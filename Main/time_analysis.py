@@ -93,44 +93,18 @@ def get_daily_productivity(daily_usage):
 
 
 def get_interval_stats(total_use, daily_productivity):
-    """
-    Calculate aggregate statistics and return a dictionary with metrics:
-      - total_time: total time tracked over the aggregate period.
-      - total_prod: total productive time.
-      - total_nonprod: total non-productive time.
-      - avg_prod_per_day: average productive time per day.
-      - avg_nonprod_per_day: average non-productive time per day.
-      - ratio: Creation Consumption Ratio (productive / non-productive).
-    """
     total_time = sum(seconds for _, seconds in total_use)
-    # Compute total productive time based on aggregate usage.
-    productive_set = set(app.lower() for app in config.PRODUCTIVE_APPS)
-    total_prod = sum(secs for proc, secs in total_use if proc.lower() in productive_set)
-    total_nonprod = total_time - total_prod
+
+    sum_prod = sum(day.get("Productive", 0) for day in daily_productivity.values())
+    sum_non = sum(day.get("Non-Productive", 0) for day in daily_productivity.values())
 
     day_count = len(daily_productivity)
-    avg_prod = (
-        (
-            sum(
-                day_usage.get("Productive", 0)
-                for day_usage in daily_productivity.values()
-            )
-            / day_count
-        )
-        if day_count > 0
-        else 0
-    )
-    avg_nonprod = (
-        (
-            sum(
-                day_usage.get("Non-Productive", 0)
-                for day_usage in daily_productivity.values()
-            )
-            / day_count
-        )
-        if day_count > 0
-        else 0
-    )
+
+    total_prod = sum_prod
+    total_nonprod = sum_non
+
+    avg_prod = (sum_prod / day_count) if day_count else 0
+    avg_nonprod = (sum_non / day_count) if day_count else 0
 
     ratio = total_prod / total_nonprod if total_nonprod > 0 else float("inf")
 
@@ -141,7 +115,7 @@ def get_interval_stats(total_use, daily_productivity):
         "avg_prod_per_day": avg_prod,
         "avg_nonprod_per_day": avg_nonprod,
         "ratio": ratio,
-        "n_days": len(daily_productivity),
+        "n_days": day_count,
     }
 
 

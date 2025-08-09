@@ -1,16 +1,13 @@
 import ctypes
 import logging
-import math
 import sqlite3
 import time
 from logging.handlers import TimedRotatingFileHandler
 
 import config
 import psutil
-import win32api
 import win32gui
 import win32process
-from config import IDLE_THRESHOLD_SECONDS, MOUSE_MOVE_THRESHOLD
 
 
 def set_up_logging():
@@ -18,7 +15,7 @@ def set_up_logging():
     logger.setLevel(logging.INFO)
 
     handler = TimedRotatingFileHandler(
-        filename=config.LOG_PATH, when="midnight", backupCount=1, encoding="utf-8"
+        filename=config.LOG_PATH, when="midnight", backupCount=1
     )
 
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -92,36 +89,6 @@ def get_idle_duration():
         return 0
 
 
-def update_activity_state(last_mouse_pos, last_sys_input_time, last_valid_input_time):
-    """
-    Check raw system input and apply a movement threshold to filter out jitter.
-    Returns updated (last_mouse_pos, last_sys_input_time, last_valid_input_time).
-    """
-    now = time.time()
-    idle = get_idle_duration()  # milliseconds→seconds internally handled
-    sys_input_ts = now - idle
-
-    # Only process once per system input event
-    if sys_input_ts > last_sys_input_time:
-        curr_pos = win32api.GetCursorPos()
-        dx = curr_pos[0] - last_mouse_pos[0]
-        dy = curr_pos[1] - last_mouse_pos[1]
-        dist = math.hypot(dx, dy)
-
-        if dist >= MOUSE_MOVE_THRESHOLD:
-            # real mouse move
-            last_valid_input_time = now
-            last_mouse_pos = curr_pos
-        elif dx == 0 and dy == 0:
-            # keyboard input
-            last_valid_input_time = now
-        # small jitter → ignore
-
-        last_sys_input_time = sys_input_ts
-
-    return last_mouse_pos, last_sys_input_time, last_valid_input_time
-
-
 def get_active_window_title():
     """
     Retrieves the title of the currently active window.
@@ -151,29 +118,16 @@ if __name__ == "__main__":
     set_up_logging()
     create_database()
 
-    # initialize AFK-sensor state
-    last_mouse_pos = win32api.GetCursorPos()
-    last_sys_input_time = time.time() - get_idle_duration()
-    last_valid_input_time = time.time()
-
     while True:
-        now = time.time()
-        # update our “last valid input” using the threshold logic
-        (last_mouse_pos, last_sys_input_time, last_valid_input_time) = (
-            update_activity_state(
-                last_mouse_pos, last_sys_input_time, last_valid_input_time
-            )
-        )
-
-        # decide AFK vs. active
-        if now - last_valid_input_time >= IDLE_THRESHOLD_SECONDS:
+        if get_idle_duration() >= config.IDLE_THRESHOLD_SECONDS:
             logging.warning("AFK")
         else:
-            proc = get_active_process_name()
-            title = get_active_window_title()
-            if proc:
-                log_time(proc, title, now)
-                logging.info(f"{proc} | {title}")
+            process_name = get_active_process_name()
+            window_title = get_active_window_title()
+            current_time = time.time()
+            if process_name:
+                log_time(process_name, window_title, current_time)
+                logging.info(f"{process_name} | {window_title}")
             else:
                 logging.info("No process found.")
 
