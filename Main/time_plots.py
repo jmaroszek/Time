@@ -1,16 +1,17 @@
 from datetime import datetime, timedelta
 
 import matplotlib
+
+matplotlib.use("Agg")
+from collections import defaultdict
+
 import matplotlib.pyplot as plt
 import numpy as np
+from config import DPI
 from matplotlib.ticker import MultipleLocator
 from time_analysis import clean_process_name
 
-matplotlib.use("Agg")
-
-
 _DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-DPI = 150
 
 
 def _pad_to_weeks(daily_productivity):
@@ -63,6 +64,9 @@ def plot_top_apps(
 
     Returns the matplotlib figure.
     """
+    if not total_use:
+        print("Total use variable is empty. Unable to plot.")
+        return
     apps, secs = zip(*total_use[:top_n])
     hrs = np.array(secs) / 3600
 
@@ -98,10 +102,6 @@ def plot_top_apps(
 
 
 # time_plots.py
-
-from collections import defaultdict
-
-from config import DPI
 
 
 def plot_top_apps_stacked(
@@ -267,7 +267,6 @@ def plot_interval_stats(interval_stats: dict, save_to: str | None = None):
     avg_nonprod_h, avg_nonprod_m = secs_to_hrs_mins(
         interval_stats.get("avg_nonprod_per_day", 0)
     )
-    ratio = interval_stats.get("ratio", 0.0)
 
     # ---- 2.  Build table data ----
     col_labels = ["Total", "Avg"]

@@ -1,274 +1,218 @@
 #!/usr/bin/env python3
+"""
+time_analysis.py
+Utilities for querying the SQLite log and aggregating usage / productivity.
+All aggregation uses the SAME classification rules so totals and averages align.
+"""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 import config
 
+# ----------------- Date helpers -----------------
 
-def parse_date(date_str):
-    """Creates a datetime object from a string in MM/DD/YYYY format."""
-    return datetime.strptime(date_str, "%m/%d/%y")
+_DATE_FMT = "%m/%d/%y"
 
 
-def get_timestamp_bounds(start_str, end_str):
+def parse_date(date_str: str) -> datetime:
+    """Parse a date string in MM/DD/YY format as a naive local datetime at 00:00."""
+    return datetime.strptime(date_str, _DATE_FMT)
+
+
+def _start_of_week(dt: datetime) -> datetime:
+    """Return the start of the week (00:00 local) given WEEK_START in config."""
+    # Map WEEK_START to weekday index where Monday=0 ... Sunday=6 (Python convention)
+    start_name = getattr(config, "WEEK_START", "Sunday")
+    start_index = {"Monday": 0, "Sunday": 6}.get(start_name, 6)
+    # dt.weekday(): Monday=0 ... Sunday=6
+    delta_days = (dt.weekday() - start_index) % 7
+    start = (dt - timedelta(days=delta_days)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return start
+
+
+def get_timestamp_bounds(start_str: str, end_str: str) -> tuple[float, float]:
     """
-    Return UNIX timestamp bounds for the given date range.
-    The end timestamp covers the full day.
+    Convert UI date strings to half‑open UNIX timestamp bounds [start, end).
+    The end bound is the midnight *after* the end date.
     """
-    start_date = parse_date(start_str)
-    end_date = parse_date(end_str)
-    start_ts = start_date.timestamp()
-    end_ts = (end_date + timedelta(days=1) - timedelta(seconds=1)).timestamp()
-    return start_ts, end_ts
+    start_dt = parse_date(start_str)
+    end_dt = parse_date(end_str) + timedelta(days=1)
+    return start_dt.timestamp(), end_dt.timestamp()
 
 
-def get_daily_use(conn, start_ts, end_ts):
+def get_this_weeks_bounds(now: datetime | None = None) -> tuple[float, float]:
+    """Bounds for [start_of_week, tomorrow) using local time."""
+    now = now or datetime.now()
+    start = _start_of_week(now)
+    end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return start.timestamp(), end.timestamp()
+
+
+def get_last_weeks_bounds(now: datetime | None = None) -> tuple[float, float]:
+    """Bounds for the previous full week (7 days) based on WEEK_START."""
+    now = now or datetime.now()
+    this_start = _start_of_week(now)
+    last_start = this_start - timedelta(days=7)
+    last_end = this_start
+    return last_start.timestamp(), last_end.timestamp()
+
+
+def get_last_n_weeks_bounds(n: int, now: datetime | None = None) -> tuple[float, float]:
     """
-    Retrieve per-process daily usage.
-    Returns a dict mapping each day (YYYY-MM-DD) to a list of tuples:
-      (process_name, window_title, total_seconds).
+    Bounds for the last n full weeks (not including the current partial week).
+    For n=2 and week starting Sunday, this returns the 14 days before this Sunday.
+    """
+    now = now or datetime.now()
+    this_start = _start_of_week(now)
+    start = this_start - timedelta(days=7 * n)
+    end = this_start
+    return start.timestamp(), end.timestamp()
+
+
+# ----------------- Query helpers -----------------
+
+
+def get_total_use(
+    conn: sqlite3.Connection, start_ts: float, end_ts: float
+) -> list[tuple[str, float]]:
+    """
+    Sum seconds per process between [start_ts, end_ts) ordered descending.
     """
     query = """
-    SELECT
-        date(timestamp, 'unixepoch', 'localtime') AS day,
-        process_name,
-        window_title,
-        SUM(poll_rate) AS total_seconds
-    FROM time_log
-    WHERE timestamp BETWEEN ? AND ?
-    GROUP BY day, process_name, window_title
-    ORDER BY day ASC, total_seconds DESC;
+        SELECT process_name, SUM(poll_rate) AS total_seconds
+        FROM time_log
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY process_name
+        ORDER BY total_seconds DESC;
     """
     cur = conn.cursor()
-    cur.execute(query, (start_ts, end_ts))
-    rows = cur.fetchall()
-
-    daily_usage = {}
-    for day, proc, window_title, secs in rows:
-        daily_usage.setdefault(day, []).append((proc, window_title, secs))
-
-    return daily_usage
+    cur.execute(query, (int(start_ts), int(end_ts)))
+    rows = [(row[0], float(row[1])) for row in cur.fetchall()]
+    return rows
 
 
-def get_total_use(conn, start_ts, end_ts):
+def get_daily_use(
+    conn: sqlite3.Connection, start_ts: float, end_ts: float
+) -> dict[str, list[tuple[str, str, float]]]:
     """
-    Retrieve total usage per process over the entire interval.
-    Returns a list of tuples (process_name, total_seconds) sorted by total_seconds descending.
+    Return a dict keyed by date string (MM/DD/YY) -> list of (process_name, window_title, seconds)
+    for each day in [start_ts, end_ts).
     """
     query = """
-    SELECT process_name,
-           SUM(poll_rate) AS total_seconds
-    FROM time_log
-    WHERE timestamp BETWEEN ? AND ?
-    GROUP BY process_name
-    ORDER BY total_seconds DESC;
+        SELECT strftime('%Y-%m-%d', timestamp, 'unixepoch') AS day,
+               process_name,
+               COALESCE(window_title, '') AS window_title,
+               SUM(poll_rate) AS total_seconds
+        FROM time_log
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY day, process_name, window_title
+        ORDER BY day ASC, total_seconds DESC;
     """
     cur = conn.cursor()
-    cur.execute(query, (start_ts, end_ts))
-    return cur.fetchall()
+    cur.execute(query, (int(start_ts), int(end_ts)))
+    out: dict[str, list[tuple[str, str, float]]] = defaultdict(list)
+    for day, proc, title, secs in cur.fetchall():
+        out[day].append((proc, title, float(secs)))
+    return dict(out)
 
 
-def get_daily_productivity(daily_usage):
-    daily_categories = {}
-    productive_set = {app.lower() for app in config.PRODUCTIVE_APPS}
-    keywords = {kw.lower() for kw in config.UNPRODUCTIVE_CHROME_KEYWORDS}
+# ----------------- Classification & aggregation -----------------
 
+# Precompute normalization and patterns
+_PRODUCTIVE = {p.lower() for p in getattr(config, "PRODUCTIVE_APPS", [])}
+# treat browsers uniformly
+_BROWSER_PROCS = {"chrome.exe", "thorium.exe"}
+# compile unproductive title patterns (simple contains, compiled for speed)
+_UNPROD_PATTERNS = [
+    re.compile(re.escape(pat), re.IGNORECASE)
+    for pat in getattr(config, "UNPRODUCTIVE_CHROME_KEYWORDS", set())
+]
+
+
+def _title_is_unproductive(title: str) -> bool:
+    if not title:
+        return False
+    return any(p.search(title) for p in _UNPROD_PATTERNS)
+
+
+def get_daily_productivity(
+    daily_usage: dict[str, list[tuple[str, str, float]]],
+) -> dict[str, dict[str, float]]:
+    """
+    Collapse per-window usage into daily 'Productive' / 'Non-Productive' seconds.
+
+    Rules:
+      - Process not in PRODUCTIVE_APPS  -> Non-Productive
+      - Process in PRODUCTIVE_APPS but is a browser:
+           title matches UNPRODUCTIVE_CHROME_KEYWORDS -> Non-Productive
+           otherwise                                   -> Productive
+      - Other PRODUCTIVE_APPS -> Productive
+    """
+    out: dict[str, dict[str, float]] = {}
     for day, entries in daily_usage.items():
-        daily_categories[day] = {"Productive": 0, "Non-Productive": 0}
-
-        for process, window_title, seconds in entries:
-            proc = process.lower()
-            title = (window_title or "").lower()
-            if proc == "chrome.exe":
-                # see which keywords actually match
-                matches = [kw for kw in keywords if kw in title]
-                if matches:
-                    category = "Non-Productive"
+        prod = 0.0
+        nonprod = 0.0
+        for proc, title, secs in entries:
+            proc_l = (proc or "").lower()
+            if proc_l in _PRODUCTIVE:
+                if proc_l in _BROWSER_PROCS and _title_is_unproductive(title or ""):
+                    nonprod += secs
                 else:
-                    category = "Productive"
+                    prod += secs
             else:
-                category = "Productive" if proc in productive_set else "Non-Productive"
-            daily_categories[day][category] += seconds
+                nonprod += secs
+        out[day] = {"Productive": prod, "Non-Productive": nonprod}
+    return out
 
-    return daily_categories
 
-
-def get_interval_stats(total_use, daily_productivity):
-    total_time = sum(seconds for _, seconds in total_use)
-
-    sum_prod = sum(day.get("Productive", 0) for day in daily_productivity.values())
-    sum_non = sum(day.get("Non-Productive", 0) for day in daily_productivity.values())
-
-    day_count = len(daily_productivity)
+def get_interval_stats(
+    total_use: list[tuple[str, float]], daily_productivity: dict[str, dict[str, float]]
+) -> dict[str, float]:
+    """
+    Compute totals and per-day averages from the SAME classification (daily_productivity).
+    """
+    n_days = len(daily_productivity)
+    sum_prod = sum(d.get("Productive", 0.0) for d in daily_productivity.values())
+    sum_non = sum(d.get("Non-Productive", 0.0) for d in daily_productivity.values())
 
     total_prod = sum_prod
-    total_nonprod = sum_non
+    total_non = sum_non
+    total_time = total_prod + total_non
 
-    avg_prod = (sum_prod / day_count) if day_count else 0
-    avg_nonprod = (sum_non / day_count) if day_count else 0
+    avg_prod = (sum_prod / n_days) if n_days else 0.0
+    avg_non = (sum_non / n_days) if n_days else 0.0
 
-    ratio = total_prod / total_nonprod if total_nonprod > 0 else float("inf")
+    ratio = (total_prod / total_non) if total_non > 0 else float("inf")
 
     return {
         "total_time": total_time,
         "total_prod": total_prod,
-        "total_nonprod": total_nonprod,
+        "total_nonprod": total_non,
         "avg_prod_per_day": avg_prod,
-        "avg_nonprod_per_day": avg_nonprod,
+        "avg_nonprod_per_day": avg_non,
         "ratio": ratio,
-        "n_days": day_count,
+        "n_days": n_days,
     }
 
 
-# Do not delete this even though it is a case of the function below it.
-# I do not want to refactor.
-def get_last_weeks_bounds():
-    """
-    Calculate the full last week based on the global WEEK_START.
-    For example, if WEEK_START is 'Sunday' and today is Wednesday,
-    the function returns the UNIX timestamps for the first and last day of last week.
-    The last day's timestamp extends to the end of the day.
-
-    Returns:
-        Tuple (float, float): UNIX timestamps for the start and end of last week.
-    """
-    # Mapping of week start names to weekday numbers (Monday=0, ..., Sunday=6)
-    days_mapping = {
-        "monday": 0,
-        "tuesday": 1,
-        "wednesday": 2,
-        "thursday": 3,
-        "friday": 4,
-        "saturday": 5,
-        "sunday": 6,
-    }
-    week_start_idx = days_mapping[config.WEEK_START.lower()]
-
-    # Determine today's date
-    today = datetime.now().date()
-
-    # Calculate the start date of the current week.
-    # (today.weekday() returns Monday=0, ..., Sunday=6)
-    delta = (today.weekday() - week_start_idx) % 7
-    current_week_start = today - timedelta(days=delta)
-
-    # The last week starts 7 days before the current week's start
-    last_week_start = current_week_start - timedelta(days=7)
-
-    # Generate the first and last day of last week
-    first_day = last_week_start
-    last_day = last_week_start + timedelta(days=6)
-
-    # Convert to UNIX timestamps
-    first_bound = datetime.combine(first_day, datetime.min.time()).timestamp()
-    last_bound = datetime.combine(last_day, datetime.max.time()).timestamp()
-
-    return first_bound, last_bound
+# ----------------- Formatting helpers (used by plots/UI) -----------------
 
 
-def get_last_n_weeks_bounds(n):
-    """
-    Calculate the full last n weeks based on the global WEEK_START.
-    The last n weeks do not include any days from this current week.
-
-    For example, if WEEK_START is 'Sunday' and today is Wednesday,
-    then for n=1, the function returns the UNIX timestamps for the first
-    and last day of last week.
-
-    For n=2, it returns the bounds for the period covering the two full weeks
-    before this week.
-
-    Args:
-        n (int): Number of full weeks to go back.
-
-    Returns:
-        Tuple (float, float): UNIX timestamps for the start of the earliest week
-                                in the period and the end of last week.
-    """
-    # Mapping of week start names to weekday numbers (Monday=0, ..., Sunday=6)
-    days_mapping = {
-        "monday": 0,
-        "tuesday": 1,
-        "wednesday": 2,
-        "thursday": 3,
-        "friday": 4,
-        "saturday": 5,
-        "sunday": 6,
-    }
-    week_start_idx = days_mapping[config.WEEK_START.lower()]
-
-    # Determine today's date
-    today = datetime.now().date()
-
-    # Calculate the start date of the current week.
-    # (today.weekday() returns Monday=0, ..., Sunday=6)
-    delta = (today.weekday() - week_start_idx) % 7
-    current_week_start = today - timedelta(days=delta)
-
-    # The period we want ends at the last moment of the day immediately before the current week begins.
-    last_day = current_week_start - timedelta(days=1)
-
-    # The period starts at the beginning of the week n weeks prior to the current week.
-    first_day = current_week_start - timedelta(weeks=n)
-
-    # Convert these dates to UNIX timestamps
-    first_bound = datetime.combine(first_day, datetime.min.time()).timestamp()
-    last_bound = datetime.combine(last_day, datetime.max.time()).timestamp()
-
-    return first_bound, last_bound
-
-
-def get_this_weeks_bounds():
-    """
-    Calculate the current week's bounds based on the global WEEK_START.
-    For example, if WEEK_START is 'Sunday' and today is Wednesday,
-    the function returns the UNIX timestamps for the start of this week (Sunday) to today.
-    The start timestamp begins at midnight of WEEK_START, and the end timestamp extends to the end of today.
-
-    Returns:
-        Tuple (float, float): UNIX timestamps for the start of this week and the end of today.
-    """
-    # Mapping of week start names to weekday numbers (Monday=0, ..., Sunday=6)
-    days_mapping = {
-        "monday": 0,
-        "tuesday": 1,
-        "wednesday": 2,
-        "thursday": 3,
-        "friday": 4,
-        "saturday": 5,
-        "sunday": 6,
-    }
-    week_start_idx = days_mapping[config.WEEK_START.lower()]
-
-    # Determine today's date
-    today = datetime.now().date()
-
-    # Calculate the start date of the current week.
-    # (today.weekday() returns Monday=0, ..., Sunday=6)
-    delta = (today.weekday() - week_start_idx) % 7
-    current_week_start = today - timedelta(days=delta)
-
-    # Generate the first day of this week and today
-    first_day = current_week_start
-    last_day = today
-
-    # Convert to UNIX timestamps
-    first_bound = datetime.combine(first_day, datetime.min.time()).timestamp()
-    last_bound = datetime.combine(last_day, datetime.max.time()).timestamp()
-
-    return first_bound, last_bound
-
-
-# --- formatting ---
-
-
-def format_duration(seconds):
-    """Convert seconds to a hh:mm:ss formatted string."""
+def format_duration(seconds: float) -> str:
+    """Convert seconds to H:MM:SS string."""
     return str(timedelta(seconds=round(seconds)))
 
 
-def clean_process_name(process_name: str, max_len: int = 15):
+def clean_process_name(process_name: str, max_len: int = 15) -> str:
+    """Shorten/normalize some noisy executable names for plotting."""
     if process_name == "r5apex_dx12.exe":
         process_name = "apex"
     name = process_name.capitalize().removesuffix(".exe")
-    name = name if len(name) <= max_len else name[:max_len] + "..."
-    return name
+    return name if len(name) <= max_len else (name[:max_len] + "...")
