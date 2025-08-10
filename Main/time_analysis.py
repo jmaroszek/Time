@@ -106,7 +106,7 @@ def get_daily_use(
     for each day in [start_ts, end_ts).
     """
     query = """
-        SELECT strftime('%Y-%m-%d', timestamp, 'unixepoch') AS day,
+        SELECT strftime('%Y-%m-%d', timestamp, 'unixepoch', 'localtime') AS day,  -- << add 'localtime'
                process_name,
                COALESCE(window_title, '') AS window_title,
                SUM(poll_rate) AS total_seconds
