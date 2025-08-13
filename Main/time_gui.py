@@ -67,21 +67,29 @@ def handle_date_dropdown(_, date_range: str):
     match date_range:
         case "Today":
             today = datetime.now().date()
-            start_ts = datetime.combine(today, datetime.min.time()).timestamp()
-            end_ts = datetime.combine(today, datetime.max.time()).timestamp()
+            start_dt = datetime.combine(today, datetime.min.time())
+            end_dt = start_dt  # inclusive date shown in the UI
         case "This Week":
             start_ts, end_ts = get_this_weeks_bounds()
+            start_dt = datetime.fromtimestamp(start_ts)
+            end_dt = datetime.fromtimestamp(end_ts) - timedelta(days=1)
         case "Last Week":
             start_ts, end_ts = get_last_weeks_bounds()
+            start_dt = datetime.fromtimestamp(start_ts)
+            end_dt = datetime.fromtimestamp(end_ts) - timedelta(days=1)
         case "Last Month":
             start_ts, end_ts = get_last_n_weeks_bounds(4)
+            start_dt = datetime.fromtimestamp(start_ts)
+            end_dt = datetime.fromtimestamp(end_ts) - timedelta(days=1)
         case "PIMLI":
-            start_ts, end_ts = get_last_n_weeks_bounds(5)
+            start_ts, end_ts = get_last_n_weeks_bounds(6)
+            start_dt = datetime.fromtimestamp(start_ts)
+            end_dt = datetime.fromtimestamp(end_ts) - timedelta(days=1)
         case _:
             return
 
-    dpg.set_value(start_date_text_field, unix_to_date(start_ts))
-    dpg.set_value(end_date_text_field, unix_to_date(end_ts))
+    dpg.set_value(start_date_text_field, start_dt.strftime("%m/%d/%y"))
+    dpg.set_value(end_date_text_field, end_dt.strftime("%m/%d/%y"))
     update()
 
 
@@ -242,9 +250,10 @@ if __name__ == "__main__":
             end_date_text_field = dpg.add_input_text(
                 callback=update,
                 on_enter=True,
-                default_value=unix_to_date(get_this_weeks_bounds()[1]),
+                default_value=unix_to_date(get_this_weeks_bounds()[1] - 24 * 3600),
                 width=100,
             )
+
         dpg.add_spacer(height=5)
         dpg.add_text("Number of Apps")
         app_number = dpg.add_input_int(default_value=5, callback=update, width=100)
