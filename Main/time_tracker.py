@@ -2,8 +2,10 @@
 # Minimal, fast, and robust tracker (no logging).
 
 import ctypes
+import logging
 import sqlite3
 import time
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Union
 
@@ -13,6 +15,23 @@ import win32gui
 import win32process
 
 # ---------- SQLite helpers ----------
+
+
+def set_up_logging():
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    handler = TimedRotatingFileHandler(
+        filename=config.LOG_PATH, when="midnight", backupCount=1, encoding="utf-8"
+    )
+
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    logger.addHandler(handler)
 
 
 def open_db(db_path: Union[str, Path]) -> sqlite3.Connection:
@@ -141,20 +160,23 @@ def run():
                     if pname:
                         wtitle = get_active_window_title()
                         log_time(conn, pname, wtitle, time.time())
+                        logging.info(f"{pname} | {wtitle}")
                         batch += 1
                         if batch >= 100:
                             # Keep WAL file from growing unbounded during long runs
                             conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                             batch = 0
+                    else:
+                        logging.info("No process found.")
 
                 # drift-free sleep
                 sleep_for = max(0.0, next_tick - time.monotonic())
                 time.sleep(sleep_for)
 
         except KeyboardInterrupt:
-            # graceful exit
             pass
 
 
 if __name__ == "__main__":
+    set_up_logging()
     run()
