@@ -151,11 +151,26 @@ def run():
         batch = 0
         next_tick = time.monotonic()
 
+        # Track AFK transitions
+        was_idle = False
+        idle_started_at = None
+
         try:
             while True:
                 next_tick += poll
 
-                if get_idle_duration() < idle_thresh:
+                idle_secs = get_idle_duration()
+
+                if idle_secs < idle_thresh:
+                    # Transition: idle -> active
+                    if was_idle:
+                        dur = int(time.time() - (idle_started_at or time.time()))
+                        logging.warning(
+                            f"AFK END (~{dur}s)"
+                        )  # Highlight return from AFK
+                        was_idle = False
+                        idle_started_at = None
+
                     pname = get_active_process_name()
                     if pname:
                         wtitle = get_active_window_title()
@@ -163,11 +178,17 @@ def run():
                         logging.info(f"{pname} | {wtitle}")
                         batch += 1
                         if batch >= 100:
-                            # Keep WAL file from growing unbounded during long runs
                             conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                             batch = 0
                     else:
                         logging.info("No process found.")
+
+                else:
+                    # Transition: active -> idle
+                    if not was_idle:
+                        logging.warning("AFK START")  # Highlight start of AFK
+                        was_idle = True
+                        idle_started_at = time.time()
 
                 # drift-free sleep
                 sleep_for = max(0.0, next_tick - time.monotonic())
