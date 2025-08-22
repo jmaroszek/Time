@@ -154,6 +154,7 @@ def run():
         # Track AFK transitions
         was_idle = False
         idle_started_at = None
+        last_logged_ts = 0.0  # throttle guard
 
         try:
             while True:
@@ -173,13 +174,19 @@ def run():
 
                     pname = get_active_process_name()
                     if pname:
-                        wtitle = get_active_window_title()
-                        log_time(conn, pname, wtitle, time.time())
-                        logging.info(f"{pname} | {wtitle}")
-                        batch += 1
-                        if batch >= 100:
-                            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-                            batch = 0
+                        now = time.time()
+                        if (
+                            now - last_logged_ts >= poll
+                        ):  # <= throttle to one log per poll
+                            wtitle = get_active_window_title()
+                            log_time(conn, pname, wtitle, now)
+                            logging.info(f"{pname} | {wtitle}")
+                            last_logged_ts = now
+
+                            batch += 1
+                            if batch >= 100:
+                                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                                batch = 0
                     else:
                         logging.info("No process found.")
 
@@ -190,8 +197,11 @@ def run():
                         was_idle = True
                         idle_started_at = time.time()
 
-                # drift-free sleep
-                sleep_for = max(0.0, next_tick - time.monotonic())
+                # drift-free sleep with RESYNC after pause/sleep/lock
+                sleep_for = next_tick - time.monotonic()
+                if sleep_for <= 0:
+                    next_tick = time.monotonic() + poll
+                    sleep_for = poll
                 time.sleep(sleep_for)
 
         except KeyboardInterrupt:
