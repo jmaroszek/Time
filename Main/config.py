@@ -13,8 +13,8 @@ LOG_PATH = Path(r"C:/Users/Jonah/Documents/Code/Time/Logs/time_tracker.log")
 
 # -- Time Tracker Settings ---------------------------------------------
 IDLE_THRESHOLD_SECONDS = 180  # Seconds before marking idle
-POLL_RATE_SECONDS = 5  # Seconds between each poll
-MOUSE_MOVE_THRESHOLD = 10  # minimum move threshold for activity in pixels
+POLL_RATE_SECONDS = 15  # Seconds between each poll
+DEFAULT_WEEKLY_PROD_GOAL = 15  # Default weekly productivity goal
 
 # -- Analysis Settings -------------------------------------------------
 TOP_COUNT = 10  # Top processes to display
@@ -59,7 +59,6 @@ IMAGE_PATHS = {
 WIDTH = 2000  # GUI window width
 HEIGHT = 1350  # GUI window height
 DEFAULT_NUM_APPS = 5  # Default number of apps to show
-DEFAULT_WEEKLY_PROD_GOAL = 30  # Default weekly productivity goal
 
 # -- Plot Settings -----------------------------------------------------
 DPI = 150  # Resolution for saved figures
