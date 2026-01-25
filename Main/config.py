@@ -14,7 +14,7 @@ LOG_PATH = Path(r"C:/Users/Jonah/Documents/Code/Time/Logs/time_tracker.log")
 # -- Time Tracker Settings ---------------------------------------------
 IDLE_THRESHOLD_SECONDS = 180  # Seconds before marking idle
 POLL_RATE_SECONDS = 15  # Seconds between each poll
-DEFAULT_WEEKLY_PROD_GOAL = 15  # Default weekly productivity goal
+DEFAULT_WEEKLY_PROD_GOAL = 20  # Default weekly productivity goal
 
 # -- Analysis Settings -------------------------------------------------
 TOP_COUNT = 10  # Top processes to display
@@ -28,6 +28,8 @@ PRODUCTIVE_APPS = [  # Processes considered 'productive'; case insensitive
     "explorer.exe",
     "Thorium.exe",
     "SumatraPDF.exe",
+    "excel.exe",
+    "DB Browser for SQLite.exe",
 ]
 UNPRODUCTIVE_CHROME_KEYWORDS = {
     "youtube",
