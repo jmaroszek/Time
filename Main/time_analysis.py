@@ -143,7 +143,7 @@ def _title_is_unproductive(title: str) -> bool:
 
 
 def get_daily_productivity(
-    daily_usage: dict[str, list[tuple[str, str, float]]],
+    daily_usage: dict[str, list[tuple[str, str, float]]] | dict[str, list[tuple[str, str, int]]],
 ) -> dict[str, dict[str, float]]:
     """
     Collapse per-window usage into daily 'Productive' / 'Non-Productive' seconds.
@@ -173,12 +173,28 @@ def get_daily_productivity(
 
 
 def get_interval_stats(
-    total_use: list[tuple[str, float]], daily_productivity: dict[str, dict[str, float]]
+    total_use: list[tuple[str, float]],
+    daily_productivity: dict[str, dict[str, float]],
+    start_ts: float | None = None,
+    end_ts: float | None = None,
 ) -> dict[str, float]:
     """
-    Compute totals and per-day averages from the SAME classification (daily_productivity).
+    Compute totals and per-day averages.
+    
+    If start_ts and end_ts are provided, n_days is calculated from the
+    calendar duration (handling empty/skipped days correctly).
+    Otherwise, n_days defaults to the number of active days in daily_productivity.
     """
-    n_days = len(daily_productivity)
+    if start_ts is not None and end_ts is not None:
+        # Calculate full calendar days in the window (rounding handles floating point drift)
+        n_days = round((end_ts - start_ts) / 86400)
+        # Ensure at least 1 day to avoid div/0
+        if n_days < 1:
+            n_days = 1
+    else:
+        # Fallback to counting only days with data (legacy/testing behavior)
+        n_days = len(daily_productivity)
+
     sum_prod = sum(d.get("Productive", 0.0) for d in daily_productivity.values())
     sum_non = sum(d.get("Non-Productive", 0.0) for d in daily_productivity.values())
 

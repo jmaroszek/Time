@@ -114,7 +114,8 @@ def update():
 
     # 3) compute stats
     daily_prod = get_daily_productivity(daily_use)
-    interval_stats = get_interval_stats(total_use, daily_prod)
+    # Pass start/end timestamps so it calculates calendar n_days correctly
+    interval_stats = get_interval_stats(total_use, daily_prod, start_ts, end_ts)
 
     # 4) regenerate plots
     plot_top_apps(total_use, num_apps, save_to=config.IMAGE_PATHS["top_apps"])
@@ -198,6 +199,8 @@ def init():
             daily_productivity[day] = {"Productive": prod, "Non-Productive": nonprod}
 
         total_use = sorted(total_use_counter.items(), key=lambda x: -x[1])
+        # Note: we don't pass timestamps here, so it falls back to len(daily_productivity)
+        # which is fine for fake data where every day exists.
         interval_stats = get_interval_stats(total_use, daily_productivity)
 
         plot_top_apps(total_use, save_to=config.IMAGE_PATHS["top_apps"])
