@@ -1,6 +1,3 @@
-# time_tracker.py
-# Minimal, fast, and robust tracker (no logging).
-
 import ctypes
 import logging
 import sqlite3
@@ -15,8 +12,6 @@ import win32gui
 import win32process
 
 # ---------- SQLite helpers ----------
-
-
 def set_up_logging():
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)

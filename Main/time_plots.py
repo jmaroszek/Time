@@ -316,23 +316,20 @@ def plot_progress_bar(
     interval_stats, *, weekly_prod_goal: float = 25.0, save_to: str | None = None
 ):
     """
-    Bullet chart comparing productive time to a (daily_goal × n_days) target.
-
-    Parameters
-    ----------
-    total_prod_secs : float
-        Total productive time in **seconds** for the selected interval.
-    n_days          : int
-        Number of calendar days in the interval (inclusive).
-    daily_goal_hours: float, optional
-        Daily productivity goal in hours. Default = 4 h.
-    save_to         : str | None, optional
-        If provided, the figure is saved to this file (PNG). Otherwise the
-        matplotlib Figure is returned.
+    Bullet chart comparing productive time to a target.
+    Target is at least one full weekly_prod_goal (7 days), even if the 
+    stats window is shorter (e.g., 'This Week' with only 3 days passed).
+    For intervals > 7 days, the target scales with duration.
     """
     # ---- 1.  Compute values (hours) ---------------------------------------
     prod_h = interval_stats["total_prod"] / 3600
-    target_h = interval_stats["n_days"] * weekly_prod_goal / 7
+    
+    # Use max(n_days, 7) to ensure "This Week" (partial week) compares against
+    # the FULL weekly goal, rather than a pro-rated daily target.
+    n_days = interval_stats["n_days"]
+    target_days = max(n_days, 7)
+    
+    target_h = target_days * weekly_prod_goal / 7
     pct = prod_h / target_h if target_h else 0
 
     # ---- 2.  Build the bullet chart --------------------------------------
