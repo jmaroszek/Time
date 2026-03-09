@@ -1,0 +1,13 @@
+name: time
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - matplotlib
+  - psutil
+  - pywin32
+  - pip
+  - pip:
+      - dearpygui

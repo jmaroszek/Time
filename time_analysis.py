@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 time_analysis.py
 Utilities for querying the SQLite log and aggregating usage / productivity.
