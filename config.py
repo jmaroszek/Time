@@ -1,15 +1,7 @@
 from pathlib import Path
 
-"""
-Project configuration file for the Time Analysis suite.
-All shared constants and file paths live here.
-"""
-
-# -- Database Settings -------------------------------------------------
-DB_PATH = Path(r"C:/Users/Jonah/Documents/Code/Time/Data/time_log.db")
-
-# -- Logging Settings --------------------------------------------------
-LOG_PATH = Path(r"C:/Users/Jonah/Documents/Code/Time/Logs/time_tracker.log")
+DB_PATH = Path(r"C:/Users/Jonah/Documents/Code/Time/time_log.db")
+LOG_PATH = Path(r"C:/Users/Jonah/Documents/Code/Time/time_tracker.log")
 
 # -- Time Tracker Settings ---------------------------------------------
 IDLE_THRESHOLD_SECONDS = 180  # Seconds before marking idle
@@ -61,6 +53,4 @@ IMAGE_PATHS = {
 WIDTH = 2000  # GUI window width
 HEIGHT = 1350  # GUI window height
 DEFAULT_NUM_APPS = 5  # Default number of apps to show
-
-# -- Plot Settings -----------------------------------------------------
 DPI = 150  # Resolution for saved figures

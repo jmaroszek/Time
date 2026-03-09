@@ -181,7 +181,7 @@ def init():
                 noise = random.randint(-300, 300)
                 seconds = max(0, base + noise)
 
-                entries.append((proc, seconds))
+                entries.append((proc, "", seconds))
                 total_use_counter[proc] = total_use_counter.get(proc, 0) + seconds
 
             daily_use[date_str] = entries
@@ -191,7 +191,7 @@ def init():
         for day, proc_list in daily_use.items():
             prod = 0
             nonprod = 0
-            for proc, secs in proc_list:
+            for proc, _, secs in proc_list:
                 if proc.lower() in productive_set:
                     prod += secs
                 else:
