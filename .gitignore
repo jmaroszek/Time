@@ -4,6 +4,6 @@ Images/
 Logs/
 features_to_add.txt
 time_log.db
-time_tracker.log
+time_tracker.log*
 time_log.db-shm
 time_log.db-wal
