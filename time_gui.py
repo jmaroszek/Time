@@ -24,12 +24,8 @@ from time_plots import (
     plot_weekly_productivity_bars,
 )
 
-# 4) Create a desktop shortcut. This will probably be a shortcut that launches a bash script that runs time_gui.py.
-
-
 # Will hold the texture tags after setup
 texture_tags: dict[str, str] = {}
-
 
 # ----------------- Helper Functions -------------------
 def unix_to_date(unix_time: float) -> str:
