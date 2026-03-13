@@ -50,6 +50,8 @@ IMAGE_PATHS = {
     "stats": "C:/Users/jonah/Documents/Code/Time/Images/stats.png",
     "progress_bar": "C:/Users/jonah/Documents/Code/Time/Images/progress_bar.png",
 }
+
+# WARNING: app is currently not smart enough to dynamically resize the images if you change the window size. 
 WIDTH = 2000  # GUI window width
 HEIGHT = 1350  # GUI window height
 DEFAULT_NUM_APPS = 5  # Default number of apps to show
