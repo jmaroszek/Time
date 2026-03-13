@@ -53,6 +53,6 @@ IMAGE_PATHS = {
 
 # WARNING: app is currently not smart enough to dynamically resize the images if you change the window size. 
 WIDTH = 2000  # GUI window width
-HEIGHT = 1350  # GUI window height
+HEIGHT = 1150  # GUI window height -- REVERT to 1350 if there are any rendering problems.
 DEFAULT_NUM_APPS = 5  # Default number of apps to show
 DPI = 150  # Resolution for saved figures

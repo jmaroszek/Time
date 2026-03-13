@@ -279,7 +279,7 @@ if __name__ == "__main__":
         title="Time Analysis",
         width=config.WIDTH,
         height=config.HEIGHT,
-        x_pos=1100,
+        x_pos=500, #1100
         y_pos=0,
     )
     dpg.setup_dearpygui()
