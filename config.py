@@ -53,4 +53,4 @@ IMAGE_PATHS = {
 WIDTH = 2000  # GUI window width
 HEIGHT = 1150  # GUI window height
 DEFAULT_NUM_APPS = 5  # Default number of apps to show
-DPI = 150  # Resolution for saved figures
+DPI = 250  # Resolution for saved figures
