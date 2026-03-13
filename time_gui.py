@@ -1,3 +1,4 @@
+import ctypes
 import os
 import random
 import sqlite3
@@ -32,6 +33,17 @@ texture_tags: dict[str, str] = {}
 
 
 # ----------------- Helper Functions -------------------
+def find_center(app_width: int, app_height: int) -> tuple[int, int]:
+    """Calculates the x and y coordinates to center the app on the primary monitor."""
+    user32 = ctypes.windll.user32
+    screen_width = user32.GetSystemMetrics(0)
+    screen_height = user32.GetSystemMetrics(1)
+    
+    center_x = int((screen_width - app_width) / 2)
+    center_y = int((screen_height - app_height) / 2)
+    return center_x, center_y
+
+
 def unix_to_date(unix_time: float) -> str:
     return datetime.fromtimestamp(unix_time).strftime("%m/%d/%y")
 
@@ -278,13 +290,16 @@ if __name__ == "__main__":
 
         update()
 
+    # Calculate center position
+    center_x, center_y = find_center(config.WIDTH, config.HEIGHT)
+
     # Show & run
     dpg.create_viewport(
         title="Time Analysis",
         width=config.WIDTH,
         height=config.HEIGHT,
-        x_pos=1100,
-        y_pos=0,
+        x_pos=center_x,
+        y_pos=center_y,
     )
     dpg.setup_dearpygui()
     dpg.show_viewport()
