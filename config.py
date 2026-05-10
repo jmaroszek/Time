@@ -22,11 +22,13 @@ PRODUCTIVE_APPS = [  # Processes considered 'productive'; case insensitive
     "SumatraPDF.exe",
     "excel.exe",
     "DB Browser for SQLite.exe",
+    "Antigravity.exe", 
+    "windowsterminal.exe", 
+    "claude.exe"
 ]
 UNPRODUCTIVE_CHROME_KEYWORDS = {
     "youtube",
     "reddit",
-    "porn",
     "amazon",
     "tv",
     "stream",
@@ -38,6 +40,7 @@ UNPRODUCTIVE_CHROME_KEYWORDS = {
     "steam",
     "apex",
     "stream",
+    "porn"
 }
 
 # -- GUI Settings ------------------------------------------------------
