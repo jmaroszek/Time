@@ -10,12 +10,26 @@ import {
   fmtDuration,
   fmtPct,
 } from "../lib/format";
-import { clipSessions, computeKpis, goalPace, topApps, withDeltas } from "../lib/metrics";
+import {
+  clipSessions,
+  computeKpis,
+  dailySecondsByApp,
+  goalPace,
+  topApps,
+  withDeltas,
+} from "../lib/metrics";
 import { addDays, previousRange, type Range } from "../lib/time";
+import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
 
-export default function OverviewTab({ range }: { range: Range }) {
+export default function OverviewTab({
+  range,
+  preset,
+}: {
+  range: Range;
+  preset: PresetOrCustom;
+}) {
   const meta = useMeta();
   const [topN, setTopN] = useState<number | null>(null);
   const [selected, setSelected] = useState<TimelineSegment | null>(null);
@@ -47,6 +61,10 @@ export default function OverviewTab({ range }: { range: Range }) {
     const apps = withDeltas(
       topApps(current, meta.classifier).slice(0, n),
       topApps(previous, meta.classifier),
+      {
+        currentDaily: dailySecondsByApp(current, range),
+        previousDaily: dailySecondsByApp(previous, prev),
+      },
     );
     const history = clipSessions(
       visible,
@@ -165,18 +183,19 @@ export default function OverviewTab({ range }: { range: Range }) {
               <Select
                 value={String(n)}
                 onChange={(v) => setTopN(Number(v))}
-                options={[5, 10, 15, 20].map((x) => ({ value: String(x), label: `top ${x}` }))}
+                options={[5, 10, 15, 20].map((x) => ({ value: String(x), label: `Top ${x}` }))}
               />
             </div>
           }
         >
           <TopAppsList apps={apps} />
         </Card>
-        <Card title="Productive hours">
+        <Card title="Daily hours">
           <ProductiveHoursChart
             historySessions={history}
             range={range}
             classifier={meta.classifier}
+            labelMode={preset === "last7" ? "weekday" : "date"}
           />
         </Card>
       </div>

@@ -83,7 +83,7 @@ function Shell() {
       </header>
 
       <main className="flex-1">
-        {tab === "overview" && <OverviewTab range={range} />}
+        {tab === "overview" && <OverviewTab range={range} preset={preset} />}
         {tab === "trends" && <TrendsTab />}
         {tab === "apps" && <AppsTab range={range} />}
         {tab === "settings" && <SettingsTab />}

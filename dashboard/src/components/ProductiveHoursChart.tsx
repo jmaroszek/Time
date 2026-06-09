@@ -1,4 +1,5 @@
-// Productive hours per day (bars) with a 7-day trailing average (dashed line).
+// Daily hours: productive (teal) with non-productive stacked in gray on top,
+// plus a 7-day trailing average of PRODUCTIVE hours (dashed line).
 // `historySessions` should cover 6 extra days before the range so the average
 // is correct from the first visible day.
 
@@ -10,27 +11,35 @@ import { addDays, dayKey, listDays, type Range } from "../lib/time";
 import { fmtShortDate } from "../lib/format";
 import EChart, { type EChartsOption } from "./EChart";
 
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 export default function ProductiveHoursChart({
   historySessions,
   range,
   classifier,
+  labelMode = "date",
 }: {
   historySessions: Session[];
   range: Range;
   classifier: Classifier;
+  labelMode?: "weekday" | "date";
 }) {
   const option = useMemo<EChartsOption>(() => {
     const extendedRange: Range = { start: addDays(range.start, -6), end: range.end };
     const isProd = (s: Session) => classifier(s)?.isProductive === true;
-    const daily = dailySeconds(historySessions, isProd, extendedRange);
+    const isNonProd = (s: Session) => classifier(s)?.isProductive !== true;
+    const prodDaily = dailySeconds(historySessions, isProd, extendedRange);
+    const nonProdDaily = dailySeconds(historySessions, isNonProd, range);
     const extendedDays = listDays(extendedRange);
-    const hours = extendedDays.map((d) => (daily.get(dayKey(d)) ?? 0) / 3600);
+    const hours = extendedDays.map((d) => (prodDaily.get(dayKey(d)) ?? 0) / 3600);
     const avg = rollingMean(hours, 7);
 
     const visibleDays = listDays(range);
     const offset = extendedDays.length - visibleDays.length;
-    const barData = hours.slice(offset).map((h) => Math.round(h * 100) / 100);
-    const avgData = avg.slice(offset).map((h) => Math.round(h * 100) / 100);
+    const round2 = (h: number) => Math.round(h * 100) / 100;
+    const prodBars = hours.slice(offset).map(round2);
+    const nonProdBars = visibleDays.map((d) => round2((nonProdDaily.get(dayKey(d)) ?? 0) / 3600));
+    const avgLine = avg.slice(offset).map(round2);
 
     return {
       animation: false,
@@ -52,7 +61,9 @@ export default function ProductiveHoursChart({
       },
       xAxis: {
         type: "category",
-        data: visibleDays.map(fmtShortDate),
+        data: visibleDays.map((d) =>
+          labelMode === "weekday" ? DAY_NAMES[d.getDay()] : fmtShortDate(d),
+        ),
         axisLabel: { color: "#9aa0a8", fontSize: 11 },
         axisTick: { show: false },
         axisLine: { lineStyle: { color: "#2a2e36" } },
@@ -66,21 +77,30 @@ export default function ProductiveHoursChart({
         {
           name: "Productive",
           type: "bar",
-          data: barData,
-          itemStyle: { color: "#1D9E75", borderRadius: [3, 3, 0, 0] },
+          stack: "day",
+          data: prodBars,
+          itemStyle: { color: "#1D9E75" },
           barMaxWidth: 36,
         },
         {
-          name: "7-day avg",
+          name: "Non-productive",
+          type: "bar",
+          stack: "day",
+          data: nonProdBars,
+          itemStyle: { color: "#3a3d44", borderRadius: [3, 3, 0, 0] },
+          barMaxWidth: 36,
+        },
+        {
+          name: "7-day avg (productive)",
           type: "line",
-          data: avgData,
+          data: avgLine,
           symbol: "none",
           lineStyle: { color: "#7F77DD", width: 2, type: "dashed" },
           itemStyle: { color: "#7F77DD" },
         },
       ],
     };
-  }, [historySessions, range, classifier]);
+  }, [historySessions, range, classifier, labelMode]);
 
   return <EChart option={option} height={240} />;
 }
