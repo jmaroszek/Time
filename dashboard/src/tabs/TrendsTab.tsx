@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import EChart, { type EChartsOption } from "../components/EChart";
 import { Card, Spinner } from "../components/ui";
 import { fmtDuration } from "../lib/format";
-import { duration, hourMatrix, splitAtMidnights, type Session } from "../lib/metrics";
+import { duration, hourMatrix, type Session } from "../lib/metrics";
 import { addDays, dayKey, startOfDay, startOfWeek } from "../lib/time";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
@@ -35,9 +35,6 @@ export default function TrendsTab() {
       </Card>
       <Card title="Productive time by hour of day (full history)">
         <HourHeatmap sessions={sessions} />
-      </Card>
-      <Card title="Daily productive hours (last 12 months)">
-        <CalendarHeatmap sessions={sessions} />
       </Card>
       <p className="text-xs text-ink-3">
         {sessions.length.toLocaleString()} sessions in history · weeks start on {meta.weekStart}
@@ -102,60 +99,6 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
   return <EChart option={option} height={260} />;
 }
 
-function CalendarHeatmap({ sessions }: { sessions: Session[] }) {
-  const meta = useMeta();
-  const option = useMemo<EChartsOption>(() => {
-    const isProd = (s: Session) => meta.classifier(s)?.isProductive === true;
-    const nonAfk = sessions.filter((s) => !s.isAfk && isProd(s));
-    const perDay = new Map<string, number>();
-    for (const s of nonAfk) {
-      for (const chunk of splitAtMidnights(s.start, s.end)) {
-        const key = dayKey(chunk.dayStart);
-        perDay.set(key, (perDay.get(key) ?? 0) + (chunk.endSec - chunk.startSec));
-      }
-    }
-    // Cap the calendar at a trailing 12 months so it stays readable as
-    // history grows; older data remains reachable via custom ranges/SQL.
-    const today = new Date();
-    const earliest = dayKey(new Date(today.getFullYear() - 1, today.getMonth(), today.getDate()));
-    const data = [...perDay.entries()]
-      .filter(([day]) => day >= earliest)
-      .map(([day, secs]) => [day, Math.round((secs / 3600) * 100) / 100]);
-    const keys = data.map((d) => String(d[0])).sort();
-    const first = keys[0] ?? dayKey(today);
-    const last = keys[keys.length - 1] ?? first;
-    const maxH = Math.max(...data.map((d) => Number(d[1])), 0.1);
-    return {
-      animation: false,
-      tooltip: {
-        ...TOOLTIP_STYLE,
-        formatter: (p: { data: [string, number] }) => `${p.data[0]} · ${p.data[1].toFixed(1)}h`,
-      },
-      visualMap: {
-        show: false,
-        min: 0,
-        max: maxH,
-        inRange: { color: ["#1d2026", "#0e3a2c", "#1D9E75", "#5DCAA5"] },
-      },
-      calendar: {
-        range: [first, last],
-        cellSize: ["auto", 14],
-        left: 40,
-        right: 16,
-        top: 28,
-        itemStyle: { color: "#16181d", borderColor: "#0f1115", borderWidth: 2 },
-        splitLine: { lineStyle: { color: "#2a2e36", width: 1 } },
-        dayLabel: { color: "#6b7280", fontSize: 10, firstDay: meta.weekStart === "Monday" ? 1 : 0 },
-        monthLabel: { color: "#9aa0a8", fontSize: 11 },
-        yearLabel: { show: false },
-      },
-      series: [{ type: "heatmap", coordinateSystem: "calendar", data }],
-    };
-  }, [sessions, meta.classifier, meta.weekStart]);
-
-  return <EChart option={option} height={160} />;
-}
-
 function CategoryTrend({ sessions }: { sessions: Session[] }) {
   const meta = useMeta();
   const option = useMemo<EChartsOption>(() => {
@@ -190,11 +133,21 @@ function CategoryTrend({ sessions }: { sessions: Session[] }) {
       tooltip: {
         trigger: "axis",
         ...TOOLTIP_STYLE,
-        valueFormatter: (v: number) => fmtDuration(v * 3600),
+        formatter: (params: { dataIndex: number; seriesName: string; value: number; marker: string }[]) => {
+          if (!params.length) return "";
+          const wk = weeks[params[0].dataIndex];
+          const wkEnd = addDays(wk, 6);
+          const head = `<b>Week of ${wk.getMonth() + 1}/${wk.getDate()} – ${wkEnd.getMonth() + 1}/${wkEnd.getDate()}</b>`;
+          const lines = params
+            .map((p) => `<div>${p.marker} ${p.seriesName}: ${fmtDuration(p.value * 3600)}</div>`)
+            .join("");
+          return head + lines;
+        },
       },
       legend: { top: 0, textStyle: { color: "#9aa0a8", fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
       xAxis: {
         type: "category",
+        // Each label is the week's START day; the bar covers that day + 6 after.
         data: weeks.map((w) => `${w.getMonth() + 1}/${w.getDate()}`),
         axisLabel: { color: "#9aa0a8", fontSize: 10 },
         axisTick: { show: false },

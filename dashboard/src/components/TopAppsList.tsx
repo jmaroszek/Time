@@ -47,7 +47,10 @@ function DeltaBadge({ app }: { app: AppDelta }) {
   return (
     <span
       className={`w-14 shrink-0 rounded-full px-1.5 py-0.5 text-center text-[11px] font-medium ${cls}`}
-      title="vs previous period (color reflects category direction)"
+      title={
+        "vs the equal-length period before; gray = not statistically significant" +
+        (app.pValue !== null ? ` (p=${app.pValue.toFixed(3)})` : "")
+      }
     >
       {text}
     </span>
