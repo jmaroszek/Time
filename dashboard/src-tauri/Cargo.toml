@@ -1,9 +1,13 @@
 [package]
 name = "dashboard"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Time tracking dashboard"
+authors = ["Jonah Maroszek"]
 edition = "2021"
+
+[[bin]]
+name = "Time"
+path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
