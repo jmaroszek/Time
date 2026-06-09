@@ -18,16 +18,25 @@ interface NumericFieldSpec {
   key: string;
   label: string;
   help: string;
+  /** Bounds in DISPLAY units. */
   min: number;
   max: number;
+  /** DB value = display value * scale (e.g. minutes shown, seconds stored). */
+  scale: number;
 }
 
 const NUMERIC_FIELDS: NumericFieldSpec[] = [
-  { key: "weekly_goal_hours", label: "Weekly productive goal (hours)", help: "Target the goal-pace card measures against.", min: 1, max: 100 },
-  { key: "idle_threshold_seconds", label: "AFK idle threshold (seconds)", help: "No input for this long marks you AFK (back-dated to last input).", min: 30, max: 3600 },
-  { key: "heartbeat_seconds", label: "Heartbeat interval (seconds)", help: "How often the open session's end time is flushed. A crash loses at most this much.", min: 5, max: 300 },
-  { key: "default_top_n_apps", label: "Default top apps shown", help: "Initial size of the Overview top-apps list.", min: 3, max: 50 },
+  { key: "weekly_goal_hours", label: "Weekly productive goal (hours)", help: "Target the goal-pace card measures against.", min: 1, max: 100, scale: 1 },
+  { key: "idle_threshold_seconds", label: "AFK idle threshold (minutes)", help: "No input for this long marks you AFK (back-dated to last input).", min: 1, max: 60, scale: 60 },
+  { key: "heartbeat_seconds", label: "Heartbeat interval (seconds)", help: "How often the open session's end time is flushed. A crash loses at most this much.", min: 5, max: 300, scale: 1 },
+  { key: "default_top_n_apps", label: "Default top apps shown", help: "Initial size of the Overview top-apps list.", min: 3, max: 50, scale: 1 },
 ];
+
+function toDisplay(spec: NumericFieldSpec, dbValue: string | undefined): string {
+  const n = Number(dbValue);
+  if (!Number.isFinite(n)) return "";
+  return String(Math.round((n / spec.scale) * 100) / 100);
+}
 
 export default function SettingsTab() {
   const meta = useMeta();
@@ -36,7 +45,9 @@ export default function SettingsTab() {
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    setDrafts({ ...meta.settings });
+    const next = { ...meta.settings };
+    for (const spec of NUMERIC_FIELDS) next[spec.key] = toDisplay(spec, meta.settings[spec.key]);
+    setDrafts(next);
   }, [meta.settings]);
 
   useEffect(() => {
@@ -52,11 +63,11 @@ export default function SettingsTab() {
   const commitNumeric = async (spec: NumericFieldSpec) => {
     const raw = Number(drafts[spec.key]);
     if (!Number.isFinite(raw)) {
-      setDrafts((d) => ({ ...d, [spec.key]: meta.settings[spec.key] }));
+      setDrafts((d) => ({ ...d, [spec.key]: toDisplay(spec, meta.settings[spec.key]) }));
       return;
     }
     const clamped = Math.min(Math.max(raw, spec.min), spec.max);
-    await updateSetting(spec.key, String(clamped));
+    await updateSetting(spec.key, String(Math.round(clamped * spec.scale)));
     await meta.refresh();
   };
 

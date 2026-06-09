@@ -62,7 +62,7 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
     }
     return {
       animation: false,
-      grid: { left: 44, right: 16, top: 8, bottom: 44 },
+      grid: { left: 44, right: 16, top: 8, bottom: 28 },
       tooltip: {
         ...TOOLTIP_STYLE,
         formatter: (p: { data: [number, number, number] }) =>
@@ -78,19 +78,15 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
       yAxis: {
         type: "category",
         data: DAY_NAMES,
+        inverse: true, // Sunday on top, Saturday at the bottom
         axisLabel: { color: "#9aa0a8", fontSize: 11 },
         axisTick: { show: false },
         axisLine: { show: false },
       },
       visualMap: {
+        show: false,
         min: 0,
         max: Math.max(maxH, 0.1),
-        calculable: false,
-        orient: "horizontal",
-        left: "center",
-        bottom: 0,
-        itemHeight: 200,
-        textStyle: { color: "#9aa0a8", fontSize: 10 },
         inRange: { color: ["#16181d", "#0e3a2c", "#1D9E75", "#5DCAA5"] },
       },
       series: [
@@ -133,12 +129,9 @@ function CalendarHeatmap({ sessions }: { sessions: Session[] }) {
         formatter: (p: { data: [string, number] }) => `${p.data[0]} · ${p.data[1].toFixed(1)}h`,
       },
       visualMap: {
+        show: false,
         min: 0,
         max: maxH,
-        orient: "horizontal",
-        left: "center",
-        bottom: 0,
-        textStyle: { color: "#9aa0a8", fontSize: 10 },
         inRange: { color: ["#1d2026", "#0e3a2c", "#1D9E75", "#5DCAA5"] },
       },
       calendar: {
@@ -157,7 +150,7 @@ function CalendarHeatmap({ sessions }: { sessions: Session[] }) {
     };
   }, [sessions, meta.classifier, meta.weekStart]);
 
-  return <EChart option={option} height={190} />;
+  return <EChart option={option} height={160} />;
 }
 
 function CategoryTrend({ sessions }: { sessions: Session[] }) {
