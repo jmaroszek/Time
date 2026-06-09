@@ -29,13 +29,13 @@ export default function App() {
 function Shell() {
   const meta = useMeta();
   const [tab, setTab] = useState<Tab>("overview");
-  const [preset, setPreset] = useState<PresetOrCustom>("thisWeek");
+  const [preset, setPreset] = useState<PresetOrCustom>("last7");
   const [customRange, setCustomRange] = useState<Range | null>(null);
 
   const range = useMemo<Range>(() => {
     if (preset === "custom" && customRange) return customRange;
-    return rangeForPreset(preset === "custom" ? "thisWeek" : preset, meta.weekStart);
-  }, [preset, customRange, meta.weekStart]);
+    return rangeForPreset(preset === "custom" ? "last7" : preset);
+  }, [preset, customRange]);
 
   if (!meta.loaded) return <Spinner label="Connecting to database..." />;
   if (meta.error) {

@@ -30,14 +30,14 @@ export default function TrendsTab() {
 
   return (
     <div className="flex flex-col gap-4">
+      <Card title="Weekly hours by category (last 12 weeks)">
+        <CategoryTrend sessions={sessions} />
+      </Card>
       <Card title="Productive time by hour of day (full history)">
         <HourHeatmap sessions={sessions} />
       </Card>
-      <Card title="Daily productive hours (full history)">
+      <Card title="Daily productive hours (last 12 months)">
         <CalendarHeatmap sessions={sessions} />
-      </Card>
-      <Card title="Weekly hours by category (last 12 weeks)">
-        <CategoryTrend sessions={sessions} />
       </Card>
       <p className="text-xs text-ink-3">
         {sessions.length.toLocaleString()} sessions in history · weeks start on {meta.weekStart}
@@ -114,12 +114,15 @@ function CalendarHeatmap({ sessions }: { sessions: Session[] }) {
         perDay.set(key, (perDay.get(key) ?? 0) + (chunk.endSec - chunk.startSec));
       }
     }
-    const data = [...perDay.entries()].map(([day, secs]) => [
-      day,
-      Math.round((secs / 3600) * 100) / 100,
-    ]);
-    const keys = [...perDay.keys()].sort();
-    const first = keys[0] ?? dayKey(new Date());
+    // Cap the calendar at a trailing 12 months so it stays readable as
+    // history grows; older data remains reachable via custom ranges/SQL.
+    const today = new Date();
+    const earliest = dayKey(new Date(today.getFullYear() - 1, today.getMonth(), today.getDate()));
+    const data = [...perDay.entries()]
+      .filter(([day]) => day >= earliest)
+      .map(([day, secs]) => [day, Math.round((secs / 3600) * 100) / 100]);
+    const keys = data.map((d) => String(d[0])).sort();
+    const first = keys[0] ?? dayKey(today);
     const last = keys[keys.length - 1] ?? first;
     const maxH = Math.max(...data.map((d) => Number(d[1])), 0.1);
     return {
@@ -162,13 +165,17 @@ function CategoryTrend({ sessions }: { sessions: Session[] }) {
     for (let i = 11; i >= 0; i--) weeks.push(addDays(thisWeekStart, -7 * i));
     const weekIdx = new Map(weeks.map((w, i) => [dayKey(w), i]));
 
-    const catNames = [...meta.categories.map((c) => c.name), "Uncategorized"];
+    const catNames = [
+      ...meta.categories.filter((c) => !c.isIgnored).map((c) => c.name),
+      "Uncategorized",
+    ];
     const totals = new Map(catNames.map((n) => [n, Array(weeks.length).fill(0) as number[]]));
 
     const rangeStart = weeks[0].getTime() / 1000;
     for (const s of sessions) {
       if (s.isAfk || s.end <= rangeStart) continue;
       const cat = meta.classifier(s);
+      if (cat?.isIgnored) continue;
       const name = cat?.name ?? "Uncategorized";
       const wk = dayKey(startOfWeek(startOfDay(new Date(s.start * 1000)), meta.weekStart));
       const idx = weekIdx.get(wk);

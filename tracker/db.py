@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS categories (
     name TEXT UNIQUE NOT NULL,
     color TEXT NOT NULL,
     is_productive INTEGER NOT NULL DEFAULT 0,
+    is_ignored INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER
 );
 
@@ -122,6 +123,13 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
 
 
 def _seed(conn: sqlite3.Connection) -> None:
+    # Older DBs predate the is_ignored column; add it in place.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(categories)")}
+    if "is_ignored" not in cols:
+        conn.execute(
+            "ALTER TABLE categories ADD COLUMN is_ignored INTEGER NOT NULL DEFAULT 0"
+        )
+
     if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
         conn.executemany(
             "INSERT INTO categories (name, color, is_productive, sort_order) VALUES (?,?,?,?)",
@@ -140,6 +148,12 @@ def _seed(conn: sqlite3.Connection) -> None:
                 if cat in cat_ids
             ],
         )
+    # The Ignored bucket is seeded even into existing DBs: sessions classified
+    # here are hidden from every visualization (managed in the Apps tab).
+    conn.execute(
+        "INSERT OR IGNORE INTO categories (name, color, is_productive, is_ignored, sort_order)"
+        " VALUES ('Ignored', '#44474e', 0, 1, 99)"
+    )
     conn.executemany(
         "INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)",
         list(DEFAULT_SETTINGS.items()),
