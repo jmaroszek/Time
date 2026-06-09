@@ -19,6 +19,7 @@ export default function OverviewTab({ range }: { range: Range }) {
   const meta = useMeta();
   const [topN, setTopN] = useState<number | null>(null);
   const [selected, setSelected] = useState<TimelineSegment | null>(null);
+  const [blockMinutes, setBlockMinutes] = useState(15);
 
   // One fetch covers the visible range, the previous period (deltas), and the
   // 6 days before the range (7-day rolling average).
@@ -83,24 +84,60 @@ export default function OverviewTab({ range }: { range: Range }) {
         />
       </div>
 
-      <Card title="Timeline">
+      <Card
+        title="Timeline"
+        right={
+          <Select
+            value={String(blockMinutes)}
+            onChange={(v) => {
+              setBlockMinutes(Number(v));
+              setSelected(null);
+            }}
+            options={[
+              { value: "0", label: "exact sessions" },
+              { value: "5", label: "5 min blocks" },
+              { value: "10", label: "10 min blocks" },
+              { value: "15", label: "15 min blocks" },
+              { value: "30", label: "30 min blocks" },
+            ]}
+          />
+        }
+      >
         <TimelineChart
           sessions={current}
           range={range}
           classifier={meta.classifier}
+          blockMinutes={blockMinutes}
           onSelect={setSelected}
         />
         {selected && (
           <div className="mt-2 flex items-center gap-4 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs">
             <span className="font-semibold">
-              {selected.isAfk ? "AFK" : cleanProcessName(selected.process)}
+              {selected.isAfk
+                ? "AFK"
+                : selected.breakdown
+                  ? selected.categoryName
+                  : cleanProcessName(selected.process)}
             </span>
-            <span className="text-ink-2">{selected.categoryName}</span>
+            {!selected.breakdown && <span className="text-ink-2">{selected.categoryName}</span>}
             <span className="text-ink-2">
               {fmtClock(selected.startSec)}–{fmtClock(selected.endSec)} ·{" "}
-              {fmtDuration(selected.endSec - selected.startSec)}
+              {fmtDuration(
+                selected.breakdown
+                  ? (selected.activeSec ?? 0)
+                  : selected.endSec - selected.startSec,
+              )}
+              {selected.breakdown ? " active" : ""}
             </span>
-            {selected.title && (
+            {selected.breakdown && !selected.isAfk && (
+              <span className="flex-1 truncate text-ink-3">
+                {selected.breakdown
+                  .slice(0, 4)
+                  .map((a) => `${cleanProcessName(a.process)} ${fmtDuration(a.seconds)}`)
+                  .join(" · ")}
+              </span>
+            )}
+            {!selected.breakdown && selected.title && (
               <span className="flex-1 truncate text-ink-3" title={selected.title}>
                 {selected.title}
               </span>

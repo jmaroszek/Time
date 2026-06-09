@@ -1,10 +1,14 @@
-// Day timeline: one row per day, colored segments per session category.
+// Day timeline: one row per day. Two view modes:
+//   blockMinutes > 0  — fixed blocks colored by dominant category (default;
+//                       smooths fragmented data and multi-app workflows)
+//   blockMinutes == 0 — exact session segments
 // ECharts custom series; click a segment for the drill-down panel.
 
 import { useCallback, useMemo } from "react";
 import type { ECElementEvent } from "echarts";
 
 import type { Classifier } from "../lib/classify";
+import { aggregateBlocks } from "../lib/blocks";
 import { clipSessions, splitAtMidnights, type Session } from "../lib/metrics";
 import { dayKey, listDays, type Range } from "../lib/time";
 import { fmtClock, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
@@ -21,27 +25,57 @@ export interface TimelineSegment {
   startSec: number;
   endSec: number;
   isAfk: boolean;
+  /** Block mode only: per-app composition and actual active seconds. */
+  breakdown?: { process: string; seconds: number }[];
+  activeSec?: number;
+}
+
+interface SegmentDatum {
+  value: number[]; // [dayIdx, startHour, endHour]
+  seg: TimelineSegment;
 }
 
 export default function TimelineChart({
   sessions,
   range,
   classifier,
+  blockMinutes,
   onSelect,
 }: {
   sessions: Session[];
   range: Range;
   classifier: Classifier;
+  blockMinutes: number; // 0 = exact sessions
   onSelect?: (seg: TimelineSegment) => void;
 }) {
   const days = useMemo(() => listDays(range).reverse(), [range]); // newest on top
-  const dayIndex = useMemo(
-    () => new Map(days.map((d, i) => [dayKey(d), i])),
-    [days],
-  );
+  const dayIndex = useMemo(() => new Map(days.map((d, i) => [dayKey(d), i])), [days]);
 
-  const segments = useMemo(() => {
-    const out: { value: number[]; seg: TimelineSegment }[] = [];
+  const segments = useMemo<SegmentDatum[]>(() => {
+    if (blockMinutes > 0) {
+      return aggregateBlocks(sessions, range, classifier, blockMinutes).flatMap((b) => {
+        const idx = dayIndex.get(b.dayKey);
+        if (idx === undefined) return [];
+        return [
+          {
+            value: [idx, b.startHour, b.endHour],
+            seg: {
+              process: b.apps[0]?.process ?? "",
+              title: "",
+              categoryName: b.categoryName,
+              color: b.color ?? AFK_COLOR,
+              startSec: b.startSec,
+              endSec: b.endSec,
+              isAfk: b.isAfk,
+              breakdown: b.apps,
+              activeSec: b.activeSec,
+            },
+          },
+        ];
+      });
+    }
+
+    const out: SegmentDatum[] = [];
     const startSec = range.start.getTime() / 1000;
     const endSec = range.end.getTime() / 1000;
     for (const s of clipSessions(sessions, startSec, endSec)) {
@@ -70,7 +104,7 @@ export default function TimelineChart({
       }
     }
     return out;
-  }, [sessions, range, classifier, dayIndex]);
+  }, [sessions, range, classifier, dayIndex, blockMinutes]);
 
   const option = useMemo<EChartsOption>(
     () => ({
@@ -101,17 +135,7 @@ export default function TimelineChart({
         backgroundColor: "#1d2026",
         borderColor: "#2a2e36",
         textStyle: { color: "#e8eaed", fontSize: 12 },
-        formatter: (p: { data: { seg: TimelineSegment } }) => {
-          const seg = p.data.seg;
-          const head = seg.isAfk
-            ? `AFK (${seg.title || "idle"})`
-            : `<b>${cleanProcessName(seg.process)}</b> · ${seg.categoryName}`;
-          const titleLine =
-            !seg.isAfk && seg.title
-              ? `<div style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9aa0a8">${escapeHtml(seg.title)}</div>`
-              : "";
-          return `${head}${titleLine}<div>${fmtClock(seg.startSec)}–${fmtClock(seg.endSec)} · ${fmtDuration(seg.endSec - seg.startSec)}</div>`;
-        },
+        formatter: (p: { data: { seg: TimelineSegment } }) => formatTooltip(p.data.seg),
       },
       series: [
         {
@@ -162,7 +186,32 @@ export default function TimelineChart({
     [onSelect],
   );
 
-  return <EChart option={option} height={Math.max(days.length * 34 + 40, 110)} onClick={handleClick} />;
+  return (
+    <EChart option={option} height={Math.max(days.length * 34 + 40, 110)} onClick={handleClick} />
+  );
+}
+
+function formatTooltip(seg: TimelineSegment): string {
+  const window = `${fmtClock(seg.startSec)}–${fmtClock(seg.endSec)}`;
+  if (seg.breakdown) {
+    if (seg.isAfk) return `AFK · ${window}`;
+    const apps = seg.breakdown
+      .slice(0, 4)
+      .map(
+        (a) =>
+          `<div style="color:#9aa0a8">${escapeHtml(cleanProcessName(a.process))} · ${fmtDuration(a.seconds)}</div>`,
+      )
+      .join("");
+    return `<b>${escapeHtml(seg.categoryName)}</b> · ${window}<div>${fmtDuration(seg.activeSec ?? 0)} active</div>${apps}`;
+  }
+  const head = seg.isAfk
+    ? `AFK (${seg.title || "idle"})`
+    : `<b>${escapeHtml(cleanProcessName(seg.process))}</b> · ${escapeHtml(seg.categoryName)}`;
+  const titleLine =
+    !seg.isAfk && seg.title
+      ? `<div style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9aa0a8">${escapeHtml(seg.title)}</div>`
+      : "";
+  return `${head}${titleLine}<div>${window} · ${fmtDuration(seg.endSec - seg.startSec)}</div>`;
 }
 
 function escapeHtml(s: string): string {
