@@ -42,6 +42,41 @@ def test_seed_does_not_overwrite_user_settings(tmp_path):
     c.close()
 
 
+def test_ignored_category_seeded_and_column_added_to_old_db(tmp_path):
+    # Simulate a DB created before the is_ignored column existed.
+    path = tmp_path / "old.db"
+    c = sqlite3.connect(path)
+    c.execute(
+        """CREATE TABLE categories (
+            id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, color TEXT NOT NULL,
+            is_productive INTEGER NOT NULL DEFAULT 0, sort_order INTEGER)"""
+    )
+    c.execute("INSERT INTO categories (name, color) VALUES ('Dev', '#000')")
+    c.commit()
+    c.close()
+
+    conn = db.open_db(path)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(categories)")}
+    assert "is_ignored" in cols
+    assert conn.execute(
+        "SELECT is_ignored FROM categories WHERE name='Ignored'"
+    ).fetchone()[0] == 1
+    # pre-existing rows preserved and defaulted to not-ignored
+    assert conn.execute(
+        "SELECT is_ignored FROM categories WHERE name='Dev'"
+    ).fetchone()[0] == 0
+    conn.close()
+
+
+def test_ignored_seed_is_idempotent(tmp_path):
+    path = tmp_path / "test.db"
+    db.open_db(path).close()
+    conn = db.open_db(path)
+    n = conn.execute("SELECT COUNT(*) FROM categories WHERE name='Ignored'").fetchone()[0]
+    assert n == 1
+    conn.close()
+
+
 def test_get_settings_parses_and_clamps(conn):
     s = db.get_settings(conn)
     assert s.idle_threshold_seconds == 180.0

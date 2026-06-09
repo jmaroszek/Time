@@ -5,9 +5,9 @@ export type PresetOrCustom = Preset | "custom";
 
 const PRESETS: { value: PresetOrCustom; label: string }[] = [
   { value: "today", label: "Today" },
-  { value: "thisWeek", label: "This week" },
-  { value: "lastWeek", label: "Last week" },
-  { value: "last4Weeks", label: "Last 4 weeks" },
+  { value: "last7", label: "Last 7 days" },
+  { value: "last14", label: "Last 14 days" },
+  { value: "last28", label: "Last 28 days" },
   { value: "custom", label: "Custom" },
 ];
 

@@ -168,6 +168,19 @@ function CategoriesEditor({ onChanged }: { onChanged: () => Promise<void> }) {
               />
               productive
             </label>
+            <label
+              className="flex items-center gap-1.5 text-ink-2"
+              title="Hide this category from all visualizations"
+            >
+              <input
+                type="checkbox"
+                checked={c.isIgnored}
+                onChange={(e) =>
+                  void updateCategory({ ...c, isIgnored: e.target.checked }).then(onChanged)
+                }
+              />
+              ignored
+            </label>
             <span className="flex-1" />
             <Button
               variant="danger"

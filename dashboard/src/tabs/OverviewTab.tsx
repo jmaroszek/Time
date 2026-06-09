@@ -32,9 +32,12 @@ export default function OverviewTab({ range }: { range: Range }) {
   const rangeEndSec = range.end.getTime() / 1000;
 
   const derived = useMemo(() => {
-    const current = clipSessions(sessions, rangeStartSec, rangeEndSec);
+    // Sessions in ignored categories are invisible to every visualization
+    // (they remain manageable in the Apps tab).
+    const visible = sessions.filter((s) => meta.classifier(s)?.isIgnored !== true);
+    const current = clipSessions(visible, rangeStartSec, rangeEndSec);
     const previous = clipSessions(
-      sessions,
+      visible,
       prev.start.getTime() / 1000,
       prev.end.getTime() / 1000,
     );
@@ -46,7 +49,7 @@ export default function OverviewTab({ range }: { range: Range }) {
       topApps(previous, meta.classifier),
     );
     const history = clipSessions(
-      sessions,
+      visible,
       addDays(range.start, -6).getTime() / 1000,
       rangeEndSec,
     );
@@ -162,7 +165,7 @@ export default function OverviewTab({ range }: { range: Range }) {
               <Select
                 value={String(n)}
                 onChange={(v) => setTopN(Number(v))}
-                options={[5, 8, 12, 20].map((x) => ({ value: String(x), label: `top ${x}` }))}
+                options={[5, 10, 15, 20].map((x) => ({ value: String(x), label: `top ${x}` }))}
               />
             </div>
           }
