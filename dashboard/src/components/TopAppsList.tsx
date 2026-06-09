@@ -1,0 +1,55 @@
+// Top apps with category-aware delta badges vs the previous period.
+
+import type { AppDelta } from "../lib/metrics";
+import { cleanProcessName, fmtDuration } from "../lib/format";
+import { CategoryDot } from "./ui";
+
+export default function TopAppsList({ apps }: { apps: AppDelta[] }) {
+  const max = apps[0]?.seconds ?? 1;
+  return (
+    <div className="flex flex-col gap-2.5">
+      {apps.map((app) => (
+        <div key={app.process} className="flex items-center gap-3 text-xs">
+          <span className="flex w-36 shrink-0 items-center gap-2 truncate" title={app.process}>
+            <CategoryDot color={app.category?.color ?? "#5b616b"} />
+            <span className="truncate">{cleanProcessName(app.process)}</span>
+          </span>
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.max((app.seconds / max) * 100, 1.5)}%`,
+                backgroundColor: app.category?.color ?? "#5b616b",
+              }}
+            />
+          </div>
+          <span className="w-14 shrink-0 text-right text-ink-2">{fmtDuration(app.seconds)}</span>
+          <DeltaBadge app={app} />
+        </div>
+      ))}
+      {apps.length === 0 && <p className="py-8 text-center text-ink-3">No activity in range</p>}
+    </div>
+  );
+}
+
+function DeltaBadge({ app }: { app: AppDelta }) {
+  if (app.deltaFraction === null) {
+    return <span className="w-14 shrink-0 text-right text-[11px] text-ink-3">new</span>;
+  }
+  const pct = Math.round(app.deltaFraction * 100);
+  const text = `${pct > 0 ? "+" : ""}${pct}%`;
+  const cls =
+    app.direction === "good"
+      ? "bg-good/10 text-good"
+      : app.direction === "bad"
+        ? "bg-bad/10 text-bad"
+        : "bg-surface-2 text-ink-2";
+  return (
+    <span
+      className={`w-14 shrink-0 rounded-full px-1.5 py-0.5 text-center text-[11px] font-medium ${cls}`}
+      title="vs previous period (color reflects category direction)"
+    >
+      {text}
+    </span>
+  );
+}
