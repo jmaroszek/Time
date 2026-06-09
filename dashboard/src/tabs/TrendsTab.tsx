@@ -1,7 +1,7 @@
 // Long-range views over full history: hour-of-day heatmap, calendar heatmap,
 // week-over-week category trend.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import EChart, { type EChartsOption } from "../components/EChart";
 import { Card, Spinner } from "../components/ui";
@@ -20,8 +20,10 @@ const TOOLTIP_STYLE = {
 
 export default function TrendsTab() {
   const meta = useMeta();
-  const nowSec = Date.now() / 1000;
-  const { sessions, loading, error } = useSessions(0, nowSec + 86_400);
+  // Computed once per mount: a fresh Date.now() on every render would change
+  // the effect deps in useSessions and loop fetch -> render -> fetch forever.
+  const [endSec] = useState(() => Math.floor(Date.now() / 1000) + 86_400);
+  const { sessions, loading, error } = useSessions(0, endSec);
 
   if (loading) return <Spinner label="Loading full history..." />;
   if (error) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
