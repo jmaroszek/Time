@@ -68,11 +68,11 @@ export default function AppsTab({ range }: { range: Range }) {
   return (
     <div className="flex flex-col gap-4">
       {uncategorized.length > 0 && (
-        <Card title={`Uncategorized time (${uncategorized.length})`}>
+        <Card title={`Uncategorized Time (${uncategorized.length})`}>
           <UsageTable rows={uncategorized.slice(0, 15)} onAssigned={refresh} />
         </Card>
       )}
-      <Card title="Apps & domains in range">
+      <Card title="Apps & Domains in Range">
         <UsageTable rows={rows} onAssigned={refresh} />
       </Card>
       <div className="grid gap-4 lg:grid-cols-2">
