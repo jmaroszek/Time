@@ -83,15 +83,15 @@ export default function OverviewTab({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <MetricCard label="Total time" value={fmtDuration(kpis.totalSec)} />
+        <MetricCard label="Total Time" value={fmtDuration(kpis.totalSec)} />
         <MetricCard
           label="Productive"
           value={fmtPct(kpis.prodFraction)}
           sub={fmtDuration(kpis.prodSec)}
         />
-        <MetricCard label="Longest focus" value={fmtDuration(kpis.longestFocusSec)} />
+        <MetricCard label="Longest Focus" value={fmtDuration(kpis.longestFocusSec)} />
         <MetricCard
-          label="Goal pace"
+          label="Goal Pace"
           value={`${pace.doneHours.toFixed(1)} / ${pace.targetHours.toFixed(0)}h`}
           sub={
             pace.remainingDays > 0
@@ -176,7 +176,7 @@ export default function OverviewTab({
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card
-          title="Top apps"
+          title="Top Apps"
           right={
             <div className="flex items-center gap-2 text-xs text-ink-2">
               <span>vs previous period</span>
@@ -190,7 +190,7 @@ export default function OverviewTab({
         >
           <TopAppsList apps={apps} />
         </Card>
-        <Card title="Daily hours">
+        <Card title="Daily Hours">
           <ProductiveHoursChart
             historySessions={history}
             range={range}

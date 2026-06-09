@@ -87,7 +87,7 @@ export default function SettingsTab() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Card title="Tracking & goals">
+      <Card title="Tracking & Goals">
         <div className="flex flex-col gap-4">
           {NUMERIC_FIELDS.map((spec) => (
             <div key={spec.key}>
@@ -140,7 +140,7 @@ export default function SettingsTab() {
         </div>
       </Card>
 
-      <Card title="Tracker & database">
+      <Card title="Tracker & Database">
         <div className="flex flex-col gap-3 text-xs">
           <div className="flex items-center gap-2">
             <span

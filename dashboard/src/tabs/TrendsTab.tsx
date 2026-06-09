@@ -30,10 +30,10 @@ export default function TrendsTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Weekly hours by category (last 12 weeks)">
+      <Card title="Weekly Hours by Category (Last 12 Weeks)">
         <CategoryTrend sessions={sessions} />
       </Card>
-      <Card title="Productive time by hour of day (full history)">
+      <Card title="Productive Time by Hour of Day (Full History)">
         <HourHeatmap sessions={sessions} />
       </Card>
       <p className="text-xs text-ink-3">
