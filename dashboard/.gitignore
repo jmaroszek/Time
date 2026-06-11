@@ -13,6 +13,13 @@ dist-ssr
 *.local
 .vite
 
+# local overrides (e.g. VITE_DB_PATH)
+.env
+
+# a global gitignore with `lib/` (for Python venvs) would otherwise
+# silently exclude the dashboard's core logic
+!src/lib/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
