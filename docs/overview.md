@@ -1,19 +1,17 @@
 # Overview tab
 
-The daily driver: one screen that answers "how is this week going?"
+This tab focuses on your recent behavior. The dropdown menu in the top-right corner allows you to select options such as "last 7 days," "last 14 days," and "last 4 weeks"
 
 ![Overview tab](images/overview.png)
 
 ## KPI cards
 
-- **Total Time** — non-AFK time at the computer in the selected range.
-- **Productive** — share of that time spent in categories marked productive,
-  with the absolute hours underneath.
-- **Longest Focus** — the longest unbroken chain of productive sessions.
-  Switching between productive apps keeps the chain alive (gaps up to 60 s are
-  forgiven); going AFK or drifting to a non-productive app breaks it.
-- **Goal Pace** — productive hours against the weekly goal, scaled to the
-  range. When behind, it shows the hours-per-day needed to catch up.
+| Card | What it measures |
+| --- | --- |
+| **Total Time** | Non-AFK time at the computer in the selected range. |
+| **Productive** | Share of that time spent in categories marked productive, with the absolute hours underneath. |
+| **Longest Focus** | The longest unbroken chain of productive sessions. Switching between productive apps keeps the chain alive (gaps up to 60 s are forgiven); going AFK or drifting to a non-productive app breaks it. |
+| **Goal Pace** | Productive hours against the weekly goal, scaled to the range. When behind, it shows the hours-per-day needed to catch up. |
 
 ## Timeline
 

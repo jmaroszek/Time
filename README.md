@@ -1,12 +1,12 @@
 # Time
 
-A personal time tracker for Windows I built to answer one question honestly:
-**where do my hours at the computer actually go?**
+A personal time tracker for Windows I built to answer one question:
+**how do I spend time on my computer?**
 
 A lightweight Python tracker runs in the background all day (~20 MB RAM) and
 records every stretch of foreground-app focus to SQLite. A Tauri 2 + React
-dashboard turns that into answers: how much I worked, what ate the afternoon,
-whether this week beat last week.
+dashboard turns that into answers: how much I worked, on what, and
+how that is changing over time.
 
 ![Overview tab](docs/images/overview.png)
 
@@ -14,25 +14,31 @@ whether this week beat last week.
 > ([scripts/make_demo_db.py](scripts/make_demo_db.py)) — plausible fake weeks,
 > nobody's real browsing history.
 
-## What it does
+## Features
 
-- **Tracks sessions, not samples.** Each row in the database is a span of
-  real focus on one app/window — when it started, when it ended, what it was.
-  Transitions are detected on a 1-second cadence.
-- **Knows when you walk away.** No input for 3 minutes marks you AFK,
-  *back-dated to the last keystroke* so idle time never inflates the stats.
-  Locking the screen is AFK instantly.
-- **Sees inside the browser.** Domains are parsed from window titles (via a
-  "URL in title" extension), so `youtube.com` and `github.com` stop hiding
-  inside one big "Chrome" blob.
-- **Categorizes everything, live.** Categories and classification rules
-  (by process, domain, or title, with priorities) live in the database and are
-  edited from the dashboard. The tracker picks up changes within one
-  heartbeat — no restarts, no config files.
-- **Flags real changes, not noise.** Week-over-week shifts in app usage are
-  colored only when a Welch's t-test on daily usage says the change is
-  statistically significant — and whether a shift is *good* or *bad* depends
-  on the category it belongs to.
+- **A complete record of your day.** Every stretch of focus on an app or
+  window becomes one session — what it was, when it started, when it ended —
+  so any day can be replayed block by block. App switches register within a
+  second.
+- **Honest about breaks.** Step away and the time doesn't count: after 3
+  minutes of no input you're marked away, and the away period is back-dated
+  to your last keystroke so idle minutes never pad the stats. Locking the
+  screen counts as away immediately.
+- **Sees inside the browser.** `youtube.com` and `github.com` show up as
+  separate things instead of hiding in one big "Chrome" blob — domains are
+  read from the window title via a "URL in title" extension.
+- **Your own definition of productive.** Apps and websites are grouped into
+  custom categories (Dev, Gaming, Media, ...) by simple rules, all edited in
+  the dashboard. Changes apply to all history instantly, and the tracker
+  picks them up within seconds — no config files, no restarts.
+- **Tells you what actually changed.** Week-over-week shifts in app usage are
+  highlighted only when they're statistically real (a Welch's t-test on daily
+  usage), and color depends on direction: more time in a productive app is
+  green, more in a distracting one is red.
+- **Never loses meaningful data.** The tracker runs all day and survives
+  crashes, restarts, and double launches — at worst the last 15 seconds are
+  lost, because the open session is flushed to disk on that heartbeat. The
+  tracker and dashboard share one SQLite file (WAL mode) safely.
 
 ## The dashboard
 
@@ -42,28 +48,6 @@ whether this week beat last week.
 | **[Trends](docs/trends.md)** | Weekly hours stacked by category over 12 weeks, and a productive-time heatmap by hour of day × day of week. |
 | **[Apps](docs/apps.md)** | Every app and domain in range with time, share, and category — plus full category and rule management. |
 | **[Settings](docs/settings.md)** | Goals, AFK threshold, heartbeat, week start, browser processes — all editable in-app — plus live tracker status and one-click backup. |
-
-## Built to not lose data
-
-This replaced an earlier version that polled the foreground window and saved
-samples. It worked, but it was an amateur build: lossy, fragile, and blind to
-idle time. The rewrite treats the tracker like a small piece of infrastructure:
-
-- **Crash-tolerant by design.** The open session's end time is flushed to
-  disk every 15 s, so even a hard crash loses at most that much. SQLite runs
-  in WAL mode so the tracker and dashboard share the file safely.
-- **A real state machine.** Active ↔ AFK ↔ locked transitions are handled in
-  one tested core (`tracker/session_manager.py`) with no platform calls in it
-  — the Win32 probing lives behind a narrow interface.
-- **Single-instance mutex.** A duplicate launch (Task Scheduler retry, fat
-  finger) exits cleanly instead of double-counting.
-- **Tested where it counts.** pytest covers the session state machine, DB
-  layer, and the legacy-data migration; vitest covers the date logic,
-  classifier, and KPI math — including the t-test, pinned against scipy
-  reference values.
-- **Migration with receipts.** The old sample-based history was collapsed
-  into sessions by a re-runnable script that backs up first and verifies
-  per-day totals against the source.
 
 ## Architecture
 
