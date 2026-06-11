@@ -14,7 +14,7 @@ the spot.
 
 Domains get their own rows because of browser title parsing: with a
 "URL in title" extension installed, `github.com` time can be classified as
-Dev while `youtube.com` time counts as Media, even though both are Chrome.
+Dev while `youtube.com` time counts as Media, even though both are part of the Chrome process.
 
 ## Categories
 
