@@ -92,8 +92,9 @@ py -m pytest tracker/tests scripts/tests   # python tests
 cd dashboard; npx vitest run               # dashboard tests
 ```
 
-The tracker auto-starts at logon via Windows Task Scheduler (a
-`New-ScheduledTaskAction` pointing `pythonw.exe` at `tracker\tracker.py`).
+The tracker is meant to start at logon — anything that can run
+`pythonw.exe tracker\tracker.py` works (Task Scheduler, a launcher script);
+the single-instance mutex makes duplicate launches harmless.
 The dashboard's DB path defaults to `Data/time_log.db` in the repo; override
 with `VITE_DB_PATH`. To explore the app without real data:
 
