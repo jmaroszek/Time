@@ -1,7 +1,7 @@
 __pycache__/
-Data/
-Images/
-Logs/
+/Data/
+/Images/
+/Logs/
 features_to_add.txt
 time_log.db
 time_tracker.log*
