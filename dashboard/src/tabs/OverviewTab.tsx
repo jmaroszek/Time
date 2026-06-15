@@ -18,7 +18,7 @@ import {
   topApps,
   withDeltas,
 } from "../lib/metrics";
-import { addDays, previousRange, type Range } from "../lib/time";
+import { addDays, calendarDays, previousRange, type Range } from "../lib/time";
 import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
@@ -83,11 +83,14 @@ export default function OverviewTab({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <MetricCard label="Total Time" value={fmtDuration(kpis.totalSec)} />
         <MetricCard
           label="Productive"
           value={fmtPct(kpis.prodFraction)}
-          sub={fmtDuration(kpis.prodSec)}
+          sub={`${fmtDuration(kpis.prodSec)} of ${fmtDuration(kpis.totalSec)}`}
+        />
+        <MetricCard
+          label="Avg Productive / Day"
+          value={fmtDuration(kpis.prodSec / calendarDays(range))}
         />
         <MetricCard label="Longest Focus" value={fmtDuration(kpis.longestFocusSec)} />
         <MetricCard
