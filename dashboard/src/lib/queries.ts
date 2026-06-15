@@ -109,9 +109,14 @@ export async function addRule(
   priority?: number,
 ): Promise<void> {
   const db = await getDb();
+  const pat = pattern.toLowerCase().trim();
+  await db.execute(
+    "DELETE FROM rules WHERE match_type = $1 AND pattern = $2",
+    [matchType, pat]
+  );
   await db.execute(
     "INSERT INTO rules (match_type, pattern, category_id, priority) VALUES ($1, $2, $3, $4)",
-    [matchType, pattern.toLowerCase().trim(), categoryId, priority ?? DEFAULT_PRIORITY[matchType]],
+    [matchType, pat, categoryId, priority ?? DEFAULT_PRIORITY[matchType]],
   );
 }
 
