@@ -84,13 +84,13 @@ export default function OverviewTab({
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <MetricCard
+          label="Avg Productive / Day"
+          value={fmtDuration(kpis.prodSec / calendarDays(range))}
+        />
+        <MetricCard
           label="Productive"
           value={fmtPct(kpis.prodFraction)}
           sub={`${fmtDuration(kpis.prodSec)} of ${fmtDuration(kpis.totalSec)}`}
-        />
-        <MetricCard
-          label="Avg Productive / Day"
-          value={fmtDuration(kpis.prodSec / calendarDays(range))}
         />
         <MetricCard label="Longest Focus" value={fmtDuration(kpis.longestFocusSec)} />
         <MetricCard
