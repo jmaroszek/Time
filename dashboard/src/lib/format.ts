@@ -30,14 +30,35 @@ export function fmtShortDate(d: Date): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-export function cleanProcessName(process: string): string {
-  const special: Record<string, string> = {
-    "r5apex_dx12.exe": "Apex Legends",
-    "b1-win64-shipping.exe": "Black Myth: Wukong",
-    "windowsterminal.exe": "Terminal",
-    "applicationframehost.exe": "UWP app",
-  };
-  if (special[process]) return special[process];
+// Built-in fallbacks for processes whose executable name is unrecognizable.
+// User aliases (passed in via `aliases`) override these.
+const DEFAULT_ALIASES: Record<string, string> = {
+  "r5apex_dx12.exe": "Apex Legends",
+  "b1-win64-shipping.exe": "Black Myth: Wukong",
+  "windowsterminal.exe": "Terminal",
+  "applicationframehost.exe": "UWP app",
+};
+
+/**
+ * Display name for a process. A user alias (keyed by the lowercased process
+ * name) wins over the built-in defaults; otherwise the .exe is stripped and
+ * title-cased. The raw process name should still be shown on hover.
+ */
+export function cleanProcessName(process: string, aliases?: Record<string, string>): string {
+  const key = process.toLowerCase();
+  const user = aliases?.[key];
+  if (user) return user;
+  if (DEFAULT_ALIASES[key]) return DEFAULT_ALIASES[key];
   const base = process.replace(/\.exe$/i, "");
   return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+/**
+ * Display name for a domain. A user alias (keyed by the lowercased domain)
+ * wins; otherwise the domain is shown as-is — it's already readable, so unlike
+ * a process name there's no fallback transform. The raw domain should still be
+ * shown on hover.
+ */
+export function cleanDomainName(domain: string, aliases?: Record<string, string>): string {
+  return aliases?.[domain.toLowerCase()] ?? domain;
 }

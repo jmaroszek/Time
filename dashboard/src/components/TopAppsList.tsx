@@ -2,9 +2,11 @@
 
 import type { AppDelta } from "../lib/metrics";
 import { cleanProcessName, fmtDuration } from "../lib/format";
+import { useMeta } from "../state/meta";
 import { CategoryDot } from "./ui";
 
 export default function TopAppsList({ apps }: { apps: AppDelta[] }) {
+  const { aliases } = useMeta();
   const max = apps[0]?.seconds ?? 1;
   return (
     <div className="flex flex-col gap-2.5">
@@ -12,7 +14,7 @@ export default function TopAppsList({ apps }: { apps: AppDelta[] }) {
         <div key={app.process} className="flex items-center gap-3 text-xs">
           <span className="flex w-36 shrink-0 items-center gap-2 truncate" title={app.process}>
             <CategoryDot color={app.category?.color ?? "#5b616b"} />
-            <span className="truncate">{cleanProcessName(app.process)}</span>
+            <span className="truncate">{cleanProcessName(app.process, aliases)}</span>
           </span>
           <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
             <div
@@ -34,7 +36,7 @@ export default function TopAppsList({ apps }: { apps: AppDelta[] }) {
 
 function DeltaBadge({ app }: { app: AppDelta }) {
   if (app.deltaFraction === null) {
-    return <span className="w-14 shrink-0 text-right text-[11px] text-ink-3">new</span>;
+    return <span className="w-14 shrink-0 text-center text-[11px] text-ink-3">new</span>;
   }
   const pct = Math.round(app.deltaFraction * 100);
   const text = `${pct > 0 ? "+" : ""}${pct}%`;

@@ -98,6 +98,11 @@ export async function updateSetting(key: string, value: string): Promise<void> {
   );
 }
 
+/** Persist the full process-alias map (lowercased process name -> display name). */
+export async function saveProcessAliases(aliases: Record<string, string>): Promise<void> {
+  await updateSetting("process_aliases", JSON.stringify(aliases));
+}
+
 // ---------------- rules / categories CRUD ----------------
 
 const DEFAULT_PRIORITY: Record<MatchType, number> = { domain: 300, title: 200, process: 100 };

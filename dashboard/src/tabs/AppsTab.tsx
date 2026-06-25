@@ -5,13 +5,14 @@ import { useMemo, useState } from "react";
 
 import { Button, Card, CategoryDot, Select, Spinner, TextInput } from "../components/ui";
 import type { MatchType } from "../lib/classify";
-import { cleanProcessName, fmtDuration } from "../lib/format";
+import { cleanDomainName, cleanProcessName, fmtDuration } from "../lib/format";
 import { clipSessions, duration, type Session } from "../lib/metrics";
 import {
   addCategory,
   addRule,
   deleteCategory,
   deleteRule,
+  saveProcessAliases,
   updateCategory,
 } from "../lib/queries";
 import type { Range } from "../lib/time";
@@ -86,11 +87,41 @@ export default function AppsTab({ range }: { range: Range }) {
 function UsageTable({ rows, onAssigned }: { rows: UsageRow[]; onAssigned: () => Promise<void> }) {
   const meta = useMeta();
   const total = rows.reduce((a, r) => a + r.seconds, 0);
+  const [editing, setEditing] = useState<string | null>(null); // rowId being renamed
+  const [draft, setDraft] = useState("");
+
+  const rowId = (r: UsageRow) => `${r.kind}:${r.key}`;
+  const displayName = (r: UsageRow) =>
+    r.kind === "process"
+      ? cleanProcessName(r.key, meta.aliases)
+      : cleanDomainName(r.key, meta.aliases);
+  // Name shown if no custom alias is set — the placeholder while editing.
+  const defaultName = (r: UsageRow) =>
+    r.kind === "process" ? cleanProcessName(r.key) : cleanDomainName(r.key);
 
   const assign = async (row: UsageRow, categoryIdStr: string) => {
     const categoryId = Number(categoryIdStr);
     if (!categoryId) return;
     await addRule(row.kind === "domain" ? "domain" : "process", row.key, categoryId);
+    await onAssigned();
+  };
+
+  const startEdit = (r: UsageRow) => {
+    setEditing(rowId(r));
+    // Seed with the existing custom alias only, so the field is empty when none
+    // is set (placeholder shows the default name).
+    setDraft(meta.aliases[r.key.toLowerCase()] ?? "");
+  };
+
+  const saveEdit = async (r: UsageRow) => {
+    const key = r.key.toLowerCase();
+    const name = draft.trim();
+    const next = { ...meta.aliases };
+    if (name) next[key] = name;
+    else delete next[key]; // empty -> revert to the default name
+    setEditing(null);
+    if (name === (meta.aliases[key] ?? "")) return; // unchanged
+    await saveProcessAliases(next);
     await onAssigned();
   };
 
@@ -111,9 +142,28 @@ function UsageTable({ rows, onAssigned }: { rows: UsageRow[]; onAssigned: () => 
             <td className="py-1.5 pr-2">
               <span className="flex items-center gap-2">
                 <CategoryDot color={r.categoryColor ?? "#5b616b"} />
-                <span className="max-w-72 truncate" title={r.key}>
-                  {r.kind === "process" ? cleanProcessName(r.key) : r.key}
-                </span>
+                {editing === rowId(r) ? (
+                  <input
+                    autoFocus
+                    value={draft}
+                    placeholder={defaultName(r)}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={() => void saveEdit(r)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void saveEdit(r);
+                      else if (e.key === "Escape") setEditing(null);
+                    }}
+                    className="w-56 rounded-lg border border-edge bg-surface-2 px-2 py-0.5 text-xs text-ink outline-none focus:border-accent/60"
+                  />
+                ) : (
+                  <span
+                    className="max-w-72 cursor-pointer truncate"
+                    title={`${r.key} — double-click to rename`}
+                    onDoubleClick={() => startEdit(r)}
+                  >
+                    {displayName(r)}
+                  </span>
+                )}
               </span>
             </td>
             <td className="py-1.5 text-ink-3">{r.kind}</td>

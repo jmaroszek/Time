@@ -16,6 +16,17 @@ Domains get their own rows because of browser title parsing: with a
 "URL in title" extension installed, `github.com` time can be classified as
 Dev while `youtube.com` time counts as Media, even though both are part of the Chrome process.
 
+**Renaming apps and domains.** Some executables have unrecognizable names —
+`r5apex_dx12.exe` is Apex Legends, `sandfall-win64-shipping.exe` is Expedition 33.
+Double-click any row's name to give it a friendly display name; press Enter to
+save or Escape to cancel. For a process the rename applies everywhere the app
+appears (Overview timeline, top apps, drill-downs); domains are renamable too
+(e.g. `gemini.google.com` → Gemini), though they only show on this tab.
+Hovering always reveals the real process or domain. Clear the field and save to
+revert to the default — for processes that's the auto-cleaned name (a handful of
+common cases ship with built-in names that your renames override), for domains
+it's the domain itself.
+
 ## Categories
 
 Categories are user-defined, colored, and flagged productive or not — those

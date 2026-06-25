@@ -1,4 +1,3 @@
-import path from "node:path";
 import process from "node:process";
 
 import { defineConfig, loadEnv } from "vite";
@@ -9,13 +8,11 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async ({ mode }) => {
-  // DB path precedence: shell env > dashboard/.env > Data/ in the repo layout.
+  // Optional build-time override: shell env > dashboard/.env. When unset, the
+  // path is resolved at runtime to %LOCALAPPDATA%\Time\time_log.db (see
+  // src/lib/db.ts and the Rust `db_path` command).
   const env = loadEnv(mode, __dirname, "VITE_");
-  const dbPath = (
-    process.env.VITE_DB_PATH ||
-    env.VITE_DB_PATH ||
-    path.resolve(__dirname, "..", "Data", "time_log.db")
-  ).replace(/\\/g, "/");
+  const dbPath = (process.env.VITE_DB_PATH || env.VITE_DB_PATH || "").replace(/\\/g, "/");
 
   return {
     plugins: [react(), tailwindcss()],

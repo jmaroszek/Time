@@ -141,7 +141,7 @@ export default function OverviewTab({
                 ? "AFK"
                 : selected.breakdown
                   ? selected.categoryName
-                  : cleanProcessName(selected.process)}
+                  : cleanProcessName(selected.process, meta.aliases)}
             </span>
             {!selected.breakdown && <span className="text-ink-2">{selected.categoryName}</span>}
             <span className="text-ink-2">
@@ -157,7 +157,7 @@ export default function OverviewTab({
               <span className="flex-1 truncate text-ink-3">
                 {selected.breakdown
                   .slice(0, 4)
-                  .map((a) => `${cleanProcessName(a.process)} ${fmtDuration(a.seconds)}`)
+                  .map((a) => `${cleanProcessName(a.process, meta.aliases)} ${fmtDuration(a.seconds)}`)
                   .join(" · ")}
               </span>
             )}

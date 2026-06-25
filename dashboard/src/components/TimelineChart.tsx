@@ -12,6 +12,7 @@ import { aggregateBlocks } from "../lib/blocks";
 import { clipSessions, splitAtMidnights, type Session } from "../lib/metrics";
 import { dayKey, listDays, type Range } from "../lib/time";
 import { fmtClock, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
+import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
 
 const AFK_COLOR = "#33363d";
@@ -48,6 +49,7 @@ export default function TimelineChart({
   blockMinutes: number; // 0 = exact sessions
   onSelect?: (seg: TimelineSegment) => void;
 }) {
+  const { aliases } = useMeta();
   const days = useMemo(() => listDays(range).reverse(), [range]); // newest on top
   const dayIndex = useMemo(() => new Map(days.map((d, i) => [dayKey(d), i])), [days]);
 
@@ -135,7 +137,7 @@ export default function TimelineChart({
         backgroundColor: "#1d2026",
         borderColor: "#2a2e36",
         textStyle: { color: "#e8eaed", fontSize: 12 },
-        formatter: (p: { data: { seg: TimelineSegment } }) => formatTooltip(p.data.seg),
+        formatter: (p: { data: { seg: TimelineSegment } }) => formatTooltip(p.data.seg, aliases),
       },
       series: [
         {
@@ -175,7 +177,7 @@ export default function TimelineChart({
         },
       ],
     }),
-    [segments, days],
+    [segments, days, aliases],
   );
 
   const handleClick = useCallback(
@@ -191,7 +193,7 @@ export default function TimelineChart({
   );
 }
 
-function formatTooltip(seg: TimelineSegment): string {
+function formatTooltip(seg: TimelineSegment, aliases?: Record<string, string>): string {
   const window = `${fmtClock(seg.startSec)}–${fmtClock(seg.endSec)}`;
   if (seg.breakdown) {
     if (seg.isAfk) return `AFK · ${window}`;
@@ -199,14 +201,14 @@ function formatTooltip(seg: TimelineSegment): string {
       .slice(0, 4)
       .map(
         (a) =>
-          `<div style="color:#9aa0a8">${escapeHtml(cleanProcessName(a.process))} · ${fmtDuration(a.seconds)}</div>`,
+          `<div style="color:#9aa0a8">${escapeHtml(cleanProcessName(a.process, aliases))} · ${fmtDuration(a.seconds)}</div>`,
       )
       .join("");
     return `<b>${escapeHtml(seg.categoryName)}</b> · ${window}<div>${fmtDuration(seg.activeSec ?? 0)} active</div>${apps}`;
   }
   const head = seg.isAfk
     ? `AFK (${seg.title || "idle"})`
-    : `<b>${escapeHtml(cleanProcessName(seg.process))}</b> · ${escapeHtml(seg.categoryName)}`;
+    : `<b>${escapeHtml(cleanProcessName(seg.process, aliases))}</b> · ${escapeHtml(seg.categoryName)}`;
   const titleLine =
     !seg.isAfk && seg.title
       ? `<div style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9aa0a8">${escapeHtml(seg.title)}</div>`
