@@ -20,6 +20,7 @@ export interface Meta {
   rules: Rule[];
   settings: Record<string, string>;
   browserSet: Set<string>;
+  aliases: Record<string, string>;
   classifier: Classifier;
   weekStart: WeekStart;
   weeklyGoalHours: number;
@@ -72,6 +73,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       rules,
       settings,
       browserSet,
+      aliases: parseAliases(settings.process_aliases),
       classifier: buildClassifier(categories, rules, browserSet),
       weekStart: settings.week_start === "Monday" ? "Monday" : "Sunday",
       weeklyGoalHours: Number(settings.weekly_goal_hours) || 20,
@@ -83,6 +85,22 @@ export function MetaProvider({ children }: { children: ReactNode }) {
   }, [categories, rules, settings, loaded, error, refresh]);
 
   return <MetaContext.Provider value={value}>{children}</MetaContext.Provider>;
+}
+
+/** Parse the process_aliases setting (a JSON object) into a map, tolerating bad data. */
+function parseAliases(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === "string" && v.trim()) out[k.toLowerCase()] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 export function useMeta(): Meta {

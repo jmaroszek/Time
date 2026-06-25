@@ -31,6 +31,9 @@ how that is changing over time.
   custom categories (Dev, Gaming, Media, ...) by simple rules, all edited in
   the dashboard. Changes apply to all history instantly, and the tracker
   picks them up within seconds — no config files, no restarts.
+- **Friendly app names.** Cryptic executables like `r5apex_dx12.exe` can be
+  renamed in place — double-click any app in the Apps tab — and the friendly
+  name shows everywhere, with the real process name still a hover away.
 - **Tells you what actually changed.** Week-over-week shifts in app usage are
   highlighted only when they're statistically real (a Welch's t-test on daily
   usage), and color depends on direction: more time in a productive app is
@@ -53,19 +56,16 @@ how that is changing over time.
 
 ```
 tracker/      Python, always on: Win32 foreground/idle probe -> session rows
-Data/         time_log.db (SQLite, WAL) - the single shared source of truth
 dashboard/    Tauri 2 + React + ECharts, launched on demand: reads sessions,
               owns categories/rules/settings
 ```
 
-The two halves never talk to each other directly — the database is the
-contract. Settings written by the dashboard are re-read by the tracker every
-heartbeat.
+The two halves never talk to each other directly — a shared SQLite database
+(WAL) at `%LOCALAPPDATA%\Time\time_log.db` is the contract. Both halves resolve
+that path independently, so it holds wherever the code lives. Settings written
+by the dashboard are re-read by the tracker every heartbeat.
 
 ## Running it
-
-Built for my own machine rather than distribution, but everything is
-repo-relative:
 
 ```powershell
 pythonw tracker/tracker.py          # tracker (headless)
@@ -79,9 +79,12 @@ cd dashboard; npx vitest run               # dashboard tests
 The tracker is meant to start at logon — anything that can run
 `pythonw.exe tracker\tracker.py` works (Task Scheduler, a launcher script);
 the single-instance mutex makes duplicate launches harmless.
-The dashboard's DB path defaults to `Data/time_log.db` in the repo; override
-with `VITE_DB_PATH`. To explore the app without real data:
+
+Both halves default the database to `%LOCALAPPDATA%\Time\time_log.db`, creating
+it on first run. Override the tracker with the `TIME_DATA_DIR` env var and the
+dashboard with `VITE_DB_PATH` — handy for pointing at demo data:
 
 ```powershell
 py scripts/make_demo_db.py     # writes Data/demo.db, ~12 weeks of fake life
+$env:VITE_DB_PATH = "$PWD/Data/demo.db"; cd dashboard; npm run tauri dev
 ```

@@ -113,6 +113,7 @@ DEFAULT_SETTINGS = {
 
 
 def open_db(db_path: str | Path) -> sqlite3.Connection:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30, isolation_level=None)  # autocommit
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
