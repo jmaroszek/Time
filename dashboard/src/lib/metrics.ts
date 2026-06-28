@@ -113,9 +113,8 @@ export interface GoalPace {
 }
 
 /**
- * Target scales with range length but is never less than one full weekly goal,
- * so a partial "this week" compares against the whole week's goal (legacy
- * progress-bar semantics preserved).
+ * Target scales with the selected range: one day targets the daily goal
+ * (weekly / 7), seven days the full weekly goal, and so on proportionally.
  */
 export function goalPace(
   prodSec: number,
@@ -123,8 +122,7 @@ export function goalPace(
   weeklyGoalHours: number,
   now: Date = new Date(),
 ): GoalPace {
-  const nDays = calendarDays(range);
-  const targetDays = Math.max(nDays, 7);
+  const targetDays = calendarDays(range);
   const targetHours = (weeklyGoalHours * targetDays) / 7;
   const doneHours = prodSec / 3600;
 

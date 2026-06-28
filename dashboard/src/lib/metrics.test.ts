@@ -107,14 +107,22 @@ describe("computeKpis", () => {
 describe("goalPace", () => {
   const week = { start: new Date(2026, 5, 7), end: new Date(2026, 5, 10) }; // 3 elapsed days
 
-  it("partial week still targets the full weekly goal", () => {
+  it("a single day targets the daily goal", () => {
+    const today = { start: new Date(2026, 5, 9), end: new Date(2026, 5, 10) };
+    const p = goalPace(2 * 3600, today, 21, new Date(2026, 5, 9, 12));
+    expect(p.targetHours).toBeCloseTo(3); // 21 / 7
+    expect(p.doneHours).toBeCloseTo(2);
+    expect(p.remainingDays).toBe(1); // half a day left, ceil -> 1
+    expect(p.needPerDayHours).toBeCloseTo(1);
+  });
+
+  it("a partial range scales the target proportionally", () => {
     const p = goalPace(7.7 * 3600, week, 20, new Date(2026, 5, 9, 12));
-    expect(p.targetHours).toBe(20);
+    expect(p.targetHours).toBeCloseTo((20 * 3) / 7); // 3 days of a 20h/week goal
     expect(p.doneHours).toBeCloseTo(7.7);
-    expect(p.fraction).toBeCloseTo(0.385);
-    // 4.5 days left in the 7-day period, ceil -> 5
-    expect(p.remainingDays).toBe(5);
-    expect(p.needPerDayHours).toBeCloseTo((20 - 7.7) / 5);
+    // 12h left in the 3-day period, ceil -> 1
+    expect(p.remainingDays).toBe(1);
+    expect(p.needPerDayHours).toBeCloseTo(Math.max(0, (20 * 3) / 7 - 7.7));
   });
 
   it("longer ranges scale the target", () => {
