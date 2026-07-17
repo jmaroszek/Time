@@ -133,30 +133,53 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
 
 
 def _migrate_rule_priorities(conn: sqlite3.Connection) -> None:
-    """One-time conversion from high-wins priorities to compact low-wins ranks."""
-    marker = conn.execute(
-        "SELECT value FROM settings WHERE key='rule_priority_scheme'"
-    ).fetchone()
-    if marker and marker[0] == "low-wins-v1":
-        return
-    values = [row[0] for row in conn.execute(
-        "SELECT DISTINCT priority FROM rules ORDER BY priority DESC"
-    )]
-    # Fresh databases already use the compact scheme. Existing databases from
-    # the earlier release have 100/200/300 (or custom values on that scale).
-    if values and all(1 <= value <= 3 for value in values):
+    """Restart-safe conversion from high-wins priorities to low-wins ranks."""
+    for _ in range(5):
+        marker = conn.execute(
+            "SELECT value FROM settings WHERE key='rule_priority_scheme'"
+        ).fetchone()
+        state = marker[0] if marker else None
+        if state == "low-wins-v1":
+            return
+
+        if state is None:
+            values = [row[0] for row in conn.execute(
+                "SELECT DISTINCT priority FROM rules ORDER BY priority"
+            )]
+            already_compact = not values or all(1 <= value <= 3 for value in values)
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key,value) VALUES"
+                " ('rule_priority_scheme',?)",
+                ("low-wins-v1" if already_compact else "ranking-v1",),
+            )
+            continue
+
+        if state == "ranking-v1":
+            conn.execute(
+                "WITH ranked AS ("
+                " SELECT priority, ROW_NUMBER() OVER (ORDER BY priority DESC) AS rank"
+                " FROM (SELECT DISTINCT priority FROM rules WHERE priority > 0)"
+                ") UPDATE rules SET priority = -(SELECT rank FROM ranked"
+                " WHERE ranked.priority = rules.priority) WHERE priority > 0"
+            )
+            conn.execute(
+                "UPDATE settings SET value='ranked-v1'"
+                " WHERE key='rule_priority_scheme' AND value='ranking-v1'"
+            )
+            continue
+
+        if state == "ranked-v1":
+            conn.execute("UPDATE rules SET priority=-priority WHERE priority < 0")
+            conn.execute(
+                "UPDATE settings SET value='low-wins-v1'"
+                " WHERE key='rule_priority_scheme' AND value='ranked-v1'"
+            )
+            continue
+
         conn.execute(
-            "INSERT INTO settings (key,value) VALUES ('rule_priority_scheme','low-wins-v1')"
-            " ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+            "UPDATE settings SET value='ranking-v1' WHERE key='rule_priority_scheme'"
         )
-        return
-    for rank, old in enumerate(values, start=1):
-        conn.execute("UPDATE rules SET priority=? WHERE priority=?", (-rank, old))
-    conn.execute("UPDATE rules SET priority=-priority WHERE priority < 0")
-    conn.execute(
-        "INSERT INTO settings (key,value) VALUES ('rule_priority_scheme','low-wins-v1')"
-        " ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-    )
+    raise RuntimeError("rule priority migration did not converge")
 
 
 def _seed(conn: sqlite3.Connection) -> None:

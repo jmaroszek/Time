@@ -153,37 +153,64 @@ export async function addCategory(
   return Number(result.lastInsertId);
 }
 
-/** Existing installs used large, high-wins values (100/200/300). The tracker
- * also performs this migration, but the dashboard can be opened first. */
+/** Existing installs used large, high-wins values (100/200/300). Each SQL
+ * call may use a different pooled connection, so this is a restart-safe state
+ * machine rather than a manual BEGIN/COMMIT transaction. */
 async function ensureLowWinsRulePriorities(
   db: Awaited<ReturnType<typeof getDb>>,
 ): Promise<void> {
-  const marker = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key='rule_priority_scheme'",
-  );
-  if (marker[0]?.value === "low-wins-v1") return;
-
-  const rows = await db.select<{ priority: number }[]>(
-    "SELECT DISTINCT priority FROM rules ORDER BY priority DESC",
-  );
-  const values = rows.map((row) => row.priority);
-  await db.execute("BEGIN IMMEDIATE");
-  try {
-    if (!values.every((value) => value >= 1 && value <= 3)) {
-      for (const [index, old] of values.entries()) {
-        await db.execute("UPDATE rules SET priority = $1 WHERE priority = $2", [-(index + 1), old]);
-      }
-      await db.execute("UPDATE rules SET priority = -priority WHERE priority < 0");
-    }
-    await db.execute(
-      "INSERT INTO settings (key,value) VALUES ('rule_priority_scheme','low-wins-v1')" +
-        " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+  for (let pass = 0; pass < 5; pass++) {
+    const marker = await db.select<{ value: string }[]>(
+      "SELECT value FROM settings WHERE key='rule_priority_scheme'",
     );
-    await db.execute("COMMIT");
-  } catch (error) {
-    await db.execute("ROLLBACK");
-    throw error;
+    const state = marker[0]?.value;
+    if (state === "low-wins-v1") return;
+
+    if (!state) {
+      const rows = await db.select<{ priority: number }[]>(
+        "SELECT DISTINCT priority FROM rules ORDER BY priority",
+      );
+      const values = rows.map((row) => row.priority);
+      const alreadyCompact = values.length === 0 || values.every((value) => value >= 1 && value <= 3);
+      await db.execute(
+        "INSERT OR IGNORE INTO settings (key,value) VALUES ('rule_priority_scheme',$1)",
+        [alreadyCompact ? "low-wins-v1" : "ranking-v1"],
+      );
+      continue;
+    }
+
+    if (state === "ranking-v1") {
+      // One statement atomically converts every still-positive legacy value to
+      // a negative rank. Repeating it after a crash is a harmless no-op.
+      await db.execute(
+        "WITH ranked AS (" +
+          " SELECT priority, ROW_NUMBER() OVER (ORDER BY priority DESC) AS rank" +
+          " FROM (SELECT DISTINCT priority FROM rules WHERE priority > 0)" +
+          ") UPDATE rules SET priority = -(SELECT rank FROM ranked" +
+          " WHERE ranked.priority = rules.priority) WHERE priority > 0",
+      );
+      await db.execute(
+        "UPDATE settings SET value='ranked-v1'" +
+          " WHERE key='rule_priority_scheme' AND value='ranking-v1'",
+      );
+      continue;
+    }
+
+    if (state === "ranked-v1") {
+      await db.execute("UPDATE rules SET priority = -priority WHERE priority < 0");
+      await db.execute(
+        "UPDATE settings SET value='low-wins-v1'" +
+          " WHERE key='rule_priority_scheme' AND value='ranked-v1'",
+      );
+      continue;
+    }
+
+    // Recover safely from an unknown marker written by an interrupted preview.
+    await db.execute(
+      "UPDATE settings SET value='ranking-v1' WHERE key='rule_priority_scheme'",
+    );
   }
+  throw new Error("Rule priority migration did not converge");
 }
 
 export async function updateCategory(cat: Category): Promise<void> {
