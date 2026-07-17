@@ -25,9 +25,9 @@ interface UsageRow {
 
 const PRIORITY: Record<MatchType, number> = { domain: 1, title: 2, process: 3 };
 const TYPE_STYLES: Record<MatchType, string> = {
-  domain: "bg-accent/15 text-accent",
-  title: "bg-[#7f77dd]/15 text-[#9a93ea]",
-  process: "bg-[#43c88a]/15 text-[#58d69a]",
+  domain: "bg-[#8397a8]/15 text-[#9aabba]",
+  title: "bg-[#a195aa]/15 text-[#b0a5b8]",
+  process: "bg-[#a99e8c]/15 text-[#b8ad9a]",
 };
 const STATE_COLORS: Record<Productivity, string> = {
   productive: "#4fb389",
@@ -37,11 +37,10 @@ const STATE_COLORS: Record<Productivity, string> = {
 
 export default function AppsTab({ range }: { range: Range }) {
   const meta = useMeta();
-  const [bump, setBump] = useState(0);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const startSec = range.start.getTime() / 1000;
   const endSec = range.end.getTime() / 1000;
-  const { sessions, loading, error } = useSessions(startSec, endSec, bump);
+  const { sessions, loading, error } = useSessions(startSec, endSec);
 
   const rows = useMemo(() => {
     const clipped = clipSessions(sessions, startSec, endSec).filter((s) => !s.isAfk);
@@ -78,7 +77,6 @@ export default function AppsTab({ range }: { range: Range }) {
   const uncategorized = rows.filter((row) => row.categoryName === null);
   const refresh = async () => {
     await meta.refresh();
-    setBump((value) => value + 1);
   };
   const assign = async (row: UsageRow, categoryId: number) => {
     await addRule(row.kind, row.key, categoryId);
@@ -319,9 +317,16 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
       right={<span className="text-[11px] text-ink-3">{meta.categories.length} categories · {meta.rules.length} rules</span>}
     >
       {stateMenu !== null && <button type="button" aria-label="Close state menu" className="fixed inset-0 z-40 cursor-default" onClick={() => setStateMenu(null)} />}
-      <p className="mb-4 text-[11px] leading-relaxed text-ink-3">
-        Each category holds its own matching rules. Priority runs 1 (highest) → 3: <span className="font-semibold text-ink-2">domain 1</span> › title 2 › process 3.
-      </p>
+      <div className="mb-4 text-[11px] text-ink-3">
+        <p>Rules live inside their category. If several rules match, the first type below wins.</p>
+        <div className="mt-2 flex items-center gap-1.5" aria-label="Rule priority order: Domain first, Title second, Process third">
+          <span className="rounded-md border border-edge bg-surface-2 px-2 py-1"><span className="mr-1 text-ink-2">1</span>Domain</span>
+          <span className="text-ink-3">then</span>
+          <span className="rounded-md border border-edge bg-surface-2 px-2 py-1"><span className="mr-1 text-ink-2">2</span>Title</span>
+          <span className="text-ink-3">then</span>
+          <span className="rounded-md border border-edge bg-surface-2 px-2 py-1"><span className="mr-1 text-ink-2">3</span>Process</span>
+        </div>
+      </div>
       <div className="flex flex-col gap-2">
         {meta.categories.map((category) => {
           const open = expanded.has(category.id);
@@ -375,10 +380,10 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
                 <div className="ml-[42px] border-t border-edge/50 px-3 py-3">
                   <div className="flex flex-col gap-1.5">
                     {rules.map((rule) => (
-                      <div key={rule.id} className="flex items-center gap-2 text-[11.5px]">
+                      <div key={rule.id} className="-mx-2 flex items-center gap-2 rounded-lg px-2 py-1 text-[11.5px] transition-colors hover:bg-white/[.028]">
                         <span className={`w-14 shrink-0 rounded-md px-1.5 py-1 text-center text-[9.5px] uppercase ${TYPE_STYLES[rule.matchType]}`}>{rule.matchType}</span>
                         <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
-                        <span className="shrink-0 text-[10.5px] text-ink-3">pri {rule.priority}</span>
+                        <span className="shrink-0 text-[10.5px] text-ink-3">Priority {rule.priority}</span>
                         <button type="button" title="Delete rule" className="rounded-md px-1.5 py-1 text-ink-3 transition-colors hover:bg-bad/15 hover:text-bad" onClick={() => void deleteRule(rule.id).then(onChanged)}>✕</button>
                       </div>
                     ))}
@@ -387,7 +392,7 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
                   <div className="mt-3 flex items-center gap-2 border-t border-edge/40 pt-3">
                     <span className="flex rounded-lg border border-edge bg-surface p-0.5">
                       {(["domain", "title", "process"] as MatchType[]).map((type) => (
-                        <button key={type} type="button" className={`rounded-md px-2 py-1 text-[10.5px] transition-colors ${draft.type === type ? "bg-accent/15 text-accent" : "text-ink-3 hover:text-ink-2"}`} onClick={() => setDraft(category.id, { type })}>{type}</button>
+                        <button key={type} type="button" className={`rounded-md px-2 py-1 text-[10.5px] transition-colors ${draft.type === type ? TYPE_STYLES[type] : "text-ink-3 hover:text-ink-2"}`} onClick={() => setDraft(category.id, { type })}>{type}</button>
                       ))}
                     </span>
                     <input
