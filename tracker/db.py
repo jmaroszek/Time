@@ -56,53 +56,53 @@ CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 # three-way state: productive (1,0), neutral (0,1), or unproductive (0,0).
 # Gaming is neutral by default — tracked, but never held against productivity.
 _SEED_CATEGORIES = [
-    ("Notes", "#7F77DD", 1, 0, 1),
-    ("Dev", "#378ADD", 1, 0, 2),
-    ("AI tools", "#1D9E75", 1, 0, 3),
-    ("Browsing", "#EF9F27", 1, 0, 4),
-    ("Gaming", "#D85A30", 0, 1, 5),
-    ("Media", "#D4537E", 0, 0, 6),
-    ("System", "#888780", 0, 0, 7),
+    ("Notes", "#7f77dd", 1, 0, 1),
+    ("Dev", "#3f9bf0", 1, 0, 2),
+    ("AI tools", "#43c88a", 1, 0, 3),
+    ("Browsing", "#e0a53a", 1, 0, 4),
+    ("Gaming", "#e8663d", 0, 1, 5),
+    ("Media", "#e75fa0", 0, 0, 6),
+    ("System", "#828994", 0, 0, 7),
 ]
 
-# Priorities: domain (300) > title (200) > process (100). Domain and title rules
+# Priorities: domain (1) > title (2) > process (3). Lower numbers win.
 # are only evaluated for browser sessions by the dashboard classifier; process
 # rules apply everywhere.
 _SEED_RULES = [
-    ("process", "obsidian.exe", "Notes", 100),
-    ("process", "code.exe", "Dev", 100),
-    ("process", "windowsterminal.exe", "Dev", 100),
-    ("process", "antigravity.exe", "Dev", 100),
-    ("process", "python.exe", "Dev", 100),
-    ("process", "db browser for sqlite.exe", "Dev", 100),
-    ("process", "claude.exe", "AI tools", 100),
-    ("process", "codex.exe", "AI tools", 100),
-    ("process", "chrome.exe", "Browsing", 100),
-    ("process", "thorium.exe", "Browsing", 100),
-    ("process", "sumatrapdf.exe", "Notes", 100),
-    ("process", "excel.exe", "Dev", 100),
-    ("process", "notepad.exe", "Notes", 100),
-    ("process", "r5apex_dx12.exe", "Gaming", 100),
-    ("process", "rocketleague.exe", "Gaming", 100),
-    ("process", "b1-win64-shipping.exe", "Gaming", 100),
-    ("process", "u4.exe", "Gaming", 100),
-    ("process", "steam.exe", "Gaming", 100),
-    ("process", "steamwebhelper.exe", "Gaming", 100),
-    ("process", "explorer.exe", "System", 100),
-    ("process", "searchhost.exe", "System", 100),
-    ("process", "lockapp.exe", "System", 100),
-    ("process", "shellexperiencehost.exe", "System", 100),
-    ("process", "applicationframehost.exe", "System", 100),
-    ("domain", "docs.google.com", "Notes", 300),
-    ("domain", "drive.google.com", "Notes", 300),
-    ("domain", "youtube.com", "Media", 300),
-    ("domain", "reddit.com", "Media", 300),
-    ("domain", "netflix.com", "Media", 300),
-    ("domain", "twitch.tv", "Media", 300),
-    ("title", "youtube", "Media", 200),
-    ("title", "reddit", "Media", 200),
-    ("title", "netflix", "Media", 200),
-    ("title", "twitch", "Media", 200),
+    ("process", "obsidian.exe", "Notes", 3),
+    ("process", "code.exe", "Dev", 3),
+    ("process", "windowsterminal.exe", "Dev", 3),
+    ("process", "antigravity.exe", "Dev", 3),
+    ("process", "python.exe", "Dev", 3),
+    ("process", "db browser for sqlite.exe", "Dev", 3),
+    ("process", "claude.exe", "AI tools", 3),
+    ("process", "codex.exe", "AI tools", 3),
+    ("process", "chrome.exe", "Browsing", 3),
+    ("process", "thorium.exe", "Browsing", 3),
+    ("process", "sumatrapdf.exe", "Notes", 3),
+    ("process", "excel.exe", "Dev", 3),
+    ("process", "notepad.exe", "Notes", 3),
+    ("process", "r5apex_dx12.exe", "Gaming", 3),
+    ("process", "rocketleague.exe", "Gaming", 3),
+    ("process", "b1-win64-shipping.exe", "Gaming", 3),
+    ("process", "u4.exe", "Gaming", 3),
+    ("process", "steam.exe", "Gaming", 3),
+    ("process", "steamwebhelper.exe", "Gaming", 3),
+    ("process", "explorer.exe", "System", 3),
+    ("process", "searchhost.exe", "System", 3),
+    ("process", "lockapp.exe", "System", 3),
+    ("process", "shellexperiencehost.exe", "System", 3),
+    ("process", "applicationframehost.exe", "System", 3),
+    ("domain", "docs.google.com", "Notes", 1),
+    ("domain", "drive.google.com", "Notes", 1),
+    ("domain", "youtube.com", "Media", 1),
+    ("domain", "reddit.com", "Media", 1),
+    ("domain", "netflix.com", "Media", 1),
+    ("domain", "twitch.tv", "Media", 1),
+    ("title", "youtube", "Media", 2),
+    ("title", "reddit", "Media", 2),
+    ("title", "netflix", "Media", 2),
+    ("title", "twitch", "Media", 2),
 ]
 
 DEFAULT_SETTINGS = {
@@ -128,7 +128,35 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA temp_store=MEMORY;")
     conn.executescript(_SCHEMA)
     _seed(conn)
+    _migrate_rule_priorities(conn)
     return conn
+
+
+def _migrate_rule_priorities(conn: sqlite3.Connection) -> None:
+    """One-time conversion from high-wins priorities to compact low-wins ranks."""
+    marker = conn.execute(
+        "SELECT value FROM settings WHERE key='rule_priority_scheme'"
+    ).fetchone()
+    if marker and marker[0] == "low-wins-v1":
+        return
+    values = [row[0] for row in conn.execute(
+        "SELECT DISTINCT priority FROM rules ORDER BY priority DESC"
+    )]
+    # Fresh databases already use the compact scheme. Existing databases from
+    # the earlier release have 100/200/300 (or custom values on that scale).
+    if values and all(1 <= value <= 3 for value in values):
+        conn.execute(
+            "INSERT INTO settings (key,value) VALUES ('rule_priority_scheme','low-wins-v1')"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+        )
+        return
+    for rank, old in enumerate(values, start=1):
+        conn.execute("UPDATE rules SET priority=? WHERE priority=?", (-rank, old))
+    conn.execute("UPDATE rules SET priority=-priority WHERE priority < 0")
+    conn.execute(
+        "INSERT INTO settings (key,value) VALUES ('rule_priority_scheme','low-wins-v1')"
+        " ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    )
 
 
 def _seed(conn: sqlite3.Connection) -> None:

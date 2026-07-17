@@ -16,10 +16,10 @@ const CATS: Category[] = [
 ];
 
 const RULES: Rule[] = [
-  { id: 1, matchType: "process", pattern: "chrome.exe", categoryId: 1, priority: 100 },
-  { id: 2, matchType: "process", pattern: "code.exe", categoryId: 3, priority: 100 },
-  { id: 3, matchType: "domain", pattern: "youtube.com", categoryId: 2, priority: 300 },
-  { id: 4, matchType: "title", pattern: "netflix", categoryId: 2, priority: 200 },
+  { id: 1, matchType: "process", pattern: "chrome.exe", categoryId: 1, priority: 3 },
+  { id: 2, matchType: "process", pattern: "code.exe", categoryId: 3, priority: 3 },
+  { id: 3, matchType: "domain", pattern: "youtube.com", categoryId: 2, priority: 1 },
+  { id: 4, matchType: "title", pattern: "netflix", categoryId: 2, priority: 2 },
 ];
 
 const BROWSERS = new Set(["chrome.exe"]);

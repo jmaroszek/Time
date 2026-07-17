@@ -1,4 +1,4 @@
-// Top apps with category-aware delta badges vs the previous period.
+// Top apps with quiet, category-aware deltas vs the previous period.
 
 import type { AppDelta } from "../lib/metrics";
 import { cleanProcessName, fmtDuration } from "../lib/format";
@@ -39,16 +39,16 @@ function DeltaBadge({ app }: { app: AppDelta }) {
     return <span className="w-14 shrink-0 text-center text-[11px] text-ink-3">new</span>;
   }
   const pct = Math.round(app.deltaFraction * 100);
-  const text = `${pct > 0 ? "+" : ""}${pct}%`;
+  const text = `${pct > 0 ? "▲ " : pct < 0 ? "▼ " : ""}${Math.abs(pct)}%`;
   const cls =
     app.direction === "good"
-      ? "bg-good/10 text-good"
+      ? "text-[#5fc296]"
       : app.direction === "bad"
-        ? "bg-bad/10 text-bad"
-        : "bg-surface-2 text-ink-2";
+        ? "text-[#e08787]"
+        : "text-ink-2";
   return (
     <span
-      className={`w-14 shrink-0 rounded-full px-1.5 py-0.5 text-center text-[11px] font-medium ${cls}`}
+      className={`w-14 shrink-0 text-right text-[11px] font-normal ${cls}`}
       title={
         "vs the equal-length period before; gray = not statistically significant" +
         (app.pValue !== null ? ` (p=${app.pValue.toFixed(3)})` : "")

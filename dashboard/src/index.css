@@ -4,14 +4,29 @@
   --color-bg: #0f1115;
   --color-surface: #16181d;
   --color-surface-2: #1d2026;
+  --color-surface-3: #23272f;
   --color-edge: #2a2e36;
+  --color-edge-2: #353b45;
   --color-ink: #e8eaed;
   --color-ink-2: #9aa0a8;
   --color-ink-3: #6b7280;
-  --color-accent: #378add;
-  --color-good: #4ade80;
-  --color-bad: #f87171;
+  --color-accent: #6ba0da;
+  --color-good: #4fb389;
+  --color-bad: #d07d7d;
 }
+
+@keyframes menu-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 185, 129, .34); }
+  50% { box-shadow: 0 0 0 5px rgba(22, 185, 129, 0); }
+}
+
+.menu-pop { animation: menu-pop 140ms ease-out; }
+.live-pulse { animation: live-pulse 2s ease-out infinite; }
 
 html,
 body,

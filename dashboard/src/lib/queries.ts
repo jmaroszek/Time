@@ -71,8 +71,9 @@ interface RuleRow {
 
 export async function fetchRules(): Promise<Rule[]> {
   const db = await getDb();
+  await ensureLowWinsRulePriorities(db);
   const rows = await db.select<RuleRow[]>(
-    "SELECT id, match_type, pattern, category_id, priority FROM rules ORDER BY priority DESC, id",
+    "SELECT id, match_type, pattern, category_id, priority FROM rules ORDER BY priority ASC, id",
   );
   return rows.map((r) => ({
     id: r.id,
@@ -107,7 +108,7 @@ export async function saveProcessAliases(aliases: Record<string, string>): Promi
 
 // ---------------- rules / categories CRUD ----------------
 
-const DEFAULT_PRIORITY: Record<MatchType, number> = { domain: 300, title: 200, process: 100 };
+const DEFAULT_PRIORITY: Record<MatchType, number> = { domain: 1, title: 2, process: 3 };
 
 export async function addRule(
   matchType: MatchType,
@@ -136,9 +137,9 @@ export async function addCategory(
   name: string,
   color: string,
   state: CategoryState,
-): Promise<void> {
+): Promise<number> {
   const db = await getDb();
-  await db.execute(
+  const result = await db.execute(
     "INSERT INTO categories (name, color, is_productive, is_neutral, is_ignored, sort_order)" +
       " VALUES ($1, $2, $3, $4, $5, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories))",
     [
@@ -149,6 +150,40 @@ export async function addCategory(
       state === "ignored" ? 1 : 0,
     ],
   );
+  return Number(result.lastInsertId);
+}
+
+/** Existing installs used large, high-wins values (100/200/300). The tracker
+ * also performs this migration, but the dashboard can be opened first. */
+async function ensureLowWinsRulePriorities(
+  db: Awaited<ReturnType<typeof getDb>>,
+): Promise<void> {
+  const marker = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key='rule_priority_scheme'",
+  );
+  if (marker[0]?.value === "low-wins-v1") return;
+
+  const rows = await db.select<{ priority: number }[]>(
+    "SELECT DISTINCT priority FROM rules ORDER BY priority DESC",
+  );
+  const values = rows.map((row) => row.priority);
+  await db.execute("BEGIN IMMEDIATE");
+  try {
+    if (!values.every((value) => value >= 1 && value <= 3)) {
+      for (const [index, old] of values.entries()) {
+        await db.execute("UPDATE rules SET priority = $1 WHERE priority = $2", [-(index + 1), old]);
+      }
+      await db.execute("UPDATE rules SET priority = -priority WHERE priority < 0");
+    }
+    await db.execute(
+      "INSERT INTO settings (key,value) VALUES ('rule_priority_scheme','low-wins-v1')" +
+        " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    );
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
 }
 
 export async function updateCategory(cat: Category): Promise<void> {
