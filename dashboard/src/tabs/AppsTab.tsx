@@ -336,11 +336,11 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
                 <span className="h-3 w-3 rounded" style={{ backgroundColor: category.color }} />
                 <span className="font-semibold">{category.name}</span>
                 <span className="flex-1" />
-                <span className="relative">
+                <span className="relative w-[112px] shrink-0">
                   <span
                     role="button"
                     tabIndex={0}
-                    className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10.5px] capitalize text-ink-3 hover:bg-surface-3"
+                    className="flex w-full items-center justify-start gap-1.5 rounded-md px-2 py-1 text-[10.5px] capitalize text-ink-3 hover:bg-surface-3"
                     onClick={(event) => { event.stopPropagation(); setStateMenu(menuOpen ? null : category.id); }}
                     onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); setStateMenu(menuOpen ? null : category.id); } }}
                   >
