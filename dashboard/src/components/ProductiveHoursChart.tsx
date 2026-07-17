@@ -55,6 +55,14 @@ export default function ProductiveHoursChart({
         show: true,
         top: 0,
         right: 0,
+        data: [
+          "Productive",
+          "Non-productive",
+          {
+            name: "7-day avg (productive)",
+            icon: "path://M0,3 L14,3 L14,5 L0,5 Z",
+          },
+        ],
         textStyle: { color: "#9aa0a8", fontSize: 11 },
         itemWidth: 14,
         itemHeight: 8,

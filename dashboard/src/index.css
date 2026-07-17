@@ -47,6 +47,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
 }
 
+input[type="date"] {
+  color-scheme: dark;
+}
+
 /* Hide the spinner arrows on number inputs — the settings fields are typed. */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {

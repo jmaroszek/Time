@@ -7,7 +7,7 @@ import EChart, { type EChartsOption } from "../components/EChart";
 import { Card, Spinner } from "../components/ui";
 import { fmtDuration } from "../lib/format";
 import { duration, hourMatrix, type Session } from "../lib/metrics";
-import { addDays, dayKey, startOfDay, startOfWeek } from "../lib/time";
+import { addDays, dayKey, listDays, startOfDay, startOfWeek } from "../lib/time";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
 
@@ -37,7 +37,17 @@ export default function TrendsTab() {
       <Card title="Weekly Hours by Category" titleAlign="center">
         <CategoryTrend sessions={sessions} />
       </Card>
-      <Card title="Productive Time by Hour of Day" titleAlign="center">
+      <Card
+        title={
+          <span className="flex flex-col items-center gap-1">
+            <span>Average Productive Minutes by Hour</span>
+            <span className="text-[11px] font-normal text-ink-3">
+              Full history · average for each weekday occurrence
+            </span>
+          </span>
+        }
+        titleAlign="center"
+      >
         <HourHeatmap sessions={sessions} />
       </Card>
     </div>
@@ -49,16 +59,30 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
   const option = useMemo<EChartsOption>(() => {
     const isProd = (s: Session) => meta.classifier(s)?.isProductive === true;
     const matrix = hourMatrix(sessions, isProd);
+    const occurrenceCounts = Array(7).fill(0) as number[];
+    if (sessions.length > 0) {
+      let firstSec = sessions[0].start;
+      let lastSec = sessions[0].end;
+      for (const session of sessions) {
+        firstSec = Math.min(firstSec, session.start);
+        lastSec = Math.max(lastSec, session.end);
+      }
+      const first = startOfDay(new Date(firstSec * 1000));
+      const last = startOfDay(new Date(lastSec * 1000));
+      for (const day of listDays({ start: first, end: addDays(last, 1) })) {
+        occurrenceCounts[day.getDay()] += 1;
+      }
+    }
     // Only the configured hour window; x is the column index into it.
     const visibleHours: number[] = [];
     for (let h = meta.dayStartHour; h < meta.dayEndHour; h++) visibleHours.push(h);
     const data: [number, number, number][] = [];
-    let maxH = 0;
+    let maxMinutes = 0;
     for (let d = 0; d < 7; d++) {
       visibleHours.forEach((h, xi) => {
-        const hours = matrix[d][h] / 3600;
-        maxH = Math.max(maxH, hours);
-        data.push([xi, d, Math.round(hours * 100) / 100]);
+        const minutes = occurrenceCounts[d] > 0 ? matrix[d][h] / occurrenceCounts[d] / 60 : 0;
+        maxMinutes = Math.max(maxMinutes, minutes);
+        data.push([xi, d, Math.round(minutes * 10) / 10]);
       });
     }
     return {
@@ -67,7 +91,7 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
       tooltip: {
         ...TOOLTIP_STYLE,
         formatter: (p: { data: [number, number, number] }) =>
-          `${DAY_NAMES[p.data[1]]} ${visibleHours[p.data[0]]}:00 · ${p.data[2].toFixed(1)}h productive`,
+          `${DAY_NAMES[p.data[1]]} ${compactHour(visibleHours[p.data[0]])} · ${p.data[2].toFixed(1)} min average`,
       },
       xAxis: {
         type: "category",
@@ -87,7 +111,7 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
       visualMap: {
         show: false,
         min: 0,
-        max: Math.max(maxH, 0.1),
+        max: Math.max(maxMinutes, 1),
         inRange: { color: ["#16181d", "#0e3a2c", "#1D9E75", "#5DCAA5"] },
       },
       series: [
