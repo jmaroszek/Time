@@ -27,6 +27,31 @@ export function categoryKind(cat: Category): Productivity {
   return "unproductive";
 }
 
+/** The full editable state of a category: its productivity, or "ignored"
+ *  (which hides it everywhere and takes precedence over productivity). */
+export type CategoryState = Productivity | "ignored";
+
+export function categoryState(cat: Category): CategoryState {
+  return cat.isIgnored ? "ignored" : categoryKind(cat);
+}
+
+/** The three flags a chosen state implies. "ignored" only sets isIgnored,
+ *  preserving the underlying productivity so toggling back restores it. */
+export function categoryStateFlags(
+  state: CategoryState,
+): Pick<Category, "isProductive" | "isNeutral" | "isIgnored"> | Pick<Category, "isIgnored"> {
+  switch (state) {
+    case "productive":
+      return { isProductive: true, isNeutral: false, isIgnored: false };
+    case "neutral":
+      return { isProductive: false, isNeutral: true, isIgnored: false };
+    case "unproductive":
+      return { isProductive: false, isNeutral: false, isIgnored: false };
+    case "ignored":
+      return { isIgnored: true };
+  }
+}
+
 export type MatchType = "process" | "domain" | "title";
 
 export interface Rule {

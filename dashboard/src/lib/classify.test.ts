@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { buildClassifier, categoryKind, type Category, type Rule } from "./classify";
+import {
+  buildClassifier,
+  categoryKind,
+  categoryState,
+  categoryStateFlags,
+  type Category,
+  type Rule,
+} from "./classify";
 
 const CATS: Category[] = [
   { id: 1, name: "Browsing", color: "#EF9F27", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 1 },
@@ -90,5 +97,40 @@ describe("categoryKind", () => {
 
   it("prefers productive when both flags are somehow set", () => {
     expect(categoryKind({ ...base, isProductive: true, isNeutral: true })).toBe("productive");
+  });
+});
+
+describe("categoryState / categoryStateFlags", () => {
+  const base: Category = {
+    id: 1,
+    name: "X",
+    color: "#000",
+    isProductive: false,
+    isNeutral: false,
+    isIgnored: false,
+    sortOrder: 1,
+  };
+
+  it("ignored overrides productivity when reading state", () => {
+    expect(categoryState({ ...base, isProductive: true, isIgnored: true })).toBe("ignored");
+    expect(categoryState({ ...base, isProductive: true })).toBe("productive");
+    expect(categoryState({ ...base, isNeutral: true })).toBe("neutral");
+    expect(categoryState(base)).toBe("unproductive");
+  });
+
+  it("productivity states clear the ignored flag", () => {
+    expect(categoryStateFlags("neutral")).toEqual({
+      isProductive: false,
+      isNeutral: true,
+      isIgnored: false,
+    });
+  });
+
+  it("ignored only sets isIgnored, preserving underlying productivity", () => {
+    // Spreading onto a productive category keeps it productive under the hood.
+    const merged = { ...base, isProductive: true, ...categoryStateFlags("ignored") };
+    expect(merged.isIgnored).toBe(true);
+    expect(merged.isProductive).toBe(true);
+    expect(categoryState(merged)).toBe("ignored");
   });
 });

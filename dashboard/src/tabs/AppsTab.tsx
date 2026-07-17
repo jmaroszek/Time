@@ -4,7 +4,12 @@
 import { useMemo, useState } from "react";
 
 import { Button, Card, CategoryDot, Select, Spinner, TextInput } from "../components/ui";
-import { categoryKind, type MatchType, type Productivity } from "../lib/classify";
+import {
+  categoryState,
+  categoryStateFlags,
+  type CategoryState,
+  type MatchType,
+} from "../lib/classify";
 import { cleanDomainName, cleanProcessName, fmtDuration } from "../lib/format";
 import { clipSessions, duration, type Session } from "../lib/metrics";
 import {
@@ -194,22 +199,20 @@ function UsageTable({ rows, onAssigned }: { rows: UsageRow[]; onAssigned: () => 
   );
 }
 
-const PRODUCTIVITY_OPTIONS = [
+// productive/neutral/unproductive judge a category; "ignored" hides it from
+// every visualization and overrides its productivity.
+const STATE_OPTIONS = [
   { value: "productive", label: "productive" },
   { value: "neutral", label: "neutral" },
   { value: "unproductive", label: "unproductive" },
+  { value: "ignored", label: "ignored" },
 ];
-
-/** Map a productivity choice to the two mutually-exclusive DB flags. */
-function kindFlags(kind: Productivity): { isProductive: boolean; isNeutral: boolean } {
-  return { isProductive: kind === "productive", isNeutral: kind === "neutral" };
-}
 
 function CategoriesEditor({ onChanged }: { onChanged: () => Promise<void> }) {
   const meta = useMeta();
   const [name, setName] = useState("");
   const [color, setColor] = useState("#7F77DD");
-  const [kind, setKind] = useState<Productivity>("unproductive");
+  const [state, setState] = useState<CategoryState>("unproductive");
 
   return (
     <Card title="Categories">
@@ -223,39 +226,29 @@ function CategoriesEditor({ onChanged }: { onChanged: () => Promise<void> }) {
               className="h-6 w-8 cursor-pointer rounded border border-edge bg-transparent"
               title="Category color"
             />
-            <span className="w-28 truncate">{c.name}</span>
+            <span className="flex-1 truncate">{c.name}</span>
             <Select
-              value={categoryKind(c)}
+              value={categoryState(c)}
               onChange={(v) =>
-                void updateCategory({ ...c, ...kindFlags(v as Productivity) }).then(onChanged)
+                void updateCategory({
+                  ...c,
+                  ...categoryStateFlags(v as CategoryState),
+                }).then(onChanged)
               }
-              options={PRODUCTIVITY_OPTIONS}
+              options={STATE_OPTIONS}
               className="w-32"
             />
-            <label
-              className="flex items-center gap-1.5 text-ink-2"
-              title="Hide this category from all visualizations"
-            >
-              <input
-                type="checkbox"
-                checked={c.isIgnored}
-                onChange={(e) =>
-                  void updateCategory({ ...c, isIgnored: e.target.checked }).then(onChanged)
-                }
-              />
-              ignored
-            </label>
-            <span className="flex-1" />
-            <Button
-              variant="danger"
+            <button
+              type="button"
+              className="px-1 text-ink-3 hover:text-bad"
               title="Delete category and its rules"
               onClick={() => {
                 if (confirm(`Delete category "${c.name}" and all its rules?`))
                   void deleteCategory(c.id).then(onChanged);
               }}
             >
-              delete
-            </Button>
+              ✕
+            </button>
           </div>
         ))}
         <div className="mt-2 flex items-center gap-2 border-t border-edge pt-3">
@@ -268,18 +261,18 @@ function CategoriesEditor({ onChanged }: { onChanged: () => Promise<void> }) {
           />
           <TextInput value={name} onChange={setName} placeholder="New category" className="w-36" />
           <Select
-            value={kind}
-            onChange={(v) => setKind(v as Productivity)}
-            options={PRODUCTIVITY_OPTIONS}
+            value={state}
+            onChange={(v) => setState(v as CategoryState)}
+            options={STATE_OPTIONS}
             className="w-32"
           />
           <Button
             variant="primary"
             disabled={!name.trim()}
             onClick={() =>
-              void addCategory(name, color, kind).then(async () => {
+              void addCategory(name, color, state).then(async () => {
                 setName("");
-                setKind("unproductive");
+                setState("unproductive");
                 await onChanged();
               })
             }
