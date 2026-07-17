@@ -59,7 +59,9 @@ export default function OverviewTab({
     const pace = goalPace(kpis.prodSec, range, meta.weeklyGoalHours);
     const n = topN ?? meta.defaultTopN;
     const apps = withDeltas(
-      topApps(current, meta.classifier).slice(0, n),
+      topApps(current, meta.classifier)
+        .filter((a) => a.seconds >= meta.minAppSeconds)
+        .slice(0, n),
       topApps(previous, meta.classifier),
       {
         currentDaily: dailySecondsByApp(current, range),

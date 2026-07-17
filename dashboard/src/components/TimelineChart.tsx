@@ -50,7 +50,7 @@ export default function TimelineChart({
   onSelect?: (seg: TimelineSegment) => void;
 }) {
   const { aliases } = useMeta();
-  const days = useMemo(() => listDays(range).reverse(), [range]); // newest on top
+  const days = useMemo(() => listDays(range), [range]); // oldest on top, reads top-to-bottom
   const dayIndex = useMemo(() => new Map(days.map((d, i) => [dayKey(d), i])), [days]);
 
   const segments = useMemo<SegmentDatum[]>(() => {

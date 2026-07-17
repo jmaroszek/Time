@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS categories (
     name TEXT UNIQUE NOT NULL,
     color TEXT NOT NULL,
     is_productive INTEGER NOT NULL DEFAULT 0,
+    is_neutral INTEGER NOT NULL DEFAULT 0,
     is_ignored INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER
 );
@@ -51,15 +52,17 @@ CREATE TABLE IF NOT EXISTS rules (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 """
 
-# (name, color, is_productive, sort_order)
+# (name, color, is_productive, is_neutral, sort_order). Productivity is a
+# three-way state: productive (1,0), neutral (0,1), or unproductive (0,0).
+# Gaming is neutral by default — tracked, but never held against productivity.
 _SEED_CATEGORIES = [
-    ("Notes", "#7F77DD", 1, 1),
-    ("Dev", "#378ADD", 1, 2),
-    ("AI tools", "#1D9E75", 1, 3),
-    ("Browsing", "#EF9F27", 1, 4),
-    ("Gaming", "#D85A30", 0, 5),
-    ("Media", "#D4537E", 0, 6),
-    ("System", "#888780", 0, 7),
+    ("Notes", "#7F77DD", 1, 0, 1),
+    ("Dev", "#378ADD", 1, 0, 2),
+    ("AI tools", "#1D9E75", 1, 0, 3),
+    ("Browsing", "#EF9F27", 1, 0, 4),
+    ("Gaming", "#D85A30", 0, 1, 5),
+    ("Media", "#D4537E", 0, 0, 6),
+    ("System", "#888780", 0, 0, 7),
 ]
 
 # Priorities: domain (300) > title (200) > process (100). Domain and title rules
@@ -109,6 +112,7 @@ DEFAULT_SETTINGS = {
     "week_start": "Sunday",
     "default_top_n_apps": "5",
     "browser_processes": "chrome.exe,thorium.exe",
+    "min_app_seconds": "120",
 }
 
 
@@ -125,16 +129,21 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
 
 
 def _seed(conn: sqlite3.Connection) -> None:
-    # Older DBs predate the is_ignored column; add it in place.
+    # Older DBs predate the is_ignored / is_neutral columns; add them in place.
     cols = {row[1] for row in conn.execute("PRAGMA table_info(categories)")}
     if "is_ignored" not in cols:
         conn.execute(
             "ALTER TABLE categories ADD COLUMN is_ignored INTEGER NOT NULL DEFAULT 0"
         )
+    if "is_neutral" not in cols:
+        conn.execute(
+            "ALTER TABLE categories ADD COLUMN is_neutral INTEGER NOT NULL DEFAULT 0"
+        )
 
     if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
         conn.executemany(
-            "INSERT INTO categories (name, color, is_productive, sort_order) VALUES (?,?,?,?)",
+            "INSERT INTO categories (name, color, is_productive, is_neutral, sort_order)"
+            " VALUES (?,?,?,?,?)",
             _SEED_CATEGORIES,
         )
     if conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0:

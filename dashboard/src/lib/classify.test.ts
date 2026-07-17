@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildClassifier, type Category, type Rule } from "./classify";
+import { buildClassifier, categoryKind, type Category, type Rule } from "./classify";
 
 const CATS: Category[] = [
-  { id: 1, name: "Browsing", color: "#EF9F27", isProductive: true, isIgnored: false, sortOrder: 1 },
-  { id: 2, name: "Media", color: "#D4537E", isProductive: false, isIgnored: false, sortOrder: 2 },
-  { id: 3, name: "Dev", color: "#378ADD", isProductive: true, isIgnored: false, sortOrder: 3 },
+  { id: 1, name: "Browsing", color: "#EF9F27", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 1 },
+  { id: 2, name: "Media", color: "#D4537E", isProductive: false, isNeutral: false, isIgnored: false, sortOrder: 2 },
+  { id: 3, name: "Dev", color: "#378ADD", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 3 },
 ];
 
 const RULES: Rule[] = [
@@ -68,5 +68,27 @@ describe("buildClassifier", () => {
 
   it("process match is case-insensitive", () => {
     expect(classify(session({ process: "Chrome.EXE" }))?.name).toBe("Browsing");
+  });
+});
+
+describe("categoryKind", () => {
+  const base: Category = {
+    id: 1,
+    name: "X",
+    color: "#000",
+    isProductive: false,
+    isNeutral: false,
+    isIgnored: false,
+    sortOrder: 1,
+  };
+
+  it("reads the productivity state off the flags", () => {
+    expect(categoryKind({ ...base, isProductive: true })).toBe("productive");
+    expect(categoryKind({ ...base, isNeutral: true })).toBe("neutral");
+    expect(categoryKind(base)).toBe("unproductive");
+  });
+
+  it("prefers productive when both flags are somehow set", () => {
+    expect(categoryKind({ ...base, isProductive: true, isNeutral: true })).toBe("productive");
   });
 });

@@ -68,6 +68,41 @@ def test_ignored_category_seeded_and_column_added_to_old_db(tmp_path):
     conn.close()
 
 
+def test_is_neutral_column_added_to_old_db(tmp_path):
+    # Simulate a DB created before the is_neutral column existed.
+    path = tmp_path / "old.db"
+    c = sqlite3.connect(path)
+    c.execute(
+        """CREATE TABLE categories (
+            id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, color TEXT NOT NULL,
+            is_productive INTEGER NOT NULL DEFAULT 0, is_ignored INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER)"""
+    )
+    c.execute("INSERT INTO categories (name, color, is_productive) VALUES ('Dev', '#000', 1)")
+    c.commit()
+    c.close()
+
+    conn = db.open_db(path)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(categories)")}
+    assert "is_neutral" in cols
+    # pre-existing rows preserved and defaulted to not-neutral
+    row = conn.execute(
+        "SELECT is_productive, is_neutral FROM categories WHERE name='Dev'"
+    ).fetchone()
+    assert (row["is_productive"], row["is_neutral"]) == (1, 0)
+    conn.close()
+
+
+def test_seeded_gaming_is_neutral(tmp_path):
+    conn = db.open_db(tmp_path / "fresh.db")
+    row = conn.execute(
+        "SELECT is_productive, is_neutral FROM categories WHERE name='Gaming'"
+    ).fetchone()
+    # neutral: not productive, not held against you
+    assert (row["is_productive"], row["is_neutral"]) == (0, 1)
+    conn.close()
+
+
 def test_ignored_seed_is_idempotent(tmp_path):
     path = tmp_path / "test.db"
     db.open_db(path).close()

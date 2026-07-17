@@ -3,14 +3,28 @@
 // apply to browser sessions; process rules apply to everything. AFK sessions
 // are never classified.
 
+/** Three-way productivity state. Neutral time (e.g. games) is tracked but is
+ *  never colored good/bad — it counts toward totals without being judged. */
+export type Productivity = "productive" | "neutral" | "unproductive";
+
 export interface Category {
   id: number;
   name: string;
   color: string;
   isProductive: boolean;
+  /** Neutral categories are neither productive nor unproductive. Mutually
+   *  exclusive with isProductive. */
+  isNeutral: boolean;
   /** Ignored categories are hidden from every visualization. */
   isIgnored: boolean;
   sortOrder: number | null;
+}
+
+/** Collapse the two flags into the single productivity state. */
+export function categoryKind(cat: Category): Productivity {
+  if (cat.isProductive) return "productive";
+  if (cat.isNeutral) return "neutral";
+  return "unproductive";
 }
 
 export type MatchType = "process" | "domain" | "title";
