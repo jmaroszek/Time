@@ -14,8 +14,9 @@ export interface Session {
   isAfk: boolean;
 }
 
-/** Max gap (s) between sessions that still counts as one continuous focus chain. */
-const FOCUS_CHAIN_MAX_GAP = 60;
+/** Default max gap (s) between sessions that still counts as one continuous
+ *  focus chain, when a caller doesn't supply one. */
+const DEFAULT_FOCUS_CHAIN_MAX_GAP = 60;
 
 export function duration(s: Session): number {
   return Math.max(0, s.end - s.start);
@@ -62,7 +63,11 @@ export interface Kpis {
   longestFocusSec: number;
 }
 
-export function computeKpis(sessions: Session[], classify: Classifier): Kpis {
+export function computeKpis(
+  sessions: Session[],
+  classify: Classifier,
+  focusChainMaxGapSec: number = DEFAULT_FOCUS_CHAIN_MAX_GAP,
+): Kpis {
   let total = 0;
   let prod = 0;
   let longest = 0;
@@ -81,7 +86,7 @@ export function computeKpis(sessions: Session[], classify: Classifier): Kpis {
     const cat = classify(s);
     if (cat?.isProductive) {
       prod += dur;
-      if (chainEnd !== null && s.start - chainEnd <= FOCUS_CHAIN_MAX_GAP) {
+      if (chainEnd !== null && s.start - chainEnd <= focusChainMaxGapSec) {
         run += dur;
       } else {
         run = dur;
@@ -107,37 +112,32 @@ export interface GoalPace {
   doneHours: number;
   targetHours: number;
   fraction: number;
-  /** Hours per remaining day needed to hit target; 0 when period is over or met. */
-  needPerDayHours: number;
-  remainingDays: number;
+  /** Daily goal: weekly goal / 7. */
+  dailyGoalHours: number;
+  /** Trailing average productive hours per day over the range. */
+  avgPerDayHours: number;
 }
 
 /**
- * Target scales with the selected range: one day targets the daily goal
- * (weekly / 7), seven days the full weekly goal, and so on proportionally.
+ * Progress toward the goal over the selected window, plus a daily-average pace.
+ * The target scales with the range (weekly goal × days / 7), so one day targets
+ * the daily goal, seven days the full weekly goal, and so on proportionally.
+ *
+ * The presets are trailing windows that end today, with no future days left to
+ * plan against, so pace is expressed as the trailing average per day measured
+ * against the daily goal — not a per-remaining-day catch-up rate (which would
+ * collapse the entire window's shortfall onto today).
  */
-export function goalPace(
-  prodSec: number,
-  range: Range,
-  weeklyGoalHours: number,
-  now: Date = new Date(),
-): GoalPace {
+export function goalPace(prodSec: number, range: Range, weeklyGoalHours: number): GoalPace {
   const targetDays = calendarDays(range);
   const targetHours = (weeklyGoalHours * targetDays) / 7;
   const doneHours = prodSec / 3600;
-
-  const periodEnd = addDays(range.start, targetDays);
-  const msLeft = periodEnd.getTime() - now.getTime();
-  const remainingDays = Math.min(Math.max(Math.ceil(msLeft / 86_400_000), 0), targetDays);
-  const needPerDayHours =
-    remainingDays > 0 ? Math.max(0, targetHours - doneHours) / remainingDays : 0;
-
   return {
     doneHours,
     targetHours,
     fraction: targetHours > 0 ? doneHours / targetHours : 0,
-    needPerDayHours,
-    remainingDays,
+    dailyGoalHours: weeklyGoalHours / 7,
+    avgPerDayHours: targetDays > 0 ? doneHours / targetDays : 0,
   };
 }
 

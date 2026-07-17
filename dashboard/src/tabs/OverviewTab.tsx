@@ -55,7 +55,7 @@ export default function OverviewTab({
       prev.start.getTime() / 1000,
       prev.end.getTime() / 1000,
     );
-    const kpis = computeKpis(current, meta.classifier);
+    const kpis = computeKpis(current, meta.classifier, meta.focusChainMaxGapSeconds);
     const pace = goalPace(kpis.prodSec, range, meta.weeklyGoalHours);
     const n = topN ?? meta.defaultTopN;
     const apps = withDeltas(
@@ -86,27 +86,18 @@ export default function OverviewTab({
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <MetricCard
-          label="Avg Productive / Day"
+          label="Average productivity per day"
           value={fmtDuration(kpis.prodSec / calendarDays(range))}
         />
+        <MetricCard label="Productivity percent" value={fmtPct(kpis.prodFraction)} />
         <MetricCard
-          label="Productive"
-          value={fmtPct(kpis.prodFraction)}
-          sub={`${fmtDuration(kpis.prodSec)} of ${fmtDuration(kpis.totalSec)}`}
+          label="Longest focus"
+          value={fmtDuration(kpis.longestFocusSec)}
+          hint="Longest continuous run of productive time. Short gaps don't break the streak."
         />
-        <MetricCard label="Longest Focus" value={fmtDuration(kpis.longestFocusSec)} />
         <MetricCard
-          label="Goal Pace"
+          label="Goal pace"
           value={`${pace.doneHours.toFixed(1)} / ${pace.targetHours.toFixed(0)}h`}
-          sub={
-            pace.remainingDays > 0
-              ? pace.needPerDayHours > 0
-                ? `need ${pace.needPerDayHours.toFixed(1)}h/day to hit goal`
-                : "goal met"
-              : pace.fraction >= 1
-                ? "goal met"
-                : `finished at ${fmtPct(pace.fraction)}`
-          }
         />
       </div>
 

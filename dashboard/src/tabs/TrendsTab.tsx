@@ -19,7 +19,6 @@ const TOOLTIP_STYLE = {
 };
 
 export default function TrendsTab() {
-  const meta = useMeta();
   // Computed once per mount: a fresh Date.now() on every render would change
   // the effect deps in useSessions and loop fetch -> render -> fetch forever.
   const [endSec] = useState(() => Math.floor(Date.now() / 1000) + 86_400);
@@ -30,15 +29,12 @@ export default function TrendsTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Weekly Hours by Category (Last 12 Weeks)">
+      <Card title="Weekly Hours by Category" titleAlign="center">
         <CategoryTrend sessions={sessions} />
       </Card>
-      <Card title="Productive Time by Hour of Day (Full History)">
+      <Card title="Productive Time by Hour of Day" titleAlign="center">
         <HourHeatmap sessions={sessions} />
       </Card>
-      <p className="text-xs text-ink-3">
-        {sessions.length.toLocaleString()} sessions in history · weeks start on {meta.weekStart}
-      </p>
     </div>
   );
 }
@@ -48,14 +44,17 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
   const option = useMemo<EChartsOption>(() => {
     const isProd = (s: Session) => meta.classifier(s)?.isProductive === true;
     const matrix = hourMatrix(sessions, isProd);
+    // Only the configured hour window; x is the column index into it.
+    const visibleHours: number[] = [];
+    for (let h = meta.dayStartHour; h < meta.dayEndHour; h++) visibleHours.push(h);
     const data: [number, number, number][] = [];
     let maxH = 0;
     for (let d = 0; d < 7; d++) {
-      for (let h = 0; h < 24; h++) {
+      visibleHours.forEach((h, xi) => {
         const hours = matrix[d][h] / 3600;
         maxH = Math.max(maxH, hours);
-        data.push([h, d, Math.round(hours * 100) / 100]);
-      }
+        data.push([xi, d, Math.round(hours * 100) / 100]);
+      });
     }
     return {
       animation: false,
@@ -63,11 +62,11 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
       tooltip: {
         ...TOOLTIP_STYLE,
         formatter: (p: { data: [number, number, number] }) =>
-          `${DAY_NAMES[p.data[1]]} ${p.data[0]}:00 · ${p.data[2].toFixed(1)}h productive`,
+          `${DAY_NAMES[p.data[1]]} ${visibleHours[p.data[0]]}:00 · ${p.data[2].toFixed(1)}h productive`,
       },
       xAxis: {
         type: "category",
-        data: Array.from({ length: 24 }, (_v, h) => `${h}`),
+        data: visibleHours.map((h) => `${h}`),
         axisLabel: { color: "#9aa0a8", fontSize: 10 },
         axisTick: { show: false },
         axisLine: { show: false },
@@ -94,7 +93,7 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
         },
       ],
     };
-  }, [sessions, meta.classifier]);
+  }, [sessions, meta.classifier, meta.dayStartHour, meta.dayEndHour]);
 
   return <EChart option={option} height={260} />;
 }

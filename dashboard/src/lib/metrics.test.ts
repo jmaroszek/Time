@@ -97,6 +97,12 @@ describe("computeKpis", () => {
     expect(k.longestFocusSec).toBe(3600 + 1370);
   });
 
+  it("honors a custom max-gap: a 90s gap survives a 120s threshold", () => {
+    const sessions = [sess(0, 3600), sess(3690, 5000)]; // 90s gap
+    expect(computeKpis(sessions, classify).longestFocusSec).toBe(3600); // default 60s breaks it
+    expect(computeKpis(sessions, classify, 120).longestFocusSec).toBe(3600 + 1310); // 120s bridges it
+  });
+
   it("uncategorized sessions break the chain but count toward total", () => {
     const k = computeKpis([sess(0, 3600), sess(3600, 4000, "mystery.exe")], classify);
     expect(k.totalSec).toBe(4000);
@@ -105,38 +111,38 @@ describe("computeKpis", () => {
 });
 
 describe("goalPace", () => {
-  const week = { start: new Date(2026, 5, 7), end: new Date(2026, 5, 10) }; // 3 elapsed days
+  const week = { start: new Date(2026, 5, 7), end: new Date(2026, 5, 10) }; // 3 days
 
   it("a single day targets the daily goal", () => {
     const today = { start: new Date(2026, 5, 9), end: new Date(2026, 5, 10) };
-    const p = goalPace(2 * 3600, today, 21, new Date(2026, 5, 9, 12));
+    const p = goalPace(2 * 3600, today, 21);
     expect(p.targetHours).toBeCloseTo(3); // 21 / 7
     expect(p.doneHours).toBeCloseTo(2);
-    expect(p.remainingDays).toBe(1); // half a day left, ceil -> 1
-    expect(p.needPerDayHours).toBeCloseTo(1);
+    expect(p.dailyGoalHours).toBeCloseTo(3); // 21 / 7
+    expect(p.avgPerDayHours).toBeCloseTo(2); // 2h over 1 day
   });
 
-  it("a partial range scales the target proportionally", () => {
-    const p = goalPace(7.7 * 3600, week, 20, new Date(2026, 5, 9, 12));
-    expect(p.targetHours).toBeCloseTo((20 * 3) / 7); // 3 days of a 20h/week goal
-    expect(p.doneHours).toBeCloseTo(7.7);
-    // 12h left in the 3-day period, ceil -> 1
-    expect(p.remainingDays).toBe(1);
-    expect(p.needPerDayHours).toBeCloseTo(Math.max(0, (20 * 3) / 7 - 7.7));
+  it("a multi-day range scales the target and averages per day", () => {
+    const p = goalPace(7.5 * 3600, week, 21);
+    expect(p.targetHours).toBeCloseTo((21 * 3) / 7); // 9h: 3 days of a 21h/week goal
+    expect(p.doneHours).toBeCloseTo(7.5);
+    expect(p.dailyGoalHours).toBeCloseTo(3);
+    expect(p.avgPerDayHours).toBeCloseTo(2.5); // 7.5h over 3 days
+    expect(p.fraction).toBeCloseTo(7.5 / 9);
   });
 
   it("longer ranges scale the target", () => {
     const r = { start: new Date(2026, 4, 10), end: new Date(2026, 4, 24) }; // 14 days
-    const p = goalPace(0, r, 20, new Date(2026, 5, 9));
-    expect(p.targetHours).toBe(40);
-    expect(p.remainingDays).toBe(0); // period over
-    expect(p.needPerDayHours).toBe(0);
+    const p = goalPace(28 * 3600, r, 20);
+    expect(p.targetHours).toBe(40); // 20 * 14 / 7
+    expect(p.avgPerDayHours).toBeCloseTo(2); // 28h over 14 days
+    expect(p.fraction).toBeCloseTo(0.7);
   });
 
-  it("met goal needs zero per day", () => {
-    const p = goalPace(25 * 3600, week, 20, new Date(2026, 5, 9, 12));
-    expect(p.needPerDayHours).toBe(0);
-    expect(p.fraction).toBeGreaterThan(1);
+  it("meeting the daily-average goal reads as on pace (fraction >= 1)", () => {
+    const p = goalPace(9 * 3600, week, 21); // 9h over 3 days = 3h/day == daily goal
+    expect(p.avgPerDayHours).toBeCloseTo(3);
+    expect(p.fraction).toBeGreaterThanOrEqual(1);
   });
 });
 

@@ -31,6 +31,9 @@ const NUMERIC_FIELDS: NumericFieldSpec[] = [
   { key: "heartbeat_seconds", label: "Heartbeat interval (seconds)", help: "How often the open session's end time is flushed. A crash loses at most this much.", min: 5, max: 300, scale: 1 },
   { key: "default_top_n_apps", label: "Default top apps shown", help: "Initial size of the Overview top-apps list.", min: 3, max: 50, scale: 1 },
   { key: "min_app_seconds", label: "Minimum app time (minutes)", help: "Apps with less time than this in the selected range are hidden from the app lists. Set 0 to show everything.", min: 0, max: 30, scale: 60 },
+  { key: "focus_chain_max_gap_seconds", label: "Focus streak max gap (minutes)", help: "Gaps shorter than this between productive sessions don't break the Longest focus streak.", min: 0, max: 30, scale: 60 },
+  { key: "day_start_hour", label: "Day starts at (hour)", help: "First hour shown on the Timeline and Hour-of-Day plots. 24-hour clock (6 = 6am). Earlier hours are hidden.", min: 0, max: 23, scale: 1 },
+  { key: "day_end_hour", label: "Day ends at (hour)", help: "Last hour shown on those plots. 24-hour clock (24 = midnight). Later hours are hidden.", min: 1, max: 24, scale: 1 },
 ];
 
 function toDisplay(spec: NumericFieldSpec, dbValue: string | undefined): string {
@@ -99,7 +102,7 @@ export default function SettingsTab() {
                   value={drafts[spec.key] ?? ""}
                   onChange={(v) => setDrafts((d) => ({ ...d, [spec.key]: v }))}
                   onCommit={() => void commitNumeric(spec)}
-                  className="w-24 text-right"
+                  className="w-16 text-right"
                 />
               </div>
               <p className="mt-0.5 text-[11px] text-ink-3">{spec.help}</p>
