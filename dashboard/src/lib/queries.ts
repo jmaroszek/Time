@@ -1,7 +1,7 @@
 // Typed SQL access. The dashboard reads sessions and writes only
 // categories/rules/settings (the tracker owns session writes).
 
-import type { Category, MatchType, Productivity, Rule } from "./classify";
+import type { Category, CategoryState, MatchType, Rule } from "./classify";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
 
@@ -135,13 +135,19 @@ export async function deleteRule(ruleId: number): Promise<void> {
 export async function addCategory(
   name: string,
   color: string,
-  kind: Productivity,
+  state: CategoryState,
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "INSERT INTO categories (name, color, is_productive, is_neutral, sort_order)" +
-      " VALUES ($1, $2, $3, $4, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories))",
-    [name.trim(), color, kind === "productive" ? 1 : 0, kind === "neutral" ? 1 : 0],
+    "INSERT INTO categories (name, color, is_productive, is_neutral, is_ignored, sort_order)" +
+      " VALUES ($1, $2, $3, $4, $5, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories))",
+    [
+      name.trim(),
+      color,
+      state === "productive" ? 1 : 0,
+      state === "neutral" ? 1 : 0,
+      state === "ignored" ? 1 : 0,
+    ],
   );
 }
 

@@ -112,7 +112,7 @@ DEFAULT_SETTINGS = {
     "week_start": "Sunday",
     "default_top_n_apps": "5",
     "browser_processes": "chrome.exe,thorium.exe",
-    "min_app_seconds": "120",
+    "min_app_seconds": "300",
 }
 
 
