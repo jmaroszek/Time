@@ -5,17 +5,23 @@ export function Card({
   right,
   children,
   className = "",
+  titleAlign = "left",
 }: {
   title?: ReactNode;
   right?: ReactNode;
   children: ReactNode;
   className?: string;
+  titleAlign?: "left" | "center";
 }) {
   return (
     <div className={`rounded-xl border border-edge bg-surface p-4 ${className}`}>
       {(title || right) && (
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink">{title}</h2>
+          <h2
+            className={`text-sm font-semibold text-ink ${titleAlign === "center" ? "w-full text-center" : ""}`}
+          >
+            {title}
+          </h2>
           {right}
         </div>
       )}
@@ -28,17 +34,46 @@ export function MetricCard({
   label,
   value,
   sub,
+  hint,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
+  /** Optional explanation shown as a hover tooltip on a small ⓘ next to the label. */
+  hint?: string;
 }) {
   return (
     <div className="rounded-xl border border-edge bg-surface px-4 py-3">
-      <p className="text-xs text-ink-2">{label}</p>
+      <p className="flex items-center gap-1 text-xs text-ink-2">
+        {label}
+        {hint && <InfoHint text={hint} />}
+      </p>
       <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
       {sub && <p className="mt-0.5 text-xs text-ink-2">{sub}</p>}
     </div>
+  );
+}
+
+/** A ⓘ that reveals an explanation on hover or keyboard focus. Uses a real
+ *  positioned element (not the native `title`, which never shows on click and
+ *  is unreliable on hover). */
+function InfoHint({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <span
+        tabIndex={0}
+        aria-label={text}
+        className="cursor-help select-none text-ink-3 outline-none hover:text-ink-2"
+      >
+        ⓘ
+      </span>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-0 top-5 z-20 hidden w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-[11px] font-normal leading-snug text-ink-2 shadow-lg group-hover:block group-focus-within:block"
+      >
+        {text}
+      </span>
+    </span>
   );
 }
 

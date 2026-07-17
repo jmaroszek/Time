@@ -49,7 +49,7 @@ export default function TimelineChart({
   blockMinutes: number; // 0 = exact sessions
   onSelect?: (seg: TimelineSegment) => void;
 }) {
-  const { aliases } = useMeta();
+  const { aliases, dayStartHour, dayEndHour } = useMeta();
   const days = useMemo(() => listDays(range), [range]); // oldest on top, reads top-to-bottom
   const dayIndex = useMemo(() => new Map(days.map((d, i) => [dayKey(d), i])), [days]);
 
@@ -114,8 +114,8 @@ export default function TimelineChart({
       grid: { left: 70, right: 16, top: 8, bottom: 24 },
       xAxis: {
         type: "value",
-        min: 0,
-        max: 24,
+        min: dayStartHour,
+        max: dayEndHour,
         interval: 3,
         axisLabel: {
           color: "#9aa0a8",
@@ -142,6 +142,7 @@ export default function TimelineChart({
       series: [
         {
           type: "custom",
+          clip: true, // trim segments that fall outside the visible hour window
           encode: { x: [1, 2], y: 0 },
           data: segments.map((s) => ({
             value: s.value,
@@ -177,7 +178,7 @@ export default function TimelineChart({
         },
       ],
     }),
-    [segments, days, aliases],
+    [segments, days, aliases, dayStartHour, dayEndHour],
   );
 
   const handleClick = useCallback(

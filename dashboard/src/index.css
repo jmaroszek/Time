@@ -32,6 +32,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
 }
 
+/* Hide the spinner arrows on number inputs — the settings fields are typed. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  appearance: textfield;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

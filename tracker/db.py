@@ -113,6 +113,9 @@ DEFAULT_SETTINGS = {
     "default_top_n_apps": "5",
     "browser_processes": "chrome.exe,thorium.exe",
     "min_app_seconds": "300",
+    "focus_chain_max_gap_seconds": "120",
+    "day_start_hour": "0",
+    "day_end_hour": "24",
 }
 
 

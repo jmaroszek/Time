@@ -27,6 +27,11 @@ export interface Meta {
   defaultTopN: number;
   /** Apps with less than this many seconds in range are hidden from app lists. */
   minAppSeconds: number;
+  /** Max gap (s) between productive sessions that still counts as one focus streak. */
+  focusChainMaxGapSeconds: number;
+  /** Hour-of-day window shown on the Timeline and Hour-of-Day plots (0–24). */
+  dayStartHour: number;
+  dayEndHour: number;
   loaded: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -81,6 +86,8 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       weeklyGoalHours: Number(settings.weekly_goal_hours) || 20,
       defaultTopN: Number(settings.default_top_n_apps) || 5,
       minAppSeconds: Math.max(0, Number(settings.min_app_seconds) || 0),
+      focusChainMaxGapSeconds: Math.max(0, Number(settings.focus_chain_max_gap_seconds) || 120),
+      ...parseDayWindow(settings.day_start_hour, settings.day_end_hour),
       loaded,
       error,
       refresh,
@@ -88,6 +95,20 @@ export function MetaProvider({ children }: { children: ReactNode }) {
   }, [categories, rules, settings, loaded, error, refresh]);
 
   return <MetaContext.Provider value={value}>{children}</MetaContext.Provider>;
+}
+
+/** Parse the day-window hour settings, falling back to a full day (0–24) on any
+ *  bad or inverted input. */
+function parseDayWindow(
+  startRaw: string | undefined,
+  endRaw: string | undefined,
+): { dayStartHour: number; dayEndHour: number } {
+  const start = Number(startRaw);
+  const end = Number(endRaw);
+  const dayStartHour = Number.isFinite(start) ? Math.min(Math.max(Math.trunc(start), 0), 23) : 0;
+  const dayEndHour = Number.isFinite(end) ? Math.min(Math.max(Math.trunc(end), 1), 24) : 24;
+  if (dayEndHour <= dayStartHour) return { dayStartHour: 0, dayEndHour: 24 };
+  return { dayStartHour, dayEndHour };
 }
 
 /** Parse the process_aliases setting (a JSON object) into a map, tolerating bad data. */
