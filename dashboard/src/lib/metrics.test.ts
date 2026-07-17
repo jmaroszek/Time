@@ -19,8 +19,8 @@ import {
 import { dayKey } from "./time";
 
 const CATS: Category[] = [
-  { id: 1, name: "Dev", color: "#378ADD", isProductive: true, isIgnored: false, sortOrder: 1 },
-  { id: 2, name: "Gaming", color: "#D85A30", isProductive: false, isIgnored: false, sortOrder: 2 },
+  { id: 1, name: "Dev", color: "#378ADD", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 1 },
+  { id: 2, name: "Gaming", color: "#D85A30", isProductive: false, isNeutral: false, isIgnored: false, sortOrder: 2 },
 ];
 const RULES: Rule[] = [
   { id: 1, matchType: "process", pattern: "code.exe", categoryId: 1, priority: 100 },
@@ -200,6 +200,22 @@ describe("topApps / withDeltas", () => {
   it("new apps have null delta and neutral direction", () => {
     const deltas = withDeltas([{ process: "new.exe", seconds: 100, category: CATS[0] }], []);
     expect(deltas[0].deltaFraction).toBeNull();
+    expect(deltas[0].direction).toBe("neutral");
+  });
+
+  it("neutral categories are never judged, even on a significant change", () => {
+    const neutral = { ...CATS[1], isProductive: false, isNeutral: true }; // e.g. games
+    const daily = (vals: number[]) => new Map([["apex.exe", vals]]);
+    const deltas = withDeltas(
+      [{ process: "apex.exe", seconds: 1400, category: neutral }],
+      [{ process: "apex.exe", seconds: 700, category: neutral }],
+      {
+        currentDaily: daily([200, 200, 200, 200, 200, 200, 200]),
+        previousDaily: daily([100, 100, 100, 100, 100, 100, 100]),
+      },
+    );
+    // The change is statistically significant, but neutral time is uncolored.
+    expect(deltas[0].pValue).not.toBeNull();
     expect(deltas[0].direction).toBe("neutral");
   });
 });

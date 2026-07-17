@@ -30,6 +30,7 @@ const NUMERIC_FIELDS: NumericFieldSpec[] = [
   { key: "idle_threshold_seconds", label: "AFK idle threshold (minutes)", help: "No input for this long marks you AFK (back-dated to last input).", min: 1, max: 60, scale: 60 },
   { key: "heartbeat_seconds", label: "Heartbeat interval (seconds)", help: "How often the open session's end time is flushed. A crash loses at most this much.", min: 5, max: 300, scale: 1 },
   { key: "default_top_n_apps", label: "Default top apps shown", help: "Initial size of the Overview top-apps list.", min: 3, max: 50, scale: 1 },
+  { key: "min_app_seconds", label: "Minimum app time (minutes)", help: "Apps with less time than this in the selected range are hidden from the app lists. Set 0 to show everything.", min: 0, max: 30, scale: 60 },
 ];
 
 function toDisplay(spec: NumericFieldSpec, dbValue: string | undefined): string {

@@ -25,6 +25,8 @@ export interface Meta {
   weekStart: WeekStart;
   weeklyGoalHours: number;
   defaultTopN: number;
+  /** Apps with less than this many seconds in range are hidden from app lists. */
+  minAppSeconds: number;
   loaded: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -78,6 +80,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       weekStart: settings.week_start === "Monday" ? "Monday" : "Sunday",
       weeklyGoalHours: Number(settings.weekly_goal_hours) || 20,
       defaultTopN: Number(settings.default_top_n_apps) || 5,
+      minAppSeconds: Math.max(0, Number(settings.min_app_seconds) || 0),
       loaded,
       error,
       refresh,

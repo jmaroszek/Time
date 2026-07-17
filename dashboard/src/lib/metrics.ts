@@ -310,7 +310,8 @@ export function withDeltas(
         pValue !== null
           ? pValue < alpha
           : Math.abs(deltaFraction) >= 0.25 && Math.abs(app.seconds - prev) >= 900;
-      if (significant) {
+      if (significant && !app.category.isNeutral) {
+        // Neutral categories (e.g. games) are never judged good or bad.
         const increased = deltaFraction > 0;
         direction = increased === app.category.isProductive ? "good" : "bad";
       }

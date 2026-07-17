@@ -5,8 +5,8 @@ import { buildClassifier, type Category, type Rule } from "./classify";
 import type { Session } from "./metrics";
 
 const CATS: Category[] = [
-  { id: 1, name: "Notes", color: "#7F77DD", isProductive: true, isIgnored: false, sortOrder: 1 },
-  { id: 2, name: "AI tools", color: "#1D9E75", isProductive: true, isIgnored: false, sortOrder: 2 },
+  { id: 1, name: "Notes", color: "#7F77DD", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 1 },
+  { id: 2, name: "AI tools", color: "#1D9E75", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 2 },
 ];
 const RULES: Rule[] = [
   { id: 1, matchType: "process", pattern: "obsidian.exe", categoryId: 1, priority: 100 },

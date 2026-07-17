@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 
 import { Button, Card, CategoryDot, Select, Spinner, TextInput } from "../components/ui";
-import type { MatchType } from "../lib/classify";
+import { categoryKind, type MatchType, type Productivity } from "../lib/classify";
 import { cleanDomainName, cleanProcessName, fmtDuration } from "../lib/format";
 import { clipSessions, duration, type Session } from "../lib/metrics";
 import {
@@ -54,7 +54,12 @@ export default function AppsTab({ range }: { range: Range }) {
       entry.row.categoryName = cat?.name ?? null;
       entry.row.categoryColor = cat?.color ?? null;
     }
-    return [...byKey.values()].map((e) => e.row).sort((a, b) => b.seconds - a.seconds);
+    // Hide low-time apps/domains so tiny background processes don't clutter the
+    // list (threshold is the Settings "minimum app time"; 0 disables it).
+    return [...byKey.values()]
+      .map((e) => e.row)
+      .filter((r) => r.seconds >= meta.minAppSeconds)
+      .sort((a, b) => b.seconds - a.seconds);
   }, [sessions, startSec, endSec, meta]);
 
   if (loading) return <Spinner />;
@@ -189,11 +194,22 @@ function UsageTable({ rows, onAssigned }: { rows: UsageRow[]; onAssigned: () => 
   );
 }
 
+const PRODUCTIVITY_OPTIONS = [
+  { value: "productive", label: "productive" },
+  { value: "neutral", label: "neutral" },
+  { value: "unproductive", label: "unproductive" },
+];
+
+/** Map a productivity choice to the two mutually-exclusive DB flags. */
+function kindFlags(kind: Productivity): { isProductive: boolean; isNeutral: boolean } {
+  return { isProductive: kind === "productive", isNeutral: kind === "neutral" };
+}
+
 function CategoriesEditor({ onChanged }: { onChanged: () => Promise<void> }) {
   const meta = useMeta();
   const [name, setName] = useState("");
   const [color, setColor] = useState("#7F77DD");
-  const [productive, setProductive] = useState(false);
+  const [kind, setKind] = useState<Productivity>("unproductive");
 
   return (
     <Card title="Categories">
@@ -208,16 +224,14 @@ function CategoriesEditor({ onChanged }: { onChanged: () => Promise<void> }) {
               title="Category color"
             />
             <span className="w-28 truncate">{c.name}</span>
-            <label className="flex items-center gap-1.5 text-ink-2">
-              <input
-                type="checkbox"
-                checked={c.isProductive}
-                onChange={(e) =>
-                  void updateCategory({ ...c, isProductive: e.target.checked }).then(onChanged)
-                }
-              />
-              productive
-            </label>
+            <Select
+              value={categoryKind(c)}
+              onChange={(v) =>
+                void updateCategory({ ...c, ...kindFlags(v as Productivity) }).then(onChanged)
+              }
+              options={PRODUCTIVITY_OPTIONS}
+              className="w-32"
+            />
             <label
               className="flex items-center gap-1.5 text-ink-2"
               title="Hide this category from all visualizations"
@@ -253,20 +267,19 @@ function CategoriesEditor({ onChanged }: { onChanged: () => Promise<void> }) {
             title="New category color"
           />
           <TextInput value={name} onChange={setName} placeholder="New category" className="w-36" />
-          <label className="flex items-center gap-1.5 text-xs text-ink-2">
-            <input
-              type="checkbox"
-              checked={productive}
-              onChange={(e) => setProductive(e.target.checked)}
-            />
-            productive
-          </label>
+          <Select
+            value={kind}
+            onChange={(v) => setKind(v as Productivity)}
+            options={PRODUCTIVITY_OPTIONS}
+            className="w-32"
+          />
           <Button
             variant="primary"
             disabled={!name.trim()}
             onClick={() =>
-              void addCategory(name, color, productive).then(async () => {
+              void addCategory(name, color, kind).then(async () => {
                 setName("");
+                setKind("unproductive");
                 await onChanged();
               })
             }

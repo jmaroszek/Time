@@ -1,7 +1,7 @@
 // Typed SQL access. The dashboard reads sessions and writes only
 // categories/rules/settings (the tracker owns session writes).
 
-import type { Category, MatchType, Rule } from "./classify";
+import type { Category, MatchType, Productivity, Rule } from "./classify";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
 
@@ -39,6 +39,7 @@ interface CategoryRow {
   name: string;
   color: string;
   is_productive: number;
+  is_neutral: number;
   is_ignored: number;
   sort_order: number | null;
 }
@@ -46,7 +47,7 @@ interface CategoryRow {
 export async function fetchCategories(): Promise<Category[]> {
   const db = await getDb();
   const rows = await db.select<CategoryRow[]>(
-    "SELECT id, name, color, is_productive, is_ignored, sort_order FROM categories" +
+    "SELECT id, name, color, is_productive, is_neutral, is_ignored, sort_order FROM categories" +
       " ORDER BY sort_order, name",
   );
   return rows.map((r) => ({
@@ -54,6 +55,7 @@ export async function fetchCategories(): Promise<Category[]> {
     name: r.name,
     color: r.color,
     isProductive: r.is_productive !== 0,
+    isNeutral: r.is_neutral !== 0,
     isIgnored: r.is_ignored !== 0,
     sortOrder: r.sort_order,
   }));
@@ -133,21 +135,29 @@ export async function deleteRule(ruleId: number): Promise<void> {
 export async function addCategory(
   name: string,
   color: string,
-  isProductive: boolean,
+  kind: Productivity,
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "INSERT INTO categories (name, color, is_productive, sort_order)" +
-      " VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories))",
-    [name.trim(), color, isProductive ? 1 : 0],
+    "INSERT INTO categories (name, color, is_productive, is_neutral, sort_order)" +
+      " VALUES ($1, $2, $3, $4, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories))",
+    [name.trim(), color, kind === "productive" ? 1 : 0, kind === "neutral" ? 1 : 0],
   );
 }
 
 export async function updateCategory(cat: Category): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "UPDATE categories SET name = $1, color = $2, is_productive = $3, is_ignored = $4 WHERE id = $5",
-    [cat.name, cat.color, cat.isProductive ? 1 : 0, cat.isIgnored ? 1 : 0, cat.id],
+    "UPDATE categories SET name = $1, color = $2, is_productive = $3, is_neutral = $4," +
+      " is_ignored = $5 WHERE id = $6",
+    [
+      cat.name,
+      cat.color,
+      cat.isProductive ? 1 : 0,
+      cat.isNeutral ? 1 : 0,
+      cat.isIgnored ? 1 : 0,
+      cat.id,
+    ],
   );
 }
 
