@@ -79,7 +79,7 @@ export default function ProductiveHoursChart({
           type: "bar",
           stack: "day",
           data: prodBars,
-          itemStyle: { color: "#1D9E75" },
+          itemStyle: { color: "#16b981" },
           barMaxWidth: 36,
         },
         {

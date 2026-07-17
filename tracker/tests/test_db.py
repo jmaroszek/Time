@@ -30,6 +30,34 @@ def test_seed_categories_and_settings_present(conn):
     raw = db.read_settings_raw(conn)
     assert raw["weekly_goal_hours"] == "20"
     assert raw["week_start"] == "Sunday"
+    priorities = {
+        row["match_type"]: row["priority"]
+        for row in conn.execute(
+            "SELECT match_type, MIN(priority) AS priority FROM rules GROUP BY match_type"
+        )
+    }
+    assert priorities == {"domain": 1, "title": 2, "process": 3}
+
+
+def test_legacy_rule_priorities_migrate_by_rank(tmp_path):
+    path = tmp_path / "legacy.db"
+    conn = db.open_db(path)
+    conn.execute("DELETE FROM settings WHERE key='rule_priority_scheme'")
+    conn.execute("UPDATE rules SET priority=100 WHERE match_type='process'")
+    conn.execute("UPDATE rules SET priority=200 WHERE match_type='title'")
+    conn.execute("UPDATE rules SET priority=300 WHERE match_type='domain'")
+    conn.close()
+
+    conn = db.open_db(path)
+    priorities = {
+        row["match_type"]: row["priority"]
+        for row in conn.execute(
+            "SELECT match_type, MIN(priority) AS priority FROM rules GROUP BY match_type"
+        )
+    }
+    assert priorities == {"domain": 1, "title": 2, "process": 3}
+    assert db.read_settings_raw(conn)["rule_priority_scheme"] == "low-wins-v1"
+    conn.close()
 
 
 def test_seed_does_not_overwrite_user_settings(tmp_path):

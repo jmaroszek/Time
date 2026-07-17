@@ -18,6 +18,11 @@ const TOOLTIP_STYLE = {
   textStyle: { color: "#e8eaed", fontSize: 12 },
 };
 
+function compactHour(hour: number): string {
+  const h = hour % 24;
+  return `${h % 12 || 12}${h < 12 ? "a" : "p"}`;
+}
+
 export default function TrendsTab() {
   // Computed once per mount: a fresh Date.now() on every render would change
   // the effect deps in useSessions and loop fetch -> render -> fetch forever.
@@ -66,7 +71,7 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
       },
       xAxis: {
         type: "category",
-        data: visibleHours.map((h) => `${h}`),
+        data: visibleHours.map(compactHour),
         axisLabel: { color: "#9aa0a8", fontSize: 10 },
         axisTick: { show: false },
         axisLine: { show: false },

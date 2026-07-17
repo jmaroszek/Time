@@ -1,5 +1,5 @@
 // Rule-based session classification. Priority decides between matching rules
-// (seeds: domain 300 > title 200 > process 100). Domain and title rules only
+// (seeds: domain 1 < title 2 < process 3). Lower numbers win. Domain and title rules only
 // apply to browser sessions; process rules apply to everything. AFK sessions
 // are never classified.
 
@@ -91,7 +91,7 @@ export function buildClassifier(
     if (s.isAfk) return null;
     let best: Rule | null = null;
     const consider = (r: Rule) => {
-      if (!best || r.priority > best.priority) best = r;
+      if (!best || r.priority < best.priority) best = r;
     };
 
     const proc = s.process.toLowerCase();

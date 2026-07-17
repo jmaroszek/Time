@@ -14,7 +14,7 @@ export function Card({
   titleAlign?: "left" | "center";
 }) {
   return (
-    <div className={`rounded-xl border border-edge bg-surface p-4 ${className}`}>
+    <div className={`rounded-[14px] border border-edge bg-surface p-5 ${className}`}>
       {(title || right) && (
         <div className="mb-3 flex items-center justify-between">
           <h2
@@ -91,9 +91,9 @@ export function Button({
   title?: string;
 }) {
   const styles = {
-    default: "border-edge bg-surface-2 hover:bg-edge text-ink",
-    primary: "border-accent/40 bg-accent/15 hover:bg-accent/25 text-accent",
-    danger: "border-bad/30 bg-bad/10 hover:bg-bad/20 text-bad",
+    default: "border-edge-2 bg-transparent hover:bg-white/[.035] text-ink-2 hover:text-ink",
+    primary: "border-accent/30 bg-transparent hover:bg-accent/15 text-accent",
+    danger: "border-bad/30 bg-transparent hover:bg-bad/15 text-bad",
   }[variant];
   return (
     <button
@@ -165,7 +165,7 @@ export function Select({
 export function CategoryDot({ color }: { color: string }) {
   return (
     <span
-      className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+      className="inline-block h-2 w-2 shrink-0 rounded-full"
       style={{ backgroundColor: color }}
     />
   );
