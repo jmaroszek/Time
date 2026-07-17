@@ -60,6 +60,35 @@ def test_legacy_rule_priorities_migrate_by_rank(tmp_path):
     conn.close()
 
 
+@pytest.mark.parametrize("interrupted_state", ["ranking-v1", "ranked-v1"])
+def test_rule_priority_migration_recovers_after_interruption(tmp_path, interrupted_state):
+    path = tmp_path / "interrupted.db"
+    conn = db.open_db(path)
+    conn.execute("UPDATE rules SET priority=100 WHERE match_type='process'")
+    conn.execute("UPDATE rules SET priority=200 WHERE match_type='title'")
+    conn.execute("UPDATE rules SET priority=300 WHERE match_type='domain'")
+    conn.execute(
+        "UPDATE settings SET value=? WHERE key='rule_priority_scheme'",
+        (interrupted_state,),
+    )
+    if interrupted_state == "ranked-v1":
+        conn.execute("UPDATE rules SET priority=-3 WHERE match_type='process'")
+        conn.execute("UPDATE rules SET priority=-2 WHERE match_type='title'")
+        conn.execute("UPDATE rules SET priority=-1 WHERE match_type='domain'")
+    conn.close()
+
+    conn = db.open_db(path)
+    priorities = {
+        row["match_type"]: row["priority"]
+        for row in conn.execute(
+            "SELECT match_type, MIN(priority) AS priority FROM rules GROUP BY match_type"
+        )
+    }
+    assert priorities == {"domain": 1, "title": 2, "process": 3}
+    assert db.read_settings_raw(conn)["rule_priority_scheme"] == "low-wins-v1"
+    conn.close()
+
+
 def test_seed_does_not_overwrite_user_settings(tmp_path):
     path = tmp_path / "test.db"
     c = db.open_db(path)
