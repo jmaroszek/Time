@@ -10,7 +10,14 @@ import {
 } from "../lib/classify";
 import { cleanDomainName, cleanProcessName, fmtDuration } from "../lib/format";
 import { clipSessions, duration, type Session } from "../lib/metrics";
-import { addCategory, addRule, deleteRule, updateCategory } from "../lib/queries";
+import {
+  addCategory,
+  addRule,
+  deleteCategory,
+  deleteRule,
+  saveProcessAliases,
+  updateCategory,
+} from "../lib/queries";
 import type { Range } from "../lib/time";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
@@ -30,9 +37,9 @@ const TYPE_STYLES: Record<MatchType, string> = {
   process: "bg-[#a99e8c]/15 text-[#b8ad9a]",
 };
 const STATE_COLORS: Record<Productivity, string> = {
-  productive: "#4fb389",
+  productive: "#34d399",
   neutral: "#9aa0a8",
-  unproductive: "#d07d7d",
+  unproductive: "#f87171",
 };
 
 export default function AppsTab({ range }: { range: Range }) {
@@ -147,6 +154,7 @@ export default function AppsTab({ range }: { range: Range }) {
           openMenu={openMenu}
           setOpenMenu={setOpenMenu}
           onAssign={assign}
+          onAliasesChanged={refresh}
         />
       </Card>
 
@@ -216,26 +224,50 @@ function UsageTable({
   openMenu,
   setOpenMenu,
   onAssign,
+  onAliasesChanged,
 }: {
   rows: UsageRow[];
   displayName: (row: UsageRow) => string;
   openMenu: string | null;
   setOpenMenu: (key: string | null) => void;
   onAssign: (row: UsageRow, categoryId: number) => Promise<void>;
+  onAliasesChanged: () => Promise<void>;
 }) {
   const meta = useMeta();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [aliasDraft, setAliasDraft] = useState("");
   const total = rows.reduce((sum, row) => sum + row.seconds, 0);
   const max = rows[0]?.seconds ?? 1;
+  const rowId = (row: UsageRow) => `${row.kind}:${row.key}`;
+  const defaultName = (row: UsageRow) =>
+    row.kind === "process" ? cleanProcessName(row.key) : cleanDomainName(row.key);
+  const startAliasEdit = (row: UsageRow) => {
+    setEditing(rowId(row));
+    setAliasDraft(meta.aliases[row.key.toLowerCase()] ?? "");
+  };
+  const saveAliasEdit = async (row: UsageRow) => {
+    const aliasKey = row.key.toLowerCase();
+    const alias = aliasDraft.trim();
+    const currentAlias = meta.aliases[aliasKey] ?? "";
+    setEditing(null);
+    if (alias === currentAlias) return;
+    const nextAliases = { ...meta.aliases };
+    if (alias) nextAliases[aliasKey] = alias;
+    else delete nextAliases[aliasKey];
+    await saveProcessAliases(nextAliases);
+    await onAliasesChanged();
+  };
   return (
     <div className="overflow-x-auto">
-      <table className="w-full table-fixed text-xs">
+      <table className="w-full min-w-[720px] table-fixed text-xs">
         <thead>
           <tr className="border-b border-edge text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
-            <th className="pb-2 font-medium">Name</th>
-            <th className="w-16 pb-2 font-medium">Type</th>
-            <th className="w-16 pb-2 text-right font-medium">Time</th>
-            <th className="w-[120px] pb-2 pl-3 font-medium">Share</th>
-            <th className="w-[150px] pb-2 pl-4 font-medium">Category</th>
+            <th className="w-[28%] pb-2 font-medium">Name</th>
+            <th className="w-[38%] pb-2 pl-4 font-medium">Share of time</th>
+            <th className="w-20 pb-2 pl-4 text-right font-medium">Time</th>
+            <th className="pb-2 pl-4 font-medium">
+              <span className="ml-auto block w-[150px] max-w-full">Category</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -245,39 +277,62 @@ function UsageTable({
             const pct = total ? Math.round((row.seconds / total) * 100) : 0;
             return (
               <tr key={key} className="border-b border-edge/40 transition-colors hover:bg-white/[.018]">
-                <td className="py-2.5 pr-3">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <CategoryDot color={color} />
-                    <span className="truncate" title={row.key}>{displayName(row)}</span>
+                <td className="py-2.5 pr-4">
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    {editing === rowId(row) ? (
+                      <input
+                        autoFocus
+                        value={aliasDraft}
+                        aria-label={`Rename ${defaultName(row)}`}
+                        placeholder={defaultName(row)}
+                        onChange={(event) => setAliasDraft(event.target.value)}
+                        onBlur={() => void saveAliasEdit(row)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void saveAliasEdit(row);
+                          else if (event.key === "Escape") setEditing(null);
+                        }}
+                        className="w-full min-w-0 max-w-56 rounded-md border border-edge bg-surface-2 px-1.5 py-0.5 text-xs text-ink outline-none focus:border-accent/60"
+                      />
+                    ) : (
+                      <span
+                        className="truncate cursor-text"
+                        title={`${row.key} — double-click to rename`}
+                        onDoubleClick={() => startAliasEdit(row)}
+                      >
+                        {displayName(row)}
+                      </span>
+                    )}
+                    <span className="text-[10px] leading-none text-ink-3">{row.kind}</span>
                   </span>
                 </td>
-                <td className="py-2.5 text-[11px] text-ink-3">{row.kind}</td>
-                <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(row.seconds)}</td>
-                <td className="py-2.5 pl-3">
+                <td className="py-2.5 pl-4">
                   <span className="flex items-center gap-2">
                     <span className="h-[5px] flex-1 overflow-hidden rounded-full bg-surface-2">
-                      <span className="block h-full rounded-full" style={{ width: `${Math.max((row.seconds / max) * 100, 2)}%`, backgroundColor: color }} />
+                      <span className="block h-full rounded-full bg-ink-2" style={{ width: `${Math.max((row.seconds / max) * 100, 2)}%` }} />
                     </span>
                     <span className="w-7 text-right text-[10.5px] tabular-nums text-ink-3">{pct}%</span>
                   </span>
                 </td>
+                <td className="py-2.5 pl-4 text-right tabular-nums text-ink-2">{fmtDuration(row.seconds)}</td>
                 <td className="py-2.5 pl-4">
-                  <CategoryMenu
-                    menuKey={key}
-                    openMenu={openMenu}
-                    setOpenMenu={setOpenMenu}
-                    categories={meta.categories}
-                    selected={row.categoryName}
-                    trigger={
-                      <span className="flex w-full items-center gap-2">
-                        {row.categoryName ? <CategoryDot color={color} /> : <span className="h-2 w-2 rounded-full border border-dashed border-edge-2" />}
-                        <span className="flex-1 truncate text-left">{row.categoryName ?? "Assign…"}</span>
-                        <span className="text-ink-3">▾</span>
-                      </span>
-                    }
-                    triggerClass={`w-full rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors hover:bg-surface-3 ${row.categoryName ? "border-edge bg-surface-2 text-ink" : "border-dashed border-edge-2 bg-transparent text-ink-2"}`}
-                    onSelect={(id) => void onAssign(row, id)}
-                  />
+                  <div className="ml-auto w-[150px] max-w-full">
+                    <CategoryMenu
+                      menuKey={key}
+                      openMenu={openMenu}
+                      setOpenMenu={setOpenMenu}
+                      categories={meta.categories}
+                      selected={row.categoryName}
+                      trigger={
+                        <span className="flex w-full items-center gap-2">
+                          {row.categoryName ? <CategoryDot color={color} /> : <span className="h-2 w-2 rounded-full border border-dashed border-edge-2" />}
+                          <span className="flex-1 truncate text-left">{row.categoryName ?? "Assign…"}</span>
+                          <span className="text-ink-3">▾</span>
+                        </span>
+                      }
+                      triggerClass={`w-full rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors hover:bg-surface-3 ${row.categoryName ? "border-edge bg-surface-2 text-ink" : "border-dashed border-edge-2 bg-transparent text-ink-2"}`}
+                      onSelect={(id) => void onAssign(row, id)}
+                    />
+                  </div>
                 </td>
               </tr>
             );
@@ -290,7 +345,7 @@ function UsageTable({
 
 function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
   const meta = useMeta();
-  const [expanded, setExpanded] = useState<Set<number>>(() => new Set(meta.categories.slice(0, 1).map((c) => c.id)));
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set<number>());
   const [stateMenu, setStateMenu] = useState<number | null>(null);
   const [newName, setNewName] = useState("");
   const [drafts, setDrafts] = useState<Record<number, { type: MatchType; pattern: string }>>({});
@@ -310,6 +365,19 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
     setDraft(categoryId, { pattern: "" });
     await onChanged();
   };
+  const removeCategory = async (category: Category, ruleCount: number) => {
+    const rulesWarning = ruleCount === 0
+      ? ""
+      : ` and ${ruleCount} ${ruleCount === 1 ? "rule" : "rules"}`;
+    if (!window.confirm(`Delete “${category.name}”${rulesWarning}? This cannot be undone.`)) return;
+    await deleteCategory(category.id);
+    setExpanded((current) => {
+      const next = new Set(current);
+      next.delete(category.id);
+      return next;
+    });
+    await onChanged();
+  };
 
   return (
     <Card
@@ -318,14 +386,7 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
     >
       {stateMenu !== null && <button type="button" aria-label="Close state menu" className="fixed inset-0 z-40 cursor-default" onClick={() => setStateMenu(null)} />}
       <div className="mb-4 text-[11px] text-ink-3">
-        <p>Rules live inside their category. If several rules match, the first type below wins.</p>
-        <div className="mt-2 flex items-center gap-1.5" aria-label="Rule priority order: Domain first, Title second, Process third">
-          <span className="rounded-md border border-edge bg-surface-2 px-2 py-1"><span className="mr-1 text-ink-2">1</span>Domain</span>
-          <span className="text-ink-3">then</span>
-          <span className="rounded-md border border-edge bg-surface-2 px-2 py-1"><span className="mr-1 text-ink-2">2</span>Title</span>
-          <span className="text-ink-3">then</span>
-          <span className="rounded-md border border-edge bg-surface-2 px-2 py-1"><span className="mr-1 text-ink-2">3</span>Process</span>
-        </div>
+        Rules live inside their category. If several rules match, the highest priority wins: domain, then title, then process.
       </div>
       <div className="flex flex-col gap-2">
         {meta.categories.map((category) => {
@@ -404,6 +465,16 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
                     />
                     <Button variant="primary" disabled={!draft.pattern.trim()} onClick={() => void submitRule(category.id)}>Add rule</Button>
                     <span className="sr-only">Priority {PRIORITY[draft.type]}</span>
+                  </div>
+                  <div className="mt-3 flex justify-end border-t border-edge/40 pt-3">
+                    <Button
+                      variant="danger"
+                      disabled={category.isIgnored}
+                      title={category.isIgnored ? "The built-in Ignored category cannot be deleted" : `Delete ${category.name}`}
+                      onClick={() => void removeCategory(category, rules.length)}
+                    >
+                      Delete category
+                    </Button>
                   </div>
                 </div>
               )}

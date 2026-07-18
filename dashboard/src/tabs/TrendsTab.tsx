@@ -20,7 +20,7 @@ const TOOLTIP_STYLE = {
 
 function compactHour(hour: number): string {
   const h = hour % 24;
-  return `${h % 12 || 12}${h < 12 ? "a" : "p"}`;
+  return `${h % 12 || 12} ${h < 12 ? "am" : "pm"}`;
 }
 
 export default function TrendsTab() {
@@ -42,7 +42,7 @@ export default function TrendsTab() {
           <span className="flex flex-col items-center gap-1">
             <span>Average Productive Minutes by Hour</span>
             <span className="text-[11px] font-normal text-ink-3">
-              Full history · average for each weekday occurrence
+              Full history
             </span>
           </span>
         }
