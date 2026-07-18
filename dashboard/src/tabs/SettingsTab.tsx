@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import { Button, Card, Spinner } from "../components/ui";
+import { Spinner } from "../components/ui";
 import { getDbPath } from "../lib/db";
 import { fmtDuration } from "../lib/format";
 import { backupDatabase, fetchTrackerStatus, updateSetting, type TrackerStatus } from "../lib/queries";
@@ -38,7 +38,6 @@ export default function SettingsTab() {
   const meta = useMeta();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<TrackerStatus | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
 
@@ -102,130 +101,126 @@ export default function SettingsTab() {
   );
 
   return (
-    <div className="grid grid-cols-2 items-start gap-4">
-      <div className="flex flex-col gap-3.5">
-        <SettingsGroup title="Goals">
-          <SettingRow label="Weekly productive goal" help="Target the goal-pace card measures against." control={numberControl(SPECS.goal, "h")} />
-        </SettingsGroup>
+    <div className="grid grid-cols-2 items-start gap-6">
+      <div className="flex flex-col gap-[26px]">
+        <Section title="Goals">
+          <Row label="Weekly productive goal" help="Target the goal-pace card measures against." control={numberControl(SPECS.goal, "h")} />
+        </Section>
 
-        <SettingsGroup title="App lists">
-          <SettingRow
-            label="Default top apps shown"
-            help="Initial size of the Overview top-apps list."
-            control={<Segmented options={["5", "10", "15", "20"]} value={drafts.default_top_n_apps ?? "5"} onChange={(value) => selectSetting("default_top_n_apps", value)} />}
-          />
-          <SettingRow label="Minimum app time" help="Apps below this in the range are hidden from the lists. 0 shows everything." control={numberControl(SPECS.minimum, "min")} />
-        </SettingsGroup>
-
-        <SettingsGroup title="Timeline window">
-          <SettingRow label="Day starts at" help="First hour shown on Timeline & Hour-of-Day plots." control={numberControl(SPECS.start, undefined, true)} />
-          <SettingRow label="Day ends at" help="Last hour shown on Timeline & Hour-of-Day plots." control={numberControl(SPECS.end, undefined, true)} />
-          <SettingRow
+        <Section title="Timeline Window">
+          <Row label="Day starts at" help="First hour shown on Timeline & Hour-of-Day plots." control={numberControl(SPECS.start, undefined, true)} />
+          <Row label="Day ends at" help="Last hour shown on Timeline & Hour-of-Day plots." control={numberControl(SPECS.end, undefined, true)} />
+          <Row
             label="Week starts on"
             help="Affects weekly presets, trends, and goal pacing."
             control={<Segmented options={["Sunday", "Monday"]} value={drafts.week_start ?? "Sunday"} onChange={(value) => selectSetting("week_start", value)} />}
           />
-        </SettingsGroup>
+        </Section>
+
+        <Section title="Focus & Idle">
+          <Row label="AFK idle threshold" help="No input for this long marks you AFK." control={numberControl(SPECS.idle, "min")} />
+          <Row label="Focus streak max gap" help="Short gaps won't break a productive streak." control={numberControl(SPECS.focus, "min")} />
+        </Section>
+
+        <Section title="App Lists">
+          <Row
+            label="Default top apps shown"
+            help="Initial size of the Overview top-apps list."
+            control={<Segmented options={["5", "10", "15", "20"]} value={drafts.default_top_n_apps ?? "5"} onChange={(value) => selectSetting("default_top_n_apps", value)} />}
+          />
+          <Row label="Minimum app time" help="Apps below this in the range are hidden from the lists. 0 shows everything." control={numberControl(SPECS.minimum, "min")} />
+        </Section>
       </div>
 
-      <div className="flex flex-col gap-3.5">
-        <Card title="Tracker & Database">
-          <div className="flex items-center gap-2 text-xs">
-            <span className={`h-2 w-2 rounded-full ${trackerLive ? "live-pulse bg-[#16b981]" : "bg-bad"}`} />
-            <span className="font-medium">{trackerLive ? "Tracker is live" : "Tracker not detected"}</span>
-            {heartbeatAge !== null && <span className="ml-auto text-[11px] text-ink-3">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
+      <div className="flex flex-col gap-[26px]">
+        <section>
+          <SectionLabel>Tracker Status</SectionLabel>
+          <div className="flex items-center gap-3 rounded-[13px] border border-[#23272e] bg-[#131519] px-[18px] py-4">
+            <span className={`h-[9px] w-[9px] rounded-full ${trackerLive ? "live-pulse bg-[#16b981]" : "bg-bad"}`} />
+            <div>
+              <p className="text-[13px] font-semibold text-[#eef0f3]">{trackerLive ? "Tracker is live" : "Tracker not detected"}</p>
+              <p className="mt-[3px] text-[11.5px] text-[#7b818b]">{trackerLive ? "Collecting activity in real time" : "No heartbeat in the last two minutes"}</p>
+            </div>
+            {heartbeatAge !== null && <span className="ml-auto text-[11.5px] tabular-nums text-ink-3">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
           </div>
+        </section>
 
-          <div className="mt-5">
-            <p className="mb-2 text-[11px] text-ink-3">Database</p>
-            <div className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface-2 p-2 pl-3">
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-2" title={getDbPath()}>{getDbPath()}</span>
+        <section>
+          <SectionLabel>Database</SectionLabel>
+          <div className="rounded-[13px] border border-[#23272e] bg-[#131519] p-4">
+            <p className="mb-[9px] text-[11.5px] text-[#7b818b]">Database path</p>
+            <div className="flex items-center gap-2 rounded-[10px] border border-[#2c313a] bg-[#191c22] p-[9px] pl-[13px]">
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-[#aab0b8]" title={getDbPath()}>{getDbPath()}</span>
               <button
                 type="button"
-                className="rounded-md border border-edge px-2 py-1 text-[10.5px] text-ink-3 transition-colors hover:border-edge-2 hover:text-ink-2"
-                onClick={() => {
-                  void navigator.clipboard.writeText(getDbPath()).then(() => {
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  });
-                }}
+                className="rounded-[7px] border border-[#2c313a] px-2.5 py-[5px] text-[11px] text-ink-2 transition-colors hover:border-edge-2 hover:text-ink"
+                onClick={() => void navigator.clipboard.writeText(getDbPath()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}
               >
                 {copied ? "Copied" : "Copy"}
               </button>
             </div>
-          </div>
 
-          <div className="mt-4 border-t border-edge/60 pt-4">
-            <Button
-              variant="primary"
+            <button
+              type="button"
               onClick={() => {
                 setBackupMessage(null);
                 void backupDatabase()
-                  .then(() => {
-                    setBackupMessage("✓ Backup written");
-                    setTimeout(() => setBackupMessage(null), 2000);
-                  })
+                  .then(() => { setBackupMessage("✓ Backup written"); setTimeout(() => setBackupMessage(null), 2000); })
                   .catch(() => setBackupMessage("Backup failed"));
               }}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-[12.5px] font-semibold text-[#9cc0ea] shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15"
             >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v11" /><path d="M7 9l5 5 5-5" /><path d="M4 20h16" />
+              </svg>
               {backupMessage ?? "Back up database now"}
-            </Button>
-            <p className="mt-4 text-[11px] leading-relaxed text-ink-3">
-              Settings save on change and the tracker picks them up within one heartbeat — no restart needed.
-            </p>
+            </button>
           </div>
-        </Card>
+        </section>
 
-        <div className="rounded-[14px] border border-edge bg-surface">
-          <button type="button" className="flex w-full items-center gap-2 px-5 py-4 text-left" onClick={() => setAdvancedOpen((open) => !open)}>
-            <span className="text-[11px] font-semibold uppercase tracking-[.06em] text-ink-2">Tracking engine</span>
-            <span className="text-[10.5px] text-ink-3">advanced</span>
-            <span className={`ml-auto text-[10px] text-ink-3 transition-transform duration-200 ${advancedOpen ? "rotate-90" : ""}`}>▶</span>
-          </button>
-          {advancedOpen && (
-            <div className="border-t border-edge/50 px-5 pb-2 pt-1">
-              <SettingRow label="AFK idle threshold" help="No input for this long marks you AFK." control={numberControl(SPECS.idle, "min")} />
-              <SettingRow label="Focus streak max gap" help="Short gaps won't break a productive streak." control={numberControl(SPECS.focus, "min")} />
-              <SettingRow label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
-              <SettingRow
-                label="Browser processes"
-                help="Comma-separated; enables domain and title matching."
-                control={
-                  <input
-                    value={drafts.browser_processes ?? ""}
-                    onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
-                    onBlur={() => void saveText("browser_processes")}
-                    onKeyDown={(event) => { if (event.key === "Enter") void saveText("browser_processes"); }}
-                    className="w-48 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 font-mono text-[11px] outline-none focus:border-accent/60"
-                  />
-                }
-              />
-            </div>
-          )}
-        </div>
+        <section>
+          <SectionLabel>Advanced</SectionLabel>
+          <div className="overflow-hidden rounded-[13px] border border-[#23272e] bg-[#131519]">
+            <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
+            <Row
+              label="Browser processes"
+              help="Comma-separated; enables domain and title matching."
+              control={
+                <input
+                  value={drafts.browser_processes ?? ""}
+                  onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
+                  onBlur={() => void saveText("browser_processes")}
+                  onKeyDown={(event) => { if (event.key === "Enter") void saveText("browser_processes"); }}
+                  className="w-[150px] rounded-[9px] border border-[#2c313a] bg-[#191c22] px-[11px] py-2 font-mono text-xs text-[#eef0f3] outline-none focus:border-accent/60"
+                />
+              }
+            />
+          </div>
+        </section>
       </div>
     </div>
   );
 }
 
-function SettingsGroup({ title, children }: { title: string; children: ReactNode }) {
+function SectionLabel({ children }: { children: ReactNode }) {
+  return <p className="mb-3 pl-0.5 text-[11px] font-bold uppercase tracking-[.09em] text-ink-2">{children}</p>;
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-[14px] border border-edge bg-surface px-5 py-4">
-      <div className="mb-2 flex items-center gap-3">
-        <span className="text-[11px] font-semibold uppercase tracking-[.06em] text-ink-2">{title}</span>
-        <span className="h-px flex-1 bg-edge" />
-      </div>
-      {children}
-    </div>
+    <section>
+      <SectionLabel>{title}</SectionLabel>
+      <div className="overflow-hidden rounded-[13px] border border-[#23272e] bg-[#131519]">{children}</div>
+    </section>
   );
 }
 
-function SettingRow({ label, help, control }: { label: string; help: string; control: ReactNode }) {
+function Row({ label, help, control }: { label: string; help: string; control: ReactNode }) {
   return (
-    <div className="flex min-h-[64px] items-center justify-between gap-4 border-b border-edge/40 py-3 last:border-0 last:pb-1">
+    <div className="flex items-center justify-between gap-4 border-t border-[#1e2127] px-4 py-[15px] first:border-t-0">
       <div className="min-w-0">
-        <p className="text-xs text-ink">{label}</p>
-        <p className="mt-1 max-w-64 text-[11px] leading-snug text-ink-3">{help}</p>
+        <p className="text-[13px] font-medium text-[#eef0f3]">{label}</p>
+        <p className="mt-[5px] max-w-[280px] text-xs leading-snug text-[#7b818b]">{help}</p>
       </div>
       <div className="shrink-0">{control}</div>
     </div>
@@ -252,31 +247,34 @@ function NumberStepper({
   onPlus: () => void;
 }) {
   return (
-    <div className="flex items-center rounded-[9px] border border-edge bg-surface-2 p-[3px] transition-colors hover:border-edge-2">
-      <button type="button" className="h-6 w-7 rounded-md text-ink-3 hover:bg-surface-3 hover:text-ink" onClick={onMinus}>−</button>
-      <input
-        type={readOnly ? "text" : "number"}
-        readOnly={readOnly}
-        value={display ?? value}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onBlur}
-        onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-        className={`${readOnly ? "w-[58px]" : "w-12"} bg-transparent text-center text-xs font-semibold tabular-nums outline-none`}
-      />
-      {unit && <span className="mr-1 text-[10.5px] text-ink-3">{unit}</span>}
-      <button type="button" className="h-6 w-7 rounded-md text-ink-3 hover:bg-surface-3 hover:text-ink" onClick={onPlus}>+</button>
+    <div className="flex items-center rounded-[10px] border border-[#2c313a] bg-[#191c22] p-[3px]">
+      <button type="button" className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-base text-ink-2 hover:bg-white/5 hover:text-ink" onClick={onMinus}>−</button>
+      <div className={`flex items-baseline justify-center ${unit ? "min-w-[48px] gap-1.5" : "min-w-[48px]"}`}>
+        <input
+          type={readOnly ? "text" : "number"}
+          readOnly={readOnly}
+          value={display ?? value}
+          style={unit ? { width: `${Math.max((display ?? value).length, 1)}ch` } : undefined}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
+          onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+          className={`${unit ? "text-right" : "w-full text-center"} bg-transparent text-[13px] font-semibold tabular-nums text-[#eef0f3] outline-none`}
+        />
+        {unit && <span className="text-[11px] text-[#7b818b]">{unit}</span>}
+      </div>
+      <button type="button" className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-base text-ink-2 hover:bg-white/5 hover:text-ink" onClick={onPlus}>+</button>
     </div>
   );
 }
 
 function Segmented({ options, value, onChange }: { options: string[]; value: string; onChange: (value: string) => void }) {
   return (
-    <div className="flex rounded-[9px] border border-edge bg-surface-2 p-0.5">
+    <div className="flex rounded-[10px] border border-[#2c313a] bg-[#191c22] p-[3px]">
       {options.map((option) => (
         <button
           type="button"
           key={option}
-          className={`rounded-[7px] px-3 py-1.5 text-[10.5px] transition-colors ${value === option ? "bg-accent/15 text-accent" : "text-ink-3 hover:text-ink-2"}`}
+          className={`rounded-[7px] px-[13px] py-1.5 text-[11.5px] transition-colors ${value === option ? "bg-accent/15 font-semibold text-[#88b3e6]" : "text-[#7b818b] hover:text-ink-2"}`}
           onClick={() => onChange(option)}
         >
           {option}
