@@ -28,8 +28,16 @@ def test_bootstrap_is_idempotent(tmp_path):
 def test_seed_categories_and_settings_present(conn):
     rows = conn.execute(
         "SELECT name, is_productive, is_neutral, is_ignored FROM categories"
+        " ORDER BY sort_order"
     ).fetchall()
-    assert [tuple(row) for row in rows] == [("Ignored", 0, 0, 1)]
+    assert [tuple(row) for row in rows] == [
+        ("Focus", 1, 0, 0),
+        ("Learning", 1, 0, 0),
+        ("Communication", 0, 1, 0),
+        ("Entertainment", 0, 0, 0),
+        ("Utilities", 0, 1, 0),
+        ("Ignored", 0, 0, 1),
+    ]
     assert conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0
     raw = db.read_settings_raw(conn)
     assert raw["weekly_goal_hours"] == "0"
@@ -37,7 +45,30 @@ def test_seed_categories_and_settings_present(conn):
     assert raw["recording_consent"] == "0"
     assert raw["record_window_titles"] == "0"
     assert raw["privacy_onboarding_complete"] == "0"
+    assert raw["starter_categories_pending"] == "1"
     assert raw["schema_version"] == str(db.SCHEMA_VERSION)
+
+
+def test_seed_does_not_add_starter_categories_to_existing_taxonomy(tmp_path):
+    path = tmp_path / "existing.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(db._SCHEMA)
+    conn.execute(
+        "INSERT INTO categories (name,color,sort_order) VALUES ('Personal','#123456',1)"
+    )
+    conn.execute(
+        "INSERT INTO settings (key,value) VALUES ('schema_version',?)",
+        (str(db.SCHEMA_VERSION),),
+    )
+    conn.commit()
+    conn.close()
+
+    conn = db.open_db(path)
+    assert [
+        row[0] for row in conn.execute("SELECT name FROM categories ORDER BY sort_order")
+    ] == ["Personal"]
+    assert "starter_categories_pending" not in db.read_settings_raw(conn)
+    conn.close()
 
 
 def test_current_schema_constraints_and_category_cleanup(conn):

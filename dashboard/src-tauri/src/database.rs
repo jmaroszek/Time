@@ -46,9 +46,22 @@ CREATE TRIGGER IF NOT EXISTS delete_category_rules
 BEFORE DELETE ON categories FOR EACH ROW BEGIN
     DELETE FROM rules WHERE category_id = OLD.id;
 END;
+INSERT OR IGNORE INTO settings (key,value)
+    SELECT 'starter_categories_pending','1'
+    WHERE NOT EXISTS (SELECT 1 FROM categories);
+WITH starter(name, color, is_productive, is_neutral, is_ignored, sort_order) AS (
+    VALUES
+        ('Focus', '#2f6fc0', 1, 0, 0, 1),
+        ('Learning', '#9c8ff0', 1, 0, 0, 2),
+        ('Communication', '#56c8d8', 0, 1, 0, 3),
+        ('Entertainment', '#e8663d', 0, 0, 0, 4),
+        ('Utilities', '#828994', 0, 1, 0, 5),
+        ('Ignored', '#44474e', 0, 0, 1, 99)
+)
 INSERT OR IGNORE INTO categories
     (name, color, is_productive, is_neutral, is_ignored, sort_order)
-    VALUES ('Ignored', '#44474e', 0, 0, 1, 99);
+    SELECT * FROM starter
+    WHERE (SELECT COUNT(*) FROM categories) = 0;
 INSERT OR IGNORE INTO settings (key,value) VALUES
     ('schema_version','1'),
     ('rule_priority_scheme','low-wins-v1'),
@@ -398,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_database_has_neutral_private_defaults() {
+    fn fresh_database_has_essential_private_defaults() {
         let path = std::env::current_dir()
             .unwrap()
             .join("target")
@@ -432,12 +445,77 @@ mod tests {
                     .fetch_one(&database.pool)
                     .await
                     .unwrap();
+            let starter_pending: String = sqlx::query_scalar(
+                "SELECT value FROM settings WHERE key='starter_categories_pending'",
+            )
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
             assert_eq!(
-                (categories, rules, consent.as_str(), titles.as_str()),
-                (1, 0, "0", "0")
+                (
+                    categories,
+                    rules,
+                    consent.as_str(),
+                    titles.as_str(),
+                    starter_pending.as_str()
+                ),
+                (6, 0, "0", "0", "1")
             );
             database.pool.close().await;
             drop(database);
+        });
+    }
+
+    #[test]
+    fn existing_taxonomy_does_not_receive_starter_categories() {
+        let path = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("database-existing-taxonomy-test.db");
+        for candidate in [
+            path.clone(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            if candidate.exists() {
+                std::fs::remove_file(candidate).unwrap();
+            }
+        }
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path.clone()).await.unwrap();
+            sqlx::query("DELETE FROM categories")
+                .execute(&database.pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM settings WHERE key='starter_categories_pending'")
+                .execute(&database.pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO categories (name,color,sort_order) VALUES ('Personal','#123456',1)",
+            )
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            database.pool.close().await;
+            drop(database);
+
+            let reopened = TimeDatabase::open(path.clone()).await.unwrap();
+            let names: Vec<String> =
+                sqlx::query_scalar("SELECT name FROM categories ORDER BY sort_order")
+                    .fetch_all(&reopened.pool)
+                    .await
+                    .unwrap();
+            let marker: Option<String> = sqlx::query_scalar(
+                "SELECT value FROM settings WHERE key='starter_categories_pending'",
+            )
+            .fetch_optional(&reopened.pool)
+            .await
+            .unwrap();
+            assert_eq!(names, vec!["Personal"]);
+            assert_eq!(marker, None);
+            reopened.pool.close().await;
+            drop(reopened);
         });
     }
 }

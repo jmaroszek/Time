@@ -29,7 +29,12 @@ it's the domain itself.
 
 ## Categories
 
-Categories are user-defined, colored, and flagged productive or not — those
+Fresh installations offer five editable essentials — **Focus**, **Learning**,
+**Communication**, **Entertainment**, and **Utilities** — to make the first
+assignments quick. Onboarding can remove the whole starter collection for users
+who prefer a blank slate. No applications or sites are assigned automatically.
+
+Categories are colored and flagged productive, neutral, or unproductive — those
 flags drive every productive-time metric in the app. The built-in **Ignored**
 bucket removes anything assigned to it (launchers, system shell noise) from
 every visualization - though it still appears on this tab, labeled "excluded
@@ -40,7 +45,6 @@ picker, and double-clicking its name renames it.
 
 Classification is rule-based with priorities - lower numbers win:
 **domain (1) beats title (2) beats process (3)**. A browser session matching a
-domain rule beats the generic
-"chrome.exe → Browsing" rule; everything else falls through to its process
-rule. Rules are evaluated live in the dashboard, so re-categorizing
+domain rule beats a generic process rule for that browser. Rules are evaluated
+live in the dashboard, so re-categorizing
 retroactively reclassifies all history — nothing is baked in at record time.

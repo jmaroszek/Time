@@ -5,7 +5,7 @@ import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePick
 import { Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
-import { fetchTrackerStatus, updateSetting, type TrackerStatus } from "./lib/queries";
+import { deleteCategory, fetchTrackerStatus, updateSetting, type TrackerStatus } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
 import { rangeForPreset, type Range } from "./lib/time";
 import { BannerProvider } from "./state/banner";
@@ -129,6 +129,7 @@ function PrivacyOnboarding() {
   const meta = useMeta();
   const [windowTitles, setWindowTitles] = useState(false);
   const [startAtLogin, setStartAtLogin] = useState(true);
+  const [startWithEssentials, setStartWithEssentials] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,6 +137,21 @@ function PrivacyOnboarding() {
     setSaving(true);
     setError(null);
     try {
+      if (meta.settings.starter_categories_pending === "1") {
+        if (!startWithEssentials) {
+          const starterNames = new Set([
+            "Focus",
+            "Learning",
+            "Communication",
+            "Entertainment",
+            "Utilities",
+          ]);
+          for (const category of meta.categories) {
+            if (starterNames.has(category.name)) await deleteCategory(category.id);
+          }
+        }
+        await updateSetting("starter_categories_pending", "0");
+      }
       await updateSetting("record_window_titles", enable && windowTitles ? "1" : "0");
       await updateSetting("launch_at_login", enable && startAtLogin ? "1" : "0");
       await updateSetting("recording_consent", enable ? "1" : "0");
@@ -173,6 +189,14 @@ function PrivacyOnboarding() {
               present; URL paths, queries, fragments, and credentials are never stored.
             </p>
           </div>
+          {meta.settings.starter_categories_pending === "1" && (
+            <ConsentCheck
+              checked={startWithEssentials}
+              onChange={setStartWithEssentials}
+              title="Start with essential categories"
+              detail="Adds Focus, Learning, Communication, Entertainment, and Utilities without classifying any apps or sites. You can rename, change, or delete them later."
+            />
+          )}
           <ConsentCheck
             checked={windowTitles}
             onChange={setWindowTitles}
