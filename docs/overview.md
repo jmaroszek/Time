@@ -23,10 +23,11 @@ browse, two work blocks around lunch, the evening tail.
 ## Top Apps
 
 Apps ranked by time in range, with a delta against the previous period of the
-same length. Deltas are colored only when a Welch's t-test on day-by-day usage
-says the change is statistically significant — and the color is
-category-aware: *more* time in a productive app is green, more time in a
-non-productive one is red, and vice versa for declines.
+same length. Deltas are colored only when the change is big enough to mean
+something — a large enough shift, enough minutes behind it, and not the result
+of one unusual day — and the color is category-aware: *more* time in a
+productive app is green, more time in a non-productive one is red, and vice
+versa for declines.
 
 ## Daily Hours
 

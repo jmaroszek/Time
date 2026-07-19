@@ -48,7 +48,7 @@ how that is changing over time.
 
 | Tab | What it shows |
 | --- | --- |
-| **[Overview](docs/overview.md)** | KPI cards (total, productive %, longest focus chain, goal pace), a per-day timeline of color-coded focus blocks, top apps with significance-tested deltas, and daily productive/non-productive hours. |
+| **[Overview](docs/overview.md)** | KPI cards (total, productive %, longest focus chain, goal pace), a per-day timeline of color-coded focus blocks, top apps with category-aware deltas, and daily productive/non-productive hours. |
 | **[Trends](docs/trends.md)** | Weekly hours stacked by category over 12 weeks, and a productive-time heatmap by hour of day × day of week. |
 | **[Apps](docs/apps.md)** | Every app and domain in range with time, share, and category — plus full category and rule management. |
 | **[Settings](docs/settings.md)** | Goals, AFK threshold, heartbeat, week start, browser processes — all editable in-app — plus live tracker status and one-click backup. |

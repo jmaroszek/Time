@@ -170,90 +170,12 @@ export type DeltaDirection = "good" | "bad" | "neutral";
 export interface AppDelta extends AppUsage {
   /** Fractional change vs previous period; null when no previous data. */
   deltaFraction: number | null;
-  /** Welch two-sided p-value on daily usage; null when not computable. */
-  pValue: number | null;
+  /**
+   * Fractional change recomputed with the single most-influential day removed;
+   * null when no previous data or the range is too short to leave one out.
+   */
+  robustFraction: number | null;
   direction: DeltaDirection;
-}
-
-// ---- Welch's t-test (two-sided) on daily usage samples -------------------
-// p-value via the identity  P(|T| > |t|) = I_x(df/2, 1/2),  x = df/(df + t²),
-// with the regularized incomplete beta computed by continued fraction
-// (Numerical Recipes betacf). Pinned to scipy reference values in tests.
-
-function lnGamma(x: number): number {
-  // Lanczos approximation, g = 7
-  const c = [
-    0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
-    -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6,
-    1.5056327351493116e-7,
-  ];
-  if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lnGamma(1 - x);
-  x -= 1;
-  let a = c[0];
-  const t = x + 7.5;
-  for (let i = 1; i < 9; i++) a += c[i] / (x + i);
-  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a);
-}
-
-function betacf(a: number, b: number, x: number): number {
-  const MAXIT = 200;
-  const EPS = 3e-12;
-  const FPMIN = 1e-300;
-  const qab = a + b;
-  const qap = a + 1;
-  const qam = a - 1;
-  let c = 1;
-  let d = 1 - (qab * x) / qap;
-  if (Math.abs(d) < FPMIN) d = FPMIN;
-  d = 1 / d;
-  let h = d;
-  for (let m = 1; m <= MAXIT; m++) {
-    const m2 = 2 * m;
-    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
-    d = 1 + aa * d;
-    if (Math.abs(d) < FPMIN) d = FPMIN;
-    c = 1 + aa / c;
-    if (Math.abs(c) < FPMIN) c = FPMIN;
-    d = 1 / d;
-    h *= d * c;
-    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
-    d = 1 + aa * d;
-    if (Math.abs(d) < FPMIN) d = FPMIN;
-    c = 1 + aa / c;
-    if (Math.abs(c) < FPMIN) c = FPMIN;
-    d = 1 / d;
-    const del = d * c;
-    h *= del;
-    if (Math.abs(del - 1) < EPS) break;
-  }
-  return h;
-}
-
-function regIncBeta(a: number, b: number, x: number): number {
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
-  const bt = Math.exp(
-    lnGamma(a + b) - lnGamma(a) - lnGamma(b) + a * Math.log(x) + b * Math.log(1 - x),
-  );
-  if (x < (a + 1) / (a + b + 2)) return (bt * betacf(a, b, x)) / a;
-  return 1 - (bt * betacf(b, a, 1 - x)) / b;
-}
-
-/** Two-sided Welch t-test p-value; null when either sample has n < 2. */
-export function welchTTestPValue(a: number[], b: number[]): number | null {
-  if (a.length < 2 || b.length < 2) return null;
-  const mean = (v: number[]) => v.reduce((x, y) => x + y, 0) / v.length;
-  const ma = mean(a);
-  const mb = mean(b);
-  const variance = (v: number[], m: number) =>
-    v.reduce((s, x) => s + (x - m) * (x - m), 0) / (v.length - 1);
-  const sa = variance(a, ma) / a.length;
-  const sb = variance(b, mb) / b.length;
-  const denom = sa + sb;
-  if (denom === 0) return ma === mb ? 1 : 0;
-  const t = (ma - mb) / Math.sqrt(denom);
-  const df = (denom * denom) / ((sa * sa) / (a.length - 1) + (sb * sb) / (b.length - 1));
-  return regIncBeta(df / 2, 0.5, df / (df + t * t));
 }
 
 /** Seconds per day per process over the range's days (zero-filled arrays). */
@@ -276,49 +198,101 @@ export function dailySecondsByApp(sessions: Session[], range: Range): Map<string
   return out;
 }
 
+// ---- delta coloring thresholds (UX-007) ---------------------------------
+// A colored badge claims "your use of this app really changed". These gates
+// encode that claim directly, as an effect size rather than an inference test.
+//
+// A significance test was tried first (Welch on daily usage) and removed: most
+// apps are used in bursts on a minority of days, so at n=7 the test had almost
+// no power and left four-digit percent changes gray, while its verdict swung
+// with range length because longer windows buy power the user never asked for.
+// Two weeks of usage are a census, not a sample — the honest question is how
+// big the change was, not whether it is distinguishable from noise.
+//
+// Tuned against 132 days of real history; see UX-007 in the audit for the
+// bucket-by-magnitude evidence behind each value.
+
+/** Minimum fractional change worth coloring. */
+const MIN_DELTA_FRACTION = 0.25;
+/** Minimum absolute change, scaled by range length so 7d and 28d agree. */
+const MIN_DELTA_SECONDS_PER_DAY = 4 * 60;
+/** Minimum change that survives dropping the single most-influential day. */
+const MIN_ROBUST_FRACTION = 0.15;
+/** Leaving a day out is only meaningful once a few days remain. */
+const MIN_DAYS_FOR_ROBUSTNESS = 3;
+
 export interface DeltaOptions {
-  /** Per-app daily seconds for the current/previous periods (for the t-test). */
+  /** Per-app daily seconds for the current/previous periods. */
   currentDaily?: Map<string, number[]>;
   previousDaily?: Map<string, number[]>;
-  /** Significance level for coloring; default 0.1. */
-  alpha?: number;
+}
+
+/**
+ * Recompute the change with the single day contributing most to it removed.
+ * A week-long habit shift survives this; one long binge collapses toward zero.
+ * Returns null when the daily series are absent or too short to leave one out.
+ */
+export function robustDeltaFraction(
+  currentDaily: number[] | undefined,
+  previousDaily: number[] | undefined,
+): number | null {
+  if (!currentDaily || !previousDaily) return null;
+  const days = Math.min(currentDaily.length, previousDaily.length);
+  if (days < MIN_DAYS_FOR_ROBUSTNESS) return null;
+  let worst = 0;
+  for (let i = 1; i < days; i++) {
+    if (Math.abs(currentDaily[i] - previousDaily[i]) > Math.abs(currentDaily[worst] - previousDaily[worst])) {
+      worst = i;
+    }
+  }
+  let delta = 0;
+  let base = 0;
+  for (let i = 0; i < days; i++) {
+    if (i === worst) continue;
+    delta += currentDaily[i] - previousDaily[i];
+    base += previousDaily[i];
+  }
+  if (base <= 0) return delta > 0 ? Infinity : 0;
+  return delta / base;
 }
 
 /**
  * Category-aware delta coloring: more time in a productive category is good,
  * more time in a non-productive category is bad — and vice versa for declines.
- * A delta only gets colored when it is statistically distinguishable from
- * "business as usual": Welch's t-test on daily usage when daily samples are
- * available (n >= 2 days per side), otherwise a coarse fallback requiring a
- * >=25% change of at least 15 minutes.
+ * A delta is colored only when the change is large in relative terms, large
+ * enough in absolute terms to matter, and not the artifact of a single day.
  */
 export function withDeltas(
   current: AppUsage[],
   previous: AppUsage[],
   opts: DeltaOptions = {},
 ): AppDelta[] {
-  const alpha = opts.alpha ?? 0.1;
   const prevByProcess = new Map(previous.map((a) => [a.process, a.seconds]));
   return current.map((app) => {
     const prev = prevByProcess.get(app.process) ?? 0;
     const deltaFraction = prev > 0 ? (app.seconds - prev) / prev : null;
+    const cur = opts.currentDaily?.get(app.process);
+    const prv = opts.previousDaily?.get(app.process);
+    const robustFraction = deltaFraction === null ? null : robustDeltaFraction(cur, prv);
     let direction: DeltaDirection = "neutral";
-    let pValue: number | null = null;
     if (deltaFraction !== null && app.category !== null && deltaFraction !== 0) {
-      const cur = opts.currentDaily?.get(app.process);
-      const prv = opts.previousDaily?.get(app.process);
-      if (cur && prv) pValue = welchTTestPValue(cur, prv);
-      const significant =
-        pValue !== null
-          ? pValue < alpha
-          : Math.abs(deltaFraction) >= 0.25 && Math.abs(app.seconds - prev) >= 900;
-      if (significant && !app.category.isNeutral) {
+      const deltaSeconds = app.seconds - prev;
+      const days = cur?.length ?? prv?.length ?? 1;
+      const meaningful =
+        Math.abs(deltaFraction) >= MIN_DELTA_FRACTION &&
+        Math.abs(deltaSeconds) >= MIN_DELTA_SECONDS_PER_DAY * days &&
+        // Without a usable daily series the range is too short to leave a day
+        // out, and the size gates above stand on their own.
+        (robustFraction === null ||
+          (Math.sign(robustFraction) === Math.sign(deltaFraction) &&
+            Math.abs(robustFraction) >= MIN_ROBUST_FRACTION));
+      if (meaningful && !app.category.isNeutral) {
         // Neutral categories (e.g. games) are never judged good or bad.
         const increased = deltaFraction > 0;
         direction = increased === app.category.isProductive ? "good" : "bad";
       }
     }
-    return { ...app, deltaFraction, pValue, direction };
+    return { ...app, deltaFraction, robustFraction, direction };
   });
 }
 

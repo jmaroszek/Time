@@ -50,10 +50,7 @@ function DeltaBadge({ app }: { app: AppDelta }) {
     <span
       className={`w-14 shrink-0 text-right text-[11px] font-normal tracking-tight tabular-nums ${cls}`}
       aria-label={`${pct > 0 ? "increased" : pct < 0 ? "decreased" : "unchanged"} ${Math.abs(pct)} percent`}
-      title={
-        "vs the equal-length period before; gray = not statistically significant" +
-        (app.pValue !== null ? ` (p=${app.pValue.toFixed(3)})` : "")
-      }
+      title="vs the equal-length period before — gray = the change was small, brief, or driven by a single day"
     >
       <span aria-hidden="true">{text}</span>
     </span>
