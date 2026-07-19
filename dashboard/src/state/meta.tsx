@@ -12,7 +12,7 @@ import {
 } from "react";
 
 import { buildClassifier, type Category, type Classifier, type Rule } from "../lib/classify";
-import { fetchCategories, fetchRules, fetchSettings } from "../lib/queries";
+import { checkSchemaVersion, fetchCategories, fetchRules, fetchSettings } from "../lib/queries";
 import type { WeekStart } from "../lib/time";
 
 export interface Meta {
@@ -48,9 +48,10 @@ export function MetaProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
+      const schemaVersion = await checkSchemaVersion();
       const [cats, rls, stgs] = await Promise.all([
         fetchCategories(),
-        fetchRules(),
+        fetchRules(schemaVersion),
         fetchSettings(),
       ]);
       setCategories(cats);

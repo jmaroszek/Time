@@ -1,8 +1,12 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 
 from tracker import db
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -10,6 +14,15 @@ def conn(tmp_path):
     c = db.open_db(tmp_path / "test.db")
     yield c
     c.close()
+
+
+@pytest.fixture
+def schema_v0_path(tmp_path):
+    path = tmp_path / "schema-v0.db"
+    conn = sqlite3.connect(path)
+    conn.executescript((FIXTURES / "schema_v0.sql").read_text(encoding="utf-8"))
+    conn.close()
+    return path
 
 
 def test_bootstrap_is_idempotent(tmp_path):
@@ -37,6 +50,68 @@ def test_seed_categories_and_settings_present(conn):
         )
     }
     assert priorities == {"domain": 1, "title": 2, "process": 3}
+    assert raw["schema_version"] == str(db.SCHEMA_VERSION)
+
+
+def test_schema_v0_fixture_migrates_atomically(schema_v0_path):
+    conn = db.open_db(schema_v0_path)
+
+    assert db.read_settings_raw(conn)["schema_version"] == str(db.SCHEMA_VERSION)
+    assert db.read_settings_raw(conn)["weekly_goal_hours"] == "35"
+    assert [row["id"] for row in conn.execute("SELECT id FROM sessions")] == [20]
+    duplicate = conn.execute(
+        "SELECT id,category_id FROM rules"
+        " WHERE match_type='process' AND pattern='googledrivefs.exe'"
+    ).fetchall()
+    assert [(row["id"], row["category_id"]) for row in duplicate] == [(10, 1)]
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO sessions (start_ts,end_ts,process) VALUES (20,10,'bad.exe')"
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO rules (match_type,pattern,category_id,priority)"
+            " VALUES ('process','code.exe',2,3)"
+        )
+
+    # Category deletion and its dependent rule cleanup are now one statement.
+    conn.execute("DELETE FROM categories WHERE id=1")
+    assert conn.execute("SELECT COUNT(*) FROM rules WHERE category_id=1").fetchone()[0] == 0
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    conn.close()
+
+
+def test_schema_v0_migration_is_idempotent(schema_v0_path):
+    db.open_db(schema_v0_path).close()
+    conn = db.open_db(schema_v0_path)
+    assert db.read_settings_raw(conn)["schema_version"] == str(db.SCHEMA_VERSION)
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+    conn.close()
+
+
+def test_tracker_refuses_newer_schema_without_mutating_it(tmp_path):
+    path = tmp_path / "newer.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);"
+        "CREATE TABLE sentinel (value TEXT);"
+        "INSERT INTO settings VALUES ('schema_version','2');"
+        "INSERT INTO sentinel VALUES ('untouched');"
+    )
+    conn.close()
+
+    with pytest.raises(db.SchemaTooNewError, match="newer than tracker schema"):
+        db.open_db(path)
+
+    conn = sqlite3.connect(path)
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    assert tables == {"settings", "sentinel"}
+    assert conn.execute("SELECT value FROM sentinel").fetchone()[0] == "untouched"
+    conn.close()
 
 
 def test_legacy_rule_priorities_migrate_by_rank(tmp_path):

@@ -5,6 +5,7 @@ import { Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
 import { fetchTrackerStatus, type TrackerStatus } from "./lib/queries";
+import { isNewerSchemaError } from "./lib/schema";
 import { rangeForPreset, type Range } from "./lib/time";
 import { BannerProvider } from "./state/banner";
 import { MetaProvider, useMeta } from "./state/meta";
@@ -75,6 +76,7 @@ function Shell() {
 
   if (!meta.loaded) return <Spinner label="Connecting to database..." />;
   if (waitingForTracker) return <WaitingForTracker />;
+  if (meta.error && isNewerSchemaError(meta.error)) return <NewerDatabaseScreen />;
   if (meta.error) return <DbErrorScreen error={meta.error} />;
 
   const showRange = tab === "overview" || tab === "apps";
@@ -171,6 +173,20 @@ function WaitingForTracker() {
         </p>
         <p className="mt-4 break-all font-mono text-[11px] text-ink-3">{getDbPath()}</p>
       </div>
+    </div>
+  );
+}
+
+/** REL-004: refuse read/write work when an older dashboard sees a newer DB. */
+function NewerDatabaseScreen() {
+  return (
+    <div className="p-10 text-sm">
+      <p className="font-semibold">This database needs a newer version of Time</p>
+      <p className="mt-2 max-w-md text-ink-2">
+        Your data was created by a newer Time release than this dashboard supports. Update Time
+        and open it again. This version has not changed the database.
+      </p>
+      <p className="mt-3 break-all font-mono text-[11px] text-ink-3">{getDbPath()}</p>
     </div>
   );
 }
