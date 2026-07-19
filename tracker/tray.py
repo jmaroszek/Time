@@ -12,11 +12,43 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+import os
 import sqlite3
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
-_ICON_PATH = Path(__file__).resolve().parent.parent / "dashboard/src-tauri/icons/icon.ico"
+_DEV_ICON_PATH = Path(__file__).resolve().parent.parent / "dashboard/src-tauri/icons/icon.ico"
+
+
+def _icon_path() -> Path:
+    """Resolve the icon in both source and PyInstaller one-dir layouts."""
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        frozen_icon = Path(bundle_root) / "assets" / "icon.ico"
+        if frozen_icon.is_file():
+            return frozen_icon
+    return _DEV_ICON_PATH
+
+
+def _dashboard_path() -> Path | None:
+    """Return the installed dashboard beside the packaged tracker, if present."""
+    override = os.environ.get("TIME_DASHBOARD_PATH")
+    if override:
+        candidate = Path(override)
+    elif getattr(sys, "frozen", False):
+        candidate = Path(sys.executable).resolve().with_name("Time.exe")
+    else:
+        candidate = (
+            Path(__file__).resolve().parent.parent
+            / "dashboard"
+            / "src-tauri"
+            / "target"
+            / "release"
+            / "Time.exe"
+        )
+    return candidate if candidate.is_file() else None
 
 
 def _write_pause(db_path: str | Path, paused: str, until: float) -> None:
@@ -70,7 +102,7 @@ def start_tray(db_path: str | Path, stop_event: threading.Event) -> bool:
 
     def load_icon() -> "Image.Image":
         try:
-            return Image.open(_ICON_PATH)
+            return Image.open(_icon_path())
         except Exception:
             # Fallback: the app's dark-clock look, minus the clock.
             img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
@@ -103,6 +135,15 @@ def start_tray(db_path: str | Path, stop_event: threading.Event) -> bool:
     def resume(_icon, _item) -> None:
         _write_pause(db_path, "0", 0)
 
+    def open_dashboard(_icon, _item) -> None:
+        path = _dashboard_path()
+        if path is None:
+            return
+        try:
+            subprocess.Popen([str(path)], cwd=str(path.parent), close_fds=True)
+        except OSError:
+            logging.exception("Could not open the Time dashboard")
+
     def quit_tracker(icon, _item) -> None:
         stop_event.set()
         icon.stop()
@@ -121,6 +162,11 @@ def start_tray(db_path: str | Path, stop_event: threading.Event) -> bool:
         ),
         pystray.MenuItem("Resume tracking", resume),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem(
+            "Open dashboard",
+            open_dashboard,
+            visible=lambda _item: _dashboard_path() is not None,
+        ),
         pystray.MenuItem("Quit tracker", quit_tracker),
     )
     icon = pystray.Icon("time-tracker", load_icon(), "Time tracker", menu)

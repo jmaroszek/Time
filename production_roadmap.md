@@ -68,23 +68,28 @@ wiring.
 
 ## Phase 1 — Package as a single installable *(Tier A)*
 
-**Required for Tier A. Effort: Med.** Assemble from pieces you already have —
-Tauri builds an MSI **and** an NSIS installer today (both appeared in your last
-`tauri build`).
+**Required for Tier A. Effort: Med.** Assemble from pieces you already have. The
+release build now deliberately targets one current-user NSIS installer, whose
+lifecycle hooks cover the tracker sidecar.
 
-- [ ] **Bundle the tracker** with PyInstaller into a standalone `.exe` — no
+> ✅ **IMPLEMENTED (2026-07-19).** The one-dir tracker is built automatically,
+> bundled into the current-user NSIS installer, started immediately, and managed
+> through an HKCU Run entry. The packaged executable tracked successfully against
+> a scratch database; the two-OS clean-VM checklist remains the release gate.
+
+- [x] **Bundle the tracker** with PyInstaller into a standalone `.exe` — no
       Python / pywin32 / psutil install required on the user's machine. (This is
       the bundling already discussed; it's the right call now that there's a
       reason to ship.)
-- [ ] **Carry the tracker inside the installer** as a Tauri sidecar /
+- [x] **Carry the tracker inside the installer** as a Tauri sidecar /
       `externalBin` so one download delivers both halves.
-- [ ] **Autostart at logon:** installer drops an `HKCU\...\Run` entry (or a Task
+- [x] **Autostart at logon:** installer drops an `HKCU\...\Run` entry (or a Task
       Scheduler task) pointing at the bundled tracker. Your single-instance
       mutex ([tracker.py:28](tracker/tracker.py:28)) already makes duplicate
       launches harmless.
-- [ ] **First-run:** start the tracker immediately after install, not just at
+- [x] **First-run:** start the tracker immediately after install, not just at
       next logon, so the app has data on first open.
-- [ ] **Uninstall cleanup:** remove the autostart entry and stop the tracker.
+- [x] **Uninstall cleanup:** remove the autostart entry and stop the tracker.
       Decide whether to keep the user's DB (recommended: keep it, like most
       apps) or offer "also delete my data."
 

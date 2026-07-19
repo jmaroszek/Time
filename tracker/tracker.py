@@ -31,7 +31,7 @@ def acquire_single_instance() -> bool:
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     # Global\ so a second logon session (RDP, fast user switching) of the same
     # user cannot run a second tracker against the same DB (REL-005).
-    _mutex_handle = kernel32.CreateMutexW(None, False, "Global\\TimeTrackerSingleton")
+    _mutex_handle = kernel32.CreateMutexW(None, False, config.MUTEX_NAME)
     if not _mutex_handle:
         return True  # cannot check; do not block tracking over it
     return ctypes.get_last_error() != _ERROR_ALREADY_EXISTS

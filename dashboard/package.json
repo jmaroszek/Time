@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:tracker": "python ../scripts/build_tracker.py",
     "preview": "vite preview",
     "tauri": "tauri"
   },
