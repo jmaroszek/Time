@@ -9,6 +9,7 @@ import {
   type MatchType,
 } from "../lib/classify";
 import { UNCATEGORIZED } from "../lib/chartTheme";
+import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
 import { cleanDomainName, cleanProcessName, fmtDuration } from "../lib/format";
 import { clipSessions, duration, type Session } from "../lib/metrics";
 import {
@@ -53,7 +54,7 @@ const STATE_COLORS: Record<CategoryState, string> = {
 // varied so no pair relies on hue alone (helps red-green CVD, VIS-006).
 const CATEGORY_SWATCHES = [
   "#9c8ff0", // light purple
-  "#3f9bf0", // blue
+  "#2f6fc0", // deep blue
   "#56c8d8", // cyan
   "#43c88a", // green
   "#1d9e75", // deep green
@@ -72,8 +73,9 @@ export default function AppsTab({ range }: { range: Range }) {
   const endSec = range.end.getTime() / 1000;
   const { sessions, loading, error } = useSessions(startSec, endSec);
 
-  const { rows, hiddenCount, hiddenSeconds } = useMemo(() => {
+  const { rows, hiddenCount, hiddenSeconds, showDomainHint } = useMemo(() => {
     const clipped = clipSessions(sessions, startSec, endSec).filter((s) => !s.isAfk);
+    const domainCoverage = browserDomainCoverage(clipped, meta.browserSet);
     const byKey = new Map<string, { row: UsageRow; sample: Session }>();
     for (const s of clipped) {
       const isBrowser = meta.browserSet.has(s.process);
@@ -106,6 +108,7 @@ export default function AppsTab({ range }: { range: Range }) {
       hiddenCount: hidden,
       hiddenSeconds: all.reduce((sum, row) => sum + row.seconds, 0) -
         visible.reduce((sum, row) => sum + row.seconds, 0),
+      showDomainHint: shouldShowDomainCoverageHint(domainCoverage),
     };
   }, [sessions, startSec, endSec, meta]);
 
@@ -139,6 +142,13 @@ export default function AppsTab({ range }: { range: Range }) {
           className="fixed inset-0 z-40 cursor-default"
           onClick={() => setOpenMenu(null)}
         />
+      )}
+
+      {showDomainHint && (
+        <section className="rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-[11.5px] text-ink-2">
+          Browser time is not being split by site. Install the third-party &quot;URL in title&quot;
+          extension so Time can read domains from browser window titles.
+        </section>
       )}
 
       {uncategorized.length > 0 && (

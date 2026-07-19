@@ -70,8 +70,8 @@ END
 # three-way state: productive (1,0), neutral (0,1), or unproductive (0,0).
 # Gaming is neutral by default — tracked, but never held against productivity.
 _SEED_CATEGORIES = [
-    ("Notes", "#7f77dd", 1, 0, 1),
-    ("Dev", "#3f9bf0", 1, 0, 2),
+    ("Notes", "#9c8ff0", 1, 0, 1),
+    ("Dev", "#2f6fc0", 1, 0, 2),
     ("AI tools", "#43c88a", 1, 0, 3),
     ("Browsing", "#e0a53a", 1, 0, 4),
     ("Gaming", "#e8663d", 0, 1, 5),
