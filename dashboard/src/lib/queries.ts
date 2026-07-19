@@ -1,7 +1,7 @@
 // Typed SQL access. The dashboard reads sessions and writes only
 // categories/rules/settings (the tracker owns session writes).
 
-import type { Category, CategoryState, MatchType, Rule } from "./classify";
+import { normalizeRulePattern, type Category, type CategoryState, type MatchType, type Rule } from "./classify";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
 
@@ -117,7 +117,16 @@ export async function addRule(
   priority?: number,
 ): Promise<void> {
   const db = await getDb();
-  const pat = pattern.toLowerCase().trim();
+  const pat = normalizeRulePattern(matchType, pattern);
+  if (!pat) {
+    const err = new Error(
+      matchType === "domain"
+        ? `"${pattern.trim()}" doesn't contain a usable domain — enter one like example.com.`
+        : "The rule pattern is empty.",
+    );
+    err.name = "ValidationError"; // explainDbError passes the message through untouched
+    throw err;
+  }
   await db.execute(
     "DELETE FROM rules WHERE match_type = $1 AND pattern = $2",
     [matchType, pat]
@@ -254,6 +263,9 @@ export async function fetchTrackerStatus(): Promise<TrackerStatus> {
   return { lastHeartbeat: r.last_hb, liveSessionCount: r.live_n, totalSessionCount: r.total_n };
 }
 
+/** Snapshot the DB next to the live file and return the backup's full path.
+ *  Derives the directory from the DB path (works whatever the file is named)
+ *  rather than assuming the production filename. */
 export async function backupDatabase(): Promise<string> {
   const db = await getDb();
   const stamp = new Date()
@@ -261,7 +273,12 @@ export async function backupDatabase(): Promise<string> {
     .replace(/[-:T]/g, "")
     .slice(0, 14);
   const { getDbPath } = await import("./db");
-  const target = getDbPath().replace(/time_log\.db$/, `backup_manual_${stamp}.db`);
-  await db.execute(`VACUUM INTO '${target}'`);
+  const source = getDbPath();
+  const sepIndex = Math.max(source.lastIndexOf("\\"), source.lastIndexOf("/"));
+  const dir = sepIndex === -1 ? "" : source.slice(0, sepIndex + 1);
+  const target = `${dir}backup_manual_${stamp}.db`;
+  // VACUUM INTO can't take a bound parameter through the pool; escape quotes
+  // so paths containing ' (legal in Windows usernames) don't break the SQL.
+  await db.execute(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
   return target;
 }

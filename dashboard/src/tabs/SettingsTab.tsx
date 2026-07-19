@@ -2,8 +2,10 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { Spinner } from "../components/ui";
 import { getDbPath } from "../lib/db";
+import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
 import { backupDatabase, fetchTrackerStatus, updateSetting, type TrackerStatus } from "../lib/queries";
+import { useBanner } from "../state/banner";
 import { useMeta } from "../state/meta";
 
 interface NumericSpec {
@@ -36,10 +38,12 @@ function clockHour(value: number): string {
 
 export default function SettingsTab() {
   const meta = useMeta();
+  const banner = useBanner();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [copied, setCopied] = useState(false);
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [backupDetail, setBackupDetail] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     const next = { ...meta.settings };
@@ -62,8 +66,12 @@ export default function SettingsTab() {
     const valid = Number.isFinite(raw) ? raw : fallback;
     const clamped = Math.min(Math.max(valid, spec.min), spec.max);
     setDrafts((current) => ({ ...current, [spec.key]: String(clamped) }));
-    await updateSetting(spec.key, String(Math.round(clamped * spec.scale)));
-    await meta.refresh();
+    try {
+      await updateSetting(spec.key, String(Math.round(clamped * spec.scale)));
+      await meta.refresh();
+    } catch (e) {
+      banner.report(e, "setting");
+    }
   };
   const step = (spec: NumericSpec, direction: -1 | 1) => {
     const current = Number(drafts[spec.key]);
@@ -76,12 +84,18 @@ export default function SettingsTab() {
       setDrafts((current) => ({ ...current, [key]: meta.settings[key] ?? "" }));
       return;
     }
-    await updateSetting(key, value);
-    await meta.refresh();
+    try {
+      await updateSetting(key, value);
+      await meta.refresh();
+    } catch (e) {
+      banner.report(e, "setting");
+    }
   };
   const selectSetting = (key: string, value: string) => {
     setDrafts((current) => ({ ...current, [key]: value }));
-    void updateSetting(key, value).then(meta.refresh);
+    void updateSetting(key, value)
+      .then(meta.refresh)
+      .catch((e: unknown) => banner.report(e, "setting"));
   };
 
   const heartbeatAge = status?.lastHeartbeat == null ? null : Date.now() / 1000 - status.lastHeartbeat;
@@ -118,7 +132,7 @@ export default function SettingsTab() {
         </Section>
 
         <Section title="Focus & Idle">
-          <Row label="AFK idle threshold" help="No input for this long marks you AFK." control={numberControl(SPECS.idle, "min")} />
+          <Row label="AFK idle threshold" help="No input for this long marks you AFK — watching video without touching the mouse or keyboard counts as away." control={numberControl(SPECS.idle, "min")} />
           <Row label="Focus streak max gap" help="Short gaps won't break a productive streak." control={numberControl(SPECS.focus, "min")} />
         </Section>
 
@@ -164,9 +178,17 @@ export default function SettingsTab() {
               type="button"
               onClick={() => {
                 setBackupMessage(null);
+                setBackupDetail(null);
                 void backupDatabase()
-                  .then(() => { setBackupMessage("✓ Backup written"); setTimeout(() => setBackupMessage(null), 2000); })
-                  .catch(() => setBackupMessage("Backup failed"));
+                  .then((target) => {
+                    setBackupMessage("✓ Backup written");
+                    setBackupDetail({ ok: true, text: `Saved to ${target}` });
+                    setTimeout(() => setBackupMessage(null), 2000);
+                  })
+                  .catch((e: unknown) => {
+                    setBackupMessage("Backup failed");
+                    setBackupDetail({ ok: false, text: explainDbError(e, "backup") });
+                  });
               }}
               className="mt-4 flex w-full items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-[12.5px] font-semibold text-[#9cc0ea] shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15"
             >
@@ -175,6 +197,16 @@ export default function SettingsTab() {
               </svg>
               {backupMessage ?? "Back up database now"}
             </button>
+            {backupDetail && (
+              <p className={`mt-2 break-all text-[11px] ${backupDetail.ok ? "text-[#7b818b]" : "text-bad"}`}>
+                {backupDetail.text}
+              </p>
+            )}
+            <p className="mt-3 text-[11px] leading-snug text-[#7b818b]">
+              Everything Time records stays in this file on your machine — nothing is ever
+              uploaded. To restore a backup: quit the tracker and dashboard, replace the
+              database file with the backup copy, then restart (full steps in docs/restore.md).
+            </p>
           </div>
         </section>
 
@@ -184,7 +216,7 @@ export default function SettingsTab() {
             <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
             <Row
               label="Browser processes"
-              help="Comma-separated; enables domain and title matching."
+              help="Comma-separated. Splitting browser time by site needs a “URL in title” extension installed in the browser; without one, browser time is tracked per app only."
               control={
                 <input
                   value={drafts.browser_processes ?? ""}

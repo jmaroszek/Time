@@ -62,6 +62,23 @@ export interface Rule {
   priority: number;
 }
 
+/** Normalize a user-entered rule pattern into a matchable one, or null when
+ *  nothing matchable remains. Domain patterns accept a pasted URL and reduce
+ *  it to the bare host — mirrors tracker/domains.py `_clean_host`, which is
+ *  what produces the `domain` values these rules compare against. */
+export function normalizeRulePattern(matchType: MatchType, raw: string): string | null {
+  let pat = raw.toLowerCase().trim();
+  if (matchType !== "domain") return pat || null;
+  pat = pat.replace(/^[a-z][a-z0-9+.-]*:\/\//, ""); // scheme
+  pat = pat.split(/[/?#]/)[0]; // path / query / fragment
+  const at = pat.lastIndexOf("@"); // userinfo (rare, but a valid URL part)
+  if (at !== -1) pat = pat.slice(at + 1);
+  pat = pat.split(":")[0]; // port
+  pat = pat.replace(/^\.+|\.+$/g, ""); // stray dots
+  if (pat.startsWith("www.")) pat = pat.slice(4);
+  return pat || null;
+}
+
 export interface Classifiable {
   process: string;
   title: string;

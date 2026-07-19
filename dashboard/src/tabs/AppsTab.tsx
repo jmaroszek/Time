@@ -19,6 +19,7 @@ import {
   updateCategory,
 } from "../lib/queries";
 import type { Range } from "../lib/time";
+import { useBanner } from "../state/banner";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
 
@@ -44,6 +45,7 @@ const STATE_COLORS: Record<Productivity, string> = {
 
 export default function AppsTab({ range }: { range: Range }) {
   const meta = useMeta();
+  const banner = useBanner();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const startSec = range.start.getTime() / 1000;
   const endSec = range.end.getTime() / 1000;
@@ -86,9 +88,13 @@ export default function AppsTab({ range }: { range: Range }) {
     await meta.refresh();
   };
   const assign = async (row: UsageRow, categoryId: number) => {
-    await addRule(row.kind, row.key, categoryId);
-    setOpenMenu(null);
-    await refresh();
+    try {
+      await addRule(row.kind, row.key, categoryId);
+      setOpenMenu(null);
+      await refresh();
+    } catch (e) {
+      banner.report(e, "rule");
+    }
   };
   const displayName = (row: UsageRow) =>
     row.kind === "process"
@@ -112,7 +118,7 @@ export default function AppsTab({ range }: { range: Range }) {
             <span className="h-2 w-2 rounded-full bg-[#e0a53a] shadow-[0_0_0_4px_rgba(224,165,58,.14)]" />
             <span className="font-semibold">Needs a category</span>
             <span className="text-[11px] text-ink-3">
-              {uncategorized.length} {uncategorized.length === 1 ? "item" : "items"} · {fmtDuration(uncategorized.reduce((sum, row) => sum + row.seconds, 0))} untracked
+              {uncategorized.length} {uncategorized.length === 1 ? "item" : "items"} · {fmtDuration(uncategorized.reduce((sum, row) => sum + row.seconds, 0))} uncategorized
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -234,6 +240,7 @@ function UsageTable({
   onAliasesChanged: () => Promise<void>;
 }) {
   const meta = useMeta();
+  const banner = useBanner();
   const [editing, setEditing] = useState<string | null>(null);
   const [aliasDraft, setAliasDraft] = useState("");
   const total = rows.reduce((sum, row) => sum + row.seconds, 0);
@@ -254,8 +261,12 @@ function UsageTable({
     const nextAliases = { ...meta.aliases };
     if (alias) nextAliases[aliasKey] = alias;
     else delete nextAliases[aliasKey];
-    await saveProcessAliases(nextAliases);
-    await onAliasesChanged();
+    try {
+      await saveProcessAliases(nextAliases);
+      await onAliasesChanged();
+    } catch (e) {
+      banner.report(e, "name");
+    }
   };
   return (
     <div className="overflow-x-auto">
@@ -345,6 +356,7 @@ function UsageTable({
 
 function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
   const meta = useMeta();
+  const banner = useBanner();
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set<number>());
   const [stateMenu, setStateMenu] = useState<number | null>(null);
   const [newName, setNewName] = useState("");
@@ -361,22 +373,57 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
   const submitRule = async (categoryId: number) => {
     const draft = draftFor(categoryId);
     if (!draft.pattern.trim()) return;
-    await addRule(draft.type, draft.pattern, categoryId);
-    setDraft(categoryId, { pattern: "" });
-    await onChanged();
+    try {
+      await addRule(draft.type, draft.pattern, categoryId);
+      setDraft(categoryId, { pattern: "" });
+      await onChanged();
+    } catch (e) {
+      banner.report(e, "rule");
+    }
+  };
+  const submitCategory = async () => {
+    if (!newName.trim()) return;
+    try {
+      const id = await addCategory(newName, "#6ba0da", "unproductive");
+      setNewName("");
+      setExpanded((current) => new Set(current).add(id));
+      await onChanged();
+    } catch (e) {
+      banner.report(e, "category");
+    }
+  };
+  const setCategoryState = async (category: Category, option: Productivity) => {
+    try {
+      await updateCategory({ ...category, ...categoryStateFlags(option) });
+      await onChanged();
+    } catch (e) {
+      banner.report(e, "category");
+    }
+  };
+  const removeRule = async (ruleId: number) => {
+    try {
+      await deleteRule(ruleId);
+      await onChanged();
+    } catch (e) {
+      banner.report(e, "rule");
+    }
   };
   const removeCategory = async (category: Category, ruleCount: number) => {
     const rulesWarning = ruleCount === 0
       ? ""
       : ` and ${ruleCount} ${ruleCount === 1 ? "rule" : "rules"}`;
     if (!window.confirm(`Delete “${category.name}”${rulesWarning}? This cannot be undone.`)) return;
-    await deleteCategory(category.id);
-    setExpanded((current) => {
-      const next = new Set(current);
-      next.delete(category.id);
-      return next;
-    });
-    await onChanged();
+    try {
+      await deleteCategory(category.id);
+      setExpanded((current) => {
+        const next = new Set(current);
+        next.delete(category.id);
+        return next;
+      });
+      await onChanged();
+    } catch (e) {
+      banner.report(e, "category");
+    }
   };
 
   return (
@@ -423,7 +470,7 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
                           onClick={(event) => {
                             event.stopPropagation();
                             setStateMenu(null);
-                            void updateCategory({ ...category, ...categoryStateFlags(option) }).then(onChanged);
+                            void setCategoryState(category, option);
                           }}
                         >
                           <CategoryDot color={STATE_COLORS[option]} />
@@ -445,7 +492,7 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
                         <span className={`w-14 shrink-0 rounded-md px-1.5 py-1 text-center text-[9.5px] uppercase ${TYPE_STYLES[rule.matchType]}`}>{rule.matchType}</span>
                         <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
                         <span className="shrink-0 text-[10.5px] text-ink-3">Priority {rule.priority}</span>
-                        <button type="button" title="Delete rule" className="rounded-md px-1.5 py-1 text-ink-3 transition-colors hover:bg-bad/15 hover:text-bad" onClick={() => void deleteRule(rule.id).then(onChanged)}>✕</button>
+                        <button type="button" title="Delete rule" className="rounded-md px-1.5 py-1 text-ink-3 transition-colors hover:bg-bad/15 hover:text-bad" onClick={() => void removeRule(rule.id)}>✕</button>
                       </div>
                     ))}
                     {rules.length === 0 && <p className="py-1 text-[11px] italic text-ink-3">No rules yet — add one below.</p>}
@@ -487,26 +534,12 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
           value={newName}
           onChange={(event) => setNewName(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && newName.trim()) {
-              void addCategory(newName, "#6ba0da", "unproductive").then(async (id) => {
-                setNewName("");
-                setExpanded((current) => new Set(current).add(id));
-                await onChanged();
-              });
-            }
+            if (event.key === "Enter") void submitCategory();
           }}
           placeholder="New category name"
           className="w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
         />
-        <Button
-          variant="primary"
-          disabled={!newName.trim()}
-          onClick={() => void addCategory(newName, "#6ba0da", "unproductive").then(async (id) => {
-            setNewName("");
-            setExpanded((current) => new Set(current).add(id));
-            await onChanged();
-          })}
-        >
+        <Button variant="primary" disabled={!newName.trim()} onClick={() => void submitCategory()}>
           + Add category
         </Button>
       </div>
