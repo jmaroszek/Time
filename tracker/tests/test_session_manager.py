@@ -259,3 +259,23 @@ def test_pause_clears_title_debounce(store):
     # After resume the old pending state must not carry over: this is tick 1/2
     # again, so no split-open yet beyond the fresh session.
     assert store.opened[-1][2:4] == ("code.exe", "other.py")
+
+
+# ---------------- clock set-back clamp (DATA-002) ----------------
+
+
+def test_clock_setback_app_switch_never_writes_negative_duration(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(10000.0, process="code.exe"))
+    # Wall clock steps back 9 minutes, then the user switches apps.
+    manager.tick(active(9460.0, process="obsidian.exe", title="Notes"))
+    assert store.closed[1] == 10000.0  # clamped to start_ts, not 9460
+    assert store.opened[1][1] == 10000.0  # new session opens at the boundary
+
+
+def test_clock_setback_afk_to_active_clamps(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(10000.0, idle=300.0))  # opens an AFK span (back-dated)
+    afk_id, afk_start = store.opened[0][0], store.opened[0][1]
+    manager.tick(active(afk_start - 100.0))  # clock behind the AFK start
+    assert store.closed[afk_id] >= afk_start
