@@ -50,7 +50,7 @@ must be managed by the user.
   read-only by older application code.
 - The tracker, dashboard, and public installer must all be Authenticode-signed
   and timestamped. The repository release verifier rejects unsigned artifacts;
-  provider setup is documented in [docs/signing.md](docs/signing.md).
+  provider setup is documented in [signing.md](signing.md).
 
 ## Reporting a vulnerability
 
