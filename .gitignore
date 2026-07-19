@@ -12,3 +12,5 @@ time_log.db-shm
 time_log.db-wal
 docs/full-system-audit.md
 docs/competitive-analysis.md
+/personal-docs/
+docs/personal/
