@@ -1,4 +1,4 @@
-// One shared, dismissible error banner for failed writes (UX-002). Tabs call
+// One shared, dismissible error banner for failed writes. Tabs call
 // report(error, subject) from any .catch; the provider renders a single quiet
 // banner rather than a per-call toast system.
 

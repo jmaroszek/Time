@@ -42,7 +42,7 @@ const TYPE_STYLES: Record<MatchType, string> = {
   title: "bg-[#a195aa]/15 text-[#b0a5b8]",
   process: "bg-[#a99e8c]/15 text-[#b8ad9a]",
 };
-// Annotation-tier semantic hues (VIS-001) plus the ignored gray.
+// Annotation-tier semantic hues plus the ignored gray.
 const STATE_COLORS: Record<CategoryState, string> = {
   productive: "#4fb389",
   neutral: "#9aa0a8",
@@ -51,7 +51,7 @@ const STATE_COLORS: Record<CategoryState, string> = {
 };
 
 // Swatches offered by the category color picker: hues spaced AND lightness
-// varied so no pair relies on hue alone (helps red-green CVD, VIS-006).
+// varied so no pair relies on hue alone (helps red-green color blindness).
 const CATEGORY_SWATCHES = [
   "#9c8ff0", // light purple
   "#2f6fc0", // deep blue
@@ -100,8 +100,8 @@ export default function AppsTab({ range }: { range: Range }) {
     }
     const all = [...byKey.values()].map((entry) => entry.row).sort((a, b) => b.seconds - a.seconds);
     const visible = all.filter((row) => row.seconds >= meta.minAppSeconds);
-    // UX-003: what min_app_seconds hides is surfaced in the header footnote so
-    // the Apps total reconciles visibly with the Overview KPI total.
+    // What min_app_seconds hides is surfaced in the header footnote so the
+    // Apps total reconciles visibly with the Overview KPI total.
     const hidden = all.length - visible.length;
     return {
       rows: visible,
@@ -431,7 +431,7 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
   const submitCategory = async () => {
     if (!newName.trim()) return;
     // First unused curated swatch, so new categories are distinguishable
-    // instead of all accent-blue (UX-005).
+    // instead of all accent-blue.
     const used = new Set(meta.categories.map((c) => c.color.toLowerCase()));
     const color =
       CATEGORY_SWATCHES.find((c) => !used.has(c)) ??

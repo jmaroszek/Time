@@ -5,7 +5,7 @@ settings table (the DB contract), so the tracker itself picks pauses up on its
 normal settings-refresh cycle and the dashboard can display the same state.
 
 pystray (and Pillow, for the icon) are optional: without them the tracker runs
-exactly as before, just without a tray icon.
+unchanged, just without a tray icon.
 """
 
 from __future__ import annotations

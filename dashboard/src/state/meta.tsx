@@ -48,10 +48,13 @@ export function MetaProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const schemaVersion = await checkSchemaVersion();
+      // Called for its throw, not its value: an unsupported schema must fail
+      // here, before any read, so the caller shows the upgrade screen instead
+      // of rendering against a database this release doesn't understand.
+      await checkSchemaVersion();
       const [cats, rls, stgs] = await Promise.all([
         fetchCategories(),
-        fetchRules(schemaVersion),
+        fetchRules(),
         fetchSettings(),
       ]);
       setCategories(cats);

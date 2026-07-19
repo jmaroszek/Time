@@ -39,7 +39,7 @@ def acquire_single_instance() -> bool:
     global _mutex_handle
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     # Global\ so a second logon session (RDP, fast user switching) of the same
-    # user cannot run a second tracker against the same DB (REL-005).
+    # user cannot run a second tracker against the same database.
     _mutex_handle = kernel32.CreateMutexW(None, False, config.MUTEX_NAME)
     if not _mutex_handle:
         return True  # cannot check; do not block tracking over it
@@ -51,8 +51,8 @@ def set_up_logging() -> None:
 
     INFO is the support level and must contain no window title and no browser
     domain: these files sit beside the database in plain text and may be handed
-    to someone else (DIST-003/SUP-001). Anything derived from captured window
-    content belongs at DEBUG, which is off by default.
+    to someone else. Anything derived from captured window content belongs at
+    DEBUG, which is off by default.
     """
     config.LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     handler = TimedRotatingFileHandler(
@@ -139,8 +139,8 @@ class FailureThrottle:
 
 def run() -> None:
     conn = db.open_db(config.DB_PATH)
-    # DIST-005: stamp the running tracker version so the dashboard can show
-    # both halves' versions (mismatch diagnosis in the field).
+    # Stamp the running tracker version so the dashboard can show both halves'
+    # versions; a mismatched install is otherwise invisible in the field.
     conn.execute(
         "INSERT INTO settings (key, value) VALUES ('tracker_version', ?)"
         " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -210,8 +210,8 @@ def main() -> int:
     """Entry point. Returns a process exit code; never raises past this frame.
 
     The packaged tracker runs windowless, so an unhandled exception would
-    otherwise vanish with no console and no log — the exact failure SUP-001 is
-    about. Every startup path below ends in either a log line or stderr.
+    otherwise vanish with no console and no log, leaving a field report with
+    nothing to report. Every startup path below ends in a log line or stderr.
     """
     try:
         set_up_logging()

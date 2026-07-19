@@ -3,7 +3,7 @@
 No Win32 or sqlite imports here — inputs arrive as `Snapshot`s and outputs go
 through a `Store` protocol, so the whole machine is unit-testable with fakes.
 
-Behavior spec (mirrors the refactor plan):
+Behavior spec:
 - App change splits the session immediately.
 - Title change must persist `debounce_ticks` consecutive ticks before splitting
   (prevents "Updating..." flicker rows); the split is back-dated to when the
@@ -85,7 +85,7 @@ class SessionManager:
     # Highest end_ts this run has written via close. Opens clamp to it so a
     # wall clock stepped backwards while no session is current (post-pause,
     # post-AFK-unknown) cannot open a row overlapping an already-closed one
-    # (DATA-002 family; caught by the TEST-002 contract test).
+    # (pinned by the cross-half contract test, which caught this case).
     _floor_ts: float = 0.0
 
     # ---------- public API ----------
@@ -145,7 +145,7 @@ class SessionManager:
         if cur.is_afk:
             # max() clamps against a wall clock stepped backwards mid-session
             # (NTP step / manual change), which would otherwise write a
-            # negative-duration row the dashboard silently drops (DATA-002).
+            # negative-duration row that the dashboard silently drops.
             boundary = max(snap.now, cur.start_ts)
             self._close(cur.id, boundary)
             if snap.process is not None:
@@ -158,7 +158,7 @@ class SessionManager:
             return  # transient unknown foreground: keep current session running
 
         if snap.process != cur.process:
-            boundary = max(snap.now, cur.start_ts)  # DATA-002 clamp, as above
+            boundary = max(snap.now, cur.start_ts)  # clock set-back clamp, as above
             self._close(cur.id, boundary)
             self._open(boundary, snap.process, snap.title)
             self._reset_pending()

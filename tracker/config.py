@@ -28,7 +28,8 @@ DATA_DIR = _data_dir()
 DB_PATH = DATA_DIR / "time_log.db"
 LOG_PATH = DATA_DIR / "Logs" / "tracker.log"
 
-# Written to the settings table at startup (DIST-005); bump with releases.
+# Written to the settings table at startup so the dashboard can report it; bump
+# with releases.
 TRACKER_VERSION = "0.1.0"
 
 # The production mutex name is stable. The override exists so release packaging

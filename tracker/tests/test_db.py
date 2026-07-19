@@ -197,7 +197,7 @@ def test_retry_gives_up_after_attempts(monkeypatch):
         db._retry(always_locked, attempts=3)
 
 
-# ---------------- pause state (PROD-001) ----------------
+# ---------------- pause state ----------------
 
 
 def test_is_paused_indefinite_flag():

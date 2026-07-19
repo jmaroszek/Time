@@ -29,7 +29,7 @@ interface NumericSpec {
 }
 
 // UI clamp ranges. The tracker separately clamps what it consumes in
-// tracker/db.py get_settings (CODE-002) — keep the two in sight of each other.
+// tracker/db.py get_settings — keep the two in sight of each other.
 const SPECS = {
   goal: { key: "weekly_goal_hours", min: 0, max: 100, scale: 1 },
   minimum: { key: "min_app_seconds", min: 0, max: 30, scale: 60 },
@@ -330,7 +330,7 @@ export default function SettingsTab() {
   );
 }
 
-/** DIST-005: both halves' versions, for diagnosing mismatched installs. The
+/** Both halves' versions, for diagnosing mismatched installs. The
  *  tracker stamps tracker_version into settings at startup. */
 function VersionsLine({ trackerVersion }: { trackerVersion: string | undefined }) {
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -347,7 +347,7 @@ function VersionsLine({ trackerVersion }: { trackerVersion: string | undefined }
   );
 }
 
-/** PROD-003: selective history deletion. Both actions show the affected count
+/** Selective history deletion. Both actions show the affected count
  *  and require an explicit confirm; the copy points at backup first. */
 function PrivacySection() {
   const meta = useMeta();

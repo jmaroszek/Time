@@ -182,7 +182,7 @@ describe("topApps / withDeltas", () => {
     expect(deltas[0].robustFraction).toBeCloseTo(1.0);
   });
 
-  it("bursty apps are judged on size, not on day-to-day consistency (UX-007)", () => {
+  it("bursty apps are judged on size, not on day-to-day consistency", () => {
     // Weekend-only use, tripled. Welch's t-test left this gray; the change is real.
     const cur = [0, 0, 0, 0, 0, 4 * 3600, 4 * 3600];
     const prv = [0, 0, 0, 0, 0, 3600, 1.5 * 3600];
@@ -197,7 +197,7 @@ describe("topApps / withDeltas", () => {
     expect(deltas[0].direction).toBe("bad");
   });
 
-  it("a change carried by one day alone stays neutral (UX-007)", () => {
+  it("a change carried by one day alone stays neutral", () => {
     // Steady 10 min/day plus a single five-hour binge: +413% overall, but the
     // habit did not change, so the badge stays gray.
     const cur = [600, 600, 600, 5 * 3600, 600, 600, 600];
@@ -215,7 +215,7 @@ describe("topApps / withDeltas", () => {
     expect(deltas[0].direction).toBe("neutral");
   });
 
-  it("large percentages on trivial amounts of time stay neutral (UX-007)", () => {
+  it("large percentages on trivial amounts of time stay neutral", () => {
     // 1 min/day -> 3 min/day is +200%, but only +14 min across the week.
     const deltas = withDeltas(
       [{ process: "code.exe", seconds: 7 * 180, category: CATS[0] }],
@@ -229,7 +229,7 @@ describe("topApps / withDeltas", () => {
     expect(deltas[0].direction).toBe("neutral");
   });
 
-  it("small steady changes stay neutral however consistent they are (UX-007)", () => {
+  it("small steady changes stay neutral however consistent they are", () => {
     // Near-zero variance made this significant under the t-test; +8% is not news.
     const deltas = withDeltas(
       [{ process: "code.exe", seconds: 7 * 3888, category: CATS[0] }],

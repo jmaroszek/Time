@@ -19,7 +19,7 @@ interface SessionRow {
 
 /** No single session legitimately spans more than this (the longest real rows
  *  are multi-day AFK spans); bounding start_ts lets idx_sessions_start skip
- *  all older history instead of scanning it (PERF-001). */
+ *  all older history instead of scanning it. */
 const MAX_SESSION_SPAN_SEC = 7 * 86_400;
 
 /** Sessions overlapping [startSec, endSec), ordered by start. Clip before use. */
@@ -76,8 +76,7 @@ interface RuleRow {
   priority: number;
 }
 
-export async function fetchRules(schemaVersion: number | null): Promise<Rule[]> {
-  void schemaVersion;
+export async function fetchRules(): Promise<Rule[]> {
   const db = await getDb();
   const rows = await db.select<RuleRow[]>(
     "SELECT id, match_type, pattern, category_id, priority FROM rules ORDER BY priority ASC, id",
@@ -198,7 +197,7 @@ export async function deleteCategory(categoryId: number): Promise<void> {
   await db.execute("DELETE FROM categories WHERE id = $1", [categoryId]);
 }
 
-// ---------------- history deletion (PROD-003) ----------------
+// ---------------- history deletion ----------------
 // The dashboard's only destructive surface. Callers confirm with the user
 // (showing the count) before calling the delete variants.
 

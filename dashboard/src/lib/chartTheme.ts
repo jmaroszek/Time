@@ -1,4 +1,4 @@
-// Shared chart chrome and semantic data colors (audit VIS-001/VIS-005).
+// Shared chart chrome and semantic data colors.
 // ECharts can't read CSS custom properties, so the values live here; each is
 // annotated with the index.css token it mirrors. Hex literals in components
 // should route through this module or the CSS tokens — nowhere else.
@@ -26,11 +26,11 @@ export const GOOD_DATA = "#16b981";
 export const NON_PRODUCTIVE_BAR = "#3a3d44";
 
 /** Annotation lines (e.g. the 7-day average): the interactive accent, not a
- *  category hue — category colors are reserved for category identity (VIS-003). */
+ *  category hue — category colors are reserved for category identity. */
 export const ANNOTATION = "#6ba0da"; // --color-accent
 
 /** Sequential heatmap ramp: green like the productive fill, with stops kept
- *  off every seed/live category color (VIS-003). */
+ *  off every seed/live category color, for the same reason. */
 export const HEATMAP_RAMP = ["#16181d", "#0e3a2c", "#17836a", "#4fd0a4"];
 
 /** Gray for uncategorized/unknown items, matching the dashed-ring affordance. */

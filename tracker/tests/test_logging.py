@@ -1,4 +1,4 @@
-"""Support-grade logging (SUP-001).
+"""Support-grade logging.
 
 Two properties matter here: a failure must leave actionable evidence, and no
 INFO-level line may carry a window title or a browser domain. The privacy tests
