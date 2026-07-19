@@ -11,7 +11,7 @@ import {
   rollingMean,
   splitAtMidnights,
   topApps,
-  welchTTestPValue,
+  robustDeltaFraction,
   withDeltas,
   type AppUsage,
   type Session,
@@ -157,41 +157,92 @@ describe("topApps / withDeltas", () => {
     expect(apps[1].seconds).toBe(150);
   });
 
-  it("delta direction is category-aware when the change is significant", () => {
-    // Consistent daily levels that clearly shift between periods.
-    const daily = (vals: number[]) => new Map([["code.exe", vals], ["apex.exe", vals]]);
+  it("delta direction is category-aware when the change is meaningful", () => {
+    // A sustained doubling: 30 min/day up from 15, every day of the week.
+    const daily = (v: number) =>
+      new Map([
+        ["code.exe", Array(7).fill(v)],
+        ["apex.exe", Array(7).fill(v)],
+      ]);
     const cur: AppUsage[] = [
-      { process: "code.exe", seconds: 1400, category: CATS[0] }, // productive, up
-      { process: "apex.exe", seconds: 1400, category: CATS[1] }, // non-productive, up
+      { process: "code.exe", seconds: 7 * 1800, category: CATS[0] }, // productive, up
+      { process: "apex.exe", seconds: 7 * 1800, category: CATS[1] }, // non-productive, up
     ];
     const prev: AppUsage[] = [
-      { process: "code.exe", seconds: 700, category: CATS[0] },
-      { process: "apex.exe", seconds: 700, category: CATS[1] },
+      { process: "code.exe", seconds: 7 * 900, category: CATS[0] },
+      { process: "apex.exe", seconds: 7 * 900, category: CATS[1] },
     ];
     const deltas = withDeltas(cur, prev, {
-      currentDaily: daily([200, 200, 200, 200, 200, 200, 200]),
-      previousDaily: daily([100, 100, 100, 100, 100, 100, 100]),
+      currentDaily: daily(1800),
+      previousDaily: daily(900),
     });
     expect(deltas[0].direction).toBe("good");
     expect(deltas[1].direction).toBe("bad");
     expect(deltas[0].deltaFraction).toBeCloseTo(1.0);
-    expect(deltas[0].pValue).not.toBeNull();
+    expect(deltas[0].robustFraction).toBeCloseTo(1.0);
   });
 
-  it("noisy small changes stay neutral (not significant)", () => {
+  it("bursty apps are judged on size, not on day-to-day consistency (UX-007)", () => {
+    // Weekend-only use, tripled. Welch's t-test left this gray; the change is real.
+    const cur = [0, 0, 0, 0, 0, 4 * 3600, 4 * 3600];
+    const prv = [0, 0, 0, 0, 0, 3600, 1.5 * 3600];
     const deltas = withDeltas(
-      [{ process: "code.exe", seconds: 24.5 * 3600, category: CATS[0] }],
-      [{ process: "code.exe", seconds: 24 * 3600, category: CATS[0] }],
+      [{ process: "apex.exe", seconds: 8 * 3600, category: CATS[1] }],
+      [{ process: "apex.exe", seconds: 2.5 * 3600, category: CATS[1] }],
       {
-        currentDaily: new Map([["code.exe", [3, 4, 3, 4, 3, 4, 3.5].map((h) => h * 3600)]]),
-        previousDaily: new Map([["code.exe", [4, 3, 4, 3, 4, 3, 3].map((h) => h * 3600)]]),
+        currentDaily: new Map([["apex.exe", cur]]),
+        previousDaily: new Map([["apex.exe", prv]]),
+      },
+    );
+    expect(deltas[0].direction).toBe("bad");
+  });
+
+  it("a change carried by one day alone stays neutral (UX-007)", () => {
+    // Steady 10 min/day plus a single five-hour binge: +413% overall, but the
+    // habit did not change, so the badge stays gray.
+    const cur = [600, 600, 600, 5 * 3600, 600, 600, 600];
+    const prv = Array(7).fill(600);
+    const deltas = withDeltas(
+      [{ process: "apex.exe", seconds: 3600 + 5 * 3600, category: CATS[1] }],
+      [{ process: "apex.exe", seconds: 7 * 600, category: CATS[1] }],
+      {
+        currentDaily: new Map([["apex.exe", cur]]),
+        previousDaily: new Map([["apex.exe", prv]]),
+      },
+    );
+    expect(deltas[0].deltaFraction).toBeGreaterThan(3);
+    expect(deltas[0].robustFraction).toBeCloseTo(0);
+    expect(deltas[0].direction).toBe("neutral");
+  });
+
+  it("large percentages on trivial amounts of time stay neutral (UX-007)", () => {
+    // 1 min/day -> 3 min/day is +200%, but only +14 min across the week.
+    const deltas = withDeltas(
+      [{ process: "code.exe", seconds: 7 * 180, category: CATS[0] }],
+      [{ process: "code.exe", seconds: 7 * 60, category: CATS[0] }],
+      {
+        currentDaily: new Map([["code.exe", Array(7).fill(180)]]),
+        previousDaily: new Map([["code.exe", Array(7).fill(60)]]),
+      },
+    );
+    expect(deltas[0].deltaFraction).toBeCloseTo(2.0);
+    expect(deltas[0].direction).toBe("neutral");
+  });
+
+  it("small steady changes stay neutral however consistent they are (UX-007)", () => {
+    // Near-zero variance made this significant under the t-test; +8% is not news.
+    const deltas = withDeltas(
+      [{ process: "code.exe", seconds: 7 * 3888, category: CATS[0] }],
+      [{ process: "code.exe", seconds: 7 * 3600, category: CATS[0] }],
+      {
+        currentDaily: new Map([["code.exe", [3890, 3886, 3888, 3887, 3889, 3888, 3888]]]),
+        previousDaily: new Map([["code.exe", [3600, 3601, 3599, 3600, 3602, 3598, 3600]]]),
       },
     );
     expect(deltas[0].direction).toBe("neutral");
-    expect(deltas[0].pValue).toBeGreaterThan(0.1);
   });
 
-  it("without daily samples, falls back to >=25% and >=15min", () => {
+  it("without daily samples, falls back to the size gates alone", () => {
     const big = withDeltas(
       [{ process: "code.exe", seconds: 4000, category: CATS[0] }],
       [{ process: "code.exe", seconds: 2000, category: CATS[0] }],
@@ -210,45 +261,41 @@ describe("topApps / withDeltas", () => {
     expect(deltas[0].direction).toBe("neutral");
   });
 
-  it("neutral categories are never judged, even on a significant change", () => {
+  it("neutral categories are never judged, even on a meaningful change", () => {
     const neutral = { ...CATS[1], isProductive: false, isNeutral: true }; // e.g. games
-    const daily = (vals: number[]) => new Map([["apex.exe", vals]]);
+    const daily = (v: number) => new Map([["apex.exe", Array(7).fill(v)]]);
     const deltas = withDeltas(
-      [{ process: "apex.exe", seconds: 1400, category: neutral }],
-      [{ process: "apex.exe", seconds: 700, category: neutral }],
-      {
-        currentDaily: daily([200, 200, 200, 200, 200, 200, 200]),
-        previousDaily: daily([100, 100, 100, 100, 100, 100, 100]),
-      },
+      [{ process: "apex.exe", seconds: 7 * 1800, category: neutral }],
+      [{ process: "apex.exe", seconds: 7 * 900, category: neutral }],
+      { currentDaily: daily(1800), previousDaily: daily(900) },
     );
-    // The change is statistically significant, but neutral time is uncolored.
-    expect(deltas[0].pValue).not.toBeNull();
+    // The change clears every gate, but neutral time is uncolored.
+    expect(deltas[0].robustFraction).toBeCloseTo(1.0);
     expect(deltas[0].direction).toBe("neutral");
   });
 });
 
-describe("welchTTestPValue (pinned to scipy.stats.ttest_ind equal_var=False)", () => {
-  it("matches scipy on a moderate overlap", () => {
-    expect(welchTTestPValue([1, 2, 3, 4, 5], [2, 3, 4, 5, 6])!).toBeCloseTo(0.34659350708733416, 8);
+describe("robustDeltaFraction", () => {
+  it("drops the single most-influential day", () => {
+    // Removing the spike leaves the two weeks identical.
+    expect(robustDeltaFraction([10, 10, 10, 900, 10], [10, 10, 10, 10, 10])).toBeCloseTo(0);
   });
-  it("matches scipy on clearly separated samples", () => {
-    expect(welchTTestPValue([5, 6, 4, 7, 5, 6, 4], [2, 1, 3, 2, 2, 1, 3])!).toBeCloseTo(
-      5.825391139442523e-5,
-      10,
-    );
+
+  it("keeps a change spread across the range", () => {
+    expect(robustDeltaFraction(Array(7).fill(200), Array(7).fill(100))).toBeCloseTo(1.0);
   });
-  it("matches scipy on near-identical samples", () => {
-    expect(welchTTestPValue([3, 4, 3, 4, 3, 4, 3], [3.5, 3, 4, 3, 4, 3, 4])!).toBeCloseTo(
-      0.8006476875457705,
-      8,
-    );
+
+  it("preserves the sign of a decline", () => {
+    expect(robustDeltaFraction(Array(7).fill(50), Array(7).fill(200))).toBeCloseTo(-0.75);
   });
-  it("identical constant samples give p=1, shifted constants give p=0", () => {
-    expect(welchTTestPValue([2, 2, 2], [2, 2, 2])).toBe(1);
-    expect(welchTTestPValue([2, 2, 2], [3, 3, 3])).toBe(0);
+
+  it("returns null when the range is too short to leave a day out", () => {
+    expect(robustDeltaFraction([100, 200], [50, 50])).toBeNull();
+    expect(robustDeltaFraction(undefined, [1, 2, 3])).toBeNull();
   });
-  it("returns null when a sample has fewer than 2 points", () => {
-    expect(welchTTestPValue([1], [1, 2, 3])).toBeNull();
+
+  it("reports Infinity when the remaining days had no prior usage", () => {
+    expect(robustDeltaFraction([100, 100, 100], [0, 0, 500])).toBe(Infinity);
   });
 });
 
