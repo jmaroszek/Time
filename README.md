@@ -113,6 +113,6 @@ Tracking is disabled until an explicit first-run choice. Window titles are a
 separate opt-in and are off by default; browser URLs are sanitized before a
 session is written. Time has no account, network client, cloud sync, analytics,
 or telemetry. The dashboard uses a restrictive content-security policy and a
-fixed-path, least-authority database bridge. See [SECURITY.md](SECURITY.md) for
+fixed-path, least-authority database bridge. See [docs/security.md](docs/security.md) for
 the threat model, at-rest limitations, vulnerability reporting, and the signed
 release requirements.
