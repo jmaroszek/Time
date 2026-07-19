@@ -1,10 +1,20 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import { Spinner } from "../components/ui";
+import { Button, Spinner } from "../components/ui";
 import { getDbPath } from "../lib/db";
 import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
-import { backupDatabase, fetchSettings, fetchTrackerStatus, updateSetting, type TrackerStatus } from "../lib/queries";
+import {
+  backupDatabase,
+  countSessionsMatching,
+  countSessionsOlderThan,
+  deleteSessionsMatching,
+  deleteSessionsOlderThan,
+  fetchSettings,
+  fetchTrackerStatus,
+  updateSetting,
+  type TrackerStatus,
+} from "../lib/queries";
 import { useBanner } from "../state/banner";
 import { useMeta } from "../state/meta";
 
@@ -233,6 +243,8 @@ export default function SettingsTab() {
           </div>
         </section>
 
+        <PrivacySection />
+
         <section>
           <SectionLabel>Advanced</SectionLabel>
           <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
@@ -254,6 +266,119 @@ export default function SettingsTab() {
         </section>
       </div>
     </div>
+  );
+}
+
+/** PROD-003: selective history deletion. Both actions show the affected count
+ *  and require an explicit confirm; the copy points at backup first. */
+function PrivacySection() {
+  const meta = useMeta();
+  const banner = useBanner();
+  const [matchText, setMatchText] = useState("");
+  const [olderDays, setOlderDays] = useState("365");
+  const [message, setMessage] = useState<string | null>(null);
+
+  const confirmAndDelete = async (
+    count: number,
+    what: string,
+    run: () => Promise<void>,
+  ): Promise<boolean> => {
+    if (count === 0) {
+      setMessage(`No recorded sessions ${what}.`);
+      return false;
+    }
+    const ok = window.confirm(
+      `Delete ${count} recorded session${count === 1 ? "" : "s"} ${what}?\n\n` +
+        "This cannot be undone. Consider “Back up database now” first.",
+    );
+    if (!ok) return false;
+    await run();
+    setMessage(`Deleted ${count} session${count === 1 ? "" : "s"} ${what}.`);
+    await meta.refresh();
+    return true;
+  };
+
+  const deleteMatching = async () => {
+    const text = matchText.trim();
+    if (!text) return;
+    try {
+      const n = await countSessionsMatching(text);
+      const done = await confirmAndDelete(n, `matching “${text}”`, () =>
+        deleteSessionsMatching(text),
+      );
+      if (done) setMatchText("");
+    } catch (e) {
+      banner.report(e, "deletion");
+    }
+  };
+
+  const deleteOlder = async () => {
+    const days = Math.floor(Number(olderDays));
+    if (!Number.isFinite(days) || days < 1) {
+      setOlderDays("365");
+      return;
+    }
+    try {
+      const cutoff = Date.now() / 1000 - days * 86_400;
+      const n = await countSessionsOlderThan(cutoff);
+      await confirmAndDelete(n, `older than ${days} day${days === 1 ? "" : "s"}`, () =>
+        deleteSessionsOlderThan(cutoff),
+      );
+    } catch (e) {
+      banner.report(e, "deletion");
+    }
+  };
+
+  const inputClass =
+    "w-[110px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 text-xs text-ink outline-none focus:border-accent/60";
+
+  return (
+    <section>
+      <SectionLabel>Privacy</SectionLabel>
+      <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
+        <Row
+          label="Delete history matching"
+          help="Removes recorded sessions whose app, window title, or site contains this text."
+          control={
+            <span className="flex items-center gap-2">
+              <input
+                value={matchText}
+                placeholder="text or site…"
+                onChange={(event) => setMatchText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void deleteMatching();
+                }}
+                className={inputClass}
+              />
+              <Button variant="danger" disabled={!matchText.trim()} onClick={() => void deleteMatching()}>
+                Delete…
+              </Button>
+            </span>
+          }
+        />
+        <Row
+          label="Delete history older than"
+          help="Removes everything recorded before the cutoff. Categories, rules, and settings are kept."
+          control={
+            <span className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                value={olderDays}
+                aria-label="Days of history to keep"
+                onChange={(event) => setOlderDays(event.target.value)}
+                className={`${inputClass} w-[64px] text-right`}
+              />
+              <span className="text-[11px] text-ink-3">days</span>
+              <Button variant="danger" onClick={() => void deleteOlder()}>
+                Delete…
+              </Button>
+            </span>
+          }
+        />
+        {message && <p className="border-t border-surface-2 px-4 py-3 text-[11.5px] text-ink-2">{message}</p>}
+      </div>
+    </section>
   );
 }
 

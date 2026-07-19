@@ -244,6 +244,47 @@ export async function deleteCategory(categoryId: number): Promise<void> {
   await db.execute("DELETE FROM categories WHERE id = $1", [categoryId]);
 }
 
+// ---------------- history deletion (PROD-003) ----------------
+// The dashboard's only destructive surface. Callers confirm with the user
+// (showing the count) before calling the delete variants.
+
+const MATCH_SQL =
+  " FROM sessions WHERE process LIKE $1 ESCAPE '\\'" +
+  " OR title LIKE $1 ESCAPE '\\' OR IFNULL(domain,'') LIKE $1 ESCAPE '\\'";
+
+function likePattern(text: string): string {
+  return `%${text.toLowerCase().replace(/[\\%_]/g, (m) => "\\" + m)}%`;
+}
+
+/** Sessions whose app, window title, or site contains `text` (case-insensitive). */
+export async function countSessionsMatching(text: string): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n" + MATCH_SQL, [
+    likePattern(text),
+  ]);
+  return rows[0].n;
+}
+
+export async function deleteSessionsMatching(text: string): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE" + MATCH_SQL, [likePattern(text)]);
+}
+
+/** Sessions that ended before `cutoffSec` (unix seconds). */
+export async function countSessionsOlderThan(cutoffSec: number): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<{ n: number }[]>(
+    "SELECT COUNT(*) AS n FROM sessions WHERE end_ts < $1",
+    [Math.floor(cutoffSec)],
+  );
+  return rows[0].n;
+}
+
+export async function deleteSessionsOlderThan(cutoffSec: number): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM sessions WHERE end_ts < $1", [Math.floor(cutoffSec)]);
+}
+
 // ---------------- status / maintenance ----------------
 
 export interface TrackerStatus {
