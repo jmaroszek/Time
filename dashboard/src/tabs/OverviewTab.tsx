@@ -93,11 +93,12 @@ export default function OverviewTab({
         <MetricCard
           label="Longest focus"
           value={fmtDuration(kpis.longestFocusSec)}
-          hint="Longest continuous run of productive time. Short gaps don't break the streak."
+          hint="Longest continuous run of productive time. Short gaps don't break the chain."
         />
         <MetricCard
           label="Goal pace"
-          value={`${pace.doneHours.toFixed(1)} / ${pace.targetHours.toFixed(0)}h`}
+          value={`${pace.doneHours.toFixed(1)}h / ${pace.targetHours.toFixed(0)}h`}
+          hint="Productive time in this range vs your weekly goal, prorated to the range's length."
         />
       </div>
 

@@ -13,6 +13,10 @@ import { useSessions } from "../state/useSessions";
 import { CHROME, HEATMAP_RAMP, TOOLTIP_STYLE } from "../lib/chartTheme";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function compactHour(hour: number): string {
   const h = hour % 24;
   return `${h % 12 || 12} ${h < 12 ? "am" : "pm"}`;
@@ -162,7 +166,7 @@ function CategoryTrend({ sessions }: { sessions: Session[] }) {
           const wkEnd = addDays(wk, 6);
           const head = `<b>Week of ${wk.getMonth() + 1}/${wk.getDate()} – ${wkEnd.getMonth() + 1}/${wkEnd.getDate()}</b>`;
           const lines = params
-            .map((p) => `<div>${p.marker} ${p.seriesName}: ${fmtDuration(p.value * 3600)}</div>`)
+            .map((p) => `<div>${p.marker} ${escapeHtml(p.seriesName)}: ${fmtDuration(p.value * 3600)}</div>`)
             .join("");
           return head + lines;
         },

@@ -87,19 +87,19 @@ describe("computeKpis", () => {
     expect(k.longestFocusSec).toBe(3600);
   });
 
-  it("focus chain broken by a tracking gap > 60s", () => {
-    const k = computeKpis([sess(0, 3600), sess(3700, 5000)], classify);
+  it("focus chain broken by a gap over the default 120s", () => {
+    const k = computeKpis([sess(0, 3600), sess(3730, 5000)], classify);
     expect(k.longestFocusSec).toBe(3600);
   });
 
-  it("focus chain survives a sub-60s gap", () => {
-    const k = computeKpis([sess(0, 3600), sess(3630, 5000)], classify);
-    expect(k.longestFocusSec).toBe(3600 + 1370);
+  it("focus chain survives a gap under the default 120s", () => {
+    const k = computeKpis([sess(0, 3600), sess(3690, 5000)], classify);
+    expect(k.longestFocusSec).toBe(3600 + 1310);
   });
 
-  it("honors a custom max-gap: a 90s gap survives a 120s threshold", () => {
+  it("honors a custom max-gap: a 90s gap breaks a 60s threshold", () => {
     const sessions = [sess(0, 3600), sess(3690, 5000)]; // 90s gap
-    expect(computeKpis(sessions, classify).longestFocusSec).toBe(3600); // default 60s breaks it
+    expect(computeKpis(sessions, classify, 60).longestFocusSec).toBe(3600); // 60s breaks it
     expect(computeKpis(sessions, classify, 120).longestFocusSec).toBe(3600 + 1310); // 120s bridges it
   });
 

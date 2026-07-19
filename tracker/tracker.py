@@ -29,7 +29,9 @@ _mutex_handle = None  # keep a module-level reference so the handle lives foreve
 def acquire_single_instance() -> bool:
     global _mutex_handle
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    _mutex_handle = kernel32.CreateMutexW(None, False, "Local\\TimeTrackerSingleton")
+    # Global\ so a second logon session (RDP, fast user switching) of the same
+    # user cannot run a second tracker against the same DB (REL-005).
+    _mutex_handle = kernel32.CreateMutexW(None, False, "Global\\TimeTrackerSingleton")
     if not _mutex_handle:
         return True  # cannot check; do not block tracking over it
     return ctypes.get_last_error() != _ERROR_ALREADY_EXISTS
@@ -49,6 +51,13 @@ def set_up_logging() -> None:
 
 def run() -> None:
     conn = db.open_db(config.DB_PATH)
+    # DIST-005: stamp the running tracker version so the dashboard can show
+    # both halves' versions (mismatch diagnosis in the field).
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('tracker_version', ?)"
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (config.TRACKER_VERSION,),
+    )
     manager = SessionManager(store=db.SqliteStore(conn), settings=db.get_settings(conn))
 
     def _shutdown(*_args) -> bool:

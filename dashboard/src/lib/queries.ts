@@ -15,13 +15,18 @@ interface SessionRow {
   is_afk: number;
 }
 
+/** No single session legitimately spans more than this (the longest real rows
+ *  are multi-day AFK spans); bounding start_ts lets idx_sessions_start skip
+ *  all older history instead of scanning it (PERF-001). */
+const MAX_SESSION_SPAN_SEC = 7 * 86_400;
+
 /** Sessions overlapping [startSec, endSec), ordered by start. Clip before use. */
 export async function fetchSessions(startSec: number, endSec: number): Promise<Session[]> {
   const db = await getDb();
   const rows = await db.select<SessionRow[]>(
     "SELECT id, start_ts, end_ts, process, title, domain, is_afk FROM sessions" +
-      " WHERE end_ts > $1 AND start_ts < $2 ORDER BY start_ts ASC",
-    [startSec, endSec],
+      " WHERE end_ts > $1 AND start_ts < $2 AND start_ts > $3 ORDER BY start_ts ASC",
+    [startSec, endSec, startSec - MAX_SESSION_SPAN_SEC],
   );
   return rows.map((r) => ({
     id: r.id,
