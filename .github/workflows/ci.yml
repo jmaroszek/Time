@@ -19,7 +19,16 @@ jobs:
         run: python -m pytest tracker/tests scripts/tests
 
   dashboard:
+    name: dashboard (${{ matrix.timezone }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        timezone:
+          - America/New_York
+          - Australia/Adelaide
+    env:
+      TZ: ${{ matrix.timezone }}
     defaults:
       run:
         working-directory: dashboard

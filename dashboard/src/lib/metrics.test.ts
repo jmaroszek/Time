@@ -36,6 +36,7 @@ function sess(start: number, end: number, process = "code.exe", isAfk = false): 
 
 // A local-midnight base keeps day-split assertions deterministic.
 const T0 = new Date(2026, 5, 8).getTime() / 1000; // Mon Jun 8 2026 00:00 local
+const TEST_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 describe("clipSessions", () => {
   it("clips overlapping edges and drops outside sessions", () => {
@@ -293,9 +294,59 @@ describe("rollingMean", () => {
 describe("hourMatrix", () => {
   it("buckets seconds into local day-of-week x hour cells", () => {
     // Mon Jun 8 2026, 09:30-11:00
-    const m = hourMatrix([sess(T0 + 9.5 * 3600, T0 + 11 * 3600)], () => true);
+    const start = new Date(2026, 5, 8, 9, 30).getTime() / 1000;
+    const end = new Date(2026, 5, 8, 11, 0).getTime() / 1000;
+    const m = hourMatrix([sess(start, end)], () => true);
     expect(m[1][9]).toBe(1800);
     expect(m[1][10]).toBe(3600);
     expect(m[1][11]).toBe(0);
   });
+
+  it.runIf(TEST_TIMEZONE === "America/New_York")(
+    "handles the skipped US eastern spring hour",
+    () => {
+      const start = new Date("2026-03-08T01:30:00-05:00").getTime() / 1000;
+      const end = new Date("2026-03-08T03:30:00-04:00").getTime() / 1000;
+      const m = hourMatrix([sess(start, end)], () => true);
+      expect(m[0][1]).toBe(1800);
+      expect(m[0][2]).toBe(0);
+      expect(m[0][3]).toBe(1800);
+    },
+  );
+
+  it.runIf(TEST_TIMEZONE === "America/New_York")(
+    "puts both US eastern fall hours in the repeated cell",
+    () => {
+      const start = new Date("2026-11-01T00:30:00-04:00").getTime() / 1000;
+      const end = new Date("2026-11-01T02:30:00-05:00").getTime() / 1000;
+      const m = hourMatrix([sess(start, end)], () => true);
+      expect(m[0][0]).toBe(1800);
+      expect(m[0][1]).toBe(7200);
+      expect(m[0][2]).toBe(1800);
+    },
+  );
+
+  it.runIf(TEST_TIMEZONE === "Australia/Adelaide")(
+    "handles Adelaide's skipped spring hour in a half-hour-offset zone",
+    () => {
+      const start = new Date("2026-10-04T01:30:00+09:30").getTime() / 1000;
+      const end = new Date("2026-10-04T03:30:00+10:30").getTime() / 1000;
+      const m = hourMatrix([sess(start, end)], () => true);
+      expect(m[0][1]).toBe(1800);
+      expect(m[0][2]).toBe(0);
+      expect(m[0][3]).toBe(1800);
+    },
+  );
+
+  it.runIf(TEST_TIMEZONE === "Australia/Adelaide")(
+    "puts both Adelaide fall hours in the repeated cell",
+    () => {
+      const start = new Date("2026-04-05T01:30:00+10:30").getTime() / 1000;
+      const end = new Date("2026-04-05T03:30:00+09:30").getTime() / 1000;
+      const m = hourMatrix([sess(start, end)], () => true);
+      expect(m[0][1]).toBe(1800);
+      expect(m[0][2]).toBe(7200);
+      expect(m[0][3]).toBe(1800);
+    },
+  );
 });

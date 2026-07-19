@@ -76,6 +76,7 @@ cd dashboard; npm run tauri build   # one NSIS installer with packaged tracker
 
 py -m pytest tracker/tests scripts/tests   # python tests
 cd dashboard; npx vitest run               # dashboard tests
+py scripts/check_db_anomalies.py <backup-or-beta-db>  # read-only health check
 ```
 
 The release build runs PyInstaller automatically, carries its one-dir tracker
@@ -84,6 +85,12 @@ installer starts the tracker immediately, registers it for logon, and removes
 the process/autostart entry on uninstall while keeping the user's database.
 Follow the [clean-VM release checklist](docs/clean-vm-release-checklist.md)
 before shipping an artifact.
+
+During a beta soak, run the anomaly checker weekly against an explicit database
+path (or, more conservatively, a fresh backup). It opens SQLite read-only, runs
+`integrity_check`, and reports duration, overlap, AFK/domain, rule, foreign-key,
+and schema-contract violations. Exit code 0 means every check passed; `--json`
+produces machine-readable output.
 
 For source development, the tracker can still run through
 `pythonw.exe tracker\tracker.py`; the single-instance mutex makes duplicate
