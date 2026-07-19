@@ -59,10 +59,15 @@ BEGIN
 END
 """
 
-# Fresh installations make no assumptions about what the user considers
-# productive. Ignored is functional infrastructure; all other categories and
-# every classification rule are user-created or belong to the synthetic demo.
+# A small, broadly applicable starter taxonomy reduces first-run setup without
+# guessing which applications or sites serve those purposes. Every category is
+# editable/deletable except the functional Ignored row; no rules are preloaded.
 _SEED_CATEGORIES = [
+    ("Focus", "#2f6fc0", 1, 0, 1),
+    ("Learning", "#9c8ff0", 1, 0, 2),
+    ("Communication", "#56c8d8", 0, 1, 3),
+    ("Entertainment", "#e8663d", 0, 0, 4),
+    ("Utilities", "#828994", 0, 1, 5),
     ("Ignored", "#44474e", 0, 0, 99),
 ]
 
@@ -173,6 +178,10 @@ def _seed(conn: sqlite3.Connection) -> None:
             "INSERT INTO categories (name, color, is_productive, is_neutral, sort_order)"
             " VALUES (?,?,?,?,?)",
             _SEED_CATEGORIES,
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key,value)"
+            " VALUES ('starter_categories_pending','1')"
         )
     if conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0:
         cat_ids = {

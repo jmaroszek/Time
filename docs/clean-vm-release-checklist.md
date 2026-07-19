@@ -48,8 +48,11 @@ signing order.
    the Start menu while the tracker is still initializing.
 3. Confirm the dashboard bootstraps the neutral schema and shows privacy
    onboarding without exposing a raw SQLite or missing-table error.
-4. Confirm categories contain only the functional Ignored row, rules are empty,
-   the weekly goal is unset, and recording/title consent are both off.
+4. Confirm categories contain Focus, Learning, Communication, Entertainment,
+   Utilities, and the functional Ignored row; rules are empty, the weekly goal
+   is unset, and recording/title consent are both off.
+5. Confirm onboarding offers the essential collection by default and that
+   deselecting it removes only the five starter categories, never Ignored.
 
 ## 3. Reboot and autostart
 
