@@ -103,8 +103,8 @@ it on first run. Debug dashboard builds accept `TIME_DB_PATH`; the tracker uses
 `TIME_DATA_DIR`. Release builds ignore database-path overrides:
 
 ```powershell
-py scripts/make_demo_db.py     # writes Data/demo.db, ~12 weeks of fake life
-$env:TIME_DB_PATH = "$PWD/Data/demo.db"; cd dashboard; npm run tauri dev
+py scripts/make_demo_db.py     # writes data/demo.db, ~12 weeks of fake life
+$env:TIME_DB_PATH = "$PWD/data/demo.db"; cd dashboard; npm run tauri dev
 ```
 
 ## Privacy and security

@@ -2,7 +2,7 @@ __pycache__/
 tracker/build/
 tracker/dist/
 dashboard/src-tauri/binaries/
-/Data/
+/data/
 /Images/
 /Logs/
 features_to_add.txt
