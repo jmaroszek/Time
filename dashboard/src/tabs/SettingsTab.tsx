@@ -162,13 +162,13 @@ export default function SettingsTab() {
       <div className="flex flex-col gap-[26px]">
         <section>
           <SectionLabel>Tracker Status</SectionLabel>
-          <div className="flex items-center gap-3 rounded-[13px] border border-[#23272e] bg-[#131519] px-[18px] py-4">
-            <span className={`h-[9px] w-[9px] rounded-full ${pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-[#16b981]" : "bg-bad"}`} />
+          <div className="flex items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-[18px] py-4">
+            <span className={`h-[9px] w-[9px] rounded-full ${pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-good-data" : "bg-bad"}`} />
             <div>
-              <p className="text-[13px] font-semibold text-[#eef0f3]">
+              <p className="text-[13px] font-semibold text-ink">
                 {pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
               </p>
-              <p className="mt-[3px] text-[11.5px] text-[#7b818b]">
+              <p className="mt-[3px] text-[11.5px] text-ink-3">
                 {pause.paused
                   ? pause.until > Date.now() / 1000
                     ? `Resumes at ${new Date(pause.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — or sooner from the tray icon`
@@ -184,13 +184,13 @@ export default function SettingsTab() {
 
         <section>
           <SectionLabel>Database</SectionLabel>
-          <div className="rounded-[13px] border border-[#23272e] bg-[#131519] p-4">
-            <p className="mb-[9px] text-[11.5px] text-[#7b818b]">Database path</p>
-            <div className="flex items-center gap-2 rounded-[10px] border border-[#2c313a] bg-[#191c22] p-[9px] pl-[13px]">
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-[#aab0b8]" title={getDbPath()}>{getDbPath()}</span>
+          <div className="rounded-[13px] border border-edge bg-surface-dim p-4">
+            <p className="mb-[9px] text-[11.5px] text-ink-3">Database path</p>
+            <div className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface-2 p-[9px] pl-[13px]">
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2" title={getDbPath()}>{getDbPath()}</span>
               <button
                 type="button"
-                className="rounded-[7px] border border-[#2c313a] px-2.5 py-[5px] text-[11px] text-ink-2 transition-colors hover:border-edge-2 hover:text-ink"
+                className="rounded-[7px] border border-edge px-2.5 py-[5px] text-[11px] text-ink-2 transition-colors hover:border-edge-2 hover:text-ink"
                 onClick={() => void navigator.clipboard.writeText(getDbPath()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}
               >
                 {copied ? "Copied" : "Copy"}
@@ -213,7 +213,7 @@ export default function SettingsTab() {
                     setBackupDetail({ ok: false, text: explainDbError(e, "backup") });
                   });
               }}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-[12.5px] font-semibold text-[#9cc0ea] shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15"
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-[12.5px] font-semibold text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 3v11" /><path d="M7 9l5 5 5-5" /><path d="M4 20h16" />
@@ -221,11 +221,11 @@ export default function SettingsTab() {
               {backupMessage ?? "Back up database now"}
             </button>
             {backupDetail && (
-              <p className={`mt-2 break-all text-[11px] ${backupDetail.ok ? "text-[#7b818b]" : "text-bad"}`}>
+              <p className={`mt-2 break-all text-[11px] ${backupDetail.ok ? "text-ink-3" : "text-bad"}`}>
                 {backupDetail.text}
               </p>
             )}
-            <p className="mt-3 text-[11px] leading-snug text-[#7b818b]">
+            <p className="mt-3 text-[11px] leading-snug text-ink-3">
               Everything Time records stays in this file on your machine — nothing is ever
               uploaded. To restore a backup: quit the tracker and dashboard, replace the
               database file with the backup copy, then restart (full steps in docs/restore.md).
@@ -235,7 +235,7 @@ export default function SettingsTab() {
 
         <section>
           <SectionLabel>Advanced</SectionLabel>
-          <div className="overflow-hidden rounded-[13px] border border-[#23272e] bg-[#131519]">
+          <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
             <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
             <Row
               label="Browser processes"
@@ -246,7 +246,7 @@ export default function SettingsTab() {
                   onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
                   onBlur={() => void saveText("browser_processes")}
                   onKeyDown={(event) => { if (event.key === "Enter") void saveText("browser_processes"); }}
-                  className="w-[150px] rounded-[9px] border border-[#2c313a] bg-[#191c22] px-[11px] py-2 font-mono text-xs text-[#eef0f3] outline-none focus:border-accent/60"
+                  className="w-[150px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs text-ink outline-none focus:border-accent/60"
                 />
               }
             />
@@ -265,17 +265,17 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
       <SectionLabel>{title}</SectionLabel>
-      <div className="overflow-hidden rounded-[13px] border border-[#23272e] bg-[#131519]">{children}</div>
+      <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">{children}</div>
     </section>
   );
 }
 
 function Row({ label, help, control }: { label: string; help: string; control: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-t border-[#1e2127] px-4 py-[15px] first:border-t-0">
+    <div className="flex items-center justify-between gap-4 border-t border-surface-2 px-4 py-[15px] first:border-t-0">
       <div className="min-w-0">
-        <p className="text-[13px] font-medium text-[#eef0f3]">{label}</p>
-        <p className="mt-[5px] max-w-[280px] text-xs leading-snug text-[#7b818b]">{help}</p>
+        <p className="text-[13px] font-medium text-ink">{label}</p>
+        <p className="mt-[5px] max-w-[280px] text-xs leading-snug text-ink-3">{help}</p>
       </div>
       <div className="shrink-0">{control}</div>
     </div>
@@ -302,7 +302,7 @@ function NumberStepper({
   onPlus: () => void;
 }) {
   return (
-    <div className="flex items-center rounded-[10px] border border-[#2c313a] bg-[#191c22] p-[3px]">
+    <div className="flex items-center rounded-[10px] border border-edge bg-surface-2 p-[3px]">
       <button type="button" className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-base text-ink-2 hover:bg-white/5 hover:text-ink" onClick={onMinus}>−</button>
       <div className={`flex items-baseline justify-center ${unit ? "min-w-[48px] gap-1.5" : "min-w-[48px]"}`}>
         <input
@@ -313,9 +313,9 @@ function NumberStepper({
           onChange={(event) => onChange(event.target.value)}
           onBlur={onBlur}
           onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-          className={`${unit ? "text-right" : "w-full text-center"} bg-transparent text-[13px] font-semibold tabular-nums text-[#eef0f3] outline-none`}
+          className={`${unit ? "text-right" : "w-full text-center"} bg-transparent text-[13px] font-semibold tabular-nums text-ink outline-none`}
         />
-        {unit && <span className="text-[11px] text-[#7b818b]">{unit}</span>}
+        {unit && <span className="text-[11px] text-ink-3">{unit}</span>}
       </div>
       <button type="button" className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-base text-ink-2 hover:bg-white/5 hover:text-ink" onClick={onPlus}>+</button>
     </div>
@@ -324,12 +324,12 @@ function NumberStepper({
 
 function Segmented({ options, value, onChange }: { options: string[]; value: string; onChange: (value: string) => void }) {
   return (
-    <div className="flex rounded-[10px] border border-[#2c313a] bg-[#191c22] p-[3px]">
+    <div className="flex rounded-[10px] border border-edge bg-surface-2 p-[3px]">
       {options.map((option) => (
         <button
           type="button"
           key={option}
-          className={`rounded-[7px] px-[13px] py-1.5 text-[11.5px] transition-colors ${value === option ? "bg-accent/15 font-semibold text-[#88b3e6]" : "text-[#7b818b] hover:text-ink-2"}`}
+          className={`rounded-[7px] px-[13px] py-1.5 text-[11.5px] transition-colors ${value === option ? "bg-accent/15 font-semibold text-accent" : "text-ink-3 hover:text-ink-2"}`}
           onClick={() => onChange(option)}
         >
           {option}

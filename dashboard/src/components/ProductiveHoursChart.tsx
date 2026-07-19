@@ -10,6 +10,7 @@ import { dailySeconds, rollingMean, type Session } from "../lib/metrics";
 import { addDays, dayKey, listDays, type Range } from "../lib/time";
 import { fmtShortDate } from "../lib/format";
 import EChart, { type EChartsOption } from "./EChart";
+import { ANNOTATION, CHROME, GOOD_DATA, NON_PRODUCTIVE_BAR, TOOLTIP_STYLE } from "../lib/chartTheme";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -46,9 +47,7 @@ export default function ProductiveHoursChart({
       grid: { left: 36, right: 12, top: 24, bottom: 24 },
       tooltip: {
         trigger: "axis",
-        backgroundColor: "#1d2026",
-        borderColor: "#2a2e36",
-        textStyle: { color: "#e8eaed", fontSize: 12 },
+        ...TOOLTIP_STYLE,
         valueFormatter: (v: number) => `${v.toFixed(1)}h`,
       },
       legend: {
@@ -63,7 +62,7 @@ export default function ProductiveHoursChart({
             icon: "path://M0,3 L14,3 L14,5 L0,5 Z",
           },
         ],
-        textStyle: { color: "#9aa0a8", fontSize: 11 },
+        textStyle: { color: CHROME.axisLabel, fontSize: 11 },
         itemWidth: 14,
         itemHeight: 8,
       },
@@ -72,14 +71,14 @@ export default function ProductiveHoursChart({
         data: visibleDays.map((d) =>
           labelMode === "weekday" ? DAY_NAMES[d.getDay()] : fmtShortDate(d),
         ),
-        axisLabel: { color: "#9aa0a8", fontSize: 11 },
+        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: "#2a2e36" } },
+        axisLine: { lineStyle: { color: CHROME.axisLine } },
       },
       yAxis: {
         type: "value",
-        axisLabel: { color: "#9aa0a8", fontSize: 11, formatter: "{value}h" },
-        splitLine: { lineStyle: { color: "#1d2026" } },
+        axisLabel: { color: CHROME.axisLabel, fontSize: 11, formatter: "{value}h" },
+        splitLine: { lineStyle: { color: CHROME.gridLine } },
       },
       series: [
         {
@@ -87,7 +86,7 @@ export default function ProductiveHoursChart({
           type: "bar",
           stack: "day",
           data: prodBars,
-          itemStyle: { color: "#16b981" },
+          itemStyle: { color: GOOD_DATA },
           barMaxWidth: 36,
         },
         {
@@ -95,7 +94,7 @@ export default function ProductiveHoursChart({
           type: "bar",
           stack: "day",
           data: nonProdBars,
-          itemStyle: { color: "#3a3d44", borderRadius: [3, 3, 0, 0] },
+          itemStyle: { color: NON_PRODUCTIVE_BAR, borderRadius: [3, 3, 0, 0] },
           barMaxWidth: 36,
         },
         {
@@ -103,8 +102,8 @@ export default function ProductiveHoursChart({
           type: "line",
           data: avgLine,
           symbol: "none",
-          lineStyle: { color: "#7F77DD", width: 2, type: "dashed" },
-          itemStyle: { color: "#7F77DD" },
+          lineStyle: { color: ANNOTATION, width: 2, type: "dashed" },
+          itemStyle: { color: ANNOTATION },
         },
       ],
     };

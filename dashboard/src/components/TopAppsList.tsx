@@ -42,9 +42,9 @@ function DeltaBadge({ app }: { app: AppDelta }) {
   const text = `${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct)}%`;
   const cls =
     app.direction === "good"
-      ? "text-[#5fc296]"
+      ? "text-good"
       : app.direction === "bad"
-        ? "text-[#e08787]"
+        ? "text-bad"
         : "text-ink-2";
   return (
     <span
