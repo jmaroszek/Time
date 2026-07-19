@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePicker";
 import { Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
-import { fetchTrackerStatus, type TrackerStatus } from "./lib/queries";
+import { fetchTrackerStatus, updateSetting, type TrackerStatus } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
 import { rangeForPreset, type Range } from "./lib/time";
 import { BannerProvider } from "./state/banner";
@@ -78,6 +79,7 @@ function Shell() {
   if (waitingForTracker) return <WaitingForTracker />;
   if (meta.error && isNewerSchemaError(meta.error)) return <NewerDatabaseScreen />;
   if (meta.error) return <DbErrorScreen error={meta.error} />;
+  if (meta.settings.privacy_onboarding_complete !== "1") return <PrivacyOnboarding />;
 
   const showRange = tab === "overview" || tab === "apps";
 
@@ -123,6 +125,122 @@ function Shell() {
   );
 }
 
+function PrivacyOnboarding() {
+  const meta = useMeta();
+  const [windowTitles, setWindowTitles] = useState(false);
+  const [startAtLogin, setStartAtLogin] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const complete = async (enable: boolean) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await updateSetting("record_window_titles", enable && windowTitles ? "1" : "0");
+      await updateSetting("launch_at_login", enable && startAtLogin ? "1" : "0");
+      await updateSetting("recording_consent", enable ? "1" : "0");
+      await invoke("set_launch_at_login", { enabled: enable && startAtLogin });
+      if (enable) await invoke("start_tracker");
+      await updateSetting("privacy_onboarding_complete", "1");
+      await meta.refresh();
+    } catch (cause) {
+      // Do not leave a partially completed first-run flow recording activity.
+      await updateSetting("recording_consent", "0").catch(() => {});
+      await updateSetting("launch_at_login", "0").catch(() => {});
+      await invoke("set_launch_at_login", { enabled: false }).catch(() => {});
+      setError(String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-full items-center justify-center p-8">
+      <section className="w-full max-w-2xl rounded-[18px] border border-edge bg-surface px-7 py-6 shadow-2xl shadow-black/20">
+        <p className="text-[11px] font-bold uppercase tracking-[.12em] text-accent">Private by design</p>
+        <h1 className="mt-2 text-xl font-semibold text-ink">Choose what Time may record</h1>
+        <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-2">
+          Time has no account, server, analytics, or telemetry. Activity is written only to your
+          per-user SQLite database. Nothing is uploaded.
+        </p>
+
+        <div className="mt-5 space-y-3 text-sm">
+          <div className="rounded-xl border border-edge bg-surface-dim p-4">
+            <p className="font-medium">When tracking is enabled</p>
+            <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
+              Time stores the foreground app name, start and end time, and idle or lock periods.
+              Browser domains are derived in memory when an optional URL-in-title extension is
+              present; URL paths, queries, fragments, and credentials are never stored.
+            </p>
+          </div>
+          <ConsentCheck
+            checked={windowTitles}
+            onChange={setWindowTitles}
+            title="Also store sanitized window titles"
+            detail="Off by default. Titles can reveal document names, email subjects, or other sensitive text. Browser URLs are stripped even when this is enabled."
+          />
+          <ConsentCheck
+            checked={startAtLogin}
+            onChange={setStartAtLogin}
+            title="Start the tracker when I sign in"
+            detail="Runs only for this Windows account. You can disable tracking or startup later in Settings."
+          />
+        </div>
+
+        {error && <p className="mt-4 rounded-lg border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">{error}</p>}
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void complete(true)}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-[#081019] transition-opacity disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Enable private tracking"}
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void complete(false)}
+            className="rounded-lg border border-edge-2 px-4 py-2 text-sm text-ink-2 hover:text-ink disabled:opacity-50"
+          >
+            Not now
+          </button>
+        </div>
+        <p className="mt-4 text-[11px] leading-relaxed text-ink-3">
+          Choosing “Not now” opens the dashboard without starting or registering the tracker.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function ConsentCheck({
+  checked,
+  onChange,
+  title,
+  detail,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <label className="flex cursor-pointer gap-3 rounded-xl border border-edge bg-surface-dim p-4">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
+      />
+      <span>
+        <span className="block font-medium text-ink">{title}</span>
+        <span className="mt-1 block text-xs leading-relaxed text-ink-3">{detail}</span>
+      </span>
+    </label>
+  );
+}
+
 /** Shown while this database has zero sessions: says what is recorded, that it
  *  stays local, whether the tracker is live, and the browser-extension caveat.
  *  Disappears on its own once the first session lands. */
@@ -133,9 +251,9 @@ function FirstRunPanel({ status }: { status: TrackerStatus }) {
     <section className="rounded-[14px] border border-accent/25 bg-[linear-gradient(180deg,rgba(107,160,218,.06),rgba(107,160,218,.02))] px-5 py-4 text-xs leading-relaxed">
       <p className="text-[13px] font-semibold">Welcome to Time</p>
       <p className="mt-2 text-ink-2">
-        Time records which app is in the foreground, its window title, and — for browsers — the
-        site&apos;s domain. Everything stays in a database file on this machine. Nothing is ever
-        uploaded.
+        Time records foreground apps and timing. Window titles are stored only if you opted in;
+        browser URLs are stripped before anything reaches the database. Everything stays in a
+        local file and nothing is uploaded.
       </p>
       <p className="mt-2 flex items-center gap-2">
         <span className={`h-2 w-2 rounded-full ${trackerLive ? "bg-good-data" : "bg-bad"}`} />
@@ -151,10 +269,9 @@ function FirstRunPanel({ status }: { status: TrackerStatus }) {
         )}
       </p>
       <p className="mt-2 text-ink-2">
-        To split browser time by site, install the &quot;URL in title&quot; browser extension
-        (third-party — it&apos;s what Time is tested with); without it, browser time is tracked
-        per app only. As data arrives, assign categories on the Apps tab — rules re-classify
-        all history instantly.
+        Site splitting is optional and requires a third-party extension that adds the current URL
+        to the browser title. Such extensions can see browsing data, so review their permissions
+        before installing one. Without an extension, browser time is tracked per app only.
       </p>
     </section>
   );
@@ -217,7 +334,7 @@ function DbErrorScreen({ error }: { error: string }) {
       </button>
       {import.meta.env.DEV && (
         <p className="mt-4 max-w-xl break-all text-[11px] text-ink-3">
-          {error} — check VITE_DB_PATH / src/lib/db.ts (dev-only hint).
+          {error} — check TIME_DB_PATH / src/lib/db.ts (debug-only hint).
         </p>
       )}
     </div>

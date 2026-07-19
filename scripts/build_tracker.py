@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import os
 import platform
 import shutil
@@ -17,6 +18,29 @@ SPEC_PATH = TRACKER_DIR / "time_tracker.spec"
 DIST_DIR = TRACKER_DIR / "dist"
 WORK_DIR = TRACKER_DIR / "build"
 TAURI_BINARIES = ROOT / "dashboard" / "src-tauri" / "binaries"
+REQUIREMENTS_PATH = TRACKER_DIR / "requirements.txt"
+
+
+def _verify_pinned_runtime() -> None:
+    """Never package whatever happens to be installed in the build Python."""
+    mismatches: list[str] = []
+    for raw in REQUIREMENTS_PATH.read_text(encoding="utf-8").splitlines():
+        requirement = raw.strip()
+        if not requirement or requirement.startswith("#"):
+            continue
+        name, expected = requirement.split("==", 1)
+        try:
+            actual = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            actual = "not installed"
+        if actual != expected:
+            mismatches.append(f"{name}: expected {expected}, found {actual}")
+    if mismatches:
+        details = "\n  ".join(mismatches)
+        raise SystemExit(
+            "Tracker build environment does not match tracker/requirements.txt:\n"
+            f"  {details}\nInstall the pinned requirements before building."
+        )
 
 
 def _target_triple(explicit: str | None) -> str:
@@ -39,6 +63,7 @@ def _target_triple(explicit: str | None) -> str:
 
 
 def build(target_triple: str) -> Path:
+    _verify_pinned_runtime()
     env = os.environ.copy()
     env["TIME_TRACKER_TARGET_TRIPLE"] = target_triple
     subprocess.run(

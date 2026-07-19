@@ -3,9 +3,10 @@
 Builds Data/demo.db with several weeks of plausible synthetic sessions (a
 software-developer persona: weekday work blocks, lunch breaks, evening gaming
 and media, lazier weekends) using the real schema bootstrap from tracker.db,
-so seed categories/rules/settings are identical to a fresh install.
+then adds a clearly synthetic persona's categories and rules. Fresh production
+installs deliberately ship without those opinions.
 
-Point the dashboard at it with:  VITE_DB_PATH=<repo>/Data/demo.db
+Point a debug dashboard at it with:  TIME_DB_PATH=<repo>/Data/demo.db
 
 Usage:
     py scripts/make_demo_db.py [--out Data/demo.db] [--weeks 12]
@@ -77,13 +78,39 @@ SYSTEM = [
     ("searchhost.exe", ["Search"], None, 0.5),
 ]
 
-# Rules a user would add on top of the seeds, so screenshots show the
-# domain-rule feature doing real work (dev domains classify as Dev, not
-# generic Browsing).
+# Demo-only taxonomy and rules. These are intentionally kept out of production
+# bootstrap so screenshots stay rich without assigning values to real users.
+DEMO_CATEGORIES = [
+    ("Notes", "#9c8ff0", 1, 0, 1),
+    ("Dev", "#2f6fc0", 1, 0, 2),
+    ("AI tools", "#43c88a", 1, 0, 3),
+    ("Browsing", "#e0a53a", 0, 1, 4),
+    ("Gaming", "#e8663d", 0, 1, 5),
+    ("Media", "#e75fa0", 0, 0, 6),
+    ("System", "#828994", 0, 1, 7),
+]
+
 DEMO_RULES = [
-    ("domain", "github.com", "Dev", 300),
-    ("domain", "stackoverflow.com", "Dev", 300),
-    ("domain", "docs.python.org", "Dev", 300),
+    ("process", "obsidian.exe", "Notes", 3),
+    ("process", "notepad.exe", "Notes", 3),
+    ("process", "code.exe", "Dev", 3),
+    ("process", "windowsterminal.exe", "Dev", 3),
+    ("process", "db browser for sqlite.exe", "Dev", 3),
+    ("process", "claude.exe", "AI tools", 3),
+    ("process", "chrome.exe", "Browsing", 3),
+    ("process", "rocketleague.exe", "Gaming", 3),
+    ("process", "r5apex_dx12.exe", "Gaming", 3),
+    ("process", "steam.exe", "Gaming", 3),
+    ("process", "explorer.exe", "System", 3),
+    ("process", "searchhost.exe", "System", 3),
+    ("domain", "github.com", "Dev", 1),
+    ("domain", "stackoverflow.com", "Dev", 1),
+    ("domain", "docs.python.org", "Dev", 1),
+    ("domain", "docs.google.com", "Notes", 1),
+    ("domain", "youtube.com", "Media", 1),
+    ("domain", "netflix.com", "Media", 1),
+    ("domain", "twitch.tv", "Media", 1),
+    ("domain", "reddit.com", "Media", 1),
 ]
 
 # Mix = weighted activity pools a block draws from.
@@ -179,9 +206,16 @@ def generate(out: Path, weeks: int, end_day: datetime, now_ts: int | None) -> in
     conn = open_db(out)
     try:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('demo_dataset','1')")
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('recording_consent','1')")
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('record_window_titles','1')")
         # The persona's productive hours land around 35-40/wk; match the goal.
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('weekly_goal_hours','35')"
+        )
+        conn.executemany(
+            "INSERT OR IGNORE INTO categories"
+            " (name,color,is_productive,is_neutral,sort_order) VALUES (?,?,?,?,?)",
+            DEMO_CATEGORIES,
         )
         cat_ids = {r[1]: r[0] for r in conn.execute("SELECT id, name FROM categories")}
         conn.executemany(
@@ -244,7 +278,7 @@ def main() -> int:
 
     n = generate(out, args.weeks, end_day, now_ts)
     print(f"wrote {n} sessions over {args.weeks} weeks -> {out}")
-    print(f"point the dashboard at it: VITE_DB_PATH={out.as_posix()}")
+    print(f"point a debug dashboard at it: TIME_DB_PATH={out.as_posix()}")
     return 0
 
 

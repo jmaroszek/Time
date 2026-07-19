@@ -6,10 +6,13 @@
   !insertmacro CheckIfAppIsRunning "${TIME_TRACKER_EXE}" "Time tracker"
 !macroend
 
-; Autostart for the current user and start tracking immediately on first install.
+; Recording is never enabled by installation alone. The dashboard's first-run
+; privacy screen obtains explicit consent before starting or registering the
+; tracker. Preserve an existing startup choice during an in-place upgrade; on
+; a fresh install there is no Run value to preserve.
 !macro NSIS_HOOK_POSTINSTALL
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" \
-    "${TIME_TRACKER_RUN_VALUE}" "$\"$INSTDIR\${TIME_TRACKER_EXE}$\""
+  ; Bootstrap the local schema, then exit without recording. The tracker only
+  ; remains running after the dashboard has recorded the user's choice.
   Exec '"$INSTDIR\${TIME_TRACKER_EXE}"'
 !macroend
 

@@ -1,5 +1,5 @@
 // Rule-based session classification. Priority decides between matching rules
-// (seeds: domain 1 < title 2 < process 3). Lower numbers win. Domain and title rules only
+// (domain 1 < title 2 < process 3). Lower numbers win. Domain and title rules only
 // apply to browser sessions; process rules apply to everything. AFK sessions
 // are never classified.
 

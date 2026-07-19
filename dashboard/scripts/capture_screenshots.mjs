@@ -2,7 +2,7 @@
 //
 // Usage (from repo root):
 //   1. py scripts/make_demo_db.py
-//   2. in dashboard/:  VITE_DB_PATH=<repo>/Data/demo.db
+//   2. in dashboard/:  TIME_DB_PATH=<repo>/Data/demo.db
 //      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222
 //      npm run tauri dev
 //   3. cd dashboard && npm i --no-save puppeteer-core

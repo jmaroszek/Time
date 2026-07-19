@@ -16,6 +16,7 @@ import re
 from urllib.parse import urlsplit
 
 _URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_ANY_URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s<>\"']+", re.IGNORECASE)
 _BROWSER_SUFFIX_RE = re.compile(
     r"\s+[-–—]\s+(google chrome|thorium|microsoft edge|brave|mozilla firefox|firefox)$",
     re.IGNORECASE,
@@ -62,3 +63,20 @@ def parse_domain(title: str) -> str | None:
     if m:
         return _clean_host(m.group(1))
     return None
+
+
+def sanitize_browser_title(title: str) -> str:
+    """Remove URL material before a browser title is persisted.
+
+    URL-in-title extensions may expose paths, query strings, fragments, or
+    embedded credentials. Time needs the host transiently for classification,
+    but none of that URL material belongs in the durable window-title field.
+    """
+    if not title:
+        return ""
+    cleaned = _BROWSER_SUFFIX_RE.sub("", title.replace("\x00", "").strip())
+    cleaned = _ANY_URL_RE.sub("", cleaned)
+    cleaned = _TRAILING_DOMAIN_RE.sub("", cleaned)
+    cleaned = re.sub(r"(?:\s*[-–—•·|]\s*)+$", "", cleaned)
+    cleaned = re.sub(r"^(?:\s*[-–—•·|]\s*)+", "", cleaned)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()[:512]

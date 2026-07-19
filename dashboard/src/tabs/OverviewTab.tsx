@@ -97,8 +97,10 @@ export default function OverviewTab({
         />
         <MetricCard
           label="Goal pace"
-          value={`${pace.doneHours.toFixed(1)}h / ${pace.targetHours.toFixed(0)}h`}
-          hint="Productive time in this range vs your weekly goal, prorated to the range's length."
+          value={meta.weeklyGoalHours > 0 ? `${pace.doneHours.toFixed(1)}h / ${pace.targetHours.toFixed(0)}h` : "Not set"}
+          hint={meta.weeklyGoalHours > 0
+            ? "Productive time in this range vs your weekly goal, prorated to the range's length."
+            : "Set an optional weekly goal in Settings."}
         />
       </div>
 

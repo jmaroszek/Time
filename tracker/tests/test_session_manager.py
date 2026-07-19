@@ -195,6 +195,26 @@ def test_heartbeat_respects_cadence(store):
 def test_browser_session_gets_domain(manager, store):
     manager.tick(active(1000.0, process="chrome.exe", title="Video - https://youtube.com/watch?v=1"))
     assert store.opened[0][4] == "youtube.com"
+    assert store.opened[0][3] == "Video"
+
+
+def test_titles_are_omitted_unless_enabled(store):
+    manager = SessionManager(store=store, settings=Settings(record_window_titles=False))
+    manager.tick(active(1000.0, process="code.exe", title="private-document.txt"))
+    assert store.opened[0][3] == ""
+
+
+def test_browser_domains_are_kept_when_titles_are_disabled(store):
+    manager = SessionManager(store=store, settings=Settings(record_window_titles=False))
+    manager.tick(active(1000.0, process="chrome.exe", title="Account - https://example.com/private"))
+    assert store.opened[0][3] == ""
+    assert store.opened[0][4] == "example.com"
+
+
+def test_no_recording_without_consent(store):
+    manager = SessionManager(store=store, settings=Settings(recording_consent=False))
+    drive(manager, 1000.0, 10)
+    assert store.opened == []
 
 
 def test_non_browser_session_has_no_domain(manager, store):

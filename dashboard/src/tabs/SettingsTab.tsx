@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 import { Button, Spinner } from "../components/ui";
 import { getDbPath } from "../lib/db";
@@ -10,6 +11,7 @@ import {
   countSessionsOlderThan,
   deleteSessionsMatching,
   deleteSessionsOlderThan,
+  eraseAllHistory,
   fetchSettings,
   fetchTrackerStatus,
   updateSetting,
@@ -29,7 +31,7 @@ interface NumericSpec {
 // UI clamp ranges. The tracker separately clamps what it consumes in
 // tracker/db.py get_settings (CODE-002) — keep the two in sight of each other.
 const SPECS = {
-  goal: { key: "weekly_goal_hours", min: 1, max: 100, scale: 1 },
+  goal: { key: "weekly_goal_hours", min: 0, max: 100, scale: 1 },
   minimum: { key: "min_app_seconds", min: 0, max: 30, scale: 60 },
   start: { key: "day_start_hour", min: 0, max: 23, scale: 1 },
   end: { key: "day_end_hour", min: 1, max: 24, scale: 1 },
@@ -125,6 +127,31 @@ export default function SettingsTab() {
 
   const heartbeatAge = status?.lastHeartbeat == null ? null : Date.now() / 1000 - status.lastHeartbeat;
   const trackerLive = heartbeatAge !== null && heartbeatAge < 120;
+  const trackingEnabled = meta.settings.recording_consent === "1";
+
+  const setTrackingEnabled = async (enabled: boolean) => {
+    try {
+      await updateSetting("recording_consent", enabled ? "1" : "0");
+      if (enabled) await invoke("start_tracker");
+      else {
+        await updateSetting("launch_at_login", "0");
+        await invoke("set_launch_at_login", { enabled: false });
+      }
+      await meta.refresh();
+    } catch (e) {
+      banner.report(e, "tracking preference");
+    }
+  };
+
+  const setStartAtLogin = async (enabled: boolean) => {
+    try {
+      await invoke("set_launch_at_login", { enabled });
+      await updateSetting("launch_at_login", enabled ? "1" : "0");
+      await meta.refresh();
+    } catch (e) {
+      banner.report(e, "startup preference");
+    }
+  };
 
   const numberControl = (spec: NumericSpec, unit?: string, hour = false) => (
     <NumberStepper
@@ -143,7 +170,7 @@ export default function SettingsTab() {
     <div className="grid grid-cols-2 items-start gap-6">
       <div className="flex flex-col gap-[26px]">
         <Section title="Goals">
-          <Row label="Weekly productive goal" help="Target the goal-pace card measures against." control={numberControl(SPECS.goal, "h")} />
+          <Row label="Weekly productive goal" help="Optional. Set 0 to leave goal pace unset." control={numberControl(SPECS.goal, "h")} />
         </Section>
 
         <Section title="Timeline Window">
@@ -152,7 +179,7 @@ export default function SettingsTab() {
           <Row
             label="Week starts on"
             help="Affects weekly presets, trends, and goal pacing."
-            control={<Segmented options={["Sunday", "Monday"]} value={drafts.week_start ?? "Sunday"} onChange={(value) => selectSetting("week_start", value)} />}
+            control={<Segmented options={["auto", "Monday", "Sunday"]} value={drafts.week_start ?? "auto"} onChange={(value) => selectSetting("week_start", value)} />}
           />
         </Section>
 
@@ -175,13 +202,15 @@ export default function SettingsTab() {
         <section>
           <SectionLabel>Tracker Status</SectionLabel>
           <div className="flex items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-[18px] py-4">
-            <span className={`h-[9px] w-[9px] rounded-full ${pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-good-data" : "bg-bad"}`} />
+            <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-good-data" : "bg-bad"}`} />
             <div>
               <p className="text-[13px] font-semibold text-ink">
-                {pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
+                {!trackingEnabled ? "Tracking disabled" : pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
               </p>
               <p className="mt-[3px] text-[11.5px] text-ink-3">
-                {pause.paused
+                {!trackingEnabled
+                  ? "No new activity is being recorded"
+                  : pause.paused
                   ? pause.until > Date.now() / 1000
                     ? `Resumes at ${new Date(pause.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — or sooner from the tray icon`
                     : "Resume from the tray icon"
@@ -193,6 +222,35 @@ export default function SettingsTab() {
             {heartbeatAge !== null && <span className="ml-auto text-[11.5px] tabular-nums text-ink-3">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
           </div>
         </section>
+
+        <Section title="Tracking & Privacy">
+          <Row
+            label="Record activity"
+            help="Stores foreground app names and timing only after you enable it."
+            control={<PrivacyToggle enabled={trackingEnabled} onChange={(enabled) => void setTrackingEnabled(enabled)} />}
+          />
+          <Row
+            label="Store window titles"
+            help="Optional and off by default. Browser URLs are stripped even when enabled."
+            control={
+              <PrivacyToggle
+                enabled={meta.settings.record_window_titles === "1"}
+                onChange={(enabled) => selectSetting("record_window_titles", enabled ? "1" : "0")}
+              />
+            }
+          />
+          <Row
+            label="Start at Windows sign-in"
+            help="Registers only the tracker for this Windows account."
+            control={
+              <PrivacyToggle
+                enabled={meta.settings.launch_at_login === "1"}
+                disabled={!trackingEnabled}
+                onChange={(enabled) => void setStartAtLogin(enabled)}
+              />
+            }
+          />
+        </Section>
 
         <section>
           <SectionLabel>Database</SectionLabel>
@@ -254,7 +312,7 @@ export default function SettingsTab() {
             <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
             <Row
               label="Browser processes"
-              help="Comma-separated. Splitting browser time by site needs the “URL in title” extension (or any extension that appends the URL to the window title); without one, browser time is tracked per app only."
+              help="Comma-separated. Site splitting needs an optional third-party extension that appends the URL to the window title; review its browsing-data permissions before installing it."
               control={
                 <input
                   value={drafts.browser_processes ?? ""}
@@ -349,6 +407,25 @@ function PrivacySection() {
     }
   };
 
+  const eraseEverything = async () => {
+    const confirmation = window.prompt(
+      "Erase every recorded session and compact the database? Categories and settings are kept.\n\n" +
+        "This does not delete separate backup files. Type DELETE to continue.",
+    );
+    if (confirmation !== "DELETE") return;
+    try {
+      await updateSetting("recording_consent", "0");
+      await updateSetting("launch_at_login", "0");
+      await invoke("set_launch_at_login", { enabled: false });
+      await invoke("stop_tracker");
+      const n = await eraseAllHistory();
+      setMessage(`Securely erased ${n} recorded session${n === 1 ? "" : "s"}. Separate backups were not deleted.`);
+      await meta.refresh();
+    } catch (e) {
+      banner.report(e, "secure erase");
+    }
+  };
+
   const inputClass =
     "w-[110px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 text-xs text-ink outline-none focus:border-accent/60";
 
@@ -377,6 +454,11 @@ function PrivacySection() {
           }
         />
         <Row
+          label="Erase all recorded history"
+          help="Stops tracking, removes every session, truncates SQLite's WAL, and compacts free pages. Separate backup files remain."
+          control={<Button variant="danger" onClick={() => void eraseEverything()}>Erase all…</Button>}
+        />
+        <Row
           label="Delete history older than"
           help="Removes everything recorded before the cutoff. Categories, rules, and settings are kept."
           control={
@@ -399,6 +481,31 @@ function PrivacySection() {
         {message && <p className="border-t border-surface-2 px-4 py-3 text-[11.5px] text-ink-2">{message}</p>}
       </div>
     </section>
+  );
+}
+
+function PrivacyToggle({
+  enabled,
+  disabled = false,
+  onChange,
+}: {
+  enabled: boolean;
+  disabled?: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      disabled={disabled}
+      onClick={() => onChange(!enabled)}
+      className={`relative h-6 w-11 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        enabled ? "border-accent/60 bg-accent/35" : "border-edge-2 bg-surface-2"
+      }`}
+    >
+      <span className={`absolute top-[3px] h-4 w-4 rounded-full bg-ink transition-all ${enabled ? "left-[22px]" : "left-[3px]"}`} />
+    </button>
   );
 }
 
@@ -477,7 +584,7 @@ function Segmented({ options, value, onChange }: { options: string[]; value: str
           className={`rounded-[7px] px-[13px] py-1.5 text-[11.5px] transition-colors ${value === option ? "bg-accent/15 font-semibold text-accent" : "text-ink-3 hover:text-ink-2"}`}
           onClick={() => onChange(option)}
         >
-          {option}
+          {option === "auto" ? "Auto" : option}
         </button>
       ))}
     </div>

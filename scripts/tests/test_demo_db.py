@@ -76,7 +76,7 @@ def test_afk_sessions_present_and_marked(tmp_path):
 def test_seeds_and_marker_present(tmp_path):
     conn = _make(tmp_path)
     assert conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] >= 8
-    assert conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] > 20
+    assert conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] >= 20
     marker = conn.execute(
         "SELECT value FROM settings WHERE key = 'demo_dataset'"
     ).fetchone()

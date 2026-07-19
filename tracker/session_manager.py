@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from tracker.domains import parse_domain
+from tracker.domains import parse_domain, sanitize_browser_title
 
 LOCK_PROCESS = "lockapp.exe"
 AFK_PROCESS = "afk"
@@ -39,10 +39,16 @@ class Snapshot:
 class Settings:
     idle_threshold_seconds: float = 180.0
     heartbeat_seconds: float = 15.0
-    browser_processes: frozenset[str] = frozenset({"chrome.exe", "thorium.exe"})
+    browser_processes: frozenset[str] = frozenset(
+        {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe"}
+    )
     debounce_ticks: int = 2
+    # Production passes both privacy choices explicitly from SQLite. Defaults
+    # stay enabled here so isolated state-machine callers retain useful behavior.
+    recording_consent: bool = True
+    record_window_titles: bool = True
     # Set from the tray (or dashboard) via the tracking_paused settings keys;
-    # picked up within one settings-refresh cycle (heartbeat_seconds).
+    # picked up by the live tracker on its next one-second poll.
     tracking_paused: bool = False
 
 
@@ -62,6 +68,7 @@ class _Current:
     start_ts: float
     process: str
     title: str
+    domain: str | None
     is_afk: bool
 
 
@@ -71,7 +78,7 @@ class SessionManager:
     settings: Settings = field(default_factory=Settings)
 
     _current: _Current | None = None
-    _pending_title: str | None = None
+    _pending_identity: tuple[str, str | None] | None = None
     _pending_first_ts: float = 0.0
     _pending_count: int = 0
     _last_heartbeat: float = 0.0
@@ -84,7 +91,7 @@ class SessionManager:
     # ---------- public API ----------
 
     def tick(self, snap: Snapshot) -> None:
-        if self.settings.tracking_paused:
+        if self.settings.tracking_paused or not self.settings.recording_consent:
             # Pause = finalize the open session and open nothing new. Resuming
             # simply lets the next tick open a fresh session.
             if self._current is not None:
@@ -157,11 +164,13 @@ class SessionManager:
             self._reset_pending()
             return
 
-        if snap.title != cur.title:
-            if snap.title == self._pending_title:
+        next_title, next_domain = self._privacy_fields(snap.process, snap.title)
+        identity = (next_title, next_domain)
+        if identity != (cur.title, cur.domain):
+            if identity == self._pending_identity:
                 self._pending_count += 1
             else:
-                self._pending_title = snap.title
+                self._pending_identity = identity
                 self._pending_first_ts = snap.now
                 self._pending_count = 1
             if self._pending_count >= self.settings.debounce_ticks:
@@ -183,14 +192,28 @@ class SessionManager:
         # open follows its close at the same boundary), it only engages when a
         # set-back would start this row before an already-written end.
         start_ts = max(start_ts, self._floor_ts)
-        domain = None
-        if not is_afk and process in self.settings.browser_processes:
-            domain = parse_domain(title)
-        session_id = self.store.open_session(start_ts, process, title, domain, is_afk)
-        self._current = _Current(session_id, start_ts, process, title, is_afk)
+        if is_afk:
+            stored_title, domain = title, None
+        else:
+            stored_title, domain = self._privacy_fields(process, title)
+        session_id = self.store.open_session(
+            start_ts, process, stored_title, domain, is_afk
+        )
+        self._current = _Current(
+            session_id, start_ts, process, stored_title, domain, is_afk
+        )
+
+    def _privacy_fields(self, process: str, raw_title: str) -> tuple[str, str | None]:
+        is_browser = process in self.settings.browser_processes
+        domain = parse_domain(raw_title) if is_browser else None
+        if not self.settings.record_window_titles:
+            return "", domain
+        if is_browser:
+            return sanitize_browser_title(raw_title), domain
+        return raw_title.replace("\x00", "")[:512], None
 
     def _reset_pending(self) -> None:
-        self._pending_title = None
+        self._pending_identity = None
         self._pending_first_ts = 0.0
         self._pending_count = 0
 
