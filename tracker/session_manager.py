@@ -75,6 +75,11 @@ class SessionManager:
     _pending_first_ts: float = 0.0
     _pending_count: int = 0
     _last_heartbeat: float = 0.0
+    # Highest end_ts this run has written via close. Opens clamp to it so a
+    # wall clock stepped backwards while no session is current (post-pause,
+    # post-AFK-unknown) cannot open a row overlapping an already-closed one
+    # (DATA-002 family; caught by the TEST-002 contract test).
+    _floor_ts: float = 0.0
 
     # ---------- public API ----------
 
@@ -83,9 +88,7 @@ class SessionManager:
             # Pause = finalize the open session and open nothing new. Resuming
             # simply lets the next tick open a fresh session.
             if self._current is not None:
-                self.store.close_session(
-                    self._current.id, max(snap.now, self._current.start_ts)
-                )
+                self._close(self._current.id, max(snap.now, self._current.start_ts))
                 self._current = None
             self._reset_pending()
             return
@@ -101,7 +104,7 @@ class SessionManager:
     def shutdown(self, now: float) -> None:
         """Finalize the open session (process exit, ctrl-c, logoff)."""
         if self._current is not None:
-            self.store.close_session(self._current.id, max(now, self._current.start_ts))
+            self._close(self._current.id, max(now, self._current.start_ts))
             self._current = None
 
     # ---------- AFK ----------
@@ -116,7 +119,7 @@ class SessionManager:
         boundary = snap.now if locked else snap.now - snap.idle_seconds
         if self._current is not None:
             boundary = max(boundary, self._current.start_ts)
-            self.store.close_session(self._current.id, boundary)
+            self._close(self._current.id, boundary)
         else:
             boundary = max(boundary, 0.0)
         self._open(boundary, AFK_PROCESS, reason, is_afk=True)
@@ -133,9 +136,13 @@ class SessionManager:
             return
 
         if cur.is_afk:
-            self.store.close_session(cur.id, snap.now)
+            # max() clamps against a wall clock stepped backwards mid-session
+            # (NTP step / manual change), which would otherwise write a
+            # negative-duration row the dashboard silently drops (DATA-002).
+            boundary = max(snap.now, cur.start_ts)
+            self._close(cur.id, boundary)
             if snap.process is not None:
-                self._open(snap.now, snap.process, snap.title)
+                self._open(boundary, snap.process, snap.title)
             else:
                 self._current = None
             return
@@ -144,8 +151,9 @@ class SessionManager:
             return  # transient unknown foreground: keep current session running
 
         if snap.process != cur.process:
-            self.store.close_session(cur.id, snap.now)
-            self._open(snap.now, snap.process, snap.title)
+            boundary = max(snap.now, cur.start_ts)  # DATA-002 clamp, as above
+            self._close(cur.id, boundary)
+            self._open(boundary, snap.process, snap.title)
             self._reset_pending()
             return
 
@@ -158,7 +166,7 @@ class SessionManager:
                 self._pending_count = 1
             if self._pending_count >= self.settings.debounce_ticks:
                 boundary = max(self._pending_first_ts, cur.start_ts)
-                self.store.close_session(cur.id, boundary)
+                self._close(cur.id, boundary)
                 self._open(boundary, snap.process, snap.title)
                 self._reset_pending()
         else:
@@ -166,7 +174,15 @@ class SessionManager:
 
     # ---------- helpers ----------
 
+    def _close(self, session_id: int, end_ts: float) -> None:
+        self.store.close_session(session_id, end_ts)
+        self._floor_ts = max(self._floor_ts, end_ts)
+
     def _open(self, start_ts: float, process: str, title: str, is_afk: bool = False) -> None:
+        # Clamp against _floor_ts: a no-op while the clock is monotonic (every
+        # open follows its close at the same boundary), it only engages when a
+        # set-back would start this row before an already-written end.
+        start_ts = max(start_ts, self._floor_ts)
         domain = None
         if not is_afk and process in self.settings.browser_processes:
             domain = parse_domain(title)
