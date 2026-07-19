@@ -281,7 +281,9 @@ class SqliteStore:
             return int(cur.lastrowid)
 
         session_id = _retry(_do)
-        logging.info("OPEN  %s | %s", process, title[:120])
+        # DEBUG, not INFO: window titles are sensitive, and an INFO-level log
+        # would archive them in plain text alongside the DB (audit DIST-003).
+        logging.debug("OPEN  %s | %s", process, title[:120])
         return session_id
 
     def close_session(self, session_id: int, end_ts: float) -> None:
@@ -290,7 +292,7 @@ class SqliteStore:
                 "UPDATE sessions SET end_ts = ? WHERE id = ?", (int(end_ts), session_id)
             )
         )
-        logging.info("CLOSE #%s @ %s", session_id, int(end_ts))
+        logging.debug("CLOSE #%s @ %s", session_id, int(end_ts))
 
     def heartbeat(self, session_id: int, end_ts: float) -> None:
         _retry(
