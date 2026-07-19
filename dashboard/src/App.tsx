@@ -136,7 +136,7 @@ function FirstRunPanel({ status }: { status: TrackerStatus }) {
         uploaded.
       </p>
       <p className="mt-2 flex items-center gap-2">
-        <span className={`h-2 w-2 rounded-full ${trackerLive ? "bg-[#16b981]" : "bg-bad"}`} />
+        <span className={`h-2 w-2 rounded-full ${trackerLive ? "bg-good-data" : "bg-bad"}`} />
         {trackerLive ? (
           <span className="text-ink-2">
             The tracker is running — your first activity will appear here within a minute.
