@@ -30,25 +30,14 @@ export function fmtShortDate(d: Date): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-// Built-in fallbacks for processes whose executable name is unrecognizable.
-// User aliases (passed in via `aliases`) override these.
-const DEFAULT_ALIASES: Record<string, string> = {
-  "r5apex_dx12.exe": "Apex Legends",
-  "b1-win64-shipping.exe": "Black Myth: Wukong",
-  "windowsterminal.exe": "Terminal",
-  "applicationframehost.exe": "UWP app",
-};
-
 /**
- * Display name for a process. A user alias (keyed by the lowercased process
- * name) wins over the built-in defaults; otherwise the .exe is stripped and
- * title-cased. The raw process name should still be shown on hover.
+ * Display name for a process. A user alias wins; otherwise use a mechanical,
+ * non-opinionated transform. Production code never guesses app identities.
  */
 export function cleanProcessName(process: string, aliases?: Record<string, string>): string {
   const key = process.toLowerCase();
   const user = aliases?.[key];
   if (user) return user;
-  if (DEFAULT_ALIASES[key]) return DEFAULT_ALIASES[key];
   const base = process.replace(/\.exe$/i, "");
   return base.charAt(0).toUpperCase() + base.slice(1);
 }

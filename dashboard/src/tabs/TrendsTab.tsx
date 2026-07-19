@@ -10,13 +10,12 @@ import { duration, hourMatrix, type Session } from "../lib/metrics";
 import { addDays, dayKey, listDays, startOfDay, startOfWeek } from "../lib/time";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
+import { CHROME, HEATMAP_RAMP, TOOLTIP_STYLE } from "../lib/chartTheme";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const TOOLTIP_STYLE = {
-  backgroundColor: "#1d2026",
-  borderColor: "#2a2e36",
-  textStyle: { color: "#e8eaed", fontSize: 12 },
-};
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 function compactHour(hour: number): string {
   const h = hour % 24;
@@ -96,7 +95,7 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
       xAxis: {
         type: "category",
         data: visibleHours.map(compactHour),
-        axisLabel: { color: "#9aa0a8", fontSize: 10 },
+        axisLabel: { color: CHROME.axisLabel, fontSize: 10 },
         axisTick: { show: false },
         axisLine: { show: false },
       },
@@ -104,7 +103,7 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
         type: "category",
         data: DAY_NAMES,
         inverse: true, // Sunday on top, Saturday at the bottom
-        axisLabel: { color: "#9aa0a8", fontSize: 11 },
+        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
         axisTick: { show: false },
         axisLine: { show: false },
       },
@@ -112,7 +111,7 @@ function HourHeatmap({ sessions }: { sessions: Session[] }) {
         show: false,
         min: 0,
         max: Math.max(maxMinutes, 1),
-        inRange: { color: ["#16181d", "#0e3a2c", "#1D9E75", "#5DCAA5"] },
+        inRange: { color: HEATMAP_RAMP },
       },
       series: [
         {
@@ -167,24 +166,24 @@ function CategoryTrend({ sessions }: { sessions: Session[] }) {
           const wkEnd = addDays(wk, 6);
           const head = `<b>Week of ${wk.getMonth() + 1}/${wk.getDate()} – ${wkEnd.getMonth() + 1}/${wkEnd.getDate()}</b>`;
           const lines = params
-            .map((p) => `<div>${p.marker} ${p.seriesName}: ${fmtDuration(p.value * 3600)}</div>`)
+            .map((p) => `<div>${p.marker} ${escapeHtml(p.seriesName)}: ${fmtDuration(p.value * 3600)}</div>`)
             .join("");
           return head + lines;
         },
       },
-      legend: { top: 0, textStyle: { color: "#9aa0a8", fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
+      legend: { top: 0, textStyle: { color: CHROME.axisLabel, fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
       xAxis: {
         type: "category",
         // Each label is the week's START day; the bar covers that day + 6 after.
         data: weeks.map((w) => `${w.getMonth() + 1}/${w.getDate()}`),
-        axisLabel: { color: "#9aa0a8", fontSize: 10 },
+        axisLabel: { color: CHROME.axisLabel, fontSize: 10 },
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: "#2a2e36" } },
+        axisLine: { lineStyle: { color: CHROME.axisLine } },
       },
       yAxis: {
         type: "value",
-        axisLabel: { color: "#9aa0a8", fontSize: 11, formatter: "{value}h" },
-        splitLine: { lineStyle: { color: "#1d2026" } },
+        axisLabel: { color: CHROME.axisLabel, fontSize: 11, formatter: "{value}h" },
+        splitLine: { lineStyle: { color: CHROME.gridLine } },
       },
       series: catNames
         .filter((name) => totals.get(name)!.some((v) => v > 0.01))

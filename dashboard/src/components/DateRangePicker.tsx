@@ -46,9 +46,12 @@ export default function DateRangePicker({
         options={PRESETS}
         className="w-32"
       />
+      {/* min/max keep start <= end selectable in the native picker; typed
+          inverted ranges still no-op in commitCustom. */}
       <TextInput
         type="date"
         value={toInputValue(range.start)}
+        max={toInputValue(lastDay)}
         onChange={(v) => commitCustom(v, toInputValue(lastDay))}
         className="w-36"
       />
@@ -56,6 +59,7 @@ export default function DateRangePicker({
       <TextInput
         type="date"
         value={toInputValue(lastDay)}
+        min={toInputValue(range.start)}
         onChange={(v) => commitCustom(toInputValue(range.start), v)}
         className="w-36"
       />

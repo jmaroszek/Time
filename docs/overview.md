@@ -1,6 +1,6 @@
 # Overview tab
 
-This tab focuses on your recent behavior. The dropdown menu in the top-right corner allows you to select options such as "last 7 days," "last 14 days," and "last 4 weeks"
+This tab focuses on your recent behavior. The date picker in the top-right corner offers Today, Last 7/14/28 days, and a custom range.
 
 ![Overview tab](images/overview.png)
 
@@ -8,10 +8,10 @@ This tab focuses on your recent behavior. The dropdown menu in the top-right cor
 
 | Card | What it measures |
 | --- | --- |
-| **Total Time** | Non-AFK time at the computer in the selected range. |
-| **Productive** | Share of that time spent in categories marked productive, with the absolute hours underneath. |
-| **Longest Focus** | The longest unbroken chain of productive sessions. Switching between productive apps keeps the chain alive (gaps up to 60 s are forgiven); going AFK or drifting to a non-productive app breaks it. |
-| **Goal Pace** | Productive hours against the weekly goal, scaled to the range. When behind, it shows the hours-per-day needed to catch up. |
+| **Average productivity per day** | Productive time in the range divided by its calendar days. |
+| **Productivity percent** | Share of non-AFK time spent in categories marked productive. |
+| **Longest focus** | The longest unbroken chain of productive sessions. Switching between productive apps keeps the chain alive (gaps up to the "Focus chain max gap" setting, 2 minutes by default, are forgiven); going AFK or drifting to a non-productive app breaks it. |
+| **Goal pace** | Productive hours in the range against the weekly goal prorated to the range's length - a trailing measure, deliberately not a catch-up rate. |
 
 ## Timeline
 

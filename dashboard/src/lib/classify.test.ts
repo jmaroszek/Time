@@ -5,6 +5,7 @@ import {
   categoryKind,
   categoryState,
   categoryStateFlags,
+  normalizeRulePattern,
   type Category,
   type Rule,
 } from "./classify";
@@ -132,5 +133,40 @@ describe("categoryState / categoryStateFlags", () => {
     expect(merged.isIgnored).toBe(true);
     expect(merged.isProductive).toBe(true);
     expect(categoryState(merged)).toBe("ignored");
+  });
+});
+
+describe("normalizeRulePattern", () => {
+  it("reduces a pasted URL to the bare domain", () => {
+    expect(normalizeRulePattern("domain", "https://www.EXAMPLE.com/path?q=1")).toBe("example.com");
+  });
+
+  it("strips scheme, port, userinfo, fragment, and stray dots", () => {
+    expect(normalizeRulePattern("domain", "http://example.com:8080/x")).toBe("example.com");
+    expect(normalizeRulePattern("domain", "https://user@example.com/")).toBe("example.com");
+    expect(normalizeRulePattern("domain", "example.com#section")).toBe("example.com");
+    expect(normalizeRulePattern("domain", "example.com.")).toBe("example.com");
+  });
+
+  it("keeps non-www subdomains (suffix matching handles the rest)", () => {
+    expect(normalizeRulePattern("domain", "music.youtube.com")).toBe("music.youtube.com");
+    expect(normalizeRulePattern("domain", "www.music.youtube.com")).toBe("music.youtube.com");
+  });
+
+  it("passes bare domains through unchanged", () => {
+    expect(normalizeRulePattern("domain", "youtube.com")).toBe("youtube.com");
+  });
+
+  it("returns null when nothing matchable remains", () => {
+    expect(normalizeRulePattern("domain", "https://")).toBeNull();
+    expect(normalizeRulePattern("domain", "   ")).toBeNull();
+    expect(normalizeRulePattern("title", "  ")).toBeNull();
+  });
+
+  it("lowercases and trims title and process patterns without URL surgery", () => {
+    expect(normalizeRulePattern("title", "  NetFlix  ")).toBe("netflix");
+    expect(normalizeRulePattern("process", "Chrome.EXE")).toBe("chrome.exe");
+    // A slash in a title pattern is content, not a URL path.
+    expect(normalizeRulePattern("title", "a/b")).toBe("a/b");
   });
 });

@@ -1,5 +1,5 @@
 // Rule-based session classification. Priority decides between matching rules
-// (seeds: domain 1 < title 2 < process 3). Lower numbers win. Domain and title rules only
+// (domain 1 < title 2 < process 3). Lower numbers win. Domain and title rules only
 // apply to browser sessions; process rules apply to everything. AFK sessions
 // are never classified.
 
@@ -60,6 +60,23 @@ export interface Rule {
   pattern: string;
   categoryId: number;
   priority: number;
+}
+
+/** Normalize a user-entered rule pattern into a matchable one, or null when
+ *  nothing matchable remains. Domain patterns accept a pasted URL and reduce
+ *  it to the bare host — mirrors tracker/domains.py `_clean_host`, which is
+ *  what produces the `domain` values these rules compare against. */
+export function normalizeRulePattern(matchType: MatchType, raw: string): string | null {
+  let pat = raw.toLowerCase().trim();
+  if (matchType !== "domain") return pat || null;
+  pat = pat.replace(/^[a-z][a-z0-9+.-]*:\/\//, ""); // scheme
+  pat = pat.split(/[/?#]/)[0]; // path / query / fragment
+  const at = pat.lastIndexOf("@"); // userinfo (rare, but a valid URL part)
+  if (at !== -1) pat = pat.slice(at + 1);
+  pat = pat.split(":")[0]; // port
+  pat = pat.replace(/^\.+|\.+$/g, ""); // stray dots
+  if (pat.startsWith("www.")) pat = pat.slice(4);
+  return pat || null;
 }
 
 export interface Classifiable {
