@@ -1,15 +1,15 @@
 """Generate a deterministic demo database for screenshots and documentation.
 
-Builds Data/demo.db with several weeks of plausible synthetic sessions (a
+Builds data/demo.db with several weeks of plausible synthetic sessions (a
 software-developer persona: weekday work blocks, lunch breaks, evening gaming
 and media, lazier weekends) using the real schema bootstrap from tracker.db,
 then adds a clearly synthetic persona's categories and rules. Fresh production
 installs deliberately ship without those opinions.
 
-Point a debug dashboard at it with:  TIME_DB_PATH=<repo>/Data/demo.db
+Point a debug dashboard at it with:  TIME_DB_PATH=<repo>/data/demo.db
 
 Usage:
-    py scripts/make_demo_db.py [--out Data/demo.db] [--weeks 12]
+    py scripts/make_demo_db.py [--out data/demo.db] [--weeks 12]
                                [--end YYYY-MM-DD] [--force]
 
 The output is regenerated from scratch on every run (the file is marked with a
@@ -235,7 +235,7 @@ def generate(out: Path, weeks: int, end_day: datetime, now_ts: int | None) -> in
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default=str(root / "Data" / "demo.db"))
+    ap.add_argument("--out", default=str(root / "data" / "demo.db"))
     ap.add_argument("--weeks", type=int, default=12)
     ap.add_argument("--end", help="last day (YYYY-MM-DD); default today, truncated at 'now'")
     ap.add_argument("--force", action="store_true", help="overwrite an unmarked existing file")
