@@ -46,7 +46,7 @@ function Shell() {
     return rangeForPreset(preset === "custom" ? "last7" : preset);
   }, [preset, customRange]);
 
-  // REL-001: an empty DB (tracker hasn't run yet) is a waiting state, not an
+  // An empty DB (the tracker hasn't run yet) is a waiting state, not an
   // error. Retry until the tracker's first bootstrap creates the schema.
   const waitingForTracker = meta.loaded && meta.error !== null && isMissingSchemaError(meta.error);
   useEffect(() => {
@@ -301,7 +301,7 @@ function FirstRunPanel({ status }: { status: TrackerStatus }) {
   );
 }
 
-/** REL-001 waiting state: the DB file exists but has no schema yet, which
+/** Waiting state: the DB file exists but has no schema yet, which
  *  means the tracker has never run. Auto-refreshes via the Shell effect. */
 function WaitingForTracker() {
   return (
@@ -318,7 +318,7 @@ function WaitingForTracker() {
   );
 }
 
-/** REL-004: refuse read/write work when an older dashboard sees a newer DB. */
+/** Refuse read/write work when an older dashboard sees a newer DB. */
 function NewerDatabaseScreen() {
   return (
     <div className="p-10 text-sm">
@@ -332,7 +332,7 @@ function NewerDatabaseScreen() {
   );
 }
 
-/** UX-001: user-facing copy for a genuinely broken DB connection. The raw
+/** User-facing copy for a genuinely broken DB connection. The raw
  *  error is one click away instead of front and center. */
 function DbErrorScreen({ error }: { error: string }) {
   const [copied, setCopied] = useState(false);

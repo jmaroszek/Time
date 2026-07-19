@@ -1,7 +1,7 @@
-// Date-range logic. Semantics carried over from the legacy time_analysis.py:
-// week starts per setting (default Sunday), ranges are half-open [start, end),
-// "this week" runs from week start through end of today, and day counts are
-// calendar days (DST-safe via Date component arithmetic, never ms addition).
+// Date-range logic: week starts per setting (default Sunday), ranges are
+// half-open [start, end), "this week" runs from week start through end of
+// today, and day counts are calendar days (DST-safe via Date component
+// arithmetic, never ms addition).
 
 export type WeekStart = "Sunday" | "Monday";
 export type Preset = "today" | "last7" | "last14" | "last28";

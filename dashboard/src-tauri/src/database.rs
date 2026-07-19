@@ -1,3 +1,15 @@
+//! The one process that holds the SQLite connection.
+//!
+//! The webview never touches the file; it sends SQL text through the `db_select`
+//! and `db_execute` commands, so everything arriving here is untrusted input
+//! from a renderer. `validate_sql` and `validate_mutation_target` are the whole
+//! boundary between that and the user's data — read both before changing either.
+//!
+//! The bootstrap schema below is duplicated in `tracker/db.py`, because either
+//! half may legitimately create the database first (dashboard opened before the
+//! tracker's first run, or the reverse). The two must stay identical; the
+//! Python side owns migrations.
+
 use serde::Serialize;
 use serde_json::{Map, Value as JsonValue};
 use sqlx::{
@@ -149,6 +161,13 @@ impl TimeDatabase {
                 let version = raw_version
                     .parse::<i64>()
                     .map_err(|_| "Database schema_version is not a valid integer".to_owned())?;
+                // A too-new database opens successfully on purpose. Failing
+                // here would leave the app unable to start and unable to say
+                // why; instead the version is carried on the handle, reads keep
+                // working, and `ensure_writable_schema` blocks every write so
+                // the UI can show the "needs a newer Time" screen. Returning
+                // early also skips the bootstrap SQL below, which must not run
+                // against a schema this release does not understand.
                 if version > SCHEMA_VERSION {
                     return Ok(Self {
                         pool,
@@ -177,6 +196,19 @@ impl TimeDatabase {
         })
     }
 
+    /// First gate: the statement is a single one, of an allowed verb, with no
+    /// way to reach outside the current database.
+    ///
+    /// Rejecting `;` and comment markers is what makes the single-verb check
+    /// meaningful — without it, `SELECT 1; DROP TABLE sessions` passes as a
+    /// SELECT, and a comment can hide a second statement from the eye without
+    /// hiding it from SQLite. ATTACH/DETACH would reach other files,
+    /// LOAD_EXTENSION would load code, and PRAGMA/VACUUM would let the webview
+    /// change durability or rewrite the file. The prefix check catches the
+    /// `load_extension`-style variants of each.
+    ///
+    /// This is a keyword denylist over a fixed set of queries this app issues,
+    /// not a SQL parser. Widening `allowed` means re-reading it in that light.
     fn validate_sql(query: &str, allowed: &[&str]) -> Result<(), String> {
         let trimmed = query.trim();
         let upper = trimmed.to_ascii_uppercase();
@@ -245,6 +277,16 @@ impl TimeDatabase {
         })
     }
 
+    /// Second gate: which tables the webview may write, per verb.
+    ///
+    /// The asymmetries are deliberate. `settings` accepts INSERT (the dashboard
+    /// upserts preferences) but not UPDATE or DELETE, so no renderer bug can
+    /// blank a privacy gate or the schema version. `sessions` accepts DELETE
+    /// only — that is the user's history-deletion surface — and never INSERT or
+    /// UPDATE, because the tracker is the sole author of session rows.
+    ///
+    /// The shape match reads the target table positionally, so a statement it
+    /// cannot parse is rejected rather than allowed by default.
     fn validate_mutation_target(query: &str) -> Result<(), String> {
         let words = query
             .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
@@ -312,6 +354,8 @@ impl TimeDatabase {
         Ok(())
     }
 
+    /// Every write path must call this first. Reads stay available on a
+    /// schema this release cannot write (see `open`).
     fn ensure_writable_schema(&self) -> Result<(), String> {
         if self.schema_version != SCHEMA_VERSION {
             return Err(format!(

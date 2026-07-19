@@ -1,9 +1,9 @@
 // Map raw SQLite/plugin error strings to one-line human causes. Every
-// user-initiated write routes its failure through here (UX-002): the goal is
+// user-initiated write routes its failure through here: the goal is
 // that "saved" and "silently failed" are never indistinguishable.
 
 /** True when the error is the empty-DB case: the tracker has not yet created
- *  the schema (REL-001 install-order failure). */
+ *  the schema, which happens when the dashboard is opened first. */
 export function isMissingSchemaError(e: unknown): boolean {
   return /no such table/i.test(String(e));
 }

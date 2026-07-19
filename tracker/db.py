@@ -71,9 +71,11 @@ _SEED_CATEGORIES = [
     ("Ignored", "#44474e", 0, 0, 99),
 ]
 
-# Priorities: domain (1) > title (2) > process (3). Lower numbers win.
-# are only evaluated for browser sessions by the dashboard classifier; process
-# rules apply everywhere.
+# Deliberately empty: Time ships with no opinion about which apps or sites are
+# productive. The shape stays here because the priority contract has to hold for
+# any rule that is added later — lower number wins: domain (1), title (2),
+# process (3). Domain and title rules are evaluated only for browser sessions;
+# process rules apply everywhere.
 _SEED_RULES: list[tuple[str, str, str, int]] = []
 
 DEFAULT_SETTINGS = {
@@ -252,7 +254,7 @@ def _retry(
 ) -> T:
     """Retry a write past transient lock contention, with backoff.
 
-    Retries and exhaustion are logged (SUP-001): a lost session is otherwise
+    Retries and exhaustion are logged because a lost session is otherwise
     invisible in the field. `op` is a fixed operation name and the SQLite error
     text describes the lock, so neither carries session content into the log.
     """
@@ -295,7 +297,7 @@ class SqliteStore:
 
         session_id = _retry(_do, op="open_session")
         # DEBUG, not INFO: window titles are sensitive, and an INFO-level log
-        # would archive them in plain text alongside the DB (audit DIST-003).
+        # would archive them in plain text alongside the database.
         logging.debug("OPEN  %s | %s", process, title[:120])
         return session_id
 

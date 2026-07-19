@@ -1,4 +1,4 @@
-"""Read-only SQLite health and invariant checks for beta Time databases.
+"""Read-only SQLite health and invariant checks for a Time database.
 
 Usage:
     python scripts/check_db_anomalies.py path\to\time_log.db

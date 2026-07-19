@@ -11,10 +11,11 @@
   --color-edge-2: #353b45;
   --color-ink: #e8eaed;
   --color-ink-2: #9aa0a8;
-  /* 4.5:1 on --color-surface (WCAG AA at small sizes); was #6b7280 @ 3.67. */
+  /* 4.5:1 on --color-surface — WCAG AA at small sizes. Keep any replacement
+     at or above that ratio. */
   --color-ink-3: #79808d;
   --color-accent: #6ba0da;
-  /* Two-tier green/red rule (VIS-001): -data for chart fills and liveness
+  /* Two-tier green/red rule: -data for chart fills and liveness
      (things that ARE data), plain for text/dots that merely annotate. */
   --color-good: #4fb389;
   --color-good-data: #16b981;

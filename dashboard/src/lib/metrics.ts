@@ -17,7 +17,7 @@ export interface Session {
 /** Default max gap (s) between sessions that still counts as one continuous
  *  focus chain, when a caller doesn't supply one. */
 // Mirrors the seeded focus_chain_max_gap_seconds default in tracker/db.py
-// DEFAULT_SETTINGS — keep in lockstep (CODE-002).
+// DEFAULT_SETTINGS — keep the two in lockstep.
 const DEFAULT_FOCUS_CHAIN_MAX_GAP = 120;
 
 export function duration(s: Session): number {
@@ -198,7 +198,7 @@ export function dailySecondsByApp(sessions: Session[], range: Range): Map<string
   return out;
 }
 
-// ---- delta coloring thresholds (UX-007) ---------------------------------
+// ---- delta coloring thresholds ------------------------------------------
 // A colored badge claims "your use of this app really changed". These gates
 // encode that claim directly, as an effect size rather than an inference test.
 //
@@ -209,8 +209,10 @@ export function dailySecondsByApp(sessions: Session[], range: Range): Map<string
 // Two weeks of usage are a census, not a sample — the honest question is how
 // big the change was, not whether it is distinguishable from noise.
 //
-// Tuned against 132 days of real history; see UX-007 in the audit for the
-// bucket-by-magnitude evidence behind each value.
+// The values below were tuned against 132 days of real history, bucketing
+// badges by magnitude and checking that the colored share rises with it.
+// Re-tune the same way rather than by intuition — the tests below pin the
+// behavior each gate exists to produce.
 
 /** Minimum fractional change worth coloring. */
 const MIN_DELTA_FRACTION = 0.25;

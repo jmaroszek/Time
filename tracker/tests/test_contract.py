@@ -1,4 +1,4 @@
-"""Cross-half contract test (audit TEST-002).
+"""Cross-half contract test.
 
 Drives SessionManager with randomized snapshot sequences — sleep gaps, clock
 jitter, debounce storms, AFK cycles, pauses — against the *real* SqliteStore on

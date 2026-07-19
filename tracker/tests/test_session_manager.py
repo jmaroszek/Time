@@ -236,7 +236,7 @@ def test_shutdown_with_no_session_is_noop(manager, store):
     assert store.closed == {}
 
 
-# ---------------- pause (PROD-001) ----------------
+# ---------------- pause ----------------
 
 
 def test_pause_closes_current_and_opens_nothing(store):
@@ -281,7 +281,7 @@ def test_pause_clears_title_debounce(store):
     assert store.opened[-1][2:4] == ("code.exe", "other.py")
 
 
-# ---------------- clock set-back clamp (DATA-002) ----------------
+# ---------------- clock set-back clamp ----------------
 
 
 def test_clock_setback_app_switch_never_writes_negative_duration(store):
