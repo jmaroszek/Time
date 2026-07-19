@@ -51,6 +51,12 @@ def test_seed_categories_and_settings_present(conn):
     }
     assert priorities == {"domain": 1, "title": 2, "process": 3}
     assert raw["schema_version"] == str(db.SCHEMA_VERSION)
+    colors = {
+        row["name"]: row["color"]
+        for row in conn.execute("SELECT name,color FROM categories")
+    }
+    assert colors["Notes"] == "#9c8ff0"
+    assert colors["Dev"] == "#2f6fc0"
 
 
 def test_schema_v0_fixture_migrates_atomically(schema_v0_path):
