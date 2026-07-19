@@ -84,7 +84,8 @@ runtime as a Tauri sidecar, and produces one current-user NSIS installer. The
 installer starts the tracker immediately, registers it for logon, and removes
 the process/autostart entry on uninstall while keeping the user's database.
 Follow the [clean-VM release checklist](docs/clean-vm-release-checklist.md)
-before shipping an artifact.
+before shipping an artifact. Invited testers should receive the
+[beta invite note](docs/beta-invite.md) with the build's SHA-256 hash filled in.
 
 During a beta soak, run the anomaly checker weekly against an explicit database
 path (or, more conservatively, a fresh backup). It opens SQLite read-only, runs
