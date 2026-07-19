@@ -8,3 +8,4 @@ time_tracker.log*
 time_log.db-shm
 time_log.db-wal
 docs/full-system-audit.md
+docs/competitive-analysis.md
