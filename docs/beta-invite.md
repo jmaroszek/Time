@@ -1,7 +1,7 @@
 # Time beta invite note
 
-Time is a small Windows time tracker from Jonah. This beta is for invited
-testers; it is not yet code-signed.
+Time is a local-first Windows time tracker. Public artifacts must be
+Authenticode-signed; verify the publisher shown by Windows before installing.
 
 ## Before installing
 
@@ -12,16 +12,16 @@ testers; it is not yet code-signed.
   Get-FileHash .\Time_0.1.0_x64-setup.exe -Algorithm SHA256
   ```
 
-- Windows SmartScreen will probably show **Windows protected your PC** and
-  **Unknown publisher** because the beta is unsigned. If the filename and hash
-  match, choose **More info → Run anyway**. Do not disable SmartScreen globally.
+- In file Properties → Digital Signatures, verify the signature is valid and
+  the publisher matches the release notes. Do not install an unsigned build.
 - If the hash does not match—or the installer came from somewhere else—do not
   run it; tell Jonah.
 
 ## What the beta records
 
-Time records the foreground application's process name, window title, start/end
-times, and idle periods. The data stays in a local SQLite database under
+After opt-in, Time records the foreground application's process name, start/end
+times, and idle periods. Window titles require a separate opt-in and are off by
+default. The data stays in a local SQLite database under
 `%LOCALAPPDATA%\Time`; Time has no account, cloud sync, analytics, or telemetry.
 Window titles can contain sensitive text, so use the beta only on a computer
 where that local history is appropriate.
@@ -33,9 +33,9 @@ Time itself reads only the resulting browser window title, not page contents.
 
 ## What to test
 
-After installation, confirm the tray icon appears, use several applications for
-at least a minute, then open Time and check that activity appears. Reboot once to
-confirm tracking starts automatically. Report the Windows version, what you were
+After installation, review the privacy screen and enable tracking, then use
+several applications for at least a minute and check that activity appears.
+Reboot once to confirm tracking starts only if startup was selected. Report the Windows version, what you were
 doing, what you expected, and a screenshot or exact error text for any problem.
 
 Uninstalling removes the application and autostart entry but intentionally keeps

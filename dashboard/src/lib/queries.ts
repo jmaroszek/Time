@@ -2,6 +2,7 @@
 // categories/rules/settings (the tracker owns session writes).
 
 import { normalizeRulePattern, type Category, type CategoryState, type MatchType, type Rule } from "./classify";
+import { invoke } from "@tauri-apps/api/core";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
 import { assertSupportedSchemaVersion } from "./schema";
@@ -76,8 +77,8 @@ interface RuleRow {
 }
 
 export async function fetchRules(schemaVersion: number | null): Promise<Rule[]> {
+  void schemaVersion;
   const db = await getDb();
-  if (schemaVersion === null) await ensureLegacyLowWinsRulePriorities(db);
   const rows = await db.select<RuleRow[]>(
     "SELECT id, match_type, pattern, category_id, priority FROM rules ORDER BY priority ASC, id",
   );
@@ -175,67 +176,6 @@ export async function addCategory(
   return Number(result.lastInsertId);
 }
 
-/** Legacy-only compatibility for unversioned DBs opened before the tracker.
- * Versioned migrations live exclusively in tracker/db.py. Each SQL call may
- * use a different pooled connection, so this old state machine stays
- * restart-safe until support for unversioned databases is removed. */
-async function ensureLegacyLowWinsRulePriorities(
-  db: Awaited<ReturnType<typeof getDb>>,
-): Promise<void> {
-  for (let pass = 0; pass < 5; pass++) {
-    const marker = await db.select<{ value: string }[]>(
-      "SELECT value FROM settings WHERE key='rule_priority_scheme'",
-    );
-    const state = marker[0]?.value;
-    if (state === "low-wins-v1") return;
-
-    if (!state) {
-      const rows = await db.select<{ priority: number }[]>(
-        "SELECT DISTINCT priority FROM rules ORDER BY priority",
-      );
-      const values = rows.map((row) => row.priority);
-      const alreadyCompact = values.length === 0 || values.every((value) => value >= 1 && value <= 3);
-      await db.execute(
-        "INSERT OR IGNORE INTO settings (key,value) VALUES ('rule_priority_scheme',$1)",
-        [alreadyCompact ? "low-wins-v1" : "ranking-v1"],
-      );
-      continue;
-    }
-
-    if (state === "ranking-v1") {
-      // One statement atomically converts every still-positive legacy value to
-      // a negative rank. Repeating it after a crash is a harmless no-op.
-      await db.execute(
-        "WITH ranked AS (" +
-          " SELECT priority, ROW_NUMBER() OVER (ORDER BY priority DESC) AS rank" +
-          " FROM (SELECT DISTINCT priority FROM rules WHERE priority > 0)" +
-          ") UPDATE rules SET priority = -(SELECT rank FROM ranked" +
-          " WHERE ranked.priority = rules.priority) WHERE priority > 0",
-      );
-      await db.execute(
-        "UPDATE settings SET value='ranked-v1'" +
-          " WHERE key='rule_priority_scheme' AND value='ranking-v1'",
-      );
-      continue;
-    }
-
-    if (state === "ranked-v1") {
-      await db.execute("UPDATE rules SET priority = -priority WHERE priority < 0");
-      await db.execute(
-        "UPDATE settings SET value='low-wins-v1'" +
-          " WHERE key='rule_priority_scheme' AND value='ranked-v1'",
-      );
-      continue;
-    }
-
-    // Recover safely from an unknown marker written by an interrupted preview.
-    await db.execute(
-      "UPDATE settings SET value='ranking-v1' WHERE key='rule_priority_scheme'",
-    );
-  }
-  throw new Error("Rule priority migration did not converge");
-}
-
 export async function updateCategory(cat: Category): Promise<void> {
   const db = await getDb();
   await db.execute(
@@ -282,6 +222,7 @@ export async function countSessionsMatching(text: string): Promise<number> {
 export async function deleteSessionsMatching(text: string): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE" + MATCH_SQL, [likePattern(text)]);
+  await invoke("compact_database");
 }
 
 /** Sessions that ended before `cutoffSec` (unix seconds). */
@@ -297,6 +238,7 @@ export async function countSessionsOlderThan(cutoffSec: number): Promise<number>
 export async function deleteSessionsOlderThan(cutoffSec: number): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM sessions WHERE end_ts < $1", [Math.floor(cutoffSec)]);
+  await invoke("compact_database");
 }
 
 // ---------------- status / maintenance ----------------
@@ -322,18 +264,10 @@ export async function fetchTrackerStatus(): Promise<TrackerStatus> {
  *  Derives the directory from the DB path (works whatever the file is named)
  *  rather than assuming the production filename. */
 export async function backupDatabase(): Promise<string> {
-  const db = await getDb();
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[-:T]/g, "")
-    .slice(0, 14);
-  const { getDbPath } = await import("./db");
-  const source = getDbPath();
-  const sepIndex = Math.max(source.lastIndexOf("\\"), source.lastIndexOf("/"));
-  const dir = sepIndex === -1 ? "" : source.slice(0, sepIndex + 1);
-  const target = `${dir}backup_manual_${stamp}.db`;
-  // VACUUM INTO can't take a bound parameter through the pool; escape quotes
-  // so paths containing ' (legal in Windows usernames) don't break the SQL.
-  await db.execute(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
-  return target;
+  return invoke<string>("backup_database");
+}
+
+/** Securely erase all recorded sessions, checkpoint the WAL, and compact. */
+export async function eraseAllHistory(): Promise<number> {
+  return invoke<number>("erase_history");
 }

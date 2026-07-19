@@ -71,7 +71,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Meta>(() => {
     const browserSet = new Set(
-      (settings.browser_processes ?? "chrome.exe,thorium.exe")
+      (settings.browser_processes ?? "chrome.exe,msedge.exe,firefox.exe,brave.exe")
         .split(",")
         .map((p) => p.trim().toLowerCase())
         .filter(Boolean),
@@ -83,8 +83,8 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       browserSet,
       aliases: parseAliases(settings.process_aliases),
       classifier: buildClassifier(categories, rules, browserSet),
-      weekStart: settings.week_start === "Monday" ? "Monday" : "Sunday",
-      weeklyGoalHours: Number(settings.weekly_goal_hours) || 20,
+      weekStart: resolveWeekStart(settings.week_start),
+      weeklyGoalHours: finiteNonNegative(settings.weekly_goal_hours),
       defaultTopN: Number(settings.default_top_n_apps) || 5,
       minAppSeconds: Math.max(0, Number(settings.min_app_seconds) || 0),
       focusChainMaxGapSeconds: Math.max(0, Number(settings.focus_chain_max_gap_seconds) || 120),
@@ -96,6 +96,21 @@ export function MetaProvider({ children }: { children: ReactNode }) {
   }, [categories, rules, settings, loaded, error, refresh]);
 
   return <MetaContext.Provider value={value}>{children}</MetaContext.Provider>;
+}
+
+function finiteNonNegative(raw: string | undefined): number {
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function resolveWeekStart(raw: string | undefined): WeekStart {
+  if (raw === "Monday" || raw === "Sunday") return raw;
+  try {
+    const region = new Intl.Locale(navigator.language).region ?? "";
+    return new Set(["US", "CA", "PH", "JP", "TW"]).has(region) ? "Sunday" : "Monday";
+  } catch {
+    return "Monday";
+  }
 }
 
 /** Parse the day-window hour settings, falling back to a full day (0–24) on any

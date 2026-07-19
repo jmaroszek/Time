@@ -16,6 +16,9 @@ Every knob lives in the database and is edited here. You do not need to edit con
 | **Heartbeat interval** | How often the open session's end time is flushed to disk; this is the upper bound on data lost in a crash. |
 | **Week starts on** | Affects weekly presets, trends bucketing, and goal pacing. |
 | **Browser processes** | Which executables get domain parsing and domain/title rule treatment. |
+| **Record activity** | Explicit consent switch for all foreground-app recording. |
+| **Store window titles** | Separate sensitive-data opt-in; off by default. Browser URLs are sanitized even when enabled. |
+| **Start at Windows sign-in** | Per-user startup registration; available only after recording is enabled. |
 
 Settings save on Enter or focus-out; the tracker re-reads them within one
 heartbeat.
@@ -34,6 +37,8 @@ shown on success; restore steps live in [restore.md](restore.md).
 ## Privacy
 
 Everything Time records stays on your machine; nothing is uploaded. The
-Privacy section deletes recorded history matching a text (app, window title,
-or site) or older than a cutoff - both show the affected count and ask for
-confirmation, and neither touches categories, rules, or settings.
+Privacy controls can delete history matching a text, delete history older than
+a cutoff, or erase all sessions. Deletion uses SQLite secure-delete, then
+checkpoints the WAL and compacts the database so removed title text is not left
+in free pages. Categories, rules, and settings are retained; separately created
+backup files are never deleted implicitly.

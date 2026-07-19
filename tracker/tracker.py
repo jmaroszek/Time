@@ -58,6 +58,16 @@ def run() -> None:
         " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (config.TRACKER_VERSION,),
     )
+    raw_settings = db.read_settings_raw(conn)
+    if (
+        raw_settings.get("privacy_onboarding_complete") != "1"
+        and raw_settings.get("recording_consent") != "1"
+    ):
+        # Installer bootstrap: create the DB contract, but do not leave a
+        # background process running before the user has seen the privacy screen.
+        conn.close()
+        logging.info("Database initialized; waiting for first-run privacy choice.")
+        return
     manager = SessionManager(store=db.SqliteStore(conn), settings=db.get_settings(conn))
 
     def _shutdown(*_args) -> bool:
@@ -88,11 +98,13 @@ def run() -> None:
     while not stop_event.is_set():
         try:
             now = time.time()
-            snap = win32_probe.snapshot(now)
-            manager.tick(snap)
-            if now - last_settings_refresh >= manager.settings.heartbeat_seconds:
+            # Consent, pause, and title-privacy switches take effect within one
+            # poll instead of waiting for the database heartbeat interval.
+            if now - last_settings_refresh >= poll:
                 manager.settings = db.get_settings(conn)
                 last_settings_refresh = now
+            snap = win32_probe.snapshot(now)
+            manager.tick(snap)
         except Exception:
             logging.exception("tick failed")
 

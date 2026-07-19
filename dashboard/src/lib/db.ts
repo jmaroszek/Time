@@ -1,25 +1,33 @@
-import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
 
-// Build-time override: VITE_DB_PATH (used to point the dashboard at a demo DB or
-// a custom dev path — see vite.config.ts). When empty, the path is resolved at
-// runtime to %LOCALAPPDATA%\Time\time_log.db by the Rust `db_path` command, the
-// same location the tracker derives in tracker/config.py, so the two halves
-// share one database.
-const OVERRIDE: string = (import.meta.env.VITE_DB_PATH as string) || "";
+// The native backend owns the one allowed database connection. This module
+// exposes query ergonomics without granting the webview arbitrary file access.
+let resolvedPath: string | null = null;
+export interface QueryResult {
+  rowsAffected: number;
+  lastInsertId?: number;
+}
 
-let resolvedPath: string | null = OVERRIDE || null;
-let dbPromise: Promise<Database> | null = null;
+class TimeDatabase {
+  async select<T>(query: string, values: unknown[] = []): Promise<T> {
+    return invoke<T>("db_select", { query, values });
+  }
+
+  async execute(query: string, values: unknown[] = []): Promise<QueryResult> {
+    return invoke<QueryResult>("db_execute", { query, values });
+  }
+}
+
+let dbPromise: Promise<TimeDatabase> | null = null;
 
 async function ensurePath(): Promise<string> {
   if (resolvedPath === null) resolvedPath = await invoke<string>("db_path");
   return resolvedPath;
 }
 
-export function getDb(): Promise<Database> {
+export function getDb(): Promise<TimeDatabase> {
   if (!dbPromise) {
-    // sqlx wants forward slashes in the sqlite: URL even on Windows.
-    dbPromise = ensurePath().then((p) => Database.load(`sqlite:${p.replace(/\\/g, "/")}`));
+    dbPromise = ensurePath().then(() => new TimeDatabase());
   }
   return dbPromise;
 }

@@ -34,7 +34,7 @@ def _icon_path() -> Path:
 
 def _dashboard_path() -> Path | None:
     """Return the installed dashboard beside the packaged tracker, if present."""
-    override = os.environ.get("TIME_DASHBOARD_PATH")
+    override = None if getattr(sys, "frozen", False) else os.environ.get("TIME_DASHBOARD_PATH")
     if override:
         candidate = Path(override)
     elif getattr(sys, "frozen", False):

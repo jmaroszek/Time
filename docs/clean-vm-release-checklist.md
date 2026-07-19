@@ -8,21 +8,34 @@ The release artifact is:
 
 `dashboard/src-tauri/target/release/bundle/nsis/Time_0.1.0_x64-setup.exe`
 
-## 1. Fresh install and tracker-first launch
+Before VM testing, run the automated tests and build, sign and timestamp the
+installer, then require the signature gate to pass:
+
+```powershell
+pwsh -File scripts/verify_release.ps1 -Installer dashboard/src-tauri/target/release/bundle/nsis/Time_0.1.0_x64-setup.exe
+```
+
+An unsigned artifact is not a public-release candidate.
+See [signing.md](signing.md) for certificate-provider setup and the sidecar
+signing order.
+
+## 1. Fresh install and privacy onboarding
 
 1. Confirm `python`, `pythonw`, and `py` are unavailable in a new terminal.
-2. Run the NSIS installer. For an unsigned beta build, record the exact
-   SmartScreen flow required to continue.
+2. Verify Properties → Digital Signatures reports the expected publisher and a
+   valid timestamp, then run the NSIS installer.
 3. Leave "Launch Time" selected on the final page.
-4. Within 30 seconds, confirm the Time tray icon is present and Settings reports
-   the tracker as running.
-5. In Task Manager, confirm `time-tracker.exe` is running and no Python process
-   was installed or launched.
-6. Open Registry Editor and verify this current-user value exists:
+4. Confirm the first-run privacy screen appears before any activity is recorded.
+5. Choose **Not now**. Confirm no tray process, session rows, or startup entry
+   appears. Reopen Time, enable tracking, leave window titles off, and select
+   startup.
+6. In Task Manager, confirm `time-tracker.exe` is running and no Python process
+   was installed or launched. Open Registry Editor and verify this value exists:
    `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Time Tracker`.
    Its quoted value must point to the installed `time-tracker.exe`.
 7. Use several apps for at least one heartbeat interval. Confirm Overview gains
    positive-duration activity and Settings shows tracker version `0.1.0`.
+   Inspect the database and confirm active rows have empty `title` values.
 8. Open the tray menu and verify its icon, recording/paused status, Pause,
    Resume, Open dashboard, and Quit tracker actions.
 9. Pause for 15 minutes, use another app for at least one heartbeat, and confirm
@@ -33,10 +46,10 @@ The release artifact is:
 1. Restore the clean VM snapshot.
 2. Start the installer and, as soon as installation completes, open Time from
    the Start menu while the tracker is still initializing.
-3. Confirm the dashboard shows its intentional waiting/first-run state and never
-   exposes a raw SQLite or missing-table error.
-4. Confirm the state resolves without relaunching once the tracker creates the
-   database.
+3. Confirm the dashboard bootstraps the neutral schema and shows privacy
+   onboarding without exposing a raw SQLite or missing-table error.
+4. Confirm categories contain only the functional Ignored row, rules are empty,
+   the weekly goal is unset, and recording/title consent are both off.
 
 ## 3. Reboot and autostart
 
@@ -75,5 +88,5 @@ The release artifact is:
 - On Windows 10, verify the WebView2 bootstrap succeeds on a machine without a
   preinstalled runtime.
 - On both OS versions, repeat once as a standard non-administrator user.
-- Record installer hash, installer size, OS build, result, and any antivirus or
-  SmartScreen warning in the release notes.
+- Record installer hash, installer size, signer subject, timestamp authority,
+  OS build, result, and any antivirus or SmartScreen warning in release notes.

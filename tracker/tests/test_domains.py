@@ -3,7 +3,7 @@ import random
 import re
 import string
 
-from tracker.domains import parse_domain
+from tracker.domains import parse_domain, sanitize_browser_title
 
 
 def test_full_url_in_title():
@@ -36,6 +36,24 @@ def test_filename_like_title_not_mistaken_for_domain():
 
 def test_empty_title():
     assert parse_domain("") is None
+
+
+def test_browser_title_strips_url_and_browser_suffix():
+    assert sanitize_browser_title(
+        "Account - https://user:secret@example.com/private?q=token - Google Chrome"
+    ) == "Account"
+
+
+def test_browser_title_strips_non_http_url_schemes():
+    assert sanitize_browser_title("Local file - file:///C:/Users/person/private.txt") == "Local file"
+
+
+def test_browser_title_strips_trailing_domain():
+    assert sanitize_browser_title("Front page - reddit.com - Mozilla Firefox") == "Front page"
+
+
+def test_browser_title_preserves_non_url_page_name():
+    assert sanitize_browser_title("Project notes - Google Chrome") == "Project notes"
 
 
 def test_www_prefix_stripped():
