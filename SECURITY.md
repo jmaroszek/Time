@@ -49,8 +49,7 @@ must be managed by the user.
 - Schema versions are checked before writes. A newer database is opened
   read-only by older application code.
 - The tracker, dashboard, and public installer must all be Authenticode-signed
-  and timestamped. The repository release verifier rejects unsigned artifacts;
-  provider setup is documented in [signing.md](signing.md).
+  and timestamped. The repository release verifier rejects unsigned artifacts.
 
 ## Reporting a vulnerability
 
