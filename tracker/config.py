@@ -30,4 +30,8 @@ LOG_PATH = DATA_DIR / "Logs" / "tracker.log"
 # Written to the settings table at startup (DIST-005); bump with releases.
 TRACKER_VERSION = "0.1.0"
 
+# The production mutex name is stable. The override exists so release packaging
+# can be smoke-tested against a scratch DB while the live tracker keeps running.
+MUTEX_NAME = os.environ.get("TIME_MUTEX_NAME", "Global\\TimeTrackerSingleton")
+
 POLL_SECONDS = 1.0  # transition-detection cadence; not a tunable, accuracy depends on it

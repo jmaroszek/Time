@@ -70,15 +70,22 @@ by the dashboard are re-read by the tracker every heartbeat.
 ```powershell
 pythonw tracker/tracker.py          # tracker (headless)
 cd dashboard; npm run tauri dev     # dashboard (dev)
-cd dashboard; npm run tauri build   # dashboard (installable build)
+cd dashboard; npm run tauri build   # one NSIS installer with packaged tracker
 
 py -m pytest tracker/tests scripts/tests   # python tests
 cd dashboard; npx vitest run               # dashboard tests
 ```
 
-The tracker is meant to start at logon — anything that can run
-`pythonw.exe tracker\tracker.py` works (Task Scheduler, a launcher script);
-the single-instance mutex makes duplicate launches harmless.
+The release build runs PyInstaller automatically, carries its one-dir tracker
+runtime as a Tauri sidecar, and produces one current-user NSIS installer. The
+installer starts the tracker immediately, registers it for logon, and removes
+the process/autostart entry on uninstall while keeping the user's database.
+Follow the [clean-VM release checklist](docs/clean-vm-release-checklist.md)
+before shipping an artifact.
+
+For source development, the tracker can still run through
+`pythonw.exe tracker\tracker.py`; the single-instance mutex makes duplicate
+launches harmless.
 
 Both halves default the database to `%LOCALAPPDATA%\Time\time_log.db`, creating
 it on first run. Override the tracker with the `TIME_DATA_DIR` env var and the

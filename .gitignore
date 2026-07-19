@@ -1,4 +1,7 @@
 __pycache__/
+tracker/build/
+tracker/dist/
+dashboard/src-tauri/binaries/
 /Data/
 /Images/
 /Logs/

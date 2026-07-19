@@ -258,3 +258,25 @@ def test_tray_pause_roundtrip(tmp_path):
     tray._write_pause(path, "0", 0)
     paused, _until = tray._read_pause_state(path)
     assert paused is False
+
+
+def test_tray_uses_frozen_icon(monkeypatch, tmp_path):
+    from tracker import tray
+
+    icon = tmp_path / "assets" / "icon.ico"
+    icon.parent.mkdir()
+    icon.write_bytes(b"icon")
+    monkeypatch.setattr(tray.sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert tray._icon_path() == icon
+
+
+def test_tray_finds_dashboard_beside_packaged_tracker(monkeypatch, tmp_path):
+    from tracker import tray
+
+    tracker_exe = tmp_path / "time-tracker.exe"
+    dashboard_exe = tmp_path / "Time.exe"
+    dashboard_exe.write_bytes(b"dashboard")
+    monkeypatch.delenv("TIME_DASHBOARD_PATH", raising=False)
+    monkeypatch.setattr(tray.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tray.sys, "executable", str(tracker_exe))
+    assert tray._dashboard_path() == dashboard_exe
