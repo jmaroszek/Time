@@ -244,13 +244,34 @@ def get_settings(conn: sqlite3.Connection) -> Settings:
     )
 
 
-def _retry(fn: Callable[[], T], attempts: int = 5, base_delay: float = 0.1) -> T:
+def _retry(
+    fn: Callable[[], T],
+    attempts: int = 5,
+    base_delay: float = 0.1,
+    op: str = "write",
+) -> T:
+    """Retry a write past transient lock contention, with backoff.
+
+    Retries and exhaustion are logged (SUP-001): a lost session is otherwise
+    invisible in the field. `op` is a fixed operation name and the SQLite error
+    text describes the lock, so neither carries session content into the log.
+    """
     for i in range(attempts):
         try:
             return fn()
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as exc:
             if i == attempts - 1:
+                logging.error(
+                    "SQLite %s failed after %d attempts over ~%.1fs; data was lost: %s",
+                    op,
+                    attempts,
+                    base_delay * (2 ** (attempts - 1) - 1),
+                    exc,
+                )
                 raise
+            logging.warning(
+                "SQLite %s retry %d of %d: %s", op, i + 1, attempts - 1, exc
+            )
             time.sleep(base_delay * (2**i))
     raise RuntimeError("unreachable")
 
@@ -272,7 +293,7 @@ class SqliteStore:
             )
             return int(cur.lastrowid)
 
-        session_id = _retry(_do)
+        session_id = _retry(_do, op="open_session")
         # DEBUG, not INFO: window titles are sensitive, and an INFO-level log
         # would archive them in plain text alongside the DB (audit DIST-003).
         logging.debug("OPEN  %s | %s", process, title[:120])
@@ -282,7 +303,8 @@ class SqliteStore:
         _retry(
             lambda: self._conn.execute(
                 "UPDATE sessions SET end_ts = ? WHERE id = ?", (int(end_ts), session_id)
-            )
+            ),
+            op="close_session",
         )
         logging.debug("CLOSE #%s @ %s", session_id, int(end_ts))
 
@@ -290,5 +312,6 @@ class SqliteStore:
         _retry(
             lambda: self._conn.execute(
                 "UPDATE sessions SET end_ts = ? WHERE id = ?", (int(end_ts), session_id)
-            )
+            ),
+            op="heartbeat",
         )
