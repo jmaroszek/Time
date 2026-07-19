@@ -2,12 +2,13 @@ import { useMemo, useState } from "react";
 
 import { Button, Card, CategoryDot, Spinner } from "../components/ui";
 import {
-  categoryKind,
+  categoryState,
   categoryStateFlags,
   type Category,
-  type Productivity,
+  type CategoryState,
   type MatchType,
 } from "../lib/classify";
+import { UNCATEGORIZED } from "../lib/chartTheme";
 import { cleanDomainName, cleanProcessName, fmtDuration } from "../lib/format";
 import { clipSessions, duration, type Session } from "../lib/metrics";
 import {
@@ -29,6 +30,9 @@ interface UsageRow {
   seconds: number;
   categoryName: string | null;
   categoryColor: string | null;
+  /** Ignored-category time shows here (Apps is the management surface) but is
+   *  excluded from Overview/Trends stats — the row is labeled accordingly. */
+  categoryIgnored: boolean;
 }
 
 const PRIORITY: Record<MatchType, number> = { domain: 1, title: 2, process: 3 };
@@ -37,11 +41,28 @@ const TYPE_STYLES: Record<MatchType, string> = {
   title: "bg-[#a195aa]/15 text-[#b0a5b8]",
   process: "bg-[#a99e8c]/15 text-[#b8ad9a]",
 };
-const STATE_COLORS: Record<Productivity, string> = {
-  productive: "#34d399",
+// Annotation-tier semantic hues (VIS-001) plus the ignored gray.
+const STATE_COLORS: Record<CategoryState, string> = {
+  productive: "#4fb389",
   neutral: "#9aa0a8",
-  unproductive: "#f87171",
+  unproductive: "#d07d7d",
+  ignored: "#5b616b",
 };
+
+// Swatches offered by the category color picker: hues spaced AND lightness
+// varied so no pair relies on hue alone (helps red-green CVD, VIS-006).
+const CATEGORY_SWATCHES = [
+  "#9c8ff0", // light purple
+  "#3f9bf0", // blue
+  "#56c8d8", // cyan
+  "#43c88a", // green
+  "#1d9e75", // deep green
+  "#e0a53a", // amber
+  "#e8663d", // orange
+  "#e75fa0", // pink
+  "#b08a5e", // tan
+  "#828994", // slate
+];
 
 export default function AppsTab({ range }: { range: Range }) {
   const meta = useMeta();
@@ -51,7 +72,7 @@ export default function AppsTab({ range }: { range: Range }) {
   const endSec = range.end.getTime() / 1000;
   const { sessions, loading, error } = useSessions(startSec, endSec);
 
-  const rows = useMemo(() => {
+  const { rows, hiddenCount, hiddenSeconds } = useMemo(() => {
     const clipped = clipSessions(sessions, startSec, endSec).filter((s) => !s.isAfk);
     const byKey = new Map<string, { row: UsageRow; sample: Session }>();
     for (const s of clipped) {
@@ -62,7 +83,7 @@ export default function AppsTab({ range }: { range: Range }) {
       let entry = byKey.get(mapKey);
       if (!entry) {
         entry = {
-          row: { kind, key, seconds: 0, categoryName: null, categoryColor: null },
+          row: { kind, key, seconds: 0, categoryName: null, categoryColor: null, categoryIgnored: false },
           sample: s,
         };
         byKey.set(mapKey, entry);
@@ -73,11 +94,19 @@ export default function AppsTab({ range }: { range: Range }) {
       const category = meta.classifier(entry.sample);
       entry.row.categoryName = category?.name ?? null;
       entry.row.categoryColor = category?.color ?? null;
+      entry.row.categoryIgnored = category?.isIgnored ?? false;
     }
-    return [...byKey.values()]
-      .map((entry) => entry.row)
-      .filter((row) => row.seconds >= meta.minAppSeconds)
-      .sort((a, b) => b.seconds - a.seconds);
+    const all = [...byKey.values()].map((entry) => entry.row).sort((a, b) => b.seconds - a.seconds);
+    const visible = all.filter((row) => row.seconds >= meta.minAppSeconds);
+    // UX-003: what min_app_seconds hides is surfaced in the header footnote so
+    // the Apps total reconciles visibly with the Overview KPI total.
+    const hidden = all.length - visible.length;
+    return {
+      rows: visible,
+      hiddenCount: hidden,
+      hiddenSeconds: all.reduce((sum, row) => sum + row.seconds, 0) -
+        visible.reduce((sum, row) => sum + row.seconds, 0),
+    };
   }, [sessions, startSec, endSec, meta]);
 
   if (loading) return <Spinner />;
@@ -126,7 +155,7 @@ export default function AppsTab({ range }: { range: Range }) {
               const key = `uncat:${row.kind}:${row.key}`;
               return (
                 <div key={key} className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface px-3 py-2 text-xs">
-                  <CategoryDot color="#5b616b" />
+                  <CategoryDot color={UNCATEGORIZED} />
                   <span>{displayName(row)}</span>
                   <span className="text-[11px] text-ink-3">{fmtDuration(row.seconds)}</span>
                   <CategoryMenu
@@ -151,6 +180,8 @@ export default function AppsTab({ range }: { range: Range }) {
         right={
           <span className="text-[11px] text-ink-3">
             {rows.length} tracked · {fmtDuration(rows.reduce((sum, row) => sum + row.seconds, 0))} total
+            {hiddenCount > 0 &&
+              ` · ${hiddenCount} more under ${fmtDuration(meta.minAppSeconds)} · ${fmtDuration(hiddenSeconds)}`}
           </span>
         }
       >
@@ -284,7 +315,7 @@ function UsageTable({
         <tbody>
           {rows.map((row) => {
             const key = `row:${row.kind}:${row.key}`;
-            const color = row.categoryColor ?? "#5b616b";
+            const color = row.categoryColor ?? UNCATEGORIZED;
             const pct = total ? Math.round((row.seconds / total) * 100) : 0;
             return (
               <tr key={key} className="border-b border-edge/40 transition-colors hover:bg-white/[.018]">
@@ -313,7 +344,10 @@ function UsageTable({
                         {displayName(row)}
                       </span>
                     )}
-                    <span className="text-[10px] leading-none text-ink-3">{row.kind}</span>
+                    <span className="text-[10px] leading-none text-ink-3">
+                      {row.kind}
+                      {row.categoryIgnored && " · excluded from stats"}
+                    </span>
                   </span>
                 </td>
                 <td className="py-2.5 pl-4">
@@ -359,6 +393,9 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
   const banner = useBanner();
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set<number>());
   const [stateMenu, setStateMenu] = useState<number | null>(null);
+  const [colorMenu, setColorMenu] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const [newName, setNewName] = useState("");
   const [drafts, setDrafts] = useState<Record<number, { type: MatchType; pattern: string }>>({});
 
@@ -383,8 +420,14 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
   };
   const submitCategory = async () => {
     if (!newName.trim()) return;
+    // First unused curated swatch, so new categories are distinguishable
+    // instead of all accent-blue (UX-005).
+    const used = new Set(meta.categories.map((c) => c.color.toLowerCase()));
+    const color =
+      CATEGORY_SWATCHES.find((c) => !used.has(c)) ??
+      CATEGORY_SWATCHES[meta.categories.length % CATEGORY_SWATCHES.length];
     try {
-      const id = await addCategory(newName, "#6ba0da", "unproductive");
+      const id = await addCategory(newName, color, "unproductive");
       setNewName("");
       setExpanded((current) => new Set(current).add(id));
       await onChanged();
@@ -392,9 +435,28 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
       banner.report(e, "category");
     }
   };
-  const setCategoryState = async (category: Category, option: Productivity) => {
+  const setCategoryState = async (category: Category, option: CategoryState) => {
     try {
       await updateCategory({ ...category, ...categoryStateFlags(option) });
+      await onChanged();
+    } catch (e) {
+      banner.report(e, "category");
+    }
+  };
+  const setCategoryColor = async (category: Category, color: string) => {
+    try {
+      await updateCategory({ ...category, color });
+      await onChanged();
+    } catch (e) {
+      banner.report(e, "category");
+    }
+  };
+  const saveRename = async (category: Category) => {
+    const name = renameDraft.trim();
+    setRenaming(null);
+    if (!name || name === category.name) return;
+    try {
+      await updateCategory({ ...category, name });
       await onChanged();
     } catch (e) {
       banner.report(e, "category");
@@ -431,37 +493,117 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
       title="Categories & Rules"
       right={<span className="text-[11px] text-ink-3">{meta.categories.length} categories · {meta.rules.length} rules</span>}
     >
-      {stateMenu !== null && <button type="button" aria-label="Close state menu" className="fixed inset-0 z-40 cursor-default" onClick={() => setStateMenu(null)} />}
+      {(stateMenu !== null || colorMenu !== null) && (
+        <button
+          type="button"
+          aria-label="Close menu"
+          className="fixed inset-0 z-40 cursor-default"
+          onClick={() => {
+            setStateMenu(null);
+            setColorMenu(null);
+          }}
+        />
+      )}
       <div className="mb-4 text-[11px] text-ink-3">
         Rules live inside their category. If several rules match, the highest priority wins: domain, then title, then process.
       </div>
       <div className="flex flex-col gap-2">
         {meta.categories.map((category) => {
           const open = expanded.has(category.id);
-          const state = categoryKind(category);
+          const state = categoryState(category);
           const menuOpen = stateMenu === category.id;
+          const colorOpen = colorMenu === category.id;
           const rules = meta.rules.filter((rule) => rule.categoryId === category.id);
           const draft = draftFor(category.id);
           return (
-            <div key={category.id} className={`rounded-[11px] border border-edge bg-surface-2 ${menuOpen ? "overflow-visible" : "overflow-hidden"}`}>
-              <button type="button" className="flex w-full items-center gap-2.5 px-3 py-3 text-left text-xs" onClick={() => toggle(category.id)}>
+            <div key={category.id} className={`rounded-[11px] border border-edge bg-surface-2 ${menuOpen || colorOpen ? "overflow-visible" : "overflow-hidden"}`}>
+              <div
+                role="button"
+                tabIndex={0}
+                className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-3 text-left text-xs"
+                onClick={() => toggle(category.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    toggle(category.id);
+                  }
+                }}
+              >
                 <span className={`text-[10px] text-ink-3 transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span>
-                <span className="h-3 w-3 rounded" style={{ backgroundColor: category.color }} />
-                <span className="font-semibold">{category.name}</span>
+                <span className="relative">
+                  <button
+                    type="button"
+                    title="Change color"
+                    aria-label={`Change color of ${category.name}`}
+                    className="block h-3 w-3 rounded transition-shadow hover:shadow-[0_0_0_2px_var(--color-edge-2)]"
+                    style={{ backgroundColor: category.color }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setColorMenu(colorOpen ? null : category.id);
+                      setStateMenu(null);
+                    }}
+                  />
+                  {colorOpen && (
+                    <span className="menu-pop absolute left-0 top-[calc(100%+6px)] z-50 grid w-[136px] grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-[0_12px_34px_rgba(0,0,0,.5)]">
+                      {CATEGORY_SWATCHES.map((swatch) => (
+                        <button
+                          key={swatch}
+                          type="button"
+                          aria-label={`Use color ${swatch}`}
+                          className={`h-4 w-4 rounded transition-shadow hover:shadow-[0_0_0_2px_var(--color-ink-3)] ${swatch === category.color.toLowerCase() ? "shadow-[0_0_0_2px_var(--color-ink-2)]" : ""}`}
+                          style={{ backgroundColor: swatch }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setColorMenu(null);
+                            void setCategoryColor(category, swatch);
+                          }}
+                        />
+                      ))}
+                    </span>
+                  )}
+                </span>
+                {renaming === category.id ? (
+                  <input
+                    autoFocus
+                    value={renameDraft}
+                    aria-label={`Rename ${category.name}`}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => setRenameDraft(event.target.value)}
+                    onBlur={() => void saveRename(category)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void saveRename(category);
+                      else if (event.key === "Escape") setRenaming(null);
+                    }}
+                    className="w-40 rounded-md border border-edge bg-surface px-1.5 py-0.5 text-xs font-semibold outline-none focus:border-accent/60"
+                  />
+                ) : (
+                  <span
+                    className="font-semibold"
+                    title={category.isIgnored ? "The built-in Ignored category cannot be renamed" : "Double-click to rename"}
+                    onDoubleClick={(event) => {
+                      if (category.isIgnored) return;
+                      event.stopPropagation();
+                      setRenaming(category.id);
+                      setRenameDraft(category.name);
+                    }}
+                  >
+                    {category.name}
+                  </span>
+                )}
                 <span className="flex-1" />
                 <span className="relative w-[112px] shrink-0">
                   <span
                     role="button"
                     tabIndex={0}
                     className="flex w-full items-center justify-start gap-1.5 rounded-md px-2 py-1 text-[10.5px] capitalize text-ink-3 hover:bg-surface-3"
-                    onClick={(event) => { event.stopPropagation(); setStateMenu(menuOpen ? null : category.id); }}
+                    onClick={(event) => { event.stopPropagation(); setStateMenu(menuOpen ? null : category.id); setColorMenu(null); }}
                     onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); setStateMenu(menuOpen ? null : category.id); } }}
                   >
                     <CategoryDot color={STATE_COLORS[state]} /> {state}
                   </span>
                   {menuOpen && (
                     <span className="menu-pop absolute right-0 top-[calc(100%+5px)] z-50 min-w-[155px] rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-[0_12px_34px_rgba(0,0,0,.5)]">
-                      {(["productive", "neutral", "unproductive"] as Productivity[]).map((option) => (
+                      {(["productive", "neutral", "unproductive", "ignored"] as CategoryState[]).map((option) => (
                         <span
                           role="button"
                           tabIndex={0}
@@ -482,7 +624,7 @@ function CategoriesAndRules({ onChanged }: { onChanged: () => Promise<void> }) {
                   )}
                 </span>
                 <span className="w-[66px] text-right text-[10.5px] text-ink-3">{rules.length} {rules.length === 1 ? "rule" : "rules"}</span>
-              </button>
+              </div>
 
               {open && (
                 <div className="ml-[42px] border-t border-edge/50 px-3 py-3">
