@@ -1,0 +1,3 @@
+# Test/development dependencies (not shipped).
+-r requirements.txt
+pytest==8.4.2

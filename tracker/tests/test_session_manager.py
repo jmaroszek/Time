@@ -195,6 +195,26 @@ def test_heartbeat_respects_cadence(store):
 def test_browser_session_gets_domain(manager, store):
     manager.tick(active(1000.0, process="chrome.exe", title="Video - https://youtube.com/watch?v=1"))
     assert store.opened[0][4] == "youtube.com"
+    assert store.opened[0][3] == "Video"
+
+
+def test_titles_are_omitted_unless_enabled(store):
+    manager = SessionManager(store=store, settings=Settings(record_window_titles=False))
+    manager.tick(active(1000.0, process="code.exe", title="private-document.txt"))
+    assert store.opened[0][3] == ""
+
+
+def test_browser_domains_are_kept_when_titles_are_disabled(store):
+    manager = SessionManager(store=store, settings=Settings(record_window_titles=False))
+    manager.tick(active(1000.0, process="chrome.exe", title="Account - https://example.com/private"))
+    assert store.opened[0][3] == ""
+    assert store.opened[0][4] == "example.com"
+
+
+def test_no_recording_without_consent(store):
+    manager = SessionManager(store=store, settings=Settings(recording_consent=False))
+    drive(manager, 1000.0, 10)
+    assert store.opened == []
 
 
 def test_non_browser_session_has_no_domain(manager, store):
@@ -214,3 +234,68 @@ def test_shutdown_finalizes_open_session(manager, store):
 def test_shutdown_with_no_session_is_noop(manager, store):
     manager.shutdown(1000.0)
     assert store.closed == {}
+
+
+# ---------------- pause (PROD-001) ----------------
+
+
+def test_pause_closes_current_and_opens_nothing(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(1000.0))
+    manager.settings = Settings(tracking_paused=True)
+    heartbeats_before_pause = len(store.heartbeats)
+    drive(manager, 1010.0, 30)
+    assert store.closed[1] == 1010.0
+    assert len(store.opened) == 1  # nothing new while paused
+    assert len(store.heartbeats) == heartbeats_before_pause  # none while paused
+
+
+def test_pause_with_no_session_is_a_noop(store):
+    manager = SessionManager(store=store, settings=Settings(tracking_paused=True))
+    drive(manager, 1000.0, 10)
+    assert store.opened == []
+    assert store.closed == {}
+
+
+def test_resume_opens_a_fresh_session(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(1000.0))
+    manager.settings = Settings(tracking_paused=True)
+    manager.tick(active(1010.0))
+    manager.settings = Settings(tracking_paused=False)
+    manager.tick(active(1600.0))
+    assert store.opened[1][1] == 1600.0  # fresh session at resume time
+    assert store.closed == {1: 1010.0}  # the pause gap is not recorded
+
+
+def test_pause_clears_title_debounce(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(1000.0))
+    manager.tick(active(1001.0, title="other.py"))  # pending debounce tick 1/2
+    manager.settings = Settings(tracking_paused=True)
+    manager.tick(active(1002.0))
+    manager.settings = Settings(tracking_paused=False)
+    manager.tick(active(1003.0, title="other.py"))
+    # After resume the old pending state must not carry over: this is tick 1/2
+    # again, so no split-open yet beyond the fresh session.
+    assert store.opened[-1][2:4] == ("code.exe", "other.py")
+
+
+# ---------------- clock set-back clamp (DATA-002) ----------------
+
+
+def test_clock_setback_app_switch_never_writes_negative_duration(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(10000.0, process="code.exe"))
+    # Wall clock steps back 9 minutes, then the user switches apps.
+    manager.tick(active(9460.0, process="obsidian.exe", title="Notes"))
+    assert store.closed[1] == 10000.0  # clamped to start_ts, not 9460
+    assert store.opened[1][1] == 10000.0  # new session opens at the boundary
+
+
+def test_clock_setback_afk_to_active_clamps(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(10000.0, idle=300.0))  # opens an AFK span (back-dated)
+    afk_id, afk_start = store.opened[0][0], store.opened[0][1]
+    manager.tick(active(afk_start - 100.0))  # clock behind the AFK start
+    assert store.closed[afk_id] >= afk_start

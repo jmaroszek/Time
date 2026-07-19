@@ -14,6 +14,7 @@ import { dayKey, listDays, type Range } from "../lib/time";
 import { fmtClock, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
+import { CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 
 const AFK_COLOR = "#33363d";
 const UNCATEGORIZED_COLOR = "#5b616b";
@@ -118,25 +119,23 @@ export default function TimelineChart({
         max: dayEndHour,
         interval: 3,
         axisLabel: {
-          color: "#9aa0a8",
+          color: CHROME.axisLabel,
           fontSize: 11,
           formatter: (h: number) =>
             h === 0 || h === 24 ? "12am" : h === 12 ? "noon" : h < 12 ? `${h}am` : `${h - 12}pm`,
         },
-        splitLine: { lineStyle: { color: "#1d2026" } },
+        splitLine: { lineStyle: { color: CHROME.gridLine } },
       },
       yAxis: {
         type: "category",
         data: days.map(fmtDayLabel),
         inverse: true,
-        axisLabel: { color: "#9aa0a8", fontSize: 11 },
+        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
         axisTick: { show: false },
         axisLine: { show: false },
       },
       tooltip: {
-        backgroundColor: "#1d2026",
-        borderColor: "#2a2e36",
-        textStyle: { color: "#e8eaed", fontSize: 12 },
+        ...TOOLTIP_STYLE,
         formatter: (p: { data: { seg: TimelineSegment } }) => formatTooltip(p.data.seg, aliases),
       },
       series: [
@@ -202,7 +201,7 @@ function formatTooltip(seg: TimelineSegment, aliases?: Record<string, string>): 
       .slice(0, 4)
       .map(
         (a) =>
-          `<div style="color:#9aa0a8">${escapeHtml(cleanProcessName(a.process, aliases))} · ${fmtDuration(a.seconds)}</div>`,
+          `<div style="color:${CHROME.axisLabel}">${escapeHtml(cleanProcessName(a.process, aliases))} · ${fmtDuration(a.seconds)}</div>`,
       )
       .join("");
     return `<b>${escapeHtml(seg.categoryName)}</b> · ${window}<div>${fmtDuration(seg.activeSec ?? 0)} active</div>${apps}`;
@@ -212,7 +211,7 @@ function formatTooltip(seg: TimelineSegment, aliases?: Record<string, string>): 
     : `<b>${escapeHtml(cleanProcessName(seg.process, aliases))}</b> · ${escapeHtml(seg.categoryName)}`;
   const titleLine =
     !seg.isAfk && seg.title
-      ? `<div style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9aa0a8">${escapeHtml(seg.title)}</div>`
+      ? `<div style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${CHROME.axisLabel}">${escapeHtml(seg.title)}</div>`
       : "";
   return `${head}${titleLine}<div>${window} · ${fmtDuration(seg.endSec - seg.startSec)}</div>`;
 }

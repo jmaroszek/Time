@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tracker:
+    # windows-latest because the tracker depends on pywin32.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install -r tracker/requirements-dev.txt
+      - name: Run pytest
+        run: python -m pytest tracker/tests scripts/tests
+
+  dashboard:
+    name: dashboard (${{ matrix.timezone }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        timezone:
+          - America/New_York
+          - Australia/Adelaide
+    env:
+      TZ: ${{ matrix.timezone }}
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Run vitest
+        run: npx vitest run

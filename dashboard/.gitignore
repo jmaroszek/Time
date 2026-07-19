@@ -13,7 +13,7 @@ dist-ssr
 *.local
 .vite
 
-# local overrides (e.g. VITE_DB_PATH)
+# local Vite-only overrides (release database paths are fixed by Rust)
 .env
 
 # a global gitignore with `lib/` (for Python venvs) would otherwise

@@ -2,11 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Time",
   "version": "0.1.0",
-  "identifier": "com.jonah.time",
+  "identifier": "io.github.jmaroszek.time",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
+    "beforeBundleCommand": "npm run build:tracker",
     "frontendDist": "../dist"
   },
   "app": {
@@ -22,12 +23,22 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "externalBin": ["binaries/time-tracker"],
+    "resources": {
+      "binaries/_internal/": "_internal/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

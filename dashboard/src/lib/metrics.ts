@@ -16,7 +16,9 @@ export interface Session {
 
 /** Default max gap (s) between sessions that still counts as one continuous
  *  focus chain, when a caller doesn't supply one. */
-const DEFAULT_FOCUS_CHAIN_MAX_GAP = 60;
+// Mirrors the seeded focus_chain_max_gap_seconds default in tracker/db.py
+// DEFAULT_SETTINGS — keep in lockstep (CODE-002).
+const DEFAULT_FOCUS_CHAIN_MAX_GAP = 120;
 
 export function duration(s: Session): number {
   return Math.max(0, s.end - s.start);
@@ -357,9 +359,18 @@ export function hourMatrix(sessions: Session[], include: (s: Session) => boolean
     if (s.isAfk || !include(s)) continue;
     let cur = s.start;
     while (cur < s.end) {
-      const nextHour = (Math.floor(cur / 3600) + 1) * 3600;
-      const chunkEnd = Math.min(s.end, nextHour);
       const d = new Date(cur * 1000);
+      // Component construction finds the next *local* hour boundary. UTC-hour
+      // chunks smear :30/:45 zones and the repeated/skipped hour on DST days.
+      const nextHour = new Date(
+        d.getFullYear(),
+        d.getMonth(),
+        d.getDate(),
+        d.getHours() + 1,
+      ).getTime() / 1000;
+      // The fallback only protects against exotic runtime timezone behavior;
+      // supported zones always produce a boundary strictly after `cur`.
+      const chunkEnd = Math.min(s.end, nextHour > cur ? nextHour : cur + 3600);
       matrix[d.getDay()][d.getHours()] += chunkEnd - cur;
       cur = chunkEnd;
     }
