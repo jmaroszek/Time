@@ -216,7 +216,7 @@ export default function SettingsTab() {
             <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
             <Row
               label="Browser processes"
-              help="Comma-separated. Splitting browser time by site needs a “URL in title” extension installed in the browser; without one, browser time is tracked per app only."
+              help="Comma-separated. Splitting browser time by site needs the “URL in title” extension (or any extension that appends the URL to the window title); without one, browser time is tracked per app only."
               control={
                 <input
                   value={drafts.browser_processes ?? ""}

@@ -149,9 +149,10 @@ function FirstRunPanel({ status }: { status: TrackerStatus }) {
         )}
       </p>
       <p className="mt-2 text-ink-2">
-        To split browser time by site, install a &quot;URL in title&quot; extension in your
-        browser; without one, browser time is tracked per app only. As data arrives, assign
-        categories on the Apps tab — rules re-classify all history instantly.
+        To split browser time by site, install the &quot;URL in title&quot; browser extension
+        (third-party — it&apos;s what Time is tested with); without it, browser time is tracked
+        per app only. As data arrives, assign categories on the Apps tab — rules re-classify
+        all history instantly.
       </p>
     </section>
   );
