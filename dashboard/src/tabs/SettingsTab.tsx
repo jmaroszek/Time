@@ -26,6 +26,8 @@ interface NumericSpec {
   step?: number;
 }
 
+// UI clamp ranges. The tracker separately clamps what it consumes in
+// tracker/db.py get_settings (CODE-002) — keep the two in sight of each other.
 const SPECS = {
   goal: { key: "weekly_goal_hours", min: 1, max: 100, scale: 1 },
   minimum: { key: "min_app_seconds", min: 0, max: 30, scale: 60 },
@@ -145,8 +147,8 @@ export default function SettingsTab() {
         </Section>
 
         <Section title="Timeline Window">
-          <Row label="Day starts at" help="First hour shown on Timeline & Hour-of-Day plots." control={numberControl(SPECS.start, undefined, true)} />
-          <Row label="Day ends at" help="Last hour shown on Timeline & Hour-of-Day plots." control={numberControl(SPECS.end, undefined, true)} />
+          <Row label="Day starts at" help="First hour drawn on Timeline & Hour-of-Day plots. Activity outside the window still counts in all totals." control={numberControl(SPECS.start, undefined, true)} />
+          <Row label="Day ends at" help="Last hour drawn on Timeline & Hour-of-Day plots. Activity outside the window still counts in all totals." control={numberControl(SPECS.end, undefined, true)} />
           <Row
             label="Week starts on"
             help="Affects weekly presets, trends, and goal pacing."
@@ -156,7 +158,7 @@ export default function SettingsTab() {
 
         <Section title="Focus & Idle">
           <Row label="AFK idle threshold" help="No input for this long marks you AFK — watching video without touching the mouse or keyboard counts as away." control={numberControl(SPECS.idle, "min")} />
-          <Row label="Focus streak max gap" help="Short gaps won't break a productive streak." control={numberControl(SPECS.focus, "min")} />
+          <Row label="Focus chain max gap" help="Short gaps won't break a productive focus chain." control={numberControl(SPECS.focus, "min")} />
         </Section>
 
         <Section title="App Lists">
@@ -240,6 +242,7 @@ export default function SettingsTab() {
               uploaded. To restore a backup: quit the tracker and dashboard, replace the
               database file with the backup copy, then restart (full steps in docs/restore.md).
             </p>
+            <VersionsLine trackerVersion={meta.settings.tracker_version} />
           </div>
         </section>
 
@@ -266,6 +269,23 @@ export default function SettingsTab() {
         </section>
       </div>
     </div>
+  );
+}
+
+/** DIST-005: both halves' versions, for diagnosing mismatched installs. The
+ *  tracker stamps tracker_version into settings at startup. */
+function VersionsLine({ trackerVersion }: { trackerVersion: string | undefined }) {
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    void import("@tauri-apps/api/app")
+      .then(({ getVersion }) => getVersion())
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
+  return (
+    <p className="mt-2 text-[11px] text-ink-3">
+      Dashboard {appVersion ?? "—"} · Tracker {trackerVersion ?? "not stamped yet"}
+    </p>
   );
 }
 

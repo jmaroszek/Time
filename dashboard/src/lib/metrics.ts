@@ -16,7 +16,9 @@ export interface Session {
 
 /** Default max gap (s) between sessions that still counts as one continuous
  *  focus chain, when a caller doesn't supply one. */
-const DEFAULT_FOCUS_CHAIN_MAX_GAP = 60;
+// Mirrors the seeded focus_chain_max_gap_seconds default in tracker/db.py
+// DEFAULT_SETTINGS — keep in lockstep (CODE-002).
+const DEFAULT_FOCUS_CHAIN_MAX_GAP = 120;
 
 export function duration(s: Session): number {
   return Math.max(0, s.end - s.start);

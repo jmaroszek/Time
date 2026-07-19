@@ -27,4 +27,7 @@ DATA_DIR = _data_dir()
 DB_PATH = DATA_DIR / "time_log.db"
 LOG_PATH = DATA_DIR / "Logs" / "tracker.log"
 
+# Written to the settings table at startup (DIST-005); bump with releases.
+TRACKER_VERSION = "0.1.0"
+
 POLL_SECONDS = 1.0  # transition-detection cadence; not a tunable, accuracy depends on it
