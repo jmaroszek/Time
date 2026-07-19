@@ -63,7 +63,9 @@ dashboard/    Tauri 2 + React + ECharts, launched on demand: reads sessions,
 The two halves never talk to each other directly — a shared SQLite database
 (WAL) at `%LOCALAPPDATA%\Time\time_log.db` is the contract. Both halves resolve
 that path independently, so it holds wherever the code lives. Settings written
-by the dashboard are re-read by the tracker every heartbeat.
+by the dashboard are re-read by the tracker every heartbeat. The tracker is the
+only schema/migration owner; the dashboard checks `schema_version` and refuses
+to write when a newer Time release created the database.
 
 ## Running it
 

@@ -156,10 +156,12 @@ lifecycle hooks cover the tracker sidecar.
 - [ ] **Backup & data safety.** The `VACUUM INTO` backup already exists
       ([docs/settings.md](docs/settings.md)). For a shipped app, consider an
       automatic periodic backup and a documented restore path.
-- [ ] **Schema migration discipline.** DDL is idempotent today and `_seed` even
-      back-fills columns ([db.py](tracker/db.py) `_seed`). Formalize this into a
-      versioned migration step so future schema changes upgrade existing users'
-      DBs safely — this is the thing most likely to bite real installs.
+- [x] **Schema migration discipline.** The tracker owns numbered, transactional
+      migrations and stamps `schema_version`; the dashboard only checks
+      compatibility and refuses newer databases. The first fixture-backed
+      migration adds session/rule constraints and cleans legacy anomalies.
+      Legacy column backfills remain tracker-owned, and each future shipped
+      schema must add one numbered step plus its prior-version fixture.
 
 ---
 

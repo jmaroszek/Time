@@ -1,8 +1,7 @@
-"""Schema bootstrap, seed data, settings access, and the sqlite-backed Store.
+"""Schema bootstrap, versioned migrations, settings, and sqlite-backed storage.
 
-All DDL is idempotent (CREATE IF NOT EXISTS); seeds only run into empty tables,
-so opening the DB from the tracker, the migration script, or tests is always
-safe. The legacy `time_log` table is left completely untouched.
+The tracker is the sole DDL/migration owner. The legacy `time_log` table is
+left completely untouched.
 """
 
 from __future__ import annotations
@@ -16,12 +15,17 @@ from typing import Callable, TypeVar
 from tracker.session_manager import Settings
 
 T = TypeVar("T")
+SCHEMA_VERSION = 1
+
+
+class SchemaTooNewError(RuntimeError):
+    """Raised before writes when an older tracker sees a newer database."""
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY,
     start_ts INTEGER NOT NULL,
-    end_ts   INTEGER NOT NULL,
+    end_ts   INTEGER NOT NULL CHECK(end_ts >= start_ts),
     process  TEXT NOT NULL,
     title    TEXT NOT NULL DEFAULT '',
     domain   TEXT,
@@ -46,10 +50,20 @@ CREATE TABLE IF NOT EXISTS rules (
     match_type TEXT NOT NULL CHECK(match_type IN ('process','domain','title')),
     pattern TEXT NOT NULL,
     category_id INTEGER NOT NULL REFERENCES categories(id),
-    priority INTEGER NOT NULL DEFAULT 0
+    priority INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(match_type, pattern)
 );
 
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+"""
+
+_CATEGORY_DELETE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS delete_category_rules
+BEFORE DELETE ON categories
+FOR EACH ROW
+BEGIN
+    DELETE FROM rules WHERE category_id = OLD.id;
+END
 """
 
 # (name, color, is_productive, is_neutral, sort_order). Productivity is a
@@ -139,13 +153,108 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30, isolation_level=None)  # autocommit
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA temp_store=MEMORY;")
-    conn.executescript(_SCHEMA)
-    _seed(conn)
-    _migrate_rule_priorities(conn)
-    return conn
+    try:
+        version = _read_schema_version(conn)
+        if version > SCHEMA_VERSION:
+            raise SchemaTooNewError(
+                f"database schema {version} is newer than tracker schema"
+                f" {SCHEMA_VERSION}; update Time before tracking"
+            )
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA temp_store=MEMORY;")
+        conn.executescript(_SCHEMA)
+        _migrate_rule_priorities(conn)
+        _run_migrations(conn, version)
+        _seed(conn)
+        return conn
+    except Exception:
+        conn.close()
+        raise
+
+
+def _read_schema_version(conn: sqlite3.Connection) -> int:
+    settings_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings'"
+    ).fetchone()
+    if settings_exists is None:
+        return 0
+    row = conn.execute(
+        "SELECT value FROM settings WHERE key='schema_version'"
+    ).fetchone()
+    if row is None:
+        return 0
+    try:
+        version = int(row[0])
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("database schema_version is not a valid integer") from exc
+    if version < 0:
+        raise RuntimeError("database schema_version cannot be negative")
+    return version
+
+
+def _run_migrations(conn: sqlite3.Connection, version: int) -> None:
+    while version < SCHEMA_VERSION:
+        if version == 0:
+            _migrate_v0_to_v1(conn)
+            version = 1
+            continue
+        raise RuntimeError(f"no migration path from schema version {version}")
+
+
+def _migrate_v0_to_v1(conn: sqlite3.Connection) -> None:
+    """Atomically add row/rule constraints and remove invalid legacy data."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        _ensure_legacy_columns(conn)
+        conn.execute(
+            "CREATE TABLE sessions_v1 ("
+            " id INTEGER PRIMARY KEY, start_ts INTEGER NOT NULL,"
+            " end_ts INTEGER NOT NULL CHECK(end_ts >= start_ts),"
+            " process TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', domain TEXT,"
+            " is_afk INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'live')"
+        )
+        # Zero/negative legacy rows have never contributed to dashboard totals.
+        conn.execute(
+            "INSERT INTO sessions_v1"
+            " (id,start_ts,end_ts,process,title,domain,is_afk,source)"
+            " SELECT id,start_ts,end_ts,process,title,domain,is_afk,source"
+            " FROM sessions WHERE end_ts > start_ts"
+        )
+
+        conn.execute(
+            "CREATE TABLE rules_v1 ("
+            " id INTEGER PRIMARY KEY,"
+            " match_type TEXT NOT NULL CHECK(match_type IN ('process','domain','title')),"
+            " pattern TEXT NOT NULL,"
+            " category_id INTEGER NOT NULL REFERENCES categories(id),"
+            " priority INTEGER NOT NULL DEFAULT 0,"
+            " UNIQUE(match_type, pattern))"
+        )
+        # Existing tie semantics are first-added-wins, so retain the lowest id.
+        conn.execute(
+            "INSERT INTO rules_v1 (id,match_type,pattern,category_id,priority)"
+            " SELECT r.id,r.match_type,r.pattern,r.category_id,r.priority FROM rules r"
+            " WHERE r.id = (SELECT MIN(r2.id) FROM rules r2"
+            " WHERE r2.match_type=r.match_type AND r2.pattern=r.pattern)"
+        )
+
+        conn.execute("DROP TABLE sessions")
+        conn.execute("ALTER TABLE sessions_v1 RENAME TO sessions")
+        conn.execute("CREATE INDEX idx_sessions_start ON sessions(start_ts)")
+        conn.execute("CREATE INDEX idx_sessions_proc ON sessions(process)")
+        conn.execute("DROP TABLE rules")
+        conn.execute("ALTER TABLE rules_v1 RENAME TO rules")
+        conn.execute(_CATEGORY_DELETE_TRIGGER)
+        conn.execute(
+            "INSERT INTO settings (key,value) VALUES ('schema_version',?)"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(SCHEMA_VERSION),),
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def _migrate_rule_priorities(conn: sqlite3.Connection) -> None:
@@ -198,7 +307,7 @@ def _migrate_rule_priorities(conn: sqlite3.Connection) -> None:
     raise RuntimeError("rule priority migration did not converge")
 
 
-def _seed(conn: sqlite3.Connection) -> None:
+def _ensure_legacy_columns(conn: sqlite3.Connection) -> None:
     # Older DBs predate the is_ignored / is_neutral columns; add them in place.
     cols = {row[1] for row in conn.execute("PRAGMA table_info(categories)")}
     if "is_ignored" not in cols:
@@ -210,6 +319,8 @@ def _seed(conn: sqlite3.Connection) -> None:
             "ALTER TABLE categories ADD COLUMN is_neutral INTEGER NOT NULL DEFAULT 0"
         )
 
+
+def _seed(conn: sqlite3.Connection) -> None:
     if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
         conn.executemany(
             "INSERT INTO categories (name, color, is_productive, is_neutral, sort_order)"

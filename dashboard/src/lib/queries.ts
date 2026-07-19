@@ -4,6 +4,7 @@
 import { normalizeRulePattern, type Category, type CategoryState, type MatchType, type Rule } from "./classify";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
+import { assertSupportedSchemaVersion } from "./schema";
 
 interface SessionRow {
   id: number;
@@ -74,9 +75,9 @@ interface RuleRow {
   priority: number;
 }
 
-export async function fetchRules(): Promise<Rule[]> {
+export async function fetchRules(schemaVersion: number | null): Promise<Rule[]> {
   const db = await getDb();
-  await ensureLowWinsRulePriorities(db);
+  if (schemaVersion === null) await ensureLegacyLowWinsRulePriorities(db);
   const rows = await db.select<RuleRow[]>(
     "SELECT id, match_type, pattern, category_id, priority FROM rules ORDER BY priority ASC, id",
   );
@@ -95,6 +96,15 @@ export async function fetchSettings(): Promise<Record<string, string>> {
     "SELECT key, value FROM settings",
   );
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+
+/** Read-only compatibility gate. The tracker is the sole migration/DDL owner. */
+export async function checkSchemaVersion(): Promise<number | null> {
+  const db = await getDb();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key='schema_version'",
+  );
+  return assertSupportedSchemaVersion(rows[0]?.value);
 }
 
 export async function updateSetting(key: string, value: string): Promise<void> {
@@ -133,11 +143,9 @@ export async function addRule(
     throw err;
   }
   await db.execute(
-    "DELETE FROM rules WHERE match_type = $1 AND pattern = $2",
-    [matchType, pat]
-  );
-  await db.execute(
-    "INSERT INTO rules (match_type, pattern, category_id, priority) VALUES ($1, $2, $3, $4)",
+    "INSERT INTO rules (match_type, pattern, category_id, priority) VALUES ($1, $2, $3, $4)" +
+      " ON CONFLICT(match_type, pattern) DO UPDATE SET" +
+      " category_id=excluded.category_id, priority=excluded.priority",
     [matchType, pat, categoryId, priority ?? DEFAULT_PRIORITY[matchType]],
   );
 }
@@ -167,10 +175,11 @@ export async function addCategory(
   return Number(result.lastInsertId);
 }
 
-/** Existing installs used large, high-wins values (100/200/300). Each SQL
- * call may use a different pooled connection, so this is a restart-safe state
- * machine rather than a manual BEGIN/COMMIT transaction. */
-async function ensureLowWinsRulePriorities(
+/** Legacy-only compatibility for unversioned DBs opened before the tracker.
+ * Versioned migrations live exclusively in tracker/db.py. Each SQL call may
+ * use a different pooled connection, so this old state machine stays
+ * restart-safe until support for unversioned databases is removed. */
+async function ensureLegacyLowWinsRulePriorities(
   db: Awaited<ReturnType<typeof getDb>>,
 ): Promise<void> {
   for (let pass = 0; pass < 5; pass++) {
@@ -245,7 +254,7 @@ export async function updateCategory(cat: Category): Promise<void> {
 
 export async function deleteCategory(categoryId: number): Promise<void> {
   const db = await getDb();
-  await db.execute("DELETE FROM rules WHERE category_id = $1", [categoryId]);
+  // Schema v1's trigger removes dependent rules in this same statement.
   await db.execute("DELETE FROM categories WHERE id = $1", [categoryId]);
 }
 
