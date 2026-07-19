@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install dependencies
-        run: pip install -r tracker/requirements.txt
+        run: pip install -r tracker/requirements-dev.txt
       - name: Run pytest
         run: python -m pytest tracker/tests scripts/tests
 

@@ -41,6 +41,9 @@ class Settings:
     heartbeat_seconds: float = 15.0
     browser_processes: frozenset[str] = frozenset({"chrome.exe", "thorium.exe"})
     debounce_ticks: int = 2
+    # Set from the tray (or dashboard) via the tracking_paused settings keys;
+    # picked up within one settings-refresh cycle (heartbeat_seconds).
+    tracking_paused: bool = False
 
 
 class Store(Protocol):
@@ -76,6 +79,17 @@ class SessionManager:
     # ---------- public API ----------
 
     def tick(self, snap: Snapshot) -> None:
+        if self.settings.tracking_paused:
+            # Pause = finalize the open session and open nothing new. Resuming
+            # simply lets the next tick open a fresh session.
+            if self._current is not None:
+                self.store.close_session(
+                    self._current.id, max(snap.now, self._current.start_ts)
+                )
+                self._current = None
+            self._reset_pending()
+            return
+
         locked = snap.process == LOCK_PROCESS
         idle = snap.idle_seconds >= self.settings.idle_threshold_seconds
         if locked or idle:
