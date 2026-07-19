@@ -214,3 +214,48 @@ def test_shutdown_finalizes_open_session(manager, store):
 def test_shutdown_with_no_session_is_noop(manager, store):
     manager.shutdown(1000.0)
     assert store.closed == {}
+
+
+# ---------------- pause (PROD-001) ----------------
+
+
+def test_pause_closes_current_and_opens_nothing(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(1000.0))
+    manager.settings = Settings(tracking_paused=True)
+    heartbeats_before_pause = len(store.heartbeats)
+    drive(manager, 1010.0, 30)
+    assert store.closed[1] == 1010.0
+    assert len(store.opened) == 1  # nothing new while paused
+    assert len(store.heartbeats) == heartbeats_before_pause  # none while paused
+
+
+def test_pause_with_no_session_is_a_noop(store):
+    manager = SessionManager(store=store, settings=Settings(tracking_paused=True))
+    drive(manager, 1000.0, 10)
+    assert store.opened == []
+    assert store.closed == {}
+
+
+def test_resume_opens_a_fresh_session(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(1000.0))
+    manager.settings = Settings(tracking_paused=True)
+    manager.tick(active(1010.0))
+    manager.settings = Settings(tracking_paused=False)
+    manager.tick(active(1600.0))
+    assert store.opened[1][1] == 1600.0  # fresh session at resume time
+    assert store.closed == {1: 1010.0}  # the pause gap is not recorded
+
+
+def test_pause_clears_title_debounce(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(1000.0))
+    manager.tick(active(1001.0, title="other.py"))  # pending debounce tick 1/2
+    manager.settings = Settings(tracking_paused=True)
+    manager.tick(active(1002.0))
+    manager.settings = Settings(tracking_paused=False)
+    manager.tick(active(1003.0, title="other.py"))
+    # After resume the old pending state must not carry over: this is tick 1/2
+    # again, so no split-open yet beyond the fresh session.
+    assert store.opened[-1][2:4] == ("code.exe", "other.py")

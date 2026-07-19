@@ -116,7 +116,23 @@ DEFAULT_SETTINGS = {
     "focus_chain_max_gap_seconds": "120",
     "day_start_hour": "0",
     "day_end_hour": "24",
+    # Pause state (written by the tray / dashboard, read by the tracker):
+    # tracking_paused = "1" pauses until resumed; tracking_paused_until = unix
+    # seconds pauses until that moment (self-resuming).
+    "tracking_paused": "0",
+    "tracking_paused_until": "0",
 }
+
+
+def is_paused(raw: dict[str, str], now: float | None = None) -> bool:
+    """True when tracking is paused, either indefinitely or until a future time."""
+    if raw.get("tracking_paused") == "1":
+        return True
+    try:
+        until = float(raw.get("tracking_paused_until", "0"))
+    except (TypeError, ValueError):
+        return False
+    return (now if now is not None else time.time()) < until
 
 
 def open_db(db_path: str | Path) -> sqlite3.Connection:
@@ -249,6 +265,7 @@ def get_settings(conn: sqlite3.Connection) -> Settings:
         idle_threshold_seconds=_float("idle_threshold_seconds", 180.0, 30.0, 3600.0),
         heartbeat_seconds=_float("heartbeat_seconds", 15.0, 5.0, 300.0),
         browser_processes=browsers or frozenset({"chrome.exe"}),
+        tracking_paused=is_paused(raw),
     )
 
 

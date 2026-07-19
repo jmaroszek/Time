@@ -224,3 +224,37 @@ def test_retry_gives_up_after_attempts(monkeypatch):
     monkeypatch.setattr(db.time, "sleep", lambda _x: None)
     with pytest.raises(sqlite3.OperationalError):
         db._retry(always_locked, attempts=3)
+
+
+# ---------------- pause state (PROD-001) ----------------
+
+
+def test_is_paused_indefinite_flag():
+    assert db.is_paused({"tracking_paused": "1"}) is True
+    assert db.is_paused({"tracking_paused": "0"}) is False
+    assert db.is_paused({}) is False
+
+
+def test_is_paused_timed():
+    assert db.is_paused({"tracking_paused_until": "2000"}, now=1000.0) is True
+    assert db.is_paused({"tracking_paused_until": "2000"}, now=3000.0) is False
+    assert db.is_paused({"tracking_paused_until": "garbage"}, now=1000.0) is False
+
+
+def test_get_settings_reads_pause_state(conn):
+    assert db.get_settings(conn).tracking_paused is False
+    conn.execute("UPDATE settings SET value='1' WHERE key='tracking_paused'")
+    assert db.get_settings(conn).tracking_paused is True
+
+
+def test_tray_pause_roundtrip(tmp_path):
+    from tracker import tray
+
+    path = tmp_path / "test.db"
+    db.open_db(path).close()
+    tray._write_pause(path, "0", 4102444800)  # far future
+    paused, until = tray._read_pause_state(path)
+    assert paused is True and until == 4102444800
+    tray._write_pause(path, "0", 0)
+    paused, _until = tray._read_pause_state(path)
+    assert paused is False

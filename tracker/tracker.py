@@ -12,13 +12,14 @@ import atexit
 import ctypes
 import logging
 import sys
+import threading
 import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tracker import config, db, win32_probe
+from tracker import config, db, tray, win32_probe
 from tracker.session_manager import SessionManager
 
 _ERROR_ALREADY_EXISTS = 183
@@ -67,12 +68,15 @@ def run() -> None:
     except Exception:
         pass  # pythonw has no console; atexit still covers normal interpreter exit
 
+    stop_event = threading.Event()
+    tray.start_tray(config.DB_PATH, stop_event)
+
     logging.info("Tracker started.")
     poll = config.POLL_SECONDS
     next_tick = time.monotonic()
     last_settings_refresh = 0.0
 
-    while True:
+    while not stop_event.is_set():
         try:
             now = time.time()
             snap = win32_probe.snapshot(now)

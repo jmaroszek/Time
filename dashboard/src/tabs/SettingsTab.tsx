@@ -4,7 +4,7 @@ import { Spinner } from "../components/ui";
 import { getDbPath } from "../lib/db";
 import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
-import { backupDatabase, fetchTrackerStatus, updateSetting, type TrackerStatus } from "../lib/queries";
+import { backupDatabase, fetchSettings, fetchTrackerStatus, updateSetting, type TrackerStatus } from "../lib/queries";
 import { useBanner } from "../state/banner";
 import { useMeta } from "../state/meta";
 
@@ -51,8 +51,21 @@ export default function SettingsTab() {
     setDrafts(next);
   }, [meta.settings]);
 
+  const [pause, setPause] = useState<{ paused: boolean; until: number }>({ paused: false, until: 0 });
   useEffect(() => {
-    const load = () => void fetchTrackerStatus().then(setStatus).catch(() => setStatus(null));
+    const load = () => {
+      void fetchTrackerStatus().then(setStatus).catch(() => setStatus(null));
+      // Pause is flipped from the tray, outside meta.refresh — poll it here.
+      void fetchSettings()
+        .then((s) => {
+          const until = Number(s.tracking_paused_until) || 0;
+          setPause({
+            paused: s.tracking_paused === "1" || until > Date.now() / 1000,
+            until,
+          });
+        })
+        .catch(() => {});
+    };
     load();
     const id = setInterval(load, 15_000);
     return () => clearInterval(id);
@@ -150,10 +163,20 @@ export default function SettingsTab() {
         <section>
           <SectionLabel>Tracker Status</SectionLabel>
           <div className="flex items-center gap-3 rounded-[13px] border border-[#23272e] bg-[#131519] px-[18px] py-4">
-            <span className={`h-[9px] w-[9px] rounded-full ${trackerLive ? "live-pulse bg-[#16b981]" : "bg-bad"}`} />
+            <span className={`h-[9px] w-[9px] rounded-full ${pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-[#16b981]" : "bg-bad"}`} />
             <div>
-              <p className="text-[13px] font-semibold text-[#eef0f3]">{trackerLive ? "Tracker is live" : "Tracker not detected"}</p>
-              <p className="mt-[3px] text-[11.5px] text-[#7b818b]">{trackerLive ? "Collecting activity in real time" : "No heartbeat in the last two minutes"}</p>
+              <p className="text-[13px] font-semibold text-[#eef0f3]">
+                {pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
+              </p>
+              <p className="mt-[3px] text-[11.5px] text-[#7b818b]">
+                {pause.paused
+                  ? pause.until > Date.now() / 1000
+                    ? `Resumes at ${new Date(pause.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — or sooner from the tray icon`
+                    : "Resume from the tray icon"
+                  : trackerLive
+                    ? "Collecting activity in real time"
+                    : "No heartbeat in the last two minutes"}
+              </p>
             </div>
             {heartbeatAge !== null && <span className="ml-auto text-[11.5px] tabular-nums text-ink-3">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
           </div>
