@@ -109,6 +109,21 @@ pub struct ExecuteResult {
     last_insert_id: i64,
 }
 
+/// Columnar session transport keeps the largest dashboard read compact. The
+/// generic SELECT bridge builds a string-keyed JSON map for every row; sending
+/// each column once avoids that repeated allocation and repeated field names.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionColumns {
+    ids: Vec<i64>,
+    starts: Vec<i64>,
+    ends: Vec<i64>,
+    processes: Vec<String>,
+    titles: Vec<String>,
+    domains: Vec<Option<String>>,
+    is_afk: Vec<bool>,
+}
+
 impl TimeDatabase {
     pub async fn open(path: PathBuf) -> Result<Self, String> {
         let preexisting = path.metadata().map(|meta| meta.len() > 0).unwrap_or(false);
@@ -256,6 +271,58 @@ impl TimeDatabase {
                 Ok(out)
             })
             .collect()
+    }
+
+    pub async fn fetch_sessions(
+        &self,
+        start_sec: f64,
+        end_sec: f64,
+        min_start_sec: f64,
+    ) -> Result<SessionColumns, String> {
+        if !start_sec.is_finite()
+            || !end_sec.is_finite()
+            || !min_start_sec.is_finite()
+            || end_sec <= start_sec
+        {
+            return Err("Invalid session window".into());
+        }
+        let rows = sqlx::query(
+            "SELECT id, start_ts, end_ts, process, title, domain, is_afk FROM sessions \
+             WHERE end_ts > ? AND start_ts < ? AND start_ts > ? ORDER BY start_ts ASC",
+        )
+        .bind(start_sec)
+        .bind(end_sec)
+        .bind(min_start_sec)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?;
+
+        let mut out = SessionColumns {
+            ids: Vec::with_capacity(rows.len()),
+            starts: Vec::with_capacity(rows.len()),
+            ends: Vec::with_capacity(rows.len()),
+            processes: Vec::with_capacity(rows.len()),
+            titles: Vec::with_capacity(rows.len()),
+            domains: Vec::with_capacity(rows.len()),
+            is_afk: Vec::with_capacity(rows.len()),
+        };
+        for row in rows {
+            out.ids
+                .push(row.try_get("id").map_err(|error| error.to_string())?);
+            out.starts
+                .push(row.try_get("start_ts").map_err(|error| error.to_string())?);
+            out.ends
+                .push(row.try_get("end_ts").map_err(|error| error.to_string())?);
+            out.processes
+                .push(row.try_get("process").map_err(|error| error.to_string())?);
+            out.titles
+                .push(row.try_get("title").map_err(|error| error.to_string())?);
+            out.domains
+                .push(row.try_get("domain").map_err(|error| error.to_string())?);
+            let is_afk: i64 = row.try_get("is_afk").map_err(|error| error.to_string())?;
+            out.is_afk.push(is_afk != 0);
+        }
+        Ok(out)
     }
 
     pub async fn execute(
@@ -560,6 +627,52 @@ mod tests {
             assert_eq!(marker, None);
             reopened.pool.close().await;
             drop(reopened);
+        });
+    }
+
+    #[test]
+    fn session_read_is_columnar_ordered_and_windowed() {
+        let path = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("database-session-columns-test.db");
+        for candidate in [
+            path.clone(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            if candidate.exists() {
+                std::fs::remove_file(candidate).unwrap();
+            }
+        }
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            for values in [
+                (1_i64, 50_i64, 60_i64, "first.exe", 0_i64),
+                (2, 20, 30, "second.exe", 1),
+                (3, 150, 160, "outside.exe", 0),
+            ] {
+                sqlx::query(
+                    "INSERT INTO sessions (id,start_ts,end_ts,process,title,is_afk) \
+                     VALUES (?,?,?,?,?,?)",
+                )
+                .bind(values.0)
+                .bind(values.1)
+                .bind(values.2)
+                .bind(values.3)
+                .bind("")
+                .bind(values.4)
+                .execute(&database.pool)
+                .await
+                .unwrap();
+            }
+
+            let sessions = database.fetch_sessions(10.0, 100.0, -1.0).await.unwrap();
+            assert_eq!(sessions.ids, vec![2, 1]);
+            assert_eq!(sessions.starts, vec![20, 50]);
+            assert_eq!(sessions.ends, vec![30, 60]);
+            assert_eq!(sessions.processes, vec!["second.exe", "first.exe"]);
+            assert_eq!(sessions.is_afk, vec![true, false]);
         });
     }
 }

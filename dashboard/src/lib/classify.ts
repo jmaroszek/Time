@@ -88,43 +88,85 @@ export interface Classifiable {
 
 export type Classifier = (s: Classifiable) => Category | null;
 
+/** Cache classification across clipped copies of the same database row. The
+ *  wrapper is recreated with the underlying classifier, so category/rule edits
+ *  invalidate every entry automatically. Non-session samples still work and
+ *  simply bypass the id cache. */
+export function memoizeClassifierById(classifier: Classifier): Classifier {
+  const categoryById = new Map<number, Category | null>();
+  return (session: Classifiable): Category | null => {
+    const id = (session as Classifiable & { id?: unknown }).id;
+    if (typeof id !== "number") return classifier(session);
+    if (categoryById.has(id)) return categoryById.get(id)!;
+    const category = classifier(session);
+    categoryById.set(id, category);
+    return category;
+  };
+}
+
 export function buildClassifier(
   categories: Category[],
   rules: Rule[],
   browserProcesses: Set<string>,
 ): Classifier {
   const catById = new Map(categories.map((c) => [c.id, c]));
-  const processRules: Rule[] = [];
-  const domainRules: Rule[] = [];
-  const titleRules: Rule[] = [];
-  for (const r of rules) {
-    const normalized = { ...r, pattern: r.pattern.toLowerCase() };
-    if (r.matchType === "process") processRules.push(normalized);
-    else if (r.matchType === "domain") domainRules.push(normalized);
-    else titleRules.push(normalized);
+  type Candidate = { rule: Rule; order: number };
+  const processRules = new Map<string, Candidate>();
+  const domainRules = new Map<string, Candidate>();
+  const titleRules: Candidate[] = [];
+  const prefer = (left: Candidate | undefined, right: Candidate): Candidate =>
+    !left || right.rule.priority < left.rule.priority ? right : left;
+  for (const [order, r] of rules.entries()) {
+    const candidate = { rule: { ...r, pattern: r.pattern.toLowerCase() }, order };
+    if (r.matchType === "process") {
+      processRules.set(candidate.rule.pattern, prefer(processRules.get(candidate.rule.pattern), candidate));
+    } else if (r.matchType === "domain") {
+      domainRules.set(candidate.rule.pattern, prefer(domainRules.get(candidate.rule.pattern), candidate));
+    } else {
+      titleRules.push(candidate);
+    }
   }
 
   return (s: Classifiable): Category | null => {
     if (s.isAfk) return null;
-    let best: Rule | null = null;
-    const consider = (r: Rule) => {
-      if (!best || r.priority < best.priority) best = r;
+    let best: Candidate | null = null;
+    const consider = (candidate: Candidate | undefined) => {
+      if (candidate && (!best || candidate.rule.priority < best.rule.priority)) best = candidate;
     };
 
     const proc = s.process.toLowerCase();
-    for (const r of processRules) if (r.pattern === proc) consider(r);
+    consider(processRules.get(proc));
 
     if (browserProcesses.has(proc)) {
       const domain = s.domain?.toLowerCase() ?? null;
       if (domain) {
-        for (const r of domainRules) {
-          if (domain === r.pattern || domain.endsWith("." + r.pattern)) consider(r);
+        let suffix = domain;
+        let domainBest: Candidate | undefined;
+        while (suffix) {
+          const candidate = domainRules.get(suffix);
+          if (
+            candidate &&
+            (!domainBest ||
+              candidate.rule.priority < domainBest.rule.priority ||
+              (candidate.rule.priority === domainBest.rule.priority &&
+                candidate.order < domainBest.order))
+          ) {
+            domainBest = candidate;
+          }
+          const dot = suffix.indexOf(".");
+          if (dot < 0) break;
+          suffix = suffix.slice(dot + 1);
+        }
+        consider(domainBest);
+      }
+      if (titleRules.length > 0) {
+        const title = s.title.toLowerCase();
+        for (const candidate of titleRules) {
+          if (title.includes(candidate.rule.pattern)) consider(candidate);
         }
       }
-      const title = s.title.toLowerCase();
-      for (const r of titleRules) if (title.includes(r.pattern)) consider(r);
     }
 
-    return best ? (catById.get((best as Rule).categoryId) ?? null) : null;
+    return best ? (catById.get((best as Candidate).rule.categoryId) ?? null) : null;
   };
 }

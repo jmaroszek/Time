@@ -27,12 +27,23 @@ export function duration(s: Session): number {
 /** Clip sessions to [startSec, endSec); drops zero-length results. */
 export function clipSessions(sessions: Session[], startSec: number, endSec: number): Session[] {
   const out: Session[] = [];
+  forEachClippedSession(sessions, startSec, endSec, (session) => out.push(session));
+  return out;
+}
+
+/** Visit clipped rows without materializing an intermediate array. Unchanged
+ * rows retain their identity, which also keeps id/object caches effective. */
+export function forEachClippedSession(
+  sessions: Session[],
+  startSec: number,
+  endSec: number,
+  visit: (session: Session) => void,
+): void {
   for (const s of sessions) {
     const start = Math.max(s.start, startSec);
     const end = Math.min(s.end, endSec);
-    if (end > start) out.push({ ...s, start, end });
+    if (end > start) visit(start === s.start && end === s.end ? s : { ...s, start, end });
   }
-  return out;
 }
 
 export interface DayChunk {
@@ -41,18 +52,28 @@ export interface DayChunk {
   endSec: number;
 }
 
-/** Split an interval at local midnights. */
-export function splitAtMidnights(startSec: number, endSec: number): DayChunk[] {
-  const out: DayChunk[] = [];
+/** Visit local-day pieces without allocating the short-lived array used by the
+ *  public `splitAtMidnights` convenience API. Hot aggregation paths use this. */
+export function forEachDayChunk(
+  startSec: number,
+  endSec: number,
+  visit: (chunk: DayChunk) => void,
+): void {
   let cur = startSec;
   while (cur < endSec) {
     const d = new Date(cur * 1000);
     const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     const nextMidnight = addDays(dayStart, 1).getTime() / 1000;
     const chunkEnd = Math.min(endSec, nextMidnight);
-    out.push({ dayStart, startSec: cur, endSec: chunkEnd });
+    visit({ dayStart, startSec: cur, endSec: chunkEnd });
     cur = chunkEnd;
   }
+}
+
+/** Split an interval at local midnights. */
+export function splitAtMidnights(startSec: number, endSec: number): DayChunk[] {
+  const out: DayChunk[] = [];
+  forEachDayChunk(startSec, endSec, (chunk) => out.push(chunk));
   return out;
 }
 

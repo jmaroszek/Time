@@ -8,18 +8,15 @@
 
 import { useMemo } from "react";
 
-import type { Classifier } from "../lib/classify";
 import { cleanProcessName, fmtDuration } from "../lib/format";
-import type { Session } from "../lib/metrics";
 import {
   metricSeconds,
   metricTrackedShare,
-  weekdayRhythmSummaries,
   ACTIVITY_METRIC_WORDS,
   type ActivityMetric,
   type RhythmCell,
+  type WeekdayRhythmSummary,
 } from "../lib/overview";
-import type { Range } from "../lib/time";
 import { useMeta } from "../state/meta";
 import { ACTIVITY_METRIC_RAMPS, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
@@ -28,24 +25,13 @@ const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function RhythmChart({
-  sessions,
-  range,
-  classifier,
+  summary,
   metric = "tracked",
 }: {
-  sessions: Session[];
-  range: Range;
-  classifier: Classifier;
+  summary: WeekdayRhythmSummary;
   metric?: ActivityMetric;
 }) {
   const { aliases, weekStart, dayStartHour, dayEndHour } = useMeta();
-  // Aggregation is metric-independent — every cell carries all four state
-  // totals, so switching the metric dropdown only re-shades and never re-walks
-  // the sessions.
-  const summary = useMemo(
-    () => weekdayRhythmSummaries(sessions, range, classifier, dayStartHour, dayEndHour),
-    [sessions, range, classifier, dayStartHour, dayEndHour],
-  );
   const option = useMemo<EChartsOption>(() => {
     const { cells, weekdayCounts } = summary;
     const weekdayRows = weekStart === "Monday" ? [1, 2, 3, 4, 5, 6, 0] : [0, 1, 2, 3, 4, 5, 6];

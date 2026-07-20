@@ -6,16 +6,12 @@
 
 import { useMemo } from "react";
 
-import type { Classifier } from "../lib/classify";
 import { cleanProcessName, fmtDuration } from "../lib/format";
-import type { Session } from "../lib/metrics";
 import {
   metricSeconds,
-  monthlyActivitySummaries,
   type ActivityMetric,
   type MonthlyActivitySummary,
 } from "../lib/overview";
-import type { Range } from "../lib/time";
 import { useMeta } from "../state/meta";
 import { ACTIVITY_METRIC_RAMPS, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
@@ -40,24 +36,13 @@ const MAX_WIDTH = GRID_LEFT + GRID_RIGHT + CELL_WIDTH * 12;
 const SCROLL_ROWS = 16;
 
 export default function MonthCalendarChart({
-  sessions,
-  range,
-  classifier,
+  summaries,
   metric = "tracked",
 }: {
-  sessions: Session[];
-  range: Range;
-  classifier: Classifier;
+  summaries: MonthlyActivitySummary[];
   metric?: ActivityMetric;
 }) {
   const { aliases } = useMeta();
-  // One metric-independent aggregation, shared by the year axis and the shaded
-  // cells, so a metric switch only re-shades. (It was previously computed twice
-  // per render — once here, once in the option memo.)
-  const summaries = useMemo(
-    () => monthlyActivitySummaries(sessions, range, classifier),
-    [sessions, range, classifier],
-  );
   const years = useMemo(
     () => [...new Set(summaries.map((month) => month.year))].sort((a, b) => a - b),
     [summaries],

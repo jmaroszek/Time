@@ -14,18 +14,19 @@ import {
   fmtDuration,
   fmtPct,
 } from "../lib/format";
+import type { InsightsRequest } from "../lib/insights";
+import { warmInsightsModel } from "../lib/insightsClient";
+import { fetchSessions } from "../lib/queries";
+import { loadSessionWindow } from "../lib/sessionWindowCache";
 import {
-  clipSessions,
-  computeKpis,
-  dailySecondsByApp,
-  goalPace,
-  topApps,
-  withDeltas,
-} from "../lib/metrics";
-import { addDays, calendarDays, previousRange, type Range } from "../lib/time";
+  addDays,
+  allTimeRange,
+  calendarDays,
+  previousRange,
+  rangeForPreset,
+  type Range,
+} from "../lib/time";
 import {
-  overviewGranularity,
-  overviewHistoryStart,
   MONTH_CALENDAR_MIN_DAYS,
   ACTIVITY_METRICS,
   ACTIVITY_METRIC_LABELS,
@@ -35,6 +36,7 @@ import {
 } from "../lib/overview";
 import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
+import { useInsightsModel } from "../state/useInsightsModel";
 import { useSessions } from "../state/useSessions";
 
 const HOURS_CARD_TITLES = {
@@ -44,12 +46,22 @@ const HOURS_CARD_TITLES = {
   yearly: "Yearly Hours",
 } as const;
 
+function insightsFetchWindow(range: Range): { startSec: number; endSec: number } {
+  const previous = previousRange(range);
+  return {
+    startSec: Math.min(previous.start.getTime(), addDays(range.start, -6).getTime()) / 1000,
+    endSec: range.end.getTime() / 1000,
+  };
+}
+
 export default function OverviewTab({
   range,
   preset,
+  firstSessionSec,
 }: {
   range: Range;
   preset: PresetOrCustom;
+  firstSessionSec: number | null;
 }) {
   const meta = useMeta();
   const [topN, setTopN] = useState<number | null>(null);
@@ -60,17 +72,107 @@ export default function OverviewTab({
   const [metric, setMetric] = useState<ActivityMetric>("tracked");
   const [stackBy, setStackBy] = useState<ActivityStack>("state");
 
-  // One fetch covers the visible range, the previous period (deltas), and the
-  // 6 days before the range (7-day rolling average).
-  const prev = previousRange(range);
-  const fetchStart = Math.min(prev.start.getTime(), addDays(range.start, -6).getTime()) / 1000;
-  const fetchEnd = range.end.getTime() / 1000;
-  const { sessions, loading, error } = useSessions(fetchStart, fetchEnd);
+  const { startSec: fetchStart, endSec: fetchEnd } = insightsFetchWindow(range);
+  const sessionData = useSessions(fetchStart, fetchEnd);
+  const request = useMemo<InsightsRequest | null>(() => {
+    if (!sessionData.ready) return null;
+    return {
+      sessions: sessionData.sessions,
+      range,
+      categories: meta.categories,
+      rules: meta.rules,
+      browserProcesses: [...meta.browserSet].sort(),
+      weekStart: meta.weekStart,
+      weeklyGoalHours: meta.weeklyGoalHours,
+      minAppSeconds: meta.minAppSeconds,
+      focusChainMaxGapSeconds: meta.focusChainMaxGapSeconds,
+      dayStartHour: meta.dayStartHour,
+      dayEndHour: meta.dayEndHour,
+      labelMode: preset === "last7" ? "weekday" : "date",
+    };
+  }, [sessionData.ready, sessionData.sessions, range, meta, preset]);
+  const analyzed = useInsightsModel(request);
+  const model = analyzed.model;
 
-  const rangeStartSec = range.start.getTime() / 1000;
-  const rangeEndSec = range.end.getTime() / 1000;
-  const granularity = overviewGranularity(range);
-  const rangeDays = calendarDays(range);
+  // Warm the widest ordinary preset only after the current view is complete.
+  // Its fetch covers the shorter nested presets too; model caching makes a
+  // later Year switch a synchronous lookup rather than first-time work.
+  useEffect(() => {
+    if (!request || !analyzed.current) return;
+    const yearRange = rangeForPreset("last365");
+    const yearWindow = insightsFetchWindow(yearRange);
+    let cancelled = false;
+    const warm = () => {
+      void (async () => {
+        await loadSessionWindow(
+          yearWindow.startSec,
+          yearWindow.endSec,
+          fetchSessions,
+        );
+        if (cancelled) return;
+        // Shorter models reuse binary-searched slices of that one wide fetch.
+        // Warm them smallest-first so the most common choices become ready
+        // quickly while the worker continues with the larger horizons.
+        for (const warmRange of [rangeForPreset("last30"), rangeForPreset("last90"), yearRange]) {
+          const warmWindow = insightsFetchWindow(warmRange);
+          const sessions = await loadSessionWindow(
+            warmWindow.startSec,
+            warmWindow.endSec,
+            fetchSessions,
+          );
+          if (cancelled) return;
+          await warmInsightsModel({
+            ...request,
+            sessions,
+            range: warmRange,
+            labelMode: "date",
+          });
+        }
+
+        // Young databases fit inside the Year fetch. Warm their distinct
+        // All-time model too, but never auto-load an older multi-year history.
+        if (firstSessionSec !== null) {
+          const allRange = allTimeRange(firstSessionSec);
+          const allWindow = insightsFetchWindow(allRange);
+          if (allWindow.startSec < yearWindow.startSec) return;
+          const allSessions = await loadSessionWindow(
+            allWindow.startSec,
+            allWindow.endSec,
+            fetchSessions,
+          );
+          if (cancelled) return;
+          await warmInsightsModel({
+            ...request,
+            sessions: allSessions,
+            range: allRange,
+            labelMode: "date",
+          });
+        }
+      })().catch(() => {});
+    };
+    const idle = window.requestIdleCallback?.(warm, { timeout: 3_000 });
+    const timeout = idle === undefined ? window.setTimeout(warm, 500) : null;
+    return () => {
+      cancelled = true;
+      if (idle !== undefined) window.cancelIdleCallback?.(idle);
+      if (timeout !== null) window.clearTimeout(timeout);
+    };
+  }, [request, analyzed.current, firstSessionSec]);
+
+  const displayedStartMs = model?.range.start.getTime() ?? null;
+  const displayedEndMs = model?.range.end.getTime() ?? null;
+  useEffect(() => setSelected(null), [displayedStartMs, displayedEndMs]);
+
+  if (!model) {
+    const error = sessionData.error ?? analyzed.error;
+    if (error) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
+    return <Spinner />;
+  }
+
+  const displayRange = model.range;
+  const prev = model.previous;
+  const granularity = model.granularity;
+  const rangeDays = model.rangeDays;
   const isSingleDay = rangeDays === 1;
   // The timeline stops being readable past ~two weeks of rows. Beyond that the
   // rhythm grid (collapsed into a typical week) and the calendar (every date
@@ -81,68 +183,32 @@ export default function OverviewTab({
   // Past ~14 months, day cells slice too thin; the calendar shows month cells
   // (years as rows) instead. Rhythm needs no such switch — it is always 7×24.
   const calendarByMonth = rangeDays >= MONTH_CALENDAR_MIN_DAYS;
-
-  useEffect(() => setSelected(null), [rangeStartSec, rangeEndSec]);
-
-  // Everything here is independent of the Top-N dropdown, so it stays in one
-  // memo that keeps a stable identity across Top-N changes. That in turn keeps
-  // `current`/`history` referentially stable, so switching Top-N doesn't force
-  // every chart below to re-aggregate — only the app-list slice re-runs.
-  const base = useMemo(() => {
-    // Sessions in ignored categories are invisible to every visualization
-    // (they remain manageable in the Apps tab).
-    const visible = sessions.filter((s) => meta.classifier(s)?.isIgnored !== true);
-    const current = clipSessions(visible, rangeStartSec, rangeEndSec);
-    const previous = clipSessions(
-      visible,
-      prev.start.getTime() / 1000,
-      prev.end.getTime() / 1000,
-    );
-    const kpis = computeKpis(current, meta.classifier, meta.focusChainMaxGapSeconds);
-    const pace = goalPace(kpis.prodSec, range, meta.weeklyGoalHours);
-    const rankedApps = topApps(current, meta.classifier);
-    const eligibleApps = rankedApps.filter((a) => a.seconds >= meta.minAppSeconds);
-    const history = clipSessions(
-      visible,
-      overviewHistoryStart(range, granularity, meta.weekStart).getTime() / 1000,
-      rangeEndSec,
-    );
-    return {
-      current,
-      kpis,
-      pace,
-      eligibleApps,
-      previousRanked: topApps(previous, meta.classifier),
-      currentDaily: dailySecondsByApp(current, range),
-      previousDaily: dailySecondsByApp(previous, prev),
-      hiddenAppCount: rankedApps.length - eligibleApps.length,
-      history,
-    };
-  }, [sessions, rangeStartSec, rangeEndSec, prev.start, prev.end, meta, range, granularity]);
-
-  const n = topN ?? meta.defaultTopN;
-  // Only the visible slice depends on Top-N; the deltas cover ≤20 apps and are
-  // cheap, so this re-runs alone on a Top-N change and leaves the charts alone.
-  const apps = useMemo(
-    () =>
-      withDeltas(base.eligibleApps.slice(0, n), base.previousRanked, {
-        currentDaily: base.currentDaily,
-        previousDaily: base.previousDaily,
-      }),
-    [base, n],
+  const currentDays = model.historyDays.filter(
+    (day) => day.date >= displayRange.start && day.date < displayRange.end,
   );
 
-  if (loading) return <Spinner />;
-  if (error) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
-
-  const { kpis, pace, hiddenAppCount, current, history } = base;
+  const n = topN ?? meta.defaultTopN;
+  const apps = model.apps.slice(0, n);
+  const updateError = sessionData.error ?? analyzed.error;
+  const refreshing =
+    !updateError &&
+    (sessionData.refreshing || sessionData.loading || analyzed.refreshing || !analyzed.current);
+  const { kpis, pace, hiddenAppCount } = model;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="relative flex flex-col gap-4" aria-busy={refreshing}>
+      {(refreshing || updateError) && (
+        <span
+          className={`pointer-events-none absolute right-1 -top-3 text-[10px] ${updateError ? "text-bad" : "text-ink-3"}`}
+          title={updateError ?? undefined}
+        >
+          {updateError ? "Update failed" : "Updating…"}
+        </span>
+      )}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <MetricCard
           label="Daily productive time"
-          value={fmtDuration(kpis.prodSec / calendarDays(range))}
+          value={fmtDuration(kpis.prodSec / calendarDays(displayRange))}
           hint="Total productive time in this range divided by the number of days it spans."
         />
         <MetricCard
@@ -222,31 +288,26 @@ export default function OverviewTab({
       >
         {middleView === "timeline" ? (
           <TimelineChart
-            sessions={current}
-            range={range}
+            sessions={model.timelineSessions ?? []}
+            range={displayRange}
             classifier={meta.classifier}
             blockMinutes={blockMinutes}
             onSelect={setSelected}
           />
         ) : middleView === "rhythm" ? (
           <RhythmChart
-            sessions={current}
-            range={range}
-            classifier={meta.classifier}
+            summary={model.rhythm!}
             metric={metric}
           />
         ) : calendarByMonth ? (
           <MonthCalendarChart
-            sessions={current}
-            range={range}
-            classifier={meta.classifier}
+            summaries={model.monthly!}
             metric={metric}
           />
         ) : (
           <ActivityCalendar
-            sessions={current}
-            range={range}
-            classifier={meta.classifier}
+            summaries={currentDays}
+            range={displayRange}
             metric={metric}
           />
         )}
@@ -330,18 +391,13 @@ export default function OverviewTab({
           <div className="pt-2">
             {isSingleDay ? (
               <HourlyActivityChart
-                sessions={current}
-                range={range}
-                classifier={meta.classifier}
-                dayStartHour={meta.dayStartHour}
-                dayEndHour={meta.dayEndHour}
+                hours={model.hourly!}
               />
             ) : (
               <ProductiveHoursChart
-                historySessions={history}
-                range={range}
-                classifier={meta.classifier}
-                labelMode={preset === "last7" ? "weekday" : "date"}
+                historyDays={model.historyDays}
+                range={displayRange}
+                labelMode={model.labelMode}
                 granularity={granularity}
                 weekStart={meta.weekStart}
                 stackBy={stackBy}

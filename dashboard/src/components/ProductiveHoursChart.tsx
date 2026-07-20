@@ -1,18 +1,18 @@
 // Adaptive activity hours: daily, weekly, or monthly productivity-state stacks
-// plus a same-scale trailing average of productive time. `historySessions`
-// includes the preceding periods needed to make the first visible average real.
+// plus a same-scale trailing average of productive time. `historyDays` includes
+// the preceding periods needed to make the first visible average real.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { Category, Classifier } from "../lib/classify";
-import { rollingMean, type Session } from "../lib/metrics";
+import type { Category } from "../lib/classify";
+import { rollingMean } from "../lib/metrics";
 import {
   bucketActivityHours,
-  dailyActivitySummaries,
   isCompleteHoursBucket,
   overviewHistoryStart,
   UNCATEGORIZED_LABEL,
   type ActivityStack,
+  type DailyActivitySummary,
   type HoursBucket,
   type OverviewGranularity,
 } from "../lib/overview";
@@ -152,18 +152,16 @@ export function estimateLegendRows(
 }
 
 export default function ProductiveHoursChart({
-  historySessions,
+  historyDays,
   range,
-  classifier,
   labelMode = "date",
   granularity = "daily",
   weekStart = "Sunday",
   stackBy = "state",
   categories = [],
 }: {
-  historySessions: Session[];
+  historyDays: DailyActivitySummary[];
   range: Range;
-  classifier: Classifier;
   labelMode?: "weekday" | "date";
   granularity?: OverviewGranularity;
   weekStart?: WeekStart;
@@ -182,10 +180,8 @@ export default function ProductiveHoursChart({
     return () => ro.disconnect();
   }, []);
 
-  // Bars, labels, the rolling average, and the on-screen buckets are all
-  // independent of the stack dropdown and the container width — they walk the
-  // sessions, so they live in their own memo. Only the stack selection and the
-  // legend/grid geometry below react to stackBy / categories / chartWidth.
+  // Session-scale work is completed by the Insights worker. This memo only
+  // folds the bounded daily summaries into display buckets.
   const agg = useMemo(() => {
     const round2 = (h: number) => Math.round(h * 100) / 100;
     let labels: string[];
@@ -199,14 +195,11 @@ export default function ProductiveHoursChart({
     // Whichever bucket run is on screen, for the category stacks.
     let visible: { categorySeconds: Map<string, number> }[] = [];
     const averageName = PRODUCTIVE_AVERAGES[granularity];
+    const visibleDays = historyDays.filter(
+      (day) => day.date >= range.start && day.date < range.end,
+    );
 
     if (granularity === "daily") {
-      const historyRange = {
-        start: overviewHistoryStart(range, granularity, weekStart),
-        end: range.end,
-      };
-      const historyDays = dailyActivitySummaries(historySessions, historyRange, classifier);
-      const visibleDays = dailyActivitySummaries(historySessions, range, classifier);
       visible = visibleDays;
       const offset = historyDays.length - visibleDays.length;
       labels = visibleDays.map((day) =>
@@ -223,14 +216,12 @@ export default function ProductiveHoursChart({
         .slice(offset)
         .map(round2);
     } else {
-      const days = dailyActivitySummaries(historySessions, range, classifier);
-      buckets = bucketActivityHours(days, range, granularity, weekStart);
+      buckets = bucketActivityHours(visibleDays, range, granularity, weekStart);
       visible = buckets;
       const historyRange = {
         start: overviewHistoryStart(range, granularity, weekStart),
         end: range.end,
       };
-      const historyDays = dailyActivitySummaries(historySessions, historyRange, classifier);
       const historyBuckets = bucketActivityHours(historyDays, historyRange, granularity, weekStart);
       const averageWindow = AVERAGE_WINDOWS[granularity];
       const averages = rollingMean(
@@ -267,7 +258,7 @@ export default function ProductiveHoursChart({
         : []),
     ];
     return { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks };
-  }, [historySessions, range, classifier, labelMode, granularity, weekStart]);
+  }, [historyDays, range, labelMode, granularity, weekStart]);
 
   const option = useMemo<EChartsOption>(() => {
     const { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks } = agg;

@@ -11,7 +11,13 @@ import {
   type ReactNode,
 } from "react";
 
-import { buildClassifier, type Category, type Classifier, type Rule } from "../lib/classify";
+import {
+  buildClassifier,
+  memoizeClassifierById,
+  type Category,
+  type Classifier,
+  type Rule,
+} from "../lib/classify";
 import { checkSchemaVersion, fetchCategories, fetchRules, fetchSettings } from "../lib/queries";
 import type { WeekStart } from "../lib/time";
 
@@ -85,7 +91,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       settings,
       browserSet,
       aliases: parseAliases(settings.process_aliases),
-      classifier: buildClassifier(categories, rules, browserSet),
+      classifier: memoizeClassifierById(buildClassifier(categories, rules, browserSet)),
       weekStart: resolveWeekStart(settings.week_start),
       weeklyGoalHours: finiteNonNegative(settings.weekly_goal_hours),
       defaultTopN: Number(settings.default_top_n_apps) || 5,

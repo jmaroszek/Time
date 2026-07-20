@@ -6,6 +6,7 @@ import {
   categoryState,
   categoryStateFlags,
   normalizeRulePattern,
+  memoizeClassifierById,
   type Category,
   type Rule,
 } from "./classify";
@@ -76,6 +77,43 @@ describe("buildClassifier", () => {
 
   it("process match is case-insensitive", () => {
     expect(classify(session({ process: "Chrome.EXE" }))?.name).toBe("Browsing");
+  });
+
+  it("preserves first-match behavior when equal-priority domain suffixes match", () => {
+    const tied = buildClassifier(
+      CATS,
+      [
+        { id: 10, matchType: "domain", pattern: "youtube.com", categoryId: 1, priority: 1 },
+        { id: 11, matchType: "domain", pattern: "music.youtube.com", categoryId: 2, priority: 1 },
+      ],
+      BROWSERS,
+    );
+    expect(tied(session({ domain: "music.youtube.com" }))?.name).toBe("Browsing");
+  });
+});
+
+describe("memoizeClassifierById", () => {
+  it("classifies clipped copies of one row only once", () => {
+    let calls = 0;
+    const memoized = memoizeClassifierById((value) => {
+      calls += 1;
+      return value.isAfk ? null : CATS[0];
+    });
+    const first = { id: 42, ...session({}) };
+    expect(memoized(first)).toBe(CATS[0]);
+    expect(memoized({ ...first, title: "a clipped copy" })).toBe(CATS[0]);
+    expect(calls).toBe(1);
+  });
+
+  it("bypasses the cache for samples without a database id", () => {
+    let calls = 0;
+    const memoized = memoizeClassifierById(() => {
+      calls += 1;
+      return null;
+    });
+    memoized(session({}));
+    memoized(session({}));
+    expect(calls).toBe(2);
   });
 });
 

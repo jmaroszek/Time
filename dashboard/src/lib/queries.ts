@@ -6,38 +6,44 @@ import { invoke } from "@tauri-apps/api/core";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
 import { assertSupportedSchemaVersion } from "./schema";
+import { clearSessionWindowCache, MAX_SESSION_SPAN_SEC } from "./sessionWindowCache";
 
-interface SessionRow {
-  id: number;
-  start_ts: number;
-  end_ts: number;
-  process: string;
-  title: string;
-  domain: string | null;
-  is_afk: number;
+interface SessionColumns {
+  ids: number[];
+  starts: number[];
+  ends: number[];
+  processes: string[];
+  titles: string[];
+  domains: Array<string | null>;
+  isAfk: boolean[];
 }
-
-/** No single session legitimately spans more than this (the longest real rows
- *  are multi-day AFK spans); bounding start_ts lets idx_sessions_start skip
- *  all older history instead of scanning it. */
-const MAX_SESSION_SPAN_SEC = 7 * 86_400;
 
 /** Sessions overlapping [startSec, endSec), ordered by start. Clip before use. */
 export async function fetchSessions(startSec: number, endSec: number): Promise<Session[]> {
-  const db = await getDb();
-  const rows = await db.select<SessionRow[]>(
-    "SELECT id, start_ts, end_ts, process, title, domain, is_afk FROM sessions" +
-      " WHERE end_ts > $1 AND start_ts < $2 AND start_ts > $3 ORDER BY start_ts ASC",
-    [startSec, endSec, startSec - MAX_SESSION_SPAN_SEC],
-  );
-  return rows.map((r) => ({
-    id: r.id,
-    start: r.start_ts,
-    end: r.end_ts,
-    process: r.process,
-    title: r.title,
-    domain: r.domain,
-    isAfk: r.is_afk !== 0,
+  const columns = await invoke<SessionColumns>("fetch_sessions", {
+    startSec,
+    endSec,
+    minStartSec: startSec - MAX_SESSION_SPAN_SEC,
+  });
+  const count = columns.ids.length;
+  if (
+    columns.starts.length !== count ||
+    columns.ends.length !== count ||
+    columns.processes.length !== count ||
+    columns.titles.length !== count ||
+    columns.domains.length !== count ||
+    columns.isAfk.length !== count
+  ) {
+    throw new Error("Native session query returned mismatched column lengths");
+  }
+  return Array.from({ length: count }, (_, index) => ({
+    id: columns.ids[index],
+    start: columns.starts[index],
+    end: columns.ends[index],
+    process: columns.processes[index],
+    title: columns.titles[index],
+    domain: columns.domains[index],
+    isAfk: columns.isAfk[index],
   }));
 }
 
@@ -221,6 +227,7 @@ export async function countSessionsMatching(text: string): Promise<number> {
 export async function deleteSessionsMatching(text: string): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE" + MATCH_SQL, [likePattern(text)]);
+  clearSessionWindowCache();
   await invoke("compact_database");
 }
 
@@ -237,6 +244,7 @@ export async function countSessionsOlderThan(cutoffSec: number): Promise<number>
 export async function deleteSessionsOlderThan(cutoffSec: number): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM sessions WHERE end_ts < $1", [Math.floor(cutoffSec)]);
+  clearSessionWindowCache();
   await invoke("compact_database");
 }
 
@@ -278,5 +286,11 @@ export async function backupDatabase(): Promise<string> {
 
 /** Securely erase all recorded sessions, checkpoint the WAL, and compact. */
 export async function eraseAllHistory(): Promise<number> {
-  return invoke<number>("erase_history");
+  try {
+    return await invoke<number>("erase_history");
+  } finally {
+    // The native command deletes before checkpoint/compaction. Even if that
+    // cleanup step fails, no renderer cache may keep showing erased rows.
+    clearSessionWindowCache();
+  }
 }
