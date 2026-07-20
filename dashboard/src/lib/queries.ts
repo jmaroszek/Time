@@ -259,6 +259,16 @@ export async function fetchTrackerStatus(): Promise<TrackerStatus> {
   return { lastHeartbeat: r.last_hb, liveSessionCount: r.live_n, totalSessionCount: r.total_n };
 }
 
+/** Unix seconds of the earliest session start, or null when the DB is empty.
+ *  Backs the "All time" range preset. */
+export async function fetchEarliestSessionStart(): Promise<number | null> {
+  const db = await getDb();
+  const rows = await db.select<{ first_ts: number | null }[]>(
+    "SELECT MIN(start_ts) AS first_ts FROM sessions",
+  );
+  return rows[0]?.first_ts ?? null;
+}
+
 /** Snapshot the DB next to the live file and return the backup's full path.
  *  Derives the directory from the DB path (works whatever the file is named)
  *  rather than assuming the production filename. */

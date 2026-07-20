@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addDays,
+  allTimeRange,
   calendarDays,
   dayKey,
   listDays,
@@ -57,6 +58,22 @@ describe("rangeForPreset (rolling windows ending today)", () => {
     const r = rangeForPreset("last365", NOW);
     expect(calendarDays(r)).toBe(365);
     expect(r.end).toEqual(new Date(2026, 5, 10));
+  });
+});
+
+describe("allTimeRange", () => {
+  it("spans the earliest session's day through end of today", () => {
+    const firstSec = new Date(2022, 2, 15, 9, 30).getTime() / 1000;
+    const r = allTimeRange(firstSec, NOW);
+    expect(r.start).toEqual(new Date(2022, 2, 15)); // clamped to that day's midnight
+    expect(r.end).toEqual(new Date(2026, 5, 10));
+  });
+
+  it("collapses to today when there are no sessions", () => {
+    const r = allTimeRange(null, NOW);
+    expect(r.start).toEqual(new Date(2026, 5, 9));
+    expect(r.end).toEqual(new Date(2026, 5, 10));
+    expect(calendarDays(r)).toBe(1);
   });
 });
 

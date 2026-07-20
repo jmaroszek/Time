@@ -14,7 +14,7 @@ Every knob lives in the database and is edited here. You do not need to edit con
 | **Focus chain max gap** | The longest break between productive sessions that still counts as one focus chain. |
 | **Minimum app time** | Apps below this in the range are hidden from app lists; the list header notes what's hidden. |
 | **Heartbeat interval** | How often the open session's end time is flushed to disk; this is the upper bound on data lost in a crash. |
-| **Week starts on** | Affects weekly presets, trends bucketing, and goal pacing. |
+| **Week starts on** | Affects weekly presets, weekly bucketing, and goal pacing. |
 | **Browser processes** | Which executables get domain parsing and domain/title rule treatment. |
 | **Record activity** | Explicit consent switch for all foreground-app recording. |
 | **Store window titles** | Separate sensitive-data opt-in; off by default. Browser URLs are sanitized even when enabled. |

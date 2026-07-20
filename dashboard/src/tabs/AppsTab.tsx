@@ -32,7 +32,7 @@ interface UsageRow {
   categoryName: string | null;
   categoryColor: string | null;
   /** Ignored-category time shows here (Apps is the management surface) but is
-   *  excluded from Overview/Trends stats — the row is labeled accordingly. */
+   *  excluded from Overview stats — the row is labeled accordingly. */
   categoryIgnored: boolean;
 }
 

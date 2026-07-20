@@ -20,7 +20,7 @@ const OUT_DIR = path.resolve(
   "docs",
   "images",
 );
-const TABS = ["Overview", "Trends", "Apps", "Settings"];
+const TABS = ["Overview", "Apps", "Settings"];
 
 const browser = await puppeteer.connect({
   browserURL: "http://127.0.0.1:9222",
