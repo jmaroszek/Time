@@ -59,8 +59,13 @@ export default function ActivityCalendar({
   metric?: ActivityMetric;
 }) {
   const { aliases, weekStart } = useMeta();
+  // Metric-independent aggregation: each day cell carries all four state totals,
+  // so a metric switch only re-shades instead of re-walking every session.
+  const summaries = useMemo(
+    () => dailyActivitySummaries(sessions, range, classifier),
+    [sessions, range, classifier],
+  );
   const option = useMemo<EChartsOption>(() => {
-    const summaries = dailyActivitySummaries(sessions, range, classifier);
     const byKey = new Map(summaries.map((day) => [day.key, day]));
     const shaded = (day: DailyActivitySummary) => metricSeconds(day, metric);
     // Rescaled per metric: every state is a subset of tracked, so reusing the
@@ -132,7 +137,7 @@ export default function ActivityCalendar({
         },
       ],
     };
-  }, [sessions, range, classifier, metric, aliases, weekStart]);
+  }, [summaries, metric, aliases, weekStart, range]);
 
   const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart);
   const rows = orientation === "vertical" ? weekColumns : 7;
