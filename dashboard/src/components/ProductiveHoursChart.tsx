@@ -4,13 +4,15 @@
 
 import { useMemo } from "react";
 
-import type { Classifier } from "../lib/classify";
+import type { Category, Classifier } from "../lib/classify";
 import { rollingMean, type Session } from "../lib/metrics";
 import {
   bucketActivityHours,
   dailyActivitySummaries,
   isCompleteHoursBucket,
   overviewHistoryStart,
+  UNCATEGORIZED_LABEL,
+  type ActivityStack,
   type HoursBucket,
   type OverviewGranularity,
 } from "../lib/overview";
@@ -24,9 +26,43 @@ import {
   NEUTRAL_BAR,
   PRODUCTIVE_BAR,
   TOOLTIP_STYLE,
+  UNCATEGORIZED,
   UNCATEGORIZED_BAR,
   UNPRODUCTIVE_BAR,
 } from "../lib/chartTheme";
+
+export interface CategorySeries {
+  name: string;
+  color: string;
+  /** Hours per bucket, in the order the buckets were given. */
+  hours: number[];
+}
+
+/**
+ * Category stacks for a run of buckets, in the user's configured order with
+ * Uncategorized last.
+ *
+ * Ignored categories never reach here — their sessions are dropped upstream —
+ * and categories with no time in the range are omitted rather than crowding
+ * the legend with flat zeroes.
+ */
+export function categorySeries(
+  buckets: { categorySeconds: Map<string, number> }[],
+  categories: Category[],
+): CategorySeries[] {
+  const ordered: { name: string; color: string }[] = [
+    ...categories.filter((category) => !category.isIgnored),
+    { name: UNCATEGORIZED_LABEL, color: UNCATEGORIZED },
+  ];
+  const out: CategorySeries[] = [];
+  for (const { name, color } of ordered) {
+    const hours = buckets.map(
+      (bucket) => Math.round(((bucket.categorySeconds.get(name) ?? 0) / 3600) * 100) / 100,
+    );
+    if (hours.some((value) => value > 0)) out.push({ name, color, hours });
+  }
+  return out;
+}
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -44,6 +80,8 @@ export default function ProductiveHoursChart({
   labelMode = "date",
   granularity = "daily",
   weekStart = "Sunday",
+  stackBy = "state",
+  categories = [],
 }: {
   historySessions: Session[];
   range: Range;
@@ -51,6 +89,8 @@ export default function ProductiveHoursChart({
   labelMode?: "weekday" | "date";
   granularity?: OverviewGranularity;
   weekStart?: WeekStart;
+  stackBy?: ActivityStack;
+  categories?: Category[];
 }) {
   const option = useMemo<EChartsOption>(() => {
     const round2 = (h: number) => Math.round(h * 100) / 100;
@@ -61,6 +101,8 @@ export default function ProductiveHoursChart({
     let uncategorizedBars: number[];
     let avgLine: Array<number | null>;
     let buckets: HoursBucket[] = [];
+    // Whichever bucket run is on screen, for the category stacks.
+    let visible: { categorySeconds: Map<string, number> }[] = [];
     const averageName = PRODUCTIVE_AVERAGES[granularity];
 
     if (granularity === "daily") {
@@ -70,6 +112,7 @@ export default function ProductiveHoursChart({
       };
       const historyDays = dailyActivitySummaries(historySessions, historyRange, classifier);
       const visibleDays = dailyActivitySummaries(historySessions, range, classifier);
+      visible = visibleDays;
       const offset = historyDays.length - visibleDays.length;
       labels = visibleDays.map((day) =>
         labelMode === "weekday" ? DAY_NAMES[day.date.getDay()] : fmtShortDate(day.date),
@@ -84,6 +127,7 @@ export default function ProductiveHoursChart({
     } else {
       const days = dailyActivitySummaries(historySessions, range, classifier);
       buckets = bucketActivityHours(days, range, granularity, weekStart);
+      visible = buckets;
       const historyRange = {
         start: overviewHistoryStart(range, granularity, weekStart),
         end: range.end,
@@ -111,7 +155,16 @@ export default function ProductiveHoursChart({
     }
 
     const hasUncategorized = shouldShowUncategorized(uncategorizedBars);
-    const stackNames = ["Productive", "Neutral", "Unproductive", ...(hasUncategorized ? ["Uncategorized"] : [])];
+    const stateStacks: CategorySeries[] = [
+      { name: "Productive", color: PRODUCTIVE_BAR, hours: prodBars },
+      { name: "Neutral", color: NEUTRAL_BAR, hours: neutralBars },
+      { name: "Unproductive", color: UNPRODUCTIVE_BAR, hours: unproductiveBars },
+      ...(hasUncategorized
+        ? [{ name: "Uncategorized", color: UNCATEGORIZED_BAR, hours: uncategorizedBars }]
+        : []),
+    ];
+    const stacks = stackBy === "category" ? categorySeries(visible, categories) : stateStacks;
+    const stackNames = stacks.map((stack) => stack.name);
     const tooltip = {
       trigger: "axis" as const,
       ...TOOLTIP_STYLE,
@@ -138,9 +191,14 @@ export default function ProductiveHoursChart({
       icon: "path://M0,4 L4,4 L4,6 L0,6 Z M6,4 L10,4 L10,6 L6,6 Z M12,4 L16,4 L16,6 L12,6 Z",
     };
 
+    // The legend wraps at ~92% width; roughly six chips fit per row. Reserve a
+    // row of height for each, so a long category list is never clipped.
+    const legendRows = Math.max(1, Math.ceil((stackNames.length + 1) / 6));
+    const bottomPad = 40 + legendRows * 18;
+
     return {
       animation: false,
-      grid: { left: 36, right: 12, top: 12, bottom: hasUncategorized ? 76 : 58 },
+      grid: { left: 36, right: 12, top: 12, bottom: bottomPad },
       tooltip,
       legend: {
         show: true,
@@ -165,43 +223,18 @@ export default function ProductiveHoursChart({
         splitLine: { lineStyle: { color: CHROME.gridLine } },
       },
       series: [
-        {
-          name: "Productive",
-          type: "bar",
+        ...stacks.map((stack, index) => ({
+          name: stack.name,
+          type: "bar" as const,
           stack: "day",
-          data: prodBars,
-          itemStyle: { color: PRODUCTIVE_BAR },
-          barMaxWidth: 36,
-        },
-        {
-          name: "Neutral",
-          type: "bar",
-          stack: "day",
-          data: neutralBars,
-          itemStyle: { color: NEUTRAL_BAR },
-          barMaxWidth: 36,
-        },
-        {
-          name: "Unproductive",
-          type: "bar",
-          stack: "day",
-          data: unproductiveBars,
+          data: stack.hours,
           itemStyle: {
-            color: UNPRODUCTIVE_BAR,
-            borderRadius: hasUncategorized ? 0 : [3, 3, 0, 0],
+            color: stack.color,
+            // Only the topmost stack is rounded, so the bar reads as one shape.
+            borderRadius: index === stacks.length - 1 ? [3, 3, 0, 0] : 0,
           },
           barMaxWidth: 36,
-        },
-        ...(hasUncategorized
-          ? [{
-              name: "Uncategorized",
-              type: "bar" as const,
-              stack: "day",
-              data: uncategorizedBars,
-              itemStyle: { color: UNCATEGORIZED_BAR, borderRadius: [3, 3, 0, 0] },
-              barMaxWidth: 36,
-            }]
-          : []),
+        })),
         {
           name: averageName,
           type: "line",
@@ -213,7 +246,7 @@ export default function ProductiveHoursChart({
         },
       ],
     };
-  }, [historySessions, range, classifier, labelMode, granularity, weekStart]);
+  }, [historySessions, range, classifier, labelMode, granularity, weekStart, stackBy, categories]);
 
   return <EChart option={option} height={254} />;
 }

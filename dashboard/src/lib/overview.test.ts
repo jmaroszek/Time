@@ -20,6 +20,7 @@ import type { Session } from "./metrics";
 import { calendarGrid, formatActivityCalendarTooltip } from "../components/ActivityCalendar";
 import { formatRhythmTooltip } from "../components/RhythmChart";
 import {
+  categorySeries,
   formatHoursBucketRange,
   shouldShowUncategorized,
 } from "../components/ProductiveHoursChart";
@@ -90,6 +91,14 @@ describe("dailyActivitySummaries", () => {
     expect(summaries.map((day) => day.uncategorizedSeconds)).toEqual([0, 900, 0]);
     expect(summaries[1].topApp).toEqual({ process: "game.exe", seconds: 7200 });
     expect(summaries[2].topApp).toBeNull();
+    // Category decomposition sums to the same tracked total, unmatched sessions
+    // under the Uncategorized label.
+    expect(Object.fromEntries(summaries[1].categorySeconds)).toEqual({
+      Dev: 3600,
+      Games: 7200,
+      Neutral: 1800,
+      Uncategorized: 900,
+    });
   });
 
   it("formats complete calendar hover detail with an aliased top app", () => {
@@ -195,6 +204,39 @@ describe("calendarGrid", () => {
     // Jun 21 2026 -> Jan 17 2027 is exactly 30 weeks, but spans a fall-back
     // hour; measuring in raw ms rounds that up to a phantom 31st column.
     expect(from(30 * 7).weekColumns).toBe(30);
+  });
+});
+
+describe("categorySeries", () => {
+  const buckets = [
+    { categorySeconds: new Map([["Dev", 7200], ["Games", 3600], ["Uncategorized", 1800]]) },
+    { categorySeconds: new Map([["Dev", 3600], ["Neutral", 900]]) },
+  ];
+
+  it("orders by configured category, Uncategorized last, in hours", () => {
+    const series = categorySeries(buckets, CATEGORIES);
+    expect(series.map((s) => s.name)).toEqual(["Dev", "Games", "Neutral", "Uncategorized"]);
+    expect(series.find((s) => s.name === "Dev")!.hours).toEqual([2, 1]);
+    expect(series.find((s) => s.name === "Uncategorized")!.hours).toEqual([0.5, 0]);
+  });
+
+  it("keeps each category's configured color and Uncategorized gray", () => {
+    const series = categorySeries(buckets, CATEGORIES);
+    expect(series.find((s) => s.name === "Dev")!.color).toBe("#378ADD");
+    expect(series.find((s) => s.name === "Uncategorized")!.color).toBe("#5b616b");
+  });
+
+  it("omits ignored categories and any category with no time in range", () => {
+    const series = categorySeries(buckets, CATEGORIES);
+    // "Ignored" is isIgnored; sessions never accrue to it upstream anyway.
+    expect(series.some((s) => s.name === "Ignored")).toBe(false);
+    // No bucket carries Games in the second slot, but it still appears because
+    // the first does; a category absent from every bucket is dropped entirely.
+    const noGames = categorySeries(
+      [{ categorySeconds: new Map([["Dev", 3600]]) }],
+      CATEGORIES,
+    );
+    expect(noGames.map((s) => s.name)).toEqual(["Dev"]);
   });
 });
 

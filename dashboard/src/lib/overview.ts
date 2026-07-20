@@ -45,12 +45,30 @@ export const ACTIVITY_METRIC_WORDS: Record<ActivityMetric, string> = {
   neutral: "neutral",
 };
 
+/** Stack decomposition for the activity-hours bars: the productive/neutral/
+ *  unproductive taxonomy, or the user's own categories. */
+export type ActivityStack = "state" | "category";
+
+/** Bucket key for sessions no rule matched. Categories cannot be named this
+ *  without colliding, which is acceptable — it is already the label the charts
+ *  and tooltips use for the same thing. */
+export const UNCATEGORIZED_LABEL = "Uncategorized";
+
 /** The four state totals every heatmap bucket carries, whatever it is keyed by. */
 export interface ActivityTotals {
   trackedSeconds: number;
   productiveSeconds: number;
   neutralSeconds: number;
   unproductiveSeconds: number;
+}
+
+function addCategorySeconds(
+  into: Map<string, number>,
+  categoryName: string | undefined,
+  seconds: number,
+): void {
+  const key = categoryName ?? UNCATEGORIZED_LABEL;
+  into.set(key, (into.get(key) ?? 0) + seconds);
 }
 
 export function metricSeconds(totals: ActivityTotals, metric: ActivityMetric): number {
@@ -81,6 +99,8 @@ export interface DailyActivitySummary {
   neutralSeconds: number;
   unproductiveSeconds: number;
   uncategorizedSeconds: number;
+  /** Seconds per category name, UNCATEGORIZED_LABEL for unmatched sessions. */
+  categorySeconds: Map<string, number>;
   topApp: { process: string; seconds: number } | null;
 }
 
@@ -90,6 +110,7 @@ export interface HourlyActivitySummary {
   neutralSeconds: number;
   unproductiveSeconds: number;
   uncategorizedSeconds: number;
+  categorySeconds: Map<string, number>;
 }
 
 /** Zero-filled activity-state totals for each visible local hour of a
@@ -107,6 +128,7 @@ export function hourlyActivitySummaries(
     neutralSeconds: 0,
     unproductiveSeconds: 0,
     uncategorizedSeconds: 0,
+    categorySeconds: new Map<string, number>(),
   }));
   const byHour = new Map(hours.map((hour) => [hour.hour, hour]));
   const startSec = range.start.getTime() / 1000;
@@ -136,6 +158,7 @@ export function hourlyActivitySummaries(
           else if (kind === "neutral") bucket.neutralSeconds += seconds;
           else bucket.unproductiveSeconds += seconds;
         }
+        addCategorySeconds(bucket.categorySeconds, category?.name, seconds);
       }
       cursor = chunkEnd;
     }
@@ -260,6 +283,7 @@ export function dailyActivitySummaries(
         neutralSeconds: 0,
         unproductiveSeconds: 0,
         uncategorizedSeconds: 0,
+        categorySeconds: new Map<string, number>(),
         topApp: null,
         appSeconds: new Map<string, number>(),
       },
@@ -284,6 +308,7 @@ export function dailyActivitySummaries(
         else if (kind === "neutral") day.neutralSeconds += seconds;
         else day.unproductiveSeconds += seconds;
       }
+      addCategorySeconds(day.categorySeconds, category?.name, seconds);
       day.appSeconds.set(session.process, (day.appSeconds.get(session.process) ?? 0) + seconds);
     }
   }
@@ -309,6 +334,7 @@ export interface HoursBucket {
   neutralSeconds: number;
   unproductiveSeconds: number;
   uncategorizedSeconds: number;
+  categorySeconds: Map<string, number>;
 }
 
 export function bucketActivityHours(
@@ -338,6 +364,7 @@ export function bucketActivityHours(
       neutralSeconds: 0,
       unproductiveSeconds: 0,
       uncategorizedSeconds: 0,
+      categorySeconds: new Map<string, number>(),
     });
     periodStart = periodEnd;
   }
@@ -356,6 +383,9 @@ export function bucketActivityHours(
     bucket.neutralSeconds += day.neutralSeconds;
     bucket.unproductiveSeconds += day.unproductiveSeconds;
     bucket.uncategorizedSeconds += day.uncategorizedSeconds;
+    for (const [name, seconds] of day.categorySeconds) {
+      bucket.categorySeconds.set(name, (bucket.categorySeconds.get(name) ?? 0) + seconds);
+    }
   }
 
   return buckets;
