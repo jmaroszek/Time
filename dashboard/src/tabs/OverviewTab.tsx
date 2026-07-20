@@ -84,7 +84,11 @@ export default function OverviewTab({
 
   useEffect(() => setSelected(null), [rangeStartSec, rangeEndSec]);
 
-  const derived = useMemo(() => {
+  // Everything here is independent of the Top-N dropdown, so it stays in one
+  // memo that keeps a stable identity across Top-N changes. That in turn keeps
+  // `current`/`history` referentially stable, so switching Top-N doesn't force
+  // every chart below to re-aggregate — only the app-list slice re-runs.
+  const base = useMemo(() => {
     // Sessions in ignored categories are invisible to every visualization
     // (they remain manageable in the Apps tab).
     const visible = sessions.filter((s) => meta.classifier(s)?.isIgnored !== true);
@@ -96,17 +100,8 @@ export default function OverviewTab({
     );
     const kpis = computeKpis(current, meta.classifier, meta.focusChainMaxGapSeconds);
     const pace = goalPace(kpis.prodSec, range, meta.weeklyGoalHours);
-    const n = topN ?? meta.defaultTopN;
     const rankedApps = topApps(current, meta.classifier);
     const eligibleApps = rankedApps.filter((a) => a.seconds >= meta.minAppSeconds);
-    const apps = withDeltas(
-      eligibleApps.slice(0, n),
-      topApps(previous, meta.classifier),
-      {
-        currentDaily: dailySecondsByApp(current, range),
-        previousDaily: dailySecondsByApp(previous, prev),
-      },
-    );
     const history = clipSessions(
       visible,
       overviewHistoryStart(range, granularity, meta.weekStart).getTime() / 1000,
@@ -116,17 +111,31 @@ export default function OverviewTab({
       current,
       kpis,
       pace,
-      apps,
+      eligibleApps,
+      previousRanked: topApps(previous, meta.classifier),
+      currentDaily: dailySecondsByApp(current, range),
+      previousDaily: dailySecondsByApp(previous, prev),
       hiddenAppCount: rankedApps.length - eligibleApps.length,
       history,
     };
-  }, [sessions, rangeStartSec, rangeEndSec, prev.start, prev.end, meta, topN, range, granularity]);
+  }, [sessions, rangeStartSec, rangeEndSec, prev.start, prev.end, meta, range, granularity]);
+
+  const n = topN ?? meta.defaultTopN;
+  // Only the visible slice depends on Top-N; the deltas cover ≤20 apps and are
+  // cheap, so this re-runs alone on a Top-N change and leaves the charts alone.
+  const apps = useMemo(
+    () =>
+      withDeltas(base.eligibleApps.slice(0, n), base.previousRanked, {
+        currentDaily: base.currentDaily,
+        previousDaily: base.previousDaily,
+      }),
+    [base, n],
+  );
 
   if (loading) return <Spinner />;
   if (error) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
 
-  const { kpis, pace, apps, hiddenAppCount, current, history } = derived;
-  const n = topN ?? meta.defaultTopN;
+  const { kpis, pace, hiddenAppCount, current, history } = base;
 
   return (
     <div className="flex flex-col gap-4">
