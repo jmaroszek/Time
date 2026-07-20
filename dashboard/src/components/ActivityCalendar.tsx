@@ -24,6 +24,9 @@ import EChart, { type EChartsOption } from "./EChart";
 /** Above this many week columns, "auto" cell sizing lands near square by
  *  itself; below it the cells must be sized explicitly. */
 const NARROW_WEEK_COLUMNS = 30;
+/** A short calendar reads more naturally with weekdays across the top. Past
+ *  this point, weeks running left-to-right use the card's width better. */
+const VERTICAL_MAX_WEEKS = 8;
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -67,7 +70,8 @@ export default function ActivityCalendar({
     // wide bar instead of a day. Below it, size the cells squarely and center
     // the grid; the box must be given an explicit width/height rather than
     // left+right+top+bottom, because a fully constrained box overrides cellSize.
-    const { weekColumns, cellPx } = calendarGrid(range, weekStart);
+    const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart);
+    const vertical = orientation === "vertical";
 
     return {
       animation: false,
@@ -86,12 +90,13 @@ export default function ActivityCalendar({
       },
       calendar: {
         top: 28,
+        orient: orientation,
         ...(cellPx === null
           ? { left: 48, right: 12, bottom: 12, cellSize: ["auto", 18] }
           : {
               left: "center",
-              width: cellPx * weekColumns,
-              height: cellPx * 7,
+              width: cellPx * (vertical ? 7 : weekColumns),
+              height: cellPx * (vertical ? weekColumns : 7),
               cellSize: [cellPx, cellPx],
             }),
         range: [dayKey(range.start), dayKey(lastDay)],
@@ -127,23 +132,23 @@ export default function ActivityCalendar({
     };
   }, [sessions, range, classifier, metric, aliases, weekStart]);
 
-  const { cellPx } = calendarGrid(range, weekStart);
-  return <EChart option={option} height={cellPx === null ? 220 : cellPx * 7 + 56} />;
+  const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart);
+  const rows = orientation === "vertical" ? weekColumns : 7;
+  return <EChart option={option} height={cellPx === null ? 220 : cellPx * rows + 56} />;
 }
 
 /**
- * Week columns in the range, and the square cell size to draw them at.
+ * Weeks in the range, the square cell size, and the most legible orientation.
  *
- * `cellSize: "auto"` divides the box across the columns, which at short ranges
- * stretches each day into a wide bar rather than a cell. Below
- * NARROW_WEEK_COLUMNS we pick an explicit square size instead (capped so a
- * five-week month doesn't render enormous), and `cellPx` is null above it,
- * where enough columns exist for "auto" to land near square on its own.
+ * Short ranges use familiar calendar reading order: weekdays across and weeks
+ * down. Longer ranges keep weeks across so time uses the card's width. For both
+ * orientations, explicit square sizing prevents short ranges from stretching
+ * each day into a bar; sufficiently long ranges can safely use auto width.
  */
 export function calendarGrid(
   range: Range,
   weekStart: WeekStart,
-): { weekColumns: number; cellPx: number | null } {
+): { weekColumns: number; cellPx: number | null; orientation: "horizontal" | "vertical" } {
   // calendarDays, not raw ms — a range spanning a DST boundary is off by an
   // hour, which rounds up into a phantom extra column.
   const weekColumns = Math.ceil(
@@ -153,7 +158,11 @@ export function calendarGrid(
     weekColumns <= NARROW_WEEK_COLUMNS
       ? Math.max(18, Math.min(40, Math.floor(880 / weekColumns)))
       : null;
-  return { weekColumns, cellPx };
+  return {
+    weekColumns,
+    cellPx,
+    orientation: weekColumns <= VERTICAL_MAX_WEEKS ? "vertical" : "horizontal",
+  };
 }
 
 export function formatActivityCalendarTooltip(

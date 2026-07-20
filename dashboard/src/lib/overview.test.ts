@@ -244,6 +244,13 @@ describe("calendarGrid", () => {
     expect(from(90).cellPx).toBe(40);
   });
 
+  it("puts weekdays across the top only for short calendars", () => {
+    expect(from(30).orientation).toBe("vertical");
+    expect(from(8 * 7).orientation).toBe("vertical");
+    expect(from(8 * 7 + 1).orientation).toBe("horizontal");
+    expect(from(90).orientation).toBe("horizontal");
+  });
+
   it("hands long ranges back to auto sizing", () => {
     expect(from(365).cellPx).toBeNull();
   });
