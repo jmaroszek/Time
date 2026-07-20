@@ -25,6 +25,9 @@ import { addDays, calendarDays, previousRange, type Range } from "../lib/time";
 import {
   overviewGranularity,
   overviewHistoryStart,
+  ACTIVITY_METRICS,
+  ACTIVITY_METRIC_LABELS,
+  ACTIVITY_METRIC_WORDS,
   type ActivityMetric,
 } from "../lib/overview";
 import type { PresetOrCustom } from "../components/DateRangePicker";
@@ -146,9 +149,7 @@ export default function OverviewTab({
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Rhythm</span>
                   <span className="text-[11px] font-normal text-ink-3">
-                    {metric === "productive"
-                      ? "Average productive time by weekday and hour"
-                      : "Average tracked time by weekday and hour"}
+                    {`Average ${ACTIVITY_METRIC_WORDS[metric]} time by weekday and hour`}
                   </span>
                 </span>
               )
@@ -156,7 +157,7 @@ export default function OverviewTab({
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Calendar</span>
                   <span className="text-[11px] font-normal text-ink-3">
-                    {metric === "productive" ? "Productive time by day" : "Tracked time by day"}
+                    {`${ACTIVITY_METRIC_WORDS[metric].replace(/^./, (c) => c.toUpperCase())} time by day`}
                   </span>
                 </span>
               )}
@@ -180,10 +181,10 @@ export default function OverviewTab({
             <Select
               value={metric}
               onChange={(v) => setMetric(v as ActivityMetric)}
-              options={[
-                { value: "tracked", label: "Total time" },
-                { value: "productive", label: "Productive time" },
-              ]}
+              options={ACTIVITY_METRICS.map((m) => ({
+                value: m,
+                label: ACTIVITY_METRIC_LABELS[m],
+              }))}
             />
             <Select
               value={middleView}

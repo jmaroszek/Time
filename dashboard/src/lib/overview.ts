@@ -15,10 +15,56 @@ export type OverviewGranularity = "daily" | "weekly" | "monthly";
 
 /**
  * Which quantity a heatmap shades by. Both the rhythm grid and the calendar
- * honor it, and the ramp follows it — blue for amount, green for productive —
- * so the color carries its own legend across either view.
+ * honor it, and the ramp follows it — blue for amount, green for productive,
+ * red-orange for unproductive, gray for neutral — so the color carries its own
+ * legend across either view.
  */
-export type ActivityMetric = "tracked" | "productive";
+export type ActivityMetric = "tracked" | "productive" | "unproductive" | "neutral";
+
+export const ACTIVITY_METRICS: ActivityMetric[] = [
+  "tracked",
+  "productive",
+  "unproductive",
+  "neutral",
+];
+
+/** Dropdown label per metric. "Total" rather than "Tracked" — the control is
+ *  read next to the others, where "total vs productive" is the clearer pair. */
+export const ACTIVITY_METRIC_LABELS: Record<ActivityMetric, string> = {
+  tracked: "Total time",
+  productive: "Productive time",
+  unproductive: "Unproductive time",
+  neutral: "Neutral time",
+};
+
+/** Adjective for chart subtitles and tooltip rows. */
+export const ACTIVITY_METRIC_WORDS: Record<ActivityMetric, string> = {
+  tracked: "tracked",
+  productive: "productive",
+  unproductive: "unproductive",
+  neutral: "neutral",
+};
+
+/** The four state totals every heatmap bucket carries, whatever it is keyed by. */
+export interface ActivityTotals {
+  trackedSeconds: number;
+  productiveSeconds: number;
+  neutralSeconds: number;
+  unproductiveSeconds: number;
+}
+
+export function metricSeconds(totals: ActivityTotals, metric: ActivityMetric): number {
+  switch (metric) {
+    case "productive":
+      return totals.productiveSeconds;
+    case "unproductive":
+      return totals.unproductiveSeconds;
+    case "neutral":
+      return totals.neutralSeconds;
+    case "tracked":
+      return totals.trackedSeconds;
+  }
+}
 
 export function overviewGranularity(range: Range): OverviewGranularity {
   const days = calendarDays(range);

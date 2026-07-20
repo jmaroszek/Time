@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import {
   dailyActivitySummaries,
+  metricSeconds,
   type ActivityMetric,
   type DailyActivitySummary,
 } from "../lib/overview";
@@ -17,12 +18,7 @@ import {
 import type { Classifier } from "../lib/classify";
 import type { Session } from "../lib/metrics";
 import { useMeta } from "../state/meta";
-import {
-  ACTIVITY_HEATMAP_RAMP,
-  CHROME,
-  HEATMAP_RAMP,
-  TOOLTIP_STYLE,
-} from "../lib/chartTheme";
+import { ACTIVITY_METRIC_RAMPS, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 /** Above this many week columns, "auto" cell sizing lands near square by
@@ -61,11 +57,11 @@ export default function ActivityCalendar({
   const option = useMemo<EChartsOption>(() => {
     const summaries = dailyActivitySummaries(sessions, range, classifier);
     const byKey = new Map(summaries.map((day) => [day.key, day]));
-    const shaded = (day: DailyActivitySummary) =>
-      metric === "productive" ? day.productiveSeconds : day.trackedSeconds;
-    // Rescaled per metric: productive time is a subset of tracked, so reusing
-    // the tracked scale would wash the productive field out.
+    const shaded = (day: DailyActivitySummary) => metricSeconds(day, metric);
+    // Rescaled per metric: every state is a subset of tracked, so reusing the
+    // tracked scale would wash the narrower fields out.
     const maxHours = Math.max(...summaries.map((day) => shaded(day) / 3600), 1);
+    const ramp = ACTIVITY_METRIC_RAMPS[metric];
     const lastDay = addDays(range.end, -1);
     // A week-column count low enough that "auto" would stretch each cell into a
     // wide bar instead of a day. Below it, size the cells squarely and center
@@ -86,7 +82,7 @@ export default function ActivityCalendar({
         show: false,
         min: 0,
         max: maxHours,
-        inRange: { color: metric === "productive" ? HEATMAP_RAMP : ACTIVITY_HEATMAP_RAMP },
+        inRange: { color: ramp },
       },
       calendar: {
         top: 28,
@@ -103,7 +99,7 @@ export default function ActivityCalendar({
         itemStyle: {
           // Empty-day fill: the ramp's own zero stop, so days with no data sit
           // flush with the low end of whichever scale is showing.
-          color: (metric === "productive" ? HEATMAP_RAMP : ACTIVITY_HEATMAP_RAMP)[0],
+          color: ramp[0],
           borderColor: CHROME.gridLine,
           borderWidth: 2,
         },

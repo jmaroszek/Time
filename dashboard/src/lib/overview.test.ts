@@ -6,10 +6,15 @@ import {
   dailyActivitySummaries,
   hourlyActivitySummaries,
   isCompleteHoursBucket,
+  metricSeconds,
   overviewGranularity,
   overviewHistoryStart,
   weekdayRhythmSummaries,
+  ACTIVITY_METRICS,
+  ACTIVITY_METRIC_LABELS,
+  ACTIVITY_METRIC_WORDS,
 } from "./overview";
+import { ACTIVITY_METRIC_RAMPS, CHROME } from "./chartTheme";
 import { addDays, dayKey, type Range } from "./time";
 import type { Session } from "./metrics";
 import { calendarGrid, formatActivityCalendarTooltip } from "../components/ActivityCalendar";
@@ -135,6 +140,29 @@ describe("hourlyActivitySummaries", () => {
   });
 });
 
+describe("activity metrics", () => {
+  it("gives every metric a ramp, a label, and a word", () => {
+    for (const metric of ACTIVITY_METRICS) {
+      expect(ACTIVITY_METRIC_RAMPS[metric]).toHaveLength(4);
+      expect(ACTIVITY_METRIC_LABELS[metric]).toBeTruthy();
+      expect(ACTIVITY_METRIC_WORDS[metric]).toBeTruthy();
+    }
+  });
+
+  it("keeps the neutral ramp below the axis-label gray so cells never read as chrome", () => {
+    const neutralRamp = ACTIVITY_METRIC_RAMPS.neutral;
+    const brightest = neutralRamp[neutralRamp.length - 1];
+    const luminance = (hex: string) =>
+      [1, 3, 5].reduce((sum, i) => sum + parseInt(hex.slice(i, i + 2), 16), 0) / 3;
+    expect(luminance(brightest)).toBeLessThan(luminance(CHROME.axisLabel));
+  });
+
+  it("starts every ramp at the same empty-cell fill", () => {
+    const zeros = new Set(ACTIVITY_METRICS.map((m) => ACTIVITY_METRIC_RAMPS[m][0]));
+    expect(zeros.size).toBe(1);
+  });
+});
+
 describe("calendarGrid", () => {
   // Sun Jun 21 2026 is a week start, so these counts are exact.
   const from = (days: number) => calendarGrid(rangeFrom(new Date(2026, 5, 21), days), "Sunday");
@@ -232,6 +260,28 @@ describe("weekdayRhythmSummaries", () => {
     expect(tooltip).toContain("Avg productive: 20m");
     expect(tooltip).toContain("(over 3 Mondays)");
     expect(tooltip).toContain("Tracked: 30m");
+    // The led metric must not also appear as a plain row.
+    expect(tooltip).not.toContain("Productive: 20m");
+  });
+
+  it("leads with unproductive and neutral too, keeping the other rows", () => {
+    const unproductive = formatRhythmTooltip(cell(1, 9), 3, "unproductive");
+    expect(unproductive).toContain("Avg unproductive: 10m");
+    expect(unproductive).toContain("Tracked: 30m");
+    expect(unproductive).toContain("Productive: 20m");
+    expect(unproductive).not.toContain("Unproductive: 10m");
+
+    const neutral = formatRhythmTooltip(cell(1, 9), 3, "neutral");
+    expect(neutral).toContain("Avg neutral: 0s");
+    expect(neutral).toContain("Unproductive: 10m");
+  });
+
+  it("reads every metric off the same totals", () => {
+    const totals = cell(1, 9);
+    expect(metricSeconds(totals, "tracked")).toBe(5400);
+    expect(metricSeconds(totals, "productive")).toBe(3600);
+    expect(metricSeconds(totals, "unproductive")).toBe(1800);
+    expect(metricSeconds(totals, "neutral")).toBe(0);
   });
 
   it("uses the singular weekday name for a single occurrence", () => {
