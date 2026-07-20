@@ -1,8 +1,10 @@
 // Rhythm heatmap for multi-week ranges: weekday × hour cells shaded by
-// average tracked (non-AFK) time per weekday occurrence. The blue ramp
-// deliberately matches ActivityCalendar — both encode amount of tracked time
-// without the productive/non-productive judgment; the tooltip carries the
-// productivity breakdown instead.
+// average time per weekday occurrence.
+//
+// The ramp follows the metric, matching the convention in chartTheme: blue
+// encodes amount of tracked time without the productive/non-productive
+// judgment (same as ActivityCalendar), green encodes productive time (same as
+// the productive bars). Either way the tooltip carries the full breakdown.
 
 import { useMemo } from "react";
 
@@ -12,20 +14,29 @@ import type { Session } from "../lib/metrics";
 import { weekdayRhythmSummaries, type RhythmCell } from "../lib/overview";
 import type { Range } from "../lib/time";
 import { useMeta } from "../state/meta";
-import { ACTIVITY_HEATMAP_RAMP, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import {
+  ACTIVITY_HEATMAP_RAMP,
+  CHROME,
+  HEATMAP_RAMP,
+  TOOLTIP_STYLE,
+} from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+export type RhythmMetric = "tracked" | "productive";
+
 export default function RhythmChart({
   sessions,
   range,
   classifier,
+  metric = "tracked",
 }: {
   sessions: Session[];
   range: Range;
   classifier: Classifier;
+  metric?: RhythmMetric;
 }) {
   const { aliases, weekStart, dayStartHour, dayEndHour } = useMeta();
   const option = useMemo<EChartsOption>(() => {
@@ -46,7 +57,8 @@ export default function RhythmChart({
     const data: [number, number, number][] = [];
     for (const cell of cells) {
       const count = weekdayCounts[cell.weekday];
-      const avgMinutes = count > 0 ? cell.trackedSeconds / count / 60 : 0;
+      const seconds = metric === "productive" ? cell.productiveSeconds : cell.trackedSeconds;
+      const avgMinutes = count > 0 ? seconds / count / 60 : 0;
       maxMinutes = Math.max(maxMinutes, avgMinutes);
       const x = cell.hour - dayStartHour;
       const y = rowIndex.get(cell.weekday)!;
@@ -61,7 +73,9 @@ export default function RhythmChart({
         ...TOOLTIP_STYLE,
         formatter: (p: { data: [number, number, number] }) => {
           const cell = cellByPoint.get(`${p.data[0]},${p.data[1]}`);
-          return cell ? formatRhythmTooltip(cell, weekdayCounts[cell.weekday], aliases) : "";
+          return cell
+            ? formatRhythmTooltip(cell, weekdayCounts[cell.weekday], metric, aliases)
+            : "";
         },
       },
       xAxis: {
@@ -82,8 +96,10 @@ export default function RhythmChart({
       visualMap: {
         show: false,
         min: 0,
+        // Rescaled per metric — productive time is a subset of tracked, so a
+        // shared scale would render the productive field uniformly dim.
         max: Math.max(maxMinutes, 1),
-        inRange: { color: ACTIVITY_HEATMAP_RAMP },
+        inRange: { color: metric === "productive" ? HEATMAP_RAMP : ACTIVITY_HEATMAP_RAMP },
       },
       series: [
         {
@@ -93,7 +109,7 @@ export default function RhythmChart({
         },
       ],
     };
-  }, [sessions, range, classifier, aliases, weekStart, dayStartHour, dayEndHour]);
+  }, [sessions, range, classifier, metric, aliases, weekStart, dayStartHour, dayEndHour]);
 
   return <EChart option={option} height={260} />;
 }
@@ -101,6 +117,7 @@ export default function RhythmChart({
 export function formatRhythmTooltip(
   cell: RhythmCell,
   weekdayCount: number,
+  metric: RhythmMetric = "tracked",
   aliases?: Record<string, string>,
 ): string {
   const avg = (seconds: number) => fmtDuration(weekdayCount > 0 ? seconds / weekdayCount : 0);
@@ -108,10 +125,13 @@ export function formatRhythmTooltip(
   const topApp = cell.topApp
     ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(cell.topApp.process, aliases))} · ${fmtDuration(cell.topApp.seconds)} total</div>`
     : "";
+  // The shaded metric leads, so the headline always names what the color means.
+  const lead = metric === "productive"
+    ? `<div>Avg productive: ${avg(cell.productiveSeconds)} <span style="color:${CHROME.axisLabel}">(over ${occurrences})</span></div><div>Tracked: ${avg(cell.trackedSeconds)}</div>`
+    : `<div>Avg tracked: ${avg(cell.trackedSeconds)} <span style="color:${CHROME.axisLabel}">(over ${occurrences})</span></div><div>Productive: ${avg(cell.productiveSeconds)}</div>`;
   return [
     `<b>${FULL_DAY_NAMES[cell.weekday]} · ${compactHour(cell.hour)}–${compactHour(cell.hour + 1)}</b>`,
-    `<div>Avg tracked: ${avg(cell.trackedSeconds)} <span style="color:${CHROME.axisLabel}">(over ${occurrences})</span></div>`,
-    `<div>Productive: ${avg(cell.productiveSeconds)}</div>`,
+    lead,
     `<div>Neutral: ${avg(cell.neutralSeconds)}</div>`,
     `<div>Unproductive: ${avg(cell.unproductiveSeconds)}</div>`,
     `<div>Uncategorized: ${avg(cell.uncategorizedSeconds)}</div>`,

@@ -182,7 +182,7 @@ describe("weekdayRhythmSummaries", () => {
   });
 
   it("formats the tooltip with per-occurrence averages and an aliased top app", () => {
-    const tooltip = formatRhythmTooltip(cell(1, 9), 3, { "code.exe": "Editor <Main>" });
+    const tooltip = formatRhythmTooltip(cell(1, 9), 3, "tracked", { "code.exe": "Editor <Main>" });
     expect(tooltip).toContain("Monday · 9am–10am");
     expect(tooltip).toContain("Avg tracked: 30m");
     expect(tooltip).toContain("(over 3 Mondays)");
@@ -190,6 +190,13 @@ describe("weekdayRhythmSummaries", () => {
     expect(tooltip).toContain("Unproductive: 10m");
     expect(tooltip).toContain("Neutral: 0s");
     expect(tooltip).toContain("Top app: Editor &lt;Main&gt; · 1h 0m total");
+  });
+
+  it("leads the tooltip with whichever metric the color encodes", () => {
+    const tooltip = formatRhythmTooltip(cell(1, 9), 3, "productive");
+    expect(tooltip).toContain("Avg productive: 20m");
+    expect(tooltip).toContain("(over 3 Mondays)");
+    expect(tooltip).toContain("Tracked: 30m");
   });
 
   it("uses the singular weekday name for a single occurrence", () => {

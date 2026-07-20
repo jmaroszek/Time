@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import { dailyActivitySummaries, type DailyActivitySummary } from "../lib/overview";
-import { addDays, dayKey, type Range } from "../lib/time";
+import { addDays, dayKey, startOfWeek, type Range } from "../lib/time";
 import type { Classifier } from "../lib/classify";
 import type { Session } from "../lib/metrics";
 import { useMeta } from "../state/meta";
@@ -41,6 +41,13 @@ export default function ActivityCalendar({
     const byKey = new Map(summaries.map((day) => [day.key, day]));
     const maxHours = Math.max(...summaries.map((day) => day.trackedSeconds / 3600), 1);
     const lastDay = addDays(range.end, -1);
+    // "auto" stretches columns to fill the card, which turns a short range into
+    // a row of wide bars instead of a calendar. Pin the cell width until there
+    // are enough weeks to fill the width honestly, and center the small grid.
+    const weekColumns = Math.ceil(
+      (range.end.getTime() - startOfWeek(range.start, weekStart).getTime()) / (7 * 86_400_000),
+    );
+    const isNarrow = weekColumns <= 40;
 
     return {
       animation: false,
@@ -59,11 +66,11 @@ export default function ActivityCalendar({
       },
       calendar: {
         top: 28,
-        left: 48,
+        left: isNarrow ? "center" : 48,
         right: 12,
         bottom: 12,
         range: [dayKey(range.start), dayKey(lastDay)],
-        cellSize: ["auto", 18],
+        cellSize: isNarrow ? [22, 18] : ["auto", 18],
         splitLine: { show: false },
         itemStyle: {
           color: ACTIVITY_HEATMAP_RAMP[0],

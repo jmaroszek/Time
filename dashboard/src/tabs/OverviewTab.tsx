@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import ActivityCalendar from "../components/ActivityCalendar";
 import HourlyActivityChart from "../components/HourlyActivityChart";
-import RhythmChart from "../components/RhythmChart";
+import RhythmChart, { type RhythmMetric } from "../components/RhythmChart";
 import TimelineChart, { type TimelineSegment } from "../components/TimelineChart";
 import TopAppsList from "../components/TopAppsList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
@@ -38,6 +38,9 @@ export default function OverviewTab({
   const [topN, setTopN] = useState<number | null>(null);
   const [selected, setSelected] = useState<TimelineSegment | null>(null);
   const [blockMinutes, setBlockMinutes] = useState(15);
+  // null = follow the range-length default; an explicit pick sticks until changed.
+  const [aggregateView, setAggregateView] = useState<"rhythm" | "calendar" | null>(null);
+  const [rhythmMetric, setRhythmMetric] = useState<RhythmMetric>("tracked");
 
   // One fetch covers the visible range, the previous period (deltas), and the
   // 6 days before the range (7-day rolling average).
@@ -51,9 +54,12 @@ export default function OverviewTab({
   const granularity = overviewGranularity(range);
   const rangeDays = calendarDays(range);
   const isSingleDay = rangeDays === 1;
-  // The timeline stops being readable past ~two weeks of rows; the calendar
-  // heatmap is stubby below ~a month. The rhythm grid covers the band between.
-  const middleView = rangeDays <= 14 ? "timeline" : rangeDays <= 30 ? "rhythm" : "calendar";
+  // The timeline stops being readable past ~two weeks of rows. Beyond that the
+  // rhythm grid (collapsed into a typical week) and the calendar (every date
+  // laid out) are both useful, so the range length picks the default and the
+  // card header lets you override it.
+  const middleView =
+    rangeDays <= 14 ? "timeline" : (aggregateView ?? (rangeDays <= 30 ? "rhythm" : "calendar"));
 
   useEffect(() => setSelected(null), [rangeStartSec, rangeEndSec]);
 
@@ -135,7 +141,11 @@ export default function OverviewTab({
             ? (
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Rhythm</span>
-                  <span className="text-[11px] font-normal text-ink-3">Average tracked time by weekday and hour</span>
+                  <span className="text-[11px] font-normal text-ink-3">
+                    {rhythmMetric === "productive"
+                      ? "Average productive time by weekday and hour"
+                      : "Average tracked time by weekday and hour"}
+                  </span>
                 </span>
               )
             : (
@@ -159,7 +169,28 @@ export default function OverviewTab({
               { value: "30", label: "30 min blocks" },
             ]}
           />
-        ) : undefined}
+        ) : (
+          <span className="flex items-center gap-2">
+            {middleView === "rhythm" && (
+              <Select
+                value={rhythmMetric}
+                onChange={(v) => setRhythmMetric(v as RhythmMetric)}
+                options={[
+                  { value: "tracked", label: "Total time" },
+                  { value: "productive", label: "Productive time" },
+                ]}
+              />
+            )}
+            <Select
+              value={middleView}
+              onChange={(v) => setAggregateView(v as "rhythm" | "calendar")}
+              options={[
+                { value: "rhythm", label: "Rhythm" },
+                { value: "calendar", label: "Calendar" },
+              ]}
+            />
+          </span>
+        )}
       >
         {middleView === "timeline" ? (
           <TimelineChart
@@ -170,7 +201,12 @@ export default function OverviewTab({
             onSelect={setSelected}
           />
         ) : middleView === "rhythm" ? (
-          <RhythmChart sessions={current} range={range} classifier={meta.classifier} />
+          <RhythmChart
+            sessions={current}
+            range={range}
+            classifier={meta.classifier}
+            metric={rhythmMetric}
+          />
         ) : (
           <ActivityCalendar sessions={current} range={range} classifier={meta.classifier} />
         )}
