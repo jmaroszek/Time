@@ -188,9 +188,12 @@ export default function TimelineChart({
     [onSelect],
   );
 
-  return (
+  const chart = (
     <EChart option={option} height={Math.max(days.length * 34 + 40, 110)} onClick={handleClick} />
   );
+  return days.length > 14
+    ? <div className="max-h-[516px] overflow-y-auto pr-1">{chart}</div>
+    : chart;
 }
 
 function formatTooltip(seg: TimelineSegment, aliases?: Record<string, string>): string {

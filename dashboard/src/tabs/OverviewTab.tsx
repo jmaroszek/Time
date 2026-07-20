@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import ActivityCalendar from "../components/ActivityCalendar";
+import HourlyActivityChart from "../components/HourlyActivityChart";
 import TimelineChart, { type TimelineSegment } from "../components/TimelineChart";
 import TopAppsList from "../components/TopAppsList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
@@ -19,6 +21,7 @@ import {
   withDeltas,
 } from "../lib/metrics";
 import { addDays, calendarDays, previousRange, type Range } from "../lib/time";
+import { overviewGranularity, overviewHistoryStart } from "../lib/overview";
 import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
@@ -44,6 +47,10 @@ export default function OverviewTab({
 
   const rangeStartSec = range.start.getTime() / 1000;
   const rangeEndSec = range.end.getTime() / 1000;
+  const granularity = overviewGranularity(range);
+  const isSingleDay = calendarDays(range) === 1;
+
+  useEffect(() => setSelected(null), [rangeStartSec, rangeEndSec]);
 
   const derived = useMemo(() => {
     // Sessions in ignored categories are invisible to every visualization
@@ -70,7 +77,7 @@ export default function OverviewTab({
     );
     const history = clipSessions(
       visible,
-      addDays(range.start, -6).getTime() / 1000,
+      overviewHistoryStart(range, granularity, meta.weekStart).getTime() / 1000,
       rangeEndSec,
     );
     return {
@@ -81,7 +88,7 @@ export default function OverviewTab({
       hiddenAppCount: rankedApps.length - eligibleApps.length,
       history,
     };
-  }, [sessions, rangeStartSec, rangeEndSec, prev.start, prev.end, meta, topN, range]);
+  }, [sessions, rangeStartSec, rangeEndSec, prev.start, prev.end, meta, topN, range, granularity]);
 
   if (loading) return <Spinner />;
   if (error) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
@@ -117,8 +124,15 @@ export default function OverviewTab({
       </div>
 
       <Card
-        title="Timeline"
-        right={
+        title={granularity === "daily"
+          ? "Timeline"
+          : (
+              <span className="flex flex-col gap-0.5">
+                <span>Activity Calendar</span>
+                <span className="text-[11px] font-normal text-ink-3">Tracked time by day</span>
+              </span>
+            )}
+        right={granularity === "daily" ? (
           <Select
             value={String(blockMinutes)}
             onChange={(v) => {
@@ -133,16 +147,20 @@ export default function OverviewTab({
               { value: "30", label: "30 min blocks" },
             ]}
           />
-        }
+        ) : undefined}
       >
-        <TimelineChart
-          sessions={current}
-          range={range}
-          classifier={meta.classifier}
-          blockMinutes={blockMinutes}
-          onSelect={setSelected}
-        />
-        {selected && (
+        {granularity === "daily" ? (
+          <TimelineChart
+            sessions={current}
+            range={range}
+            classifier={meta.classifier}
+            blockMinutes={blockMinutes}
+            onSelect={setSelected}
+          />
+        ) : (
+          <ActivityCalendar sessions={current} range={range} classifier={meta.classifier} />
+        )}
+        {granularity === "daily" && selected && (
           <div className="mt-2 flex items-center gap-4 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs">
             <span className="font-semibold">
               {selected.isAfk
@@ -205,14 +223,29 @@ export default function OverviewTab({
             />
           </div>
         </Card>
-        <Card title="Daily Hours" className="h-[345px]">
+        <Card
+          title={isSingleDay ? "Hourly Activity" : granularity === "daily" ? "Daily Hours" : granularity === "weekly" ? "Weekly Hours" : "Monthly Hours"}
+          className="h-[345px]"
+        >
           <div className="pt-2">
-            <ProductiveHoursChart
-              historySessions={history}
-              range={range}
-              classifier={meta.classifier}
-              labelMode={preset === "last7" ? "weekday" : "date"}
-            />
+            {isSingleDay ? (
+              <HourlyActivityChart
+                sessions={current}
+                range={range}
+                classifier={meta.classifier}
+                dayStartHour={meta.dayStartHour}
+                dayEndHour={meta.dayEndHour}
+              />
+            ) : (
+              <ProductiveHoursChart
+                historySessions={history}
+                range={range}
+                classifier={meta.classifier}
+                labelMode={preset === "last7" ? "weekday" : "date"}
+                granularity={granularity}
+                weekStart={meta.weekStart}
+              />
+            )}
           </div>
         </Card>
       </div>
