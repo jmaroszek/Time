@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import ActivityCalendar from "../components/ActivityCalendar";
 import HourlyActivityChart from "../components/HourlyActivityChart";
+import RhythmChart from "../components/RhythmChart";
 import TimelineChart, { type TimelineSegment } from "../components/TimelineChart";
 import TopAppsList from "../components/TopAppsList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
@@ -48,7 +49,11 @@ export default function OverviewTab({
   const rangeStartSec = range.start.getTime() / 1000;
   const rangeEndSec = range.end.getTime() / 1000;
   const granularity = overviewGranularity(range);
-  const isSingleDay = calendarDays(range) === 1;
+  const rangeDays = calendarDays(range);
+  const isSingleDay = rangeDays === 1;
+  // The timeline stops being readable past ~two weeks of rows; the calendar
+  // heatmap is stubby below ~a month. The rhythm grid covers the band between.
+  const middleView = rangeDays <= 14 ? "timeline" : rangeDays <= 30 ? "rhythm" : "calendar";
 
   useEffect(() => setSelected(null), [rangeStartSec, rangeEndSec]);
 
@@ -124,15 +129,22 @@ export default function OverviewTab({
       </div>
 
       <Card
-        title={granularity === "daily"
+        title={middleView === "timeline"
           ? "Timeline"
-          : (
-              <span className="flex flex-col gap-0.5">
-                <span>Activity Calendar</span>
-                <span className="text-[11px] font-normal text-ink-3">Tracked time by day</span>
-              </span>
-            )}
-        right={granularity === "daily" ? (
+          : middleView === "rhythm"
+            ? (
+                <span className="flex flex-col gap-0.5">
+                  <span>Activity Rhythm</span>
+                  <span className="text-[11px] font-normal text-ink-3">Average tracked time by weekday and hour</span>
+                </span>
+              )
+            : (
+                <span className="flex flex-col gap-0.5">
+                  <span>Activity Calendar</span>
+                  <span className="text-[11px] font-normal text-ink-3">Tracked time by day</span>
+                </span>
+              )}
+        right={middleView === "timeline" ? (
           <Select
             value={String(blockMinutes)}
             onChange={(v) => {
@@ -149,7 +161,7 @@ export default function OverviewTab({
           />
         ) : undefined}
       >
-        {granularity === "daily" ? (
+        {middleView === "timeline" ? (
           <TimelineChart
             sessions={current}
             range={range}
@@ -157,10 +169,12 @@ export default function OverviewTab({
             blockMinutes={blockMinutes}
             onSelect={setSelected}
           />
+        ) : middleView === "rhythm" ? (
+          <RhythmChart sessions={current} range={range} classifier={meta.classifier} />
         ) : (
           <ActivityCalendar sessions={current} range={range} classifier={meta.classifier} />
         )}
-        {granularity === "daily" && selected && (
+        {middleView === "timeline" && selected && (
           <div className="mt-2 flex items-center gap-4 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs">
             <span className="font-semibold">
               {selected.isAfk
