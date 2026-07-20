@@ -39,12 +39,16 @@ export function MetricCard({
   label: string;
   value: ReactNode;
   sub?: ReactNode;
-  /** Optional explanation shown as a hover tooltip on a small ⓘ next to the label. */
+  /** Optional explanation shown when the card title is hovered or focused. */
   hint?: string;
 }) {
   return (
     <div className="rounded-xl border border-edge bg-surface px-4 py-3">
-      <p className="flex items-center gap-1 text-xs text-ink-2">
+      <p
+        tabIndex={hint ? 0 : undefined}
+        aria-label={hint ? `${label}. ${hint}` : undefined}
+        className={`group relative w-fit text-xs text-ink-2 outline-none ${hint ? "cursor-help" : ""}`}
+      >
         {label}
         {hint && <InfoHint text={hint} />}
       </p>
@@ -54,25 +58,14 @@ export function MetricCard({
   );
 }
 
-/** A ⓘ that reveals an explanation on hover or keyboard focus. Uses a real
- *  positioned element (not the native `title`, which never shows on click and
- *  is unreliable on hover). */
+/** Positioned tooltip shared by the card's hover and title focus states. */
 function InfoHint({ text }: { text: string }) {
   return (
-    <span className="group relative inline-flex">
-      <span
-        tabIndex={0}
-        aria-label={text}
-        className="cursor-help select-none text-ink-3 outline-none hover:text-ink-2"
-      >
-        ⓘ
-      </span>
-      <span
-        role="tooltip"
-        className="pointer-events-none absolute left-0 top-5 z-20 hidden w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-[11px] font-normal leading-snug text-ink-2 shadow-lg group-hover:block group-focus-within:block"
-      >
-        {text}
-      </span>
+    <span
+      role="tooltip"
+      className="pointer-events-none absolute left-0 top-5 z-20 hidden w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-[11px] font-normal leading-snug text-ink-2 shadow-lg group-hover:block group-focus:block"
+    >
+      {text}
     </span>
   );
 }
