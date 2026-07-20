@@ -12,7 +12,7 @@ import {
 } from "./overview";
 import { addDays, dayKey, type Range } from "./time";
 import type { Session } from "./metrics";
-import { formatActivityCalendarTooltip } from "../components/ActivityCalendar";
+import { calendarGrid, formatActivityCalendarTooltip } from "../components/ActivityCalendar";
 import { formatRhythmTooltip } from "../components/RhythmChart";
 import {
   formatHoursBucketRange,
@@ -132,6 +132,41 @@ describe("hourlyActivitySummaries", () => {
     expect(summaries.map((hour) => hour.neutralSeconds)).toEqual([0, 900, 900]);
     expect(summaries.map((hour) => hour.unproductiveSeconds)).toEqual([0, 0, 900]);
     expect(summaries.map((hour) => hour.uncategorizedSeconds)).toEqual([0, 0, 1800]);
+  });
+});
+
+describe("calendarGrid", () => {
+  // Sun Jun 21 2026 is a week start, so these counts are exact.
+  const from = (days: number) => calendarGrid(rangeFrom(new Date(2026, 5, 21), days), "Sunday");
+
+  it("counts week columns from the aligned week containing the range start", () => {
+    expect(from(30).weekColumns).toBe(5);
+    expect(from(90).weekColumns).toBe(13);
+    expect(from(365).weekColumns).toBe(53);
+    // A range starting mid-week still owns the whole column it falls in.
+    expect(calendarGrid(rangeFrom(new Date(2026, 5, 24), 7), "Sunday").weekColumns).toBe(2);
+  });
+
+  it("sizes short ranges squarely instead of letting cells stretch", () => {
+    expect(from(30).cellPx).toBe(40);
+    expect(from(90).cellPx).toBe(40);
+  });
+
+  it("hands long ranges back to auto sizing", () => {
+    expect(from(365).cellPx).toBeNull();
+  });
+
+  it("shrinks cells rather than overflowing as columns approach the threshold", () => {
+    const wide = calendarGrid(rangeFrom(new Date(2026, 5, 21), 30 * 7), "Sunday");
+    expect(wide.weekColumns).toBe(30);
+    expect(wide.cellPx).toBe(29);
+    expect(wide.cellPx! * wide.weekColumns).toBeLessThanOrEqual(880);
+  });
+
+  it("counts whole weeks across a DST boundary", () => {
+    // Jun 21 2026 -> Jan 17 2027 is exactly 30 weeks, but spans a fall-back
+    // hour; measuring in raw ms rounds that up to a phantom 31st column.
+    expect(from(30 * 7).weekColumns).toBe(30);
   });
 });
 
