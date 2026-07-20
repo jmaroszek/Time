@@ -4,6 +4,8 @@ import { cleanProcessName, fmtDuration } from "../lib/format";
 import {
   dailyActivitySummaries,
   metricSeconds,
+  metricTrackedShare,
+  ACTIVITY_METRIC_WORDS,
   type ActivityMetric,
   type DailyActivitySummary,
 } from "../lib/overview";
@@ -79,7 +81,7 @@ export default function ActivityCalendar({
         ...TOOLTIP_STYLE,
         formatter: (params: { data: [string, number] }) => {
           const day = byKey.get(params.data[0]);
-          return day ? formatActivityCalendarTooltip(day, aliases) : "";
+          return day ? formatActivityCalendarTooltip(day, metric, aliases) : "";
         },
       },
       visualMap: {
@@ -167,22 +169,24 @@ export function calendarGrid(
 
 export function formatActivityCalendarTooltip(
   day: DailyActivitySummary,
+  metric: ActivityMetric = "tracked",
   aliases?: Record<string, string>,
 ): string {
   const date = `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}`;
-  const productiveShare = day.trackedSeconds > 0
-    ? Math.round((day.productiveSeconds / day.trackedSeconds) * 100)
-    : 0;
   const topApp = day.topApp
     ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(day.topApp.process, aliases))} · ${fmtDuration(day.topApp.seconds)}</div>`
     : "";
+  // Matches the rhythm tooltip: the shaded metric leads, with tracked as its
+  // denominator. The dropdown selects the state, so the tooltip need not list
+  // every one.
+  const share = metricTrackedShare(day, metric);
+  const word = ACTIVITY_METRIC_WORDS[metric];
   return [
     `<b>${date}</b>`,
-    `<div>Tracked: ${fmtDuration(day.trackedSeconds)}</div>`,
-    `<div>Productive: ${fmtDuration(day.productiveSeconds)} (${productiveShare}%)</div>`,
-    `<div>Neutral: ${fmtDuration(day.neutralSeconds)}</div>`,
-    `<div>Unproductive: ${fmtDuration(day.unproductiveSeconds)}</div>`,
-    `<div>Uncategorized: ${fmtDuration(day.uncategorizedSeconds)}</div>`,
+    `<div>${word.replace(/^./, (c) => c.toUpperCase())}: ${fmtDuration(metricSeconds(day, metric))}${share === null ? "" : ` <span style="color:${CHROME.axisLabel}">(${share}% of tracked)</span>`}</div>`,
+    metric === "tracked"
+      ? ""
+      : `<div style="color:${CHROME.axisLabel}">Tracked: ${fmtDuration(day.trackedSeconds)}</div>`,
     topApp,
   ].join("");
 }

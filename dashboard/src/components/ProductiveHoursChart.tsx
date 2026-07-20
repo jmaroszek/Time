@@ -2,7 +2,7 @@
 // plus a same-scale trailing average of productive time. `historySessions`
 // includes the preceding periods needed to make the first visible average real.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Category, Classifier } from "../lib/classify";
 import { rollingMean, type Session } from "../lib/metrics";
@@ -63,7 +63,14 @@ export function categorySeries(
     const hours = buckets.map(
       (bucket) => Math.round(((bucket.categorySeconds.get(name) ?? 0) / 3600) * 100) / 100,
     );
-    if (totalSeconds > 0) out.push({ name, color, hours, configuredIndex, totalSeconds });
+    // Uncategorized is supporting context, not a primary series: hold it back
+    // until there's at least an hour of it, matching the state view's gate.
+    // Real categories show whenever they have any time in range.
+    const meetsThreshold =
+      name === UNCATEGORIZED_LABEL
+        ? totalSeconds >= MIN_UNCATEGORIZED_SERIES_HOURS * 3600
+        : totalSeconds > 0;
+    if (meetsThreshold) out.push({ name, color, hours, configuredIndex, totalSeconds });
   }
   return out
     .sort((a, b) => b.totalSeconds - a.totalSeconds || a.configuredIndex - b.configuredIndex)
@@ -82,6 +89,67 @@ const PRODUCTIVE_AVERAGES = {
 /** Trailing periods averaged for the dashed line, per non-daily granularity. */
 const AVERAGE_WINDOWS = { weekly: 4, monthly: 3, yearly: 3 } as const;
 const MIN_UNCATEGORIZED_SERIES_HOURS = 1;
+
+// Legend geometry, mirrored from the `legend` option below so the row estimate
+// matches what ECharts actually lays out.
+const LEGEND_FONT = "11px sans-serif";
+const LEGEND_ITEM_WIDTH = 14; // legend.itemWidth
+const LEGEND_ICON_GAP = 5; // fixed icon-to-text spacing ECharts inserts
+const LEGEND_ITEM_GAP = 14; // legend.itemGap between entries
+const LEGEND_H_PADDING = 10; // legend.padding default (5px) on each side
+// Trim a hair more off the usable width so we round toward wrapping: an
+// unpredicted extra row collides with the x-axis, while a spare predicted row
+// only pads the (invisible) top margin.
+const LEGEND_WIDTH_SAFETY = 6;
+const LEGEND_ITEMS_PER_ROW_FALLBACK = 6; // used until the container is measured
+
+/** Usable legend width for a chart of `chartWidth` px, matching the `legend`
+ *  option below (`width: "92%"`) minus ECharts' padding and a safety margin. */
+export function legendContentWidth(chartWidth: number): number {
+  return chartWidth * 0.92 - LEGEND_H_PADDING - LEGEND_WIDTH_SAFETY;
+}
+
+let measureCanvas: HTMLCanvasElement | null = null;
+function measureTextWidth(text: string, font: string): number {
+  if (!measureCanvas) measureCanvas = document.createElement("canvas");
+  const ctx = measureCanvas.getContext("2d");
+  if (!ctx) return text.length * 6.5; // crude fallback if 2d context is unavailable
+  ctx.font = font;
+  return ctx.measureText(text).width;
+}
+
+/**
+ * Rows ECharts will wrap a horizontal legend into, by greedily packing each
+ * entry's measured pixel width into `availableWidth`. Before the container has
+ * been measured (`availableWidth <= 0`), fall back to a count-based guess so the
+ * first paint is still reasonable.
+ */
+export function estimateLegendRows(
+  labels: string[],
+  availableWidth: number,
+  measure: (text: string) => number = (text) => measureTextWidth(text, LEGEND_FONT),
+): number {
+  if (labels.length === 0) return 1;
+  if (availableWidth <= 0) {
+    return Math.max(1, Math.ceil(labels.length / LEGEND_ITEMS_PER_ROW_FALLBACK));
+  }
+  const itemWidth = (label: string) =>
+    LEGEND_ITEM_WIDTH + LEGEND_ICON_GAP + measure(label);
+  let rows = 1;
+  let rowWidth = 0;
+  for (const label of labels) {
+    const w = itemWidth(label);
+    if (rowWidth === 0) {
+      rowWidth = w; // first entry on a row always fits, even if it overflows alone
+    } else if (rowWidth + LEGEND_ITEM_GAP + w <= availableWidth) {
+      rowWidth += LEGEND_ITEM_GAP + w;
+    } else {
+      rows += 1;
+      rowWidth = w;
+    }
+  }
+  return rows;
+}
 
 export default function ProductiveHoursChart({
   historySessions,
@@ -102,6 +170,18 @@ export default function ProductiveHoursChart({
   stackBy?: ActivityStack;
   categories?: Category[];
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [chartWidth, setChartWidth] = useState(0);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      setChartWidth(entries[0].contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const option = useMemo<EChartsOption>(() => {
     const round2 = (h: number) => Math.round(h * 100) / 100;
     let labels: string[];
@@ -205,17 +285,42 @@ export default function ProductiveHoursChart({
       icon: "path://M0,4 L4,4 L4,6 L0,6 Z M6,4 L10,4 L10,6 L6,6 Z M12,4 L16,4 L16,6 L12,6 Z",
     };
 
-    // Keep the plotting rectangle fixed while switching views. Reserving the
-    // larger legend footprint prevents the x-axis and bars from jumping when
-    // one view has enough entries to wrap and the other does not.
+    // Keep the plotting rectangle the same HEIGHT across views so bars — which
+    // share a total, hence a y-scale — never change length. Rather than reserve
+    // the worst-case legend at the bottom in every view (which strands an empty
+    // row next to a one-row legend), reserve exactly what THIS view needs at the
+    // bottom and park the leftover worst-case slack on top. Same grid height,
+    // but the freed space goes where it doesn't show.
+    // ECharts' real per-row pitch for an 11px legend. This must match what it
+    // actually draws: reserve too little and a wrapped legend creeps upward into
+    // the bars, and the shortfall compounds with each row (a two-row legend
+    // overshoots by 2×). Matching it keeps the gap above the top row constant
+    // whether the legend is one row or two.
+    const LEGEND_ROW_H = 22;
+    const AXIS_BAND = 40; // x-axis labels + baseline gap below the plot
+    const GRID_TOP = 12;
     const legendData = showProductiveAverage ? [...stackNames, averageLegend] : stackNames;
-    const legendItemCount = Math.max(categoryStacks.length, stateStacks.length + 1);
-    const legendRows = Math.max(1, Math.ceil(legendItemCount / 6));
-    const bottomPad = 40 + legendRows * 18;
+    // Estimate wrapping from the real legend width (92% of the chart, matching
+    // the `legend.width` below). Rows are computed for BOTH views so the grid
+    // can reserve the worst case as height while each view pads only what it
+    // needs at the bottom.
+    const legendWidth = legendContentWidth(chartWidth);
+    const stateLegendLabels = [...stateStacks.map((s) => s.name), averageName];
+    const categoryLegendLabels = categoryStacks.map((s) => s.name);
+    const thisRows = estimateLegendRows(
+      showProductiveAverage ? stateLegendLabels : categoryLegendLabels,
+      legendWidth,
+    );
+    const maxRows = Math.max(
+      estimateLegendRows(stateLegendLabels, legendWidth),
+      estimateLegendRows(categoryLegendLabels, legendWidth),
+    );
+    const bottomPad = AXIS_BAND + thisRows * LEGEND_ROW_H;
+    const topPad = GRID_TOP + (maxRows - thisRows) * LEGEND_ROW_H;
 
     return {
       animation: false,
-      grid: { left: 36, right: 12, top: 12, bottom: bottomPad },
+      grid: { left: 36, right: 12, top: topPad, bottom: bottomPad },
       tooltip,
       legend: {
         show: true,
@@ -264,9 +369,13 @@ export default function ProductiveHoursChart({
         }] : []),
       ],
     };
-  }, [historySessions, range, classifier, labelMode, granularity, weekStart, stackBy, categories]);
+  }, [historySessions, range, classifier, labelMode, granularity, weekStart, stackBy, categories, chartWidth]);
 
-  return <EChart option={option} height={254} />;
+  return (
+    <div ref={wrapRef}>
+      <EChart option={option} height={254} />
+    </div>
+  );
 }
 
 export function formatHoursTooltipValue(value: unknown): string {

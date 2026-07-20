@@ -106,7 +106,7 @@ describe("dailyActivitySummaries", () => {
     });
   });
 
-  it("formats complete calendar hover detail with an aliased top app", () => {
+  it("formats the tracked calendar tooltip with an aliased top app", () => {
     const day = dailyActivitySummaries(
       [
         session(new Date(2026, 5, 8, 9).getTime() / 1000, new Date(2026, 5, 8, 10).getTime() / 1000, "code.exe"),
@@ -115,14 +115,28 @@ describe("dailyActivitySummaries", () => {
       rangeFrom(new Date(2026, 5, 8), 1),
       classify,
     )[0];
-    const tooltip = formatActivityCalendarTooltip(day, { "code.exe": "Editor <Main>" });
+    const tooltip = formatActivityCalendarTooltip(day, "tracked", { "code.exe": "Editor <Main>" });
     expect(tooltip).toContain("Monday, June 8, 2026");
     expect(tooltip).toContain("Tracked: 1h 30m");
-    expect(tooltip).toContain("Productive: 1h 0m (67%)");
-    expect(tooltip).toContain("Neutral: 0s");
-    expect(tooltip).toContain("Unproductive: 30m");
-    expect(tooltip).toContain("Uncategorized: 0s");
     expect(tooltip).toContain("Top app: Editor &lt;Main&gt; · 1h 0m");
+    // The dropdown picks the state; the tracked view need not list the others.
+    expect(tooltip).not.toContain("Productive");
+    expect(tooltip).not.toContain("Unproductive");
+  });
+
+  it("leads the calendar tooltip with the selected metric and its share of tracked", () => {
+    const day = dailyActivitySummaries(
+      [
+        session(new Date(2026, 5, 8, 9).getTime() / 1000, new Date(2026, 5, 8, 10).getTime() / 1000, "code.exe"),
+        session(new Date(2026, 5, 8, 10).getTime() / 1000, new Date(2026, 5, 8, 10, 30).getTime() / 1000, "game.exe"),
+      ],
+      rangeFrom(new Date(2026, 5, 8), 1),
+      classify,
+    )[0];
+    const tooltip = formatActivityCalendarTooltip(day, "productive");
+    expect(tooltip).toContain("Productive: 1h 0m");
+    expect(tooltip).toContain("(67% of tracked)");
+    expect(tooltip).toContain("Tracked: 1h 30m");
   });
 });
 
@@ -271,7 +285,8 @@ describe("calendarGrid", () => {
 
 describe("categorySeries", () => {
   const buckets = [
-    { categorySeconds: new Map([["Dev", 7200], ["Games", 3600], ["Uncategorized", 1800]]) },
+    // Uncategorized clears the one-hour floor below, so it earns a series.
+    { categorySeconds: new Map([["Dev", 7200], ["Games", 3600], ["Uncategorized", 3600]]) },
     { categorySeconds: new Map([["Dev", 3600], ["Neutral", 900]]) },
   ];
 
@@ -279,7 +294,14 @@ describe("categorySeries", () => {
     const series = categorySeries(buckets, CATEGORIES);
     expect(series.map((s) => s.name)).toEqual(["Dev", "Games", "Uncategorized", "Neutral"]);
     expect(series.find((s) => s.name === "Dev")!.hours).toEqual([2, 1]);
-    expect(series.find((s) => s.name === "Uncategorized")!.hours).toEqual([0.5, 0]);
+    expect(series.find((s) => s.name === "Uncategorized")!.hours).toEqual([1, 0]);
+  });
+
+  it("holds Uncategorized back until it reaches an hour, unlike real categories", () => {
+    const thin = [{ categorySeconds: new Map([["Dev", 60], ["Uncategorized", 1800]]) }];
+    const series = categorySeries(thin, CATEGORIES);
+    // Dev shows with a single minute; sub-hour Uncategorized is suppressed.
+    expect(series.map((s) => s.name)).toEqual(["Dev"]);
   });
 
   it("puts a later configured category at the bottom when it has more total time", () => {
@@ -365,36 +387,39 @@ describe("weekdayRhythmSummaries", () => {
     expect(cell(3, 11)).toMatchObject({ trackedSeconds: 900, uncategorizedSeconds: 900 });
   });
 
-  it("formats the tooltip with per-occurrence averages and an aliased top app", () => {
+  it("formats the tracked tooltip as a per-occurrence average with an aliased top app", () => {
     const tooltip = formatRhythmTooltip(cell(1, 9), 3, "tracked", { "code.exe": "Editor <Main>" });
     expect(tooltip).toContain("Monday · 9am–10am");
     expect(tooltip).toContain("Avg tracked: 30m");
-    expect(tooltip).toContain("(over 3 Mondays)");
-    expect(tooltip).toContain("Productive: 20m");
-    expect(tooltip).toContain("Unproductive: 10m");
-    expect(tooltip).toContain("Neutral: 0s");
     expect(tooltip).toContain("Top app: Editor &lt;Main&gt; · 1h 0m total");
+    // The dropdown selects the state, so the tooltip lists only the shaded one:
+    // no occurrence count, no other-state breakdown.
+    expect(tooltip).not.toContain("Mondays");
+    expect(tooltip).not.toContain("Productive");
+    expect(tooltip).not.toContain("Unproductive");
   });
 
-  it("leads the tooltip with whichever metric the color encodes", () => {
+  it("leads a subset metric with its value and share of tracked", () => {
     const tooltip = formatRhythmTooltip(cell(1, 9), 3, "productive");
     expect(tooltip).toContain("Avg productive: 20m");
-    expect(tooltip).toContain("(over 3 Mondays)");
+    expect(tooltip).toContain("(67% of tracked)");
     expect(tooltip).toContain("Tracked: 30m");
-    // The led metric must not also appear as a plain row.
-    expect(tooltip).not.toContain("Productive: 20m");
+    // No occurrence count, and the other subset states stay out.
+    expect(tooltip).not.toContain("Mondays");
+    expect(tooltip).not.toContain("Unproductive");
+    expect(tooltip).not.toContain("Neutral");
   });
 
-  it("leads with unproductive and neutral too, keeping the other rows", () => {
+  it("shares are relative to tracked for unproductive and neutral too", () => {
     const unproductive = formatRhythmTooltip(cell(1, 9), 3, "unproductive");
     expect(unproductive).toContain("Avg unproductive: 10m");
+    expect(unproductive).toContain("(33% of tracked)");
     expect(unproductive).toContain("Tracked: 30m");
-    expect(unproductive).toContain("Productive: 20m");
-    expect(unproductive).not.toContain("Unproductive: 10m");
 
     const neutral = formatRhythmTooltip(cell(1, 9), 3, "neutral");
     expect(neutral).toContain("Avg neutral: 0s");
-    expect(neutral).toContain("Unproductive: 10m");
+    expect(neutral).toContain("(0% of tracked)");
+    expect(neutral).toContain("Tracked: 30m");
   });
 
   it("reads every metric off the same totals", () => {
@@ -403,10 +428,6 @@ describe("weekdayRhythmSummaries", () => {
     expect(metricSeconds(totals, "productive")).toBe(3600);
     expect(metricSeconds(totals, "unproductive")).toBe(1800);
     expect(metricSeconds(totals, "neutral")).toBe(0);
-  });
-
-  it("uses the singular weekday name for a single occurrence", () => {
-    expect(formatRhythmTooltip(cell(0, 9), 1)).toContain("(over 1 Sunday)");
   });
 });
 

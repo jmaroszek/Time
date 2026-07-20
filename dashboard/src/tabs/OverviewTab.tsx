@@ -183,7 +183,7 @@ export default function OverviewTab({
               setSelected(null);
             }}
             options={[
-              { value: "0", label: "exact sessions" },
+              { value: "0", label: "Exact sessions" },
               { value: "5", label: "5 min blocks" },
               { value: "10", label: "10 min blocks" },
               { value: "15", label: "15 min blocks" },
