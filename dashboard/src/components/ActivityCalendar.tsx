@@ -2,12 +2,23 @@ import { useMemo } from "react";
 
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import { dailyActivitySummaries, type DailyActivitySummary } from "../lib/overview";
-import { addDays, dayKey, startOfWeek, type Range } from "../lib/time";
+import {
+  addDays,
+  calendarDays,
+  dayKey,
+  startOfWeek,
+  type Range,
+  type WeekStart,
+} from "../lib/time";
 import type { Classifier } from "../lib/classify";
 import type { Session } from "../lib/metrics";
 import { useMeta } from "../state/meta";
 import { ACTIVITY_HEATMAP_RAMP, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
+
+/** Above this many week columns, "auto" cell sizing lands near square by
+ *  itself; below it the cells must be sized explicitly. */
+const NARROW_WEEK_COLUMNS = 30;
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -41,13 +52,11 @@ export default function ActivityCalendar({
     const byKey = new Map(summaries.map((day) => [day.key, day]));
     const maxHours = Math.max(...summaries.map((day) => day.trackedSeconds / 3600), 1);
     const lastDay = addDays(range.end, -1);
-    // "auto" stretches columns to fill the card, which turns a short range into
-    // a row of wide bars instead of a calendar. Pin the cell width until there
-    // are enough weeks to fill the width honestly, and center the small grid.
-    const weekColumns = Math.ceil(
-      (range.end.getTime() - startOfWeek(range.start, weekStart).getTime()) / (7 * 86_400_000),
-    );
-    const isNarrow = weekColumns <= 40;
+    // A week-column count low enough that "auto" would stretch each cell into a
+    // wide bar instead of a day. Below it, size the cells squarely and center
+    // the grid; the box must be given an explicit width/height rather than
+    // left+right+top+bottom, because a fully constrained box overrides cellSize.
+    const { weekColumns, cellPx } = calendarGrid(range, weekStart);
 
     return {
       animation: false,
@@ -66,11 +75,15 @@ export default function ActivityCalendar({
       },
       calendar: {
         top: 28,
-        left: isNarrow ? "center" : 48,
-        right: 12,
-        bottom: 12,
+        ...(cellPx === null
+          ? { left: 48, right: 12, bottom: 12, cellSize: ["auto", 18] }
+          : {
+              left: "center",
+              width: cellPx * weekColumns,
+              height: cellPx * 7,
+              cellSize: [cellPx, cellPx],
+            }),
         range: [dayKey(range.start), dayKey(lastDay)],
-        cellSize: isNarrow ? [22, 18] : ["auto", 18],
         splitLine: { show: false },
         itemStyle: {
           color: ACTIVITY_HEATMAP_RAMP[0],
@@ -101,7 +114,33 @@ export default function ActivityCalendar({
     };
   }, [sessions, range, classifier, aliases, weekStart]);
 
-  return <EChart option={option} height={220} />;
+  const { cellPx } = calendarGrid(range, weekStart);
+  return <EChart option={option} height={cellPx === null ? 220 : cellPx * 7 + 56} />;
+}
+
+/**
+ * Week columns in the range, and the square cell size to draw them at.
+ *
+ * `cellSize: "auto"` divides the box across the columns, which at short ranges
+ * stretches each day into a wide bar rather than a cell. Below
+ * NARROW_WEEK_COLUMNS we pick an explicit square size instead (capped so a
+ * five-week month doesn't render enormous), and `cellPx` is null above it,
+ * where enough columns exist for "auto" to land near square on its own.
+ */
+export function calendarGrid(
+  range: Range,
+  weekStart: WeekStart,
+): { weekColumns: number; cellPx: number | null } {
+  // calendarDays, not raw ms — a range spanning a DST boundary is off by an
+  // hour, which rounds up into a phantom extra column.
+  const weekColumns = Math.ceil(
+    calendarDays({ start: startOfWeek(range.start, weekStart), end: range.end }) / 7,
+  );
+  const cellPx =
+    weekColumns <= NARROW_WEEK_COLUMNS
+      ? Math.max(18, Math.min(40, Math.floor(880 / weekColumns)))
+      : null;
+  return { weekColumns, cellPx };
 }
 
 export function formatActivityCalendarTooltip(
