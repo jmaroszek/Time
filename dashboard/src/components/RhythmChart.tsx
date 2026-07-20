@@ -12,18 +12,15 @@ import type { Classifier } from "../lib/classify";
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import type { Session } from "../lib/metrics";
 import {
+  metricSeconds,
   weekdayRhythmSummaries,
+  ACTIVITY_METRIC_WORDS,
   type ActivityMetric,
   type RhythmCell,
 } from "../lib/overview";
 import type { Range } from "../lib/time";
 import { useMeta } from "../state/meta";
-import {
-  ACTIVITY_HEATMAP_RAMP,
-  CHROME,
-  HEATMAP_RAMP,
-  TOOLTIP_STYLE,
-} from "../lib/chartTheme";
+import { ACTIVITY_METRIC_RAMPS, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -59,8 +56,7 @@ export default function RhythmChart({
     const data: [number, number, number][] = [];
     for (const cell of cells) {
       const count = weekdayCounts[cell.weekday];
-      const seconds = metric === "productive" ? cell.productiveSeconds : cell.trackedSeconds;
-      const avgMinutes = count > 0 ? seconds / count / 60 : 0;
+      const avgMinutes = count > 0 ? metricSeconds(cell, metric) / count / 60 : 0;
       maxMinutes = Math.max(maxMinutes, avgMinutes);
       const x = cell.hour - dayStartHour;
       const y = rowIndex.get(cell.weekday)!;
@@ -98,10 +94,10 @@ export default function RhythmChart({
       visualMap: {
         show: false,
         min: 0,
-        // Rescaled per metric — productive time is a subset of tracked, so a
-        // shared scale would render the productive field uniformly dim.
+        // Rescaled per metric — every state is a subset of tracked, so a shared
+        // scale would render the narrower fields uniformly dim.
         max: Math.max(maxMinutes, 1),
-        inRange: { color: metric === "productive" ? HEATMAP_RAMP : ACTIVITY_HEATMAP_RAMP },
+        inRange: { color: ACTIVITY_METRIC_RAMPS[metric] },
       },
       series: [
         {
@@ -127,16 +123,22 @@ export function formatRhythmTooltip(
   const topApp = cell.topApp
     ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(cell.topApp.process, aliases))} · ${fmtDuration(cell.topApp.seconds)} total</div>`
     : "";
-  // The shaded metric leads, so the headline always names what the color means.
-  const lead = metric === "productive"
-    ? `<div>Avg productive: ${avg(cell.productiveSeconds)} <span style="color:${CHROME.axisLabel}">(over ${occurrences})</span></div><div>Tracked: ${avg(cell.trackedSeconds)}</div>`
-    : `<div>Avg tracked: ${avg(cell.trackedSeconds)} <span style="color:${CHROME.axisLabel}">(over ${occurrences})</span></div><div>Productive: ${avg(cell.productiveSeconds)}</div>`;
+  // The shaded metric leads, so the headline always names what the color means;
+  // the rest follow in a fixed order so rows don't jump between metrics.
+  const rows: [ActivityMetric | "uncategorized", string, number][] = [
+    ["tracked", "Tracked", cell.trackedSeconds],
+    ["productive", "Productive", cell.productiveSeconds],
+    ["neutral", "Neutral", cell.neutralSeconds],
+    ["unproductive", "Unproductive", cell.unproductiveSeconds],
+    ["uncategorized", "Uncategorized", cell.uncategorizedSeconds],
+  ];
+  const lead = rows.find(([key]) => key === metric)!;
   return [
     `<b>${FULL_DAY_NAMES[cell.weekday]} · ${compactHour(cell.hour)}–${compactHour(cell.hour + 1)}</b>`,
-    lead,
-    `<div>Neutral: ${avg(cell.neutralSeconds)}</div>`,
-    `<div>Unproductive: ${avg(cell.unproductiveSeconds)}</div>`,
-    `<div>Uncategorized: ${avg(cell.uncategorizedSeconds)}</div>`,
+    `<div>Avg ${ACTIVITY_METRIC_WORDS[metric]}: ${avg(lead[2])} <span style="color:${CHROME.axisLabel}">(over ${occurrences})</span></div>`,
+    ...rows
+      .filter(([key]) => key !== metric)
+      .map(([, label, seconds]) => `<div>${label}: ${avg(seconds)}</div>`),
     topApp,
   ].join("");
 }

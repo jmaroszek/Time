@@ -1,3 +1,5 @@
+import type { ActivityMetric } from "./overview";
+
 // Shared chart chrome and semantic data colors.
 // ECharts can't read CSS custom properties, so the values live here; each is
 // annotated with the index.css token it mirrors. Hex literals in components
@@ -42,6 +44,24 @@ export const HEATMAP_RAMP = ["#16181d", "#0e3a2c", "#17836a", "#4fd0a4"];
 /** Neutral activity intensity for tracked-time views. Blue communicates
  *  amount without making the productive/non-productive judgment of green. */
 export const ACTIVITY_HEATMAP_RAMP = ["#16181d", "#123b5d", "#206fae", "#59a9ef"];
+
+/** Red-orange like UNPRODUCTIVE_BAR, shifted off it at every stop so intensity
+ *  never reads as a category identity. */
+export const UNPRODUCTIVE_HEATMAP_RAMP = ["#16181d", "#4a2013", "#a2451f", "#e87c4d"];
+
+/** Gray like NEUTRAL_BAR. The top stop stays below CHROME.axisLabel so a hot
+ *  cell never reads as chrome or text; that ceiling makes this the lowest
+ *  contrast of the ramps, which is the cost of gray on a dark surface. */
+export const NEUTRAL_HEATMAP_RAMP = ["#16181d", "#2b2f37", "#474d57", "#6b727e"];
+
+/** Ramp per shaded metric. Type-only import: this module stays free of
+ *  runtime dependencies on the data layer. */
+export const ACTIVITY_METRIC_RAMPS: Record<ActivityMetric, string[]> = {
+  tracked: ACTIVITY_HEATMAP_RAMP,
+  productive: HEATMAP_RAMP,
+  unproductive: UNPRODUCTIVE_HEATMAP_RAMP,
+  neutral: NEUTRAL_HEATMAP_RAMP,
+};
 
 /** Gray for uncategorized/unknown items, matching the dashed-ring affordance. */
 export const UNCATEGORIZED = "#5b616b";
