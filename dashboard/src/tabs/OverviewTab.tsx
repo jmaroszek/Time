@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import ActivityCalendar from "../components/ActivityCalendar";
 import HourlyActivityChart from "../components/HourlyActivityChart";
+import MonthCalendarChart from "../components/MonthCalendarChart";
 import RhythmChart from "../components/RhythmChart";
 import TimelineChart, { type TimelineSegment } from "../components/TimelineChart";
 import TopAppsList from "../components/TopAppsList";
@@ -25,6 +26,7 @@ import { addDays, calendarDays, previousRange, type Range } from "../lib/time";
 import {
   overviewGranularity,
   overviewHistoryStart,
+  MONTH_CALENDAR_MIN_DAYS,
   ACTIVITY_METRICS,
   ACTIVITY_METRIC_LABELS,
   ACTIVITY_METRIC_WORDS,
@@ -34,6 +36,13 @@ import {
 import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
+
+const HOURS_CARD_TITLES = {
+  daily: "Daily Hours",
+  weekly: "Weekly Hours",
+  monthly: "Monthly Hours",
+  yearly: "Yearly Hours",
+} as const;
 
 export default function OverviewTab({
   range,
@@ -69,6 +78,9 @@ export default function OverviewTab({
   // card header lets you override it.
   const middleView =
     rangeDays <= 14 ? "timeline" : (aggregateView ?? (rangeDays <= 30 ? "rhythm" : "calendar"));
+  // Past ~14 months, day cells slice too thin; the calendar shows month cells
+  // (years as rows) instead. Rhythm needs no such switch — it is always 7×24.
+  const calendarByMonth = rangeDays >= MONTH_CALENDAR_MIN_DAYS;
 
   useEffect(() => setSelected(null), [rangeStartSec, rangeEndSec]);
 
@@ -159,7 +171,7 @@ export default function OverviewTab({
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Calendar</span>
                   <span className="text-[11px] font-normal text-ink-3">
-                    {`${ACTIVITY_METRIC_WORDS[metric].replace(/^./, (c) => c.toUpperCase())} time by day`}
+                    {`${ACTIVITY_METRIC_WORDS[metric].replace(/^./, (c) => c.toUpperCase())} time by ${calendarByMonth ? "month" : "day"}`}
                   </span>
                 </span>
               )}
@@ -209,6 +221,13 @@ export default function OverviewTab({
           />
         ) : middleView === "rhythm" ? (
           <RhythmChart
+            sessions={current}
+            range={range}
+            classifier={meta.classifier}
+            metric={metric}
+          />
+        ) : calendarByMonth ? (
+          <MonthCalendarChart
             sessions={current}
             range={range}
             classifier={meta.classifier}
@@ -286,7 +305,7 @@ export default function OverviewTab({
           </div>
         </Card>
         <Card
-          title={isSingleDay ? "Hourly Activity" : granularity === "daily" ? "Daily Hours" : granularity === "weekly" ? "Weekly Hours" : "Monthly Hours"}
+          title={isSingleDay ? "Hourly Activity" : HOURS_CARD_TITLES[granularity]}
           className="h-[345px]"
           right={isSingleDay ? undefined : (
             <Select

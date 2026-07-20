@@ -70,7 +70,10 @@ const PRODUCTIVE_AVERAGES = {
   daily: "7-day productive avg",
   weekly: "4-week productive avg",
   monthly: "3-month productive avg",
+  yearly: "3-year productive avg",
 } as const;
+/** Trailing periods averaged for the dashed line, per non-daily granularity. */
+const AVERAGE_WINDOWS = { weekly: 4, monthly: 3, yearly: 3 } as const;
 const MIN_UNCATEGORIZED_SERIES_HOURS = 1;
 
 export default function ProductiveHoursChart({
@@ -134,17 +137,17 @@ export default function ProductiveHoursChart({
       };
       const historyDays = dailyActivitySummaries(historySessions, historyRange, classifier);
       const historyBuckets = bucketActivityHours(historyDays, historyRange, granularity, weekStart);
-      const averageWindow = granularity === "weekly" ? 4 : 3;
+      const averageWindow = AVERAGE_WINDOWS[granularity];
       const averages = rollingMean(
         historyBuckets.map((bucket) => bucket.productiveSeconds / 3600),
         averageWindow,
       );
       const averageByKey = new Map(historyBuckets.map((bucket, index) => [bucket.key, round2(averages[index])]));
-      labels = buckets.map((bucket) =>
-        granularity === "weekly"
-          ? fmtShortDate(bucket.periodStart)
-          : `${MONTH_NAMES[bucket.periodStart.getMonth()]} '${String(bucket.periodStart.getFullYear()).slice(-2)}`,
-      );
+      labels = buckets.map((bucket) => {
+        if (granularity === "weekly") return fmtShortDate(bucket.periodStart);
+        if (granularity === "yearly") return String(bucket.periodStart.getFullYear());
+        return `${MONTH_NAMES[bucket.periodStart.getMonth()]} '${String(bucket.periodStart.getFullYear()).slice(-2)}`;
+      });
       prodBars = buckets.map((bucket) => round2(bucket.productiveSeconds / 3600));
       neutralBars = buckets.map((bucket) => round2(bucket.neutralSeconds / 3600));
       unproductiveBars = buckets.map((bucket) => round2(bucket.unproductiveSeconds / 3600));
@@ -179,9 +182,8 @@ export default function ProductiveHoursChart({
           return [params[0].axisValueLabel, ...rows].join("<br/>");
         }
         const bucket = buckets[params[0].dataIndex];
-        const partial = isCompleteHoursBucket(bucket, granularity)
-          ? ""
-          : ` · partial ${granularity === "weekly" ? "week" : "month"}`;
+        const period = granularity === "weekly" ? "week" : granularity === "yearly" ? "year" : "month";
+        const partial = isCompleteHoursBucket(bucket, granularity) ? "" : ` · partial ${period}`;
         return [`<b>${formatHoursBucketRange(bucket)}${partial}</b>`, ...rows].join("<br/>");
       },
     };
