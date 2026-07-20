@@ -51,13 +51,19 @@ export default function MonthCalendarChart({
   metric?: ActivityMetric;
 }) {
   const { aliases } = useMeta();
-  const years = useMemo(() => {
-    const summaries = monthlyActivitySummaries(sessions, range, classifier);
-    return [...new Set(summaries.map((month) => month.year))].sort((a, b) => a - b);
-  }, [sessions, range, classifier]);
+  // One metric-independent aggregation, shared by the year axis and the shaded
+  // cells, so a metric switch only re-shades. (It was previously computed twice
+  // per render — once here, once in the option memo.)
+  const summaries = useMemo(
+    () => monthlyActivitySummaries(sessions, range, classifier),
+    [sessions, range, classifier],
+  );
+  const years = useMemo(
+    () => [...new Set(summaries.map((month) => month.year))].sort((a, b) => a - b),
+    [summaries],
+  );
 
   const option = useMemo<EChartsOption>(() => {
-    const summaries = monthlyActivitySummaries(sessions, range, classifier);
     const rowIndex = new Map(years.map((year, index) => [year, index]));
     const byPoint = new Map<string, MonthlyActivitySummary>();
     const data: [number, number, number][] = [];
@@ -119,7 +125,7 @@ export default function MonthCalendarChart({
         },
       ],
     };
-  }, [sessions, range, classifier, metric, aliases, years]);
+  }, [summaries, years, metric, aliases]);
 
   const height = CELL_HEIGHT * years.length + CHART_TOP + CHART_BOTTOM;
   // Cap the width so 12 columns stay near-square in a full-width card, and

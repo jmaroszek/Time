@@ -39,14 +39,15 @@ export default function RhythmChart({
   metric?: ActivityMetric;
 }) {
   const { aliases, weekStart, dayStartHour, dayEndHour } = useMeta();
+  // Aggregation is metric-independent — every cell carries all four state
+  // totals, so switching the metric dropdown only re-shades and never re-walks
+  // the sessions.
+  const summary = useMemo(
+    () => weekdayRhythmSummaries(sessions, range, classifier, dayStartHour, dayEndHour),
+    [sessions, range, classifier, dayStartHour, dayEndHour],
+  );
   const option = useMemo<EChartsOption>(() => {
-    const { cells, weekdayCounts } = weekdayRhythmSummaries(
-      sessions,
-      range,
-      classifier,
-      dayStartHour,
-      dayEndHour,
-    );
+    const { cells, weekdayCounts } = summary;
     const weekdayRows = weekStart === "Monday" ? [1, 2, 3, 4, 5, 6, 0] : [0, 1, 2, 3, 4, 5, 6];
     const rowIndex = new Map(weekdayRows.map((weekday, index) => [weekday, index]));
     const visibleHours: number[] = [];
@@ -108,7 +109,7 @@ export default function RhythmChart({
         },
       ],
     };
-  }, [sessions, range, classifier, metric, aliases, weekStart, dayStartHour, dayEndHour]);
+  }, [summary, metric, aliases, weekStart, dayStartHour, dayEndHour]);
 
   return <EChart option={option} height={260} />;
 }
