@@ -312,8 +312,8 @@ export default function OverviewTab({
               value={stackBy}
               onChange={(v) => setStackBy(v as ActivityStack)}
               options={[
-                { value: "state", label: "By state" },
-                { value: "category", label: "By category" },
+                { value: "state", label: "Productivity" },
+                { value: "category", label: "Categories" },
               ]}
             />
           )}

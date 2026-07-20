@@ -39,8 +39,8 @@ export interface CategorySeries {
 }
 
 /**
- * Category stacks for a run of buckets, in the user's configured order with
- * Uncategorized last.
+ * Category stacks for a run of buckets, ordered by total time so the largest
+ * segment forms the stable base of every bar. Configured order breaks ties.
  *
  * Ignored categories never reach here — their sessions are dropped upstream —
  * and categories with no time in the range are omitted rather than crowding
@@ -54,17 +54,24 @@ export function categorySeries(
     ...categories.filter((category) => !category.isIgnored),
     { name: UNCATEGORIZED_LABEL, color: UNCATEGORIZED },
   ];
-  const out: CategorySeries[] = [];
-  for (const { name, color } of ordered) {
+  const out: Array<CategorySeries & { configuredIndex: number; totalSeconds: number }> = [];
+  for (const [configuredIndex, { name, color }] of ordered.entries()) {
+    const totalSeconds = buckets.reduce(
+      (total, bucket) => total + (bucket.categorySeconds.get(name) ?? 0),
+      0,
+    );
     const hours = buckets.map(
       (bucket) => Math.round(((bucket.categorySeconds.get(name) ?? 0) / 3600) * 100) / 100,
     );
-    if (hours.some((value) => value > 0)) out.push({ name, color, hours });
+    if (totalSeconds > 0) out.push({ name, color, hours, configuredIndex, totalSeconds });
   }
-  return out;
+  return out
+    .sort((a, b) => b.totalSeconds - a.totalSeconds || a.configuredIndex - b.configuredIndex)
+    .map(({ name, color, hours }) => ({ name, color, hours }));
 }
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const PRODUCTIVE_AVERAGES = {
   daily: "7-day productive avg",
@@ -103,6 +110,7 @@ export default function ProductiveHoursChart({
     let unproductiveBars: number[];
     let uncategorizedBars: number[];
     let avgLine: Array<number | null>;
+    let tooltipHeaders: string[];
     let buckets: HoursBucket[] = [];
     // Whichever bucket run is on screen, for the category stacks.
     let visible: { categorySeconds: Map<string, number> }[] = [];
@@ -119,6 +127,9 @@ export default function ProductiveHoursChart({
       const offset = historyDays.length - visibleDays.length;
       labels = visibleDays.map((day) =>
         labelMode === "weekday" ? DAY_NAMES[day.date.getDay()] : fmtShortDate(day.date),
+      );
+      tooltipHeaders = visibleDays.map((day) =>
+        labelMode === "weekday" ? FULL_DAY_NAMES[day.date.getDay()] : fmtShortDate(day.date),
       );
       prodBars = visibleDays.map((day) => round2(day.productiveSeconds / 3600));
       neutralBars = visibleDays.map((day) => round2(day.neutralSeconds / 3600));
@@ -148,6 +159,11 @@ export default function ProductiveHoursChart({
         if (granularity === "yearly") return String(bucket.periodStart.getFullYear());
         return `${MONTH_NAMES[bucket.periodStart.getMonth()]} '${String(bucket.periodStart.getFullYear()).slice(-2)}`;
       });
+      tooltipHeaders = buckets.map((bucket) => {
+        const period = granularity === "weekly" ? "week" : granularity === "yearly" ? "year" : "month";
+        const partial = isCompleteHoursBucket(bucket, granularity) ? "" : ` · partial ${period}`;
+        return `${formatHoursBucketRange(bucket)}${partial}`;
+      });
       prodBars = buckets.map((bucket) => round2(bucket.productiveSeconds / 3600));
       neutralBars = buckets.map((bucket) => round2(bucket.neutralSeconds / 3600));
       unproductiveBars = buckets.map((bucket) => round2(bucket.unproductiveSeconds / 3600));
@@ -166,25 +182,21 @@ export default function ProductiveHoursChart({
         ? [{ name: "Uncategorized", color: UNCATEGORIZED_BAR, hours: uncategorizedBars }]
         : []),
     ];
-    const stacks = stackBy === "category" ? categorySeries(visible, categories) : stateStacks;
+    const categoryStacks = categorySeries(visible, categories);
+    const stacks = stackBy === "category" ? categoryStacks : stateStacks;
     const stackNames = stacks.map((stack) => stack.name);
+    const showProductiveAverage = stackBy === "state";
     const tooltip = {
       trigger: "axis" as const,
       ...TOOLTIP_STYLE,
       formatter: (params: Array<{ axisValueLabel: string; dataIndex: number; marker: string; seriesName: string; value: number }>) => {
         if (!params.length) return "";
         const byName = new Map(params.map((p) => [p.seriesName, p]));
-        const rows = [averageName, ...stackNames]
+        const rows = [...(showProductiveAverage ? [averageName] : []), ...stackNames]
           .map((name) => byName.get(name))
           .filter((p): p is NonNullable<typeof p> => p !== undefined)
-          .map((p) => `${p.marker}${p.seriesName}: <b>${Number(p.value).toFixed(1)}h</b>`);
-        if (granularity === "daily") {
-          return [params[0].axisValueLabel, ...rows].join("<br/>");
-        }
-        const bucket = buckets[params[0].dataIndex];
-        const period = granularity === "weekly" ? "week" : granularity === "yearly" ? "year" : "month";
-        const partial = isCompleteHoursBucket(bucket, granularity) ? "" : ` · partial ${period}`;
-        return [`<b>${formatHoursBucketRange(bucket)}${partial}</b>`, ...rows].join("<br/>");
+          .map((p) => `${p.marker}${p.seriesName}: <b>${formatHoursTooltipValue(p.value)}</b>`);
+        return [`<b>${tooltipHeaders[params[0].dataIndex]}</b>`, ...rows].join("<br/>");
       },
     };
 
@@ -193,9 +205,12 @@ export default function ProductiveHoursChart({
       icon: "path://M0,4 L4,4 L4,6 L0,6 Z M6,4 L10,4 L10,6 L6,6 Z M12,4 L16,4 L16,6 L12,6 Z",
     };
 
-    // The legend wraps at ~92% width; roughly six chips fit per row. Reserve a
-    // row of height for each, so a long category list is never clipped.
-    const legendRows = Math.max(1, Math.ceil((stackNames.length + 1) / 6));
+    // Keep the plotting rectangle fixed while switching views. Reserving the
+    // larger legend footprint prevents the x-axis and bars from jumping when
+    // one view has enough entries to wrap and the other does not.
+    const legendData = showProductiveAverage ? [...stackNames, averageLegend] : stackNames;
+    const legendItemCount = Math.max(categoryStacks.length, stateStacks.length + 1);
+    const legendRows = Math.max(1, Math.ceil(legendItemCount / 6));
     const bottomPad = 40 + legendRows * 18;
 
     return {
@@ -204,13 +219,14 @@ export default function ProductiveHoursChart({
       tooltip,
       legend: {
         show: true,
-        bottom: 0,
+        bottom: 4,
         left: "center",
         width: "92%",
-        data: [...stackNames, averageLegend],
+        data: legendData,
         textStyle: { color: CHROME.axisLabel, fontSize: 11 },
         itemWidth: 14,
         itemHeight: 8,
+        itemGap: 14,
       },
       xAxis: {
         type: "category",
@@ -237,20 +253,26 @@ export default function ProductiveHoursChart({
           },
           barMaxWidth: 36,
         })),
-        {
+        ...(showProductiveAverage ? [{
           name: averageName,
-          type: "line",
+          type: "line" as const,
           data: avgLine,
           symbol: "none",
           connectNulls: false,
           lineStyle: { color: ANNOTATION, width: 2, type: "dashed" },
           itemStyle: { color: ANNOTATION },
-        },
+        }] : []),
       ],
     };
   }, [historySessions, range, classifier, labelMode, granularity, weekStart, stackBy, categories]);
 
   return <EChart option={option} height={254} />;
+}
+
+export function formatHoursTooltipValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "NA";
+  const hours = Number(value);
+  return Number.isFinite(hours) ? `${hours.toFixed(1)}h` : "NA";
 }
 
 export function formatHoursBucketRange(bucket: HoursBucket): string {

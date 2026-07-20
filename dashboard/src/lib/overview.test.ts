@@ -23,6 +23,7 @@ import { formatMonthCalendarTooltip } from "../components/MonthCalendarChart";
 import { formatRhythmTooltip } from "../components/RhythmChart";
 import {
   categorySeries,
+  formatHoursTooltipValue,
   formatHoursBucketRange,
   shouldShowUncategorized,
 } from "../components/ProductiveHoursChart";
@@ -267,11 +268,19 @@ describe("categorySeries", () => {
     { categorySeconds: new Map([["Dev", 3600], ["Neutral", 900]]) },
   ];
 
-  it("orders by configured category, Uncategorized last, in hours", () => {
+  it("orders largest total first, using configured order to break ties", () => {
     const series = categorySeries(buckets, CATEGORIES);
-    expect(series.map((s) => s.name)).toEqual(["Dev", "Games", "Neutral", "Uncategorized"]);
+    expect(series.map((s) => s.name)).toEqual(["Dev", "Games", "Uncategorized", "Neutral"]);
     expect(series.find((s) => s.name === "Dev")!.hours).toEqual([2, 1]);
     expect(series.find((s) => s.name === "Uncategorized")!.hours).toEqual([0.5, 0]);
+  });
+
+  it("puts a later configured category at the bottom when it has more total time", () => {
+    const series = categorySeries(
+      [{ categorySeconds: new Map([["Dev", 3600], ["Neutral", 7200]]) }],
+      CATEGORIES,
+    );
+    expect(series.map((s) => s.name)).toEqual(["Neutral", "Dev"]);
   });
 
   it("keeps each category's configured color and Uncategorized gray", () => {
@@ -291,6 +300,15 @@ describe("categorySeries", () => {
       CATEGORIES,
     );
     expect(noGames.map((s) => s.name)).toEqual(["Dev"]);
+  });
+});
+
+describe("formatHoursTooltipValue", () => {
+  it("formats finite durations and labels missing rolling averages as NA", () => {
+    expect(formatHoursTooltipValue(1.25)).toBe("1.3h");
+    expect(formatHoursTooltipValue("-")).toBe("NA");
+    expect(formatHoursTooltipValue(null)).toBe("NA");
+    expect(formatHoursTooltipValue(Number.NaN)).toBe("NA");
   });
 });
 
