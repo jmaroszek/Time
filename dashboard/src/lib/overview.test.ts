@@ -7,6 +7,7 @@ import {
   hourlyActivitySummaries,
   isCompleteHoursBucket,
   metricSeconds,
+  monthlyActivitySummaries,
   overviewGranularity,
   overviewHistoryStart,
   weekdayRhythmSummaries,
@@ -18,6 +19,7 @@ import { ACTIVITY_METRIC_RAMPS, CHROME } from "./chartTheme";
 import { addDays, dayKey, type Range } from "./time";
 import type { Session } from "./metrics";
 import { calendarGrid, formatActivityCalendarTooltip } from "../components/ActivityCalendar";
+import { formatMonthCalendarTooltip } from "../components/MonthCalendarChart";
 import { formatRhythmTooltip } from "../components/RhythmChart";
 import {
   categorySeries,
@@ -55,6 +57,8 @@ describe("overviewGranularity", () => {
     [31, "weekly"],
     [90, "weekly"],
     [91, "monthly"],
+    [730, "monthly"],
+    [731, "yearly"],
   ] as const)("uses %i days as %s", (days, expected) => {
     expect(overviewGranularity(rangeFrom(start, days))).toBe(expected);
   });
@@ -118,6 +122,56 @@ describe("dailyActivitySummaries", () => {
     expect(tooltip).toContain("Unproductive: 30m");
     expect(tooltip).toContain("Uncategorized: 0s");
     expect(tooltip).toContain("Top app: Editor &lt;Main&gt; · 1h 0m");
+  });
+});
+
+describe("monthlyActivitySummaries", () => {
+  // Nov 2025 – Feb 2026: four calendar months, one straddling the year boundary.
+  const range = { start: new Date(2025, 10, 1), end: new Date(2026, 1, 1) };
+  const at = (year: number, month: number, day: number, hour: number) =>
+    new Date(year, month, day, hour).getTime() / 1000;
+  const summaries = monthlyActivitySummaries(
+    [
+      session(at(2025, 10, 3, 9), at(2025, 10, 3, 11), "code.exe"), // Nov: 2h prod
+      session(at(2025, 11, 5, 20), at(2025, 11, 5, 22), "game.exe"), // Dec: 2h unprod
+      session(at(2025, 11, 31, 23), at(2026, 0, 1, 1), "chat.exe"), // Dec→Jan spans midnight+year
+      session(at(2025, 11, 10, 9), at(2025, 11, 10, 10), "secret.exe"), // ignored
+      session(at(2025, 11, 12, 9), at(2025, 11, 12, 10), "idle", true), // AFK
+    ],
+    range,
+    classify,
+  );
+  const month = (key: string) => summaries.find((m) => m.key === key)!;
+
+  it("zero-fills every month in range with year and month indices", () => {
+    expect(summaries.map((m) => m.key)).toEqual(["2025-11", "2025-12", "2026-01"]);
+    expect(month("2026-01")).toMatchObject({ year: 2026, month: 0, trackedSeconds: 3600 });
+  });
+
+  it("splits a session across the month and year boundary", () => {
+    // 11pm Dec 31 → 1am Jan 1: one hour to each side.
+    expect(month("2025-12").neutralSeconds).toBe(3600); // chat.exe is Neutral
+    expect(month("2026-01").neutralSeconds).toBe(3600);
+  });
+
+  it("accumulates state totals, categories, and top app, excluding AFK and ignored", () => {
+    expect(month("2025-11")).toMatchObject({
+      trackedSeconds: 7200,
+      productiveSeconds: 7200,
+      topApp: { process: "code.exe", seconds: 7200 },
+    });
+    expect(Object.fromEntries(month("2025-12").categorySeconds)).toEqual({
+      Games: 7200,
+      Neutral: 3600,
+    });
+  });
+
+  it("formats the month tooltip with a share and aliased top app", () => {
+    const tooltip = formatMonthCalendarTooltip(month("2025-11"), { "code.exe": "Editor" });
+    expect(tooltip).toContain("November 2025");
+    expect(tooltip).toContain("Tracked: 2h 0m");
+    expect(tooltip).toContain("Productive: 2h 0m (100%)");
+    expect(tooltip).toContain("Top app: Editor · 2h 0m");
   });
 });
 
@@ -385,11 +439,30 @@ describe("bucketActivityHours", () => {
     expect(formatHoursBucketRange(buckets[1])).toBe("Jan 1, 2027–Jan 2, 2027");
   });
 
+  it("buckets by calendar year and aligns partial years", () => {
+    // Apr 2024 – Feb 2026: three calendar years, first and last partial.
+    const range = { start: new Date(2024, 3, 1), end: new Date(2026, 1, 1) };
+    const days = dailyActivitySummaries([], range, classify);
+    days[0].productiveSeconds = 3600; // Apr 1 2024
+    days[days.length - 1].neutralSeconds = 1800; // Jan 31 2026
+    const buckets = bucketActivityHours(days, range, "yearly", "Sunday");
+    expect(buckets.map((bucket) => dayKey(bucket.periodStart))).toEqual([
+      "2024-01-01", "2025-01-01", "2026-01-01",
+    ]);
+    expect(buckets.map((bucket) => bucket.productiveSeconds)).toEqual([3600, 0, 0]);
+    expect(buckets.map((bucket) => bucket.neutralSeconds)).toEqual([0, 0, 1800]);
+    // Only the full middle year is complete; the clipped ends are not.
+    expect(buckets.map((bucket) => isCompleteHoursBucket(bucket, "yearly"))).toEqual([
+      false, true, false,
+    ]);
+  });
+
   it("keeps enough aligned history for each rolling-average scale", () => {
     const range = rangeFrom(new Date(2026, 5, 10), 40);
     expect(dayKey(overviewHistoryStart(range, "daily", "Sunday"))).toBe("2026-06-04");
     expect(dayKey(overviewHistoryStart(range, "weekly", "Sunday"))).toBe("2026-05-17");
     expect(dayKey(overviewHistoryStart(range, "weekly", "Monday"))).toBe("2026-05-18");
     expect(dayKey(overviewHistoryStart(range, "monthly", "Sunday"))).toBe("2026-04-01");
+    expect(dayKey(overviewHistoryStart(range, "yearly", "Sunday"))).toBe("2024-01-01");
   });
 });
