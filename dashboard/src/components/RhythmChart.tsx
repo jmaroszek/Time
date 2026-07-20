@@ -11,7 +11,11 @@ import { useMemo } from "react";
 import type { Classifier } from "../lib/classify";
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import type { Session } from "../lib/metrics";
-import { weekdayRhythmSummaries, type RhythmCell } from "../lib/overview";
+import {
+  weekdayRhythmSummaries,
+  type ActivityMetric,
+  type RhythmCell,
+} from "../lib/overview";
 import type { Range } from "../lib/time";
 import { useMeta } from "../state/meta";
 import {
@@ -25,8 +29,6 @@ import EChart, { type EChartsOption } from "./EChart";
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-export type RhythmMetric = "tracked" | "productive";
-
 export default function RhythmChart({
   sessions,
   range,
@@ -36,7 +38,7 @@ export default function RhythmChart({
   sessions: Session[];
   range: Range;
   classifier: Classifier;
-  metric?: RhythmMetric;
+  metric?: ActivityMetric;
 }) {
   const { aliases, weekStart, dayStartHour, dayEndHour } = useMeta();
   const option = useMemo<EChartsOption>(() => {
@@ -117,7 +119,7 @@ export default function RhythmChart({
 export function formatRhythmTooltip(
   cell: RhythmCell,
   weekdayCount: number,
-  metric: RhythmMetric = "tracked",
+  metric: ActivityMetric = "tracked",
   aliases?: Record<string, string>,
 ): string {
   const avg = (seconds: number) => fmtDuration(weekdayCount > 0 ? seconds / weekdayCount : 0);
