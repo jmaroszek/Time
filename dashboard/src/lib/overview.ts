@@ -13,6 +13,13 @@ import {
 
 export type OverviewGranularity = "daily" | "weekly" | "monthly";
 
+/**
+ * Which quantity a heatmap shades by. Both the rhythm grid and the calendar
+ * honor it, and the ramp follows it — blue for amount, green for productive —
+ * so the color carries its own legend across either view.
+ */
+export type ActivityMetric = "tracked" | "productive";
+
 export function overviewGranularity(range: Range): OverviewGranularity {
   const days = calendarDays(range);
   if (days <= 30) return "daily";

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import ActivityCalendar from "../components/ActivityCalendar";
 import HourlyActivityChart from "../components/HourlyActivityChart";
-import RhythmChart, { type RhythmMetric } from "../components/RhythmChart";
+import RhythmChart from "../components/RhythmChart";
 import TimelineChart, { type TimelineSegment } from "../components/TimelineChart";
 import TopAppsList from "../components/TopAppsList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
@@ -22,7 +22,11 @@ import {
   withDeltas,
 } from "../lib/metrics";
 import { addDays, calendarDays, previousRange, type Range } from "../lib/time";
-import { overviewGranularity, overviewHistoryStart } from "../lib/overview";
+import {
+  overviewGranularity,
+  overviewHistoryStart,
+  type ActivityMetric,
+} from "../lib/overview";
 import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
@@ -40,7 +44,7 @@ export default function OverviewTab({
   const [blockMinutes, setBlockMinutes] = useState(15);
   // null = follow the range-length default; an explicit pick sticks until changed.
   const [aggregateView, setAggregateView] = useState<"rhythm" | "calendar" | null>(null);
-  const [rhythmMetric, setRhythmMetric] = useState<RhythmMetric>("tracked");
+  const [metric, setMetric] = useState<ActivityMetric>("tracked");
 
   // One fetch covers the visible range, the previous period (deltas), and the
   // 6 days before the range (7-day rolling average).
@@ -142,7 +146,7 @@ export default function OverviewTab({
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Rhythm</span>
                   <span className="text-[11px] font-normal text-ink-3">
-                    {rhythmMetric === "productive"
+                    {metric === "productive"
                       ? "Average productive time by weekday and hour"
                       : "Average tracked time by weekday and hour"}
                   </span>
@@ -151,7 +155,9 @@ export default function OverviewTab({
             : (
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Calendar</span>
-                  <span className="text-[11px] font-normal text-ink-3">Tracked time by day</span>
+                  <span className="text-[11px] font-normal text-ink-3">
+                    {metric === "productive" ? "Productive time by day" : "Tracked time by day"}
+                  </span>
                 </span>
               )}
         right={middleView === "timeline" ? (
@@ -171,16 +177,14 @@ export default function OverviewTab({
           />
         ) : (
           <span className="flex items-center gap-2">
-            {middleView === "rhythm" && (
-              <Select
-                value={rhythmMetric}
-                onChange={(v) => setRhythmMetric(v as RhythmMetric)}
-                options={[
-                  { value: "tracked", label: "Total time" },
-                  { value: "productive", label: "Productive time" },
-                ]}
-              />
-            )}
+            <Select
+              value={metric}
+              onChange={(v) => setMetric(v as ActivityMetric)}
+              options={[
+                { value: "tracked", label: "Total time" },
+                { value: "productive", label: "Productive time" },
+              ]}
+            />
             <Select
               value={middleView}
               onChange={(v) => setAggregateView(v as "rhythm" | "calendar")}
@@ -205,10 +209,15 @@ export default function OverviewTab({
             sessions={current}
             range={range}
             classifier={meta.classifier}
-            metric={rhythmMetric}
+            metric={metric}
           />
         ) : (
-          <ActivityCalendar sessions={current} range={range} classifier={meta.classifier} />
+          <ActivityCalendar
+            sessions={current}
+            range={range}
+            classifier={meta.classifier}
+            metric={metric}
+          />
         )}
         {middleView === "timeline" && selected && (
           <div className="mt-2 flex items-center gap-4 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs">
