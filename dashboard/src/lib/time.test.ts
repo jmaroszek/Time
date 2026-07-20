@@ -43,10 +43,20 @@ describe("rangeForPreset (rolling windows ending today)", () => {
     expect(calendarDays(r)).toBe(14);
     expect(r.end).toEqual(new Date(2026, 5, 10));
   });
-  it("last28 is a 28-day window ending today", () => {
-    const r = rangeForPreset("last28", NOW);
-    expect(calendarDays(r)).toBe(28);
-    expect(r.start).toEqual(new Date(2026, 4, 13));
+  it("last30 is a 30-day window ending today", () => {
+    const r = rangeForPreset("last30", NOW);
+    expect(calendarDays(r)).toBe(30);
+    expect(r.start).toEqual(new Date(2026, 4, 11));
+  });
+  it("last90 is a 90-day rolling window ending today", () => {
+    const r = rangeForPreset("last90", NOW);
+    expect(calendarDays(r)).toBe(90);
+    expect(r.end).toEqual(new Date(2026, 5, 10));
+  });
+  it("last365 is a 365-day rolling window ending today", () => {
+    const r = rangeForPreset("last365", NOW);
+    expect(calendarDays(r)).toBe(365);
+    expect(r.end).toEqual(new Date(2026, 5, 10));
   });
 });
 

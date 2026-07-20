@@ -5,9 +5,10 @@ export type PresetOrCustom = Preset | "custom";
 
 const PRESETS: { value: PresetOrCustom; label: string }[] = [
   { value: "today", label: "Today" },
-  { value: "last7", label: "Last 7 days" },
-  { value: "last14", label: "Last 14 days" },
-  { value: "last28", label: "Last 28 days" },
+  { value: "last7", label: "Week" },
+  { value: "last30", label: "Month" },
+  { value: "last90", label: "Quarter" },
+  { value: "last365", label: "Year" },
   { value: "custom", label: "Custom" },
 ];
 
@@ -30,6 +31,7 @@ export default function DateRangePicker({
 }) {
   // range.end is exclusive; the UI shows the inclusive last day.
   const lastDay = addDays(range.end, -1);
+  const isRollingPreset = preset !== "today" && preset !== "custom";
 
   const commitCustom = (startStr: string, endStr: string) => {
     const start = parseDateInput(startStr);
@@ -40,6 +42,12 @@ export default function DateRangePicker({
 
   return (
     <div className="flex items-center gap-2">
+      <span
+        className={`w-11 text-right text-[11px] text-ink-3 ${isRollingPreset ? "" : "invisible"}`}
+        aria-hidden={!isRollingPreset}
+      >
+        Rolling
+      </span>
       <Select
         value={preset}
         onChange={(v) => onPreset(v as PresetOrCustom)}

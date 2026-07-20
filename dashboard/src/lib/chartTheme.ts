@@ -22,8 +22,14 @@ export const TOOLTIP_STYLE = {
  *  that merely annotates (delta text, state dots) uses --color-good instead. */
 export const GOOD_DATA = "#16b981";
 
-/** Deliberately de-emphasized non-productive bar fill. */
-export const NON_PRODUCTIVE_BAR = "#3a3d44";
+/** Three-way productivity fills used when the chart exposes the taxonomy
+ *  instead of collapsing everything outside productive into one stack. */
+export const PRODUCTIVE_BAR = "#1d9e75";
+export const NEUTRAL_BAR = "#4b5059";
+/** Category-palette red-orange, balanced against PRODUCTIVE_BAR rather than
+ *  the quieter --color-bad annotation red. */
+export const UNPRODUCTIVE_BAR = "#d85a30";
+export const UNCATEGORIZED_BAR = "#30343b";
 
 /** Annotation lines (e.g. the 7-day average): the interactive accent, not a
  *  category hue — category colors are reserved for category identity. */
@@ -32,6 +38,10 @@ export const ANNOTATION = "#6ba0da"; // --color-accent
 /** Sequential heatmap ramp: green like the productive fill, with stops kept
  *  off every seed/live category color, for the same reason. */
 export const HEATMAP_RAMP = ["#16181d", "#0e3a2c", "#17836a", "#4fd0a4"];
+
+/** Neutral activity intensity for tracked-time views. Blue communicates
+ *  amount without making the productive/non-productive judgment of green. */
+export const ACTIVITY_HEATMAP_RAMP = ["#16181d", "#123b5d", "#206fae", "#59a9ef"];
 
 /** Gray for uncategorized/unknown items, matching the dashed-ring affordance. */
 export const UNCATEGORIZED = "#5b616b";

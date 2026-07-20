@@ -4,7 +4,7 @@
 // arithmetic, never ms addition).
 
 export type WeekStart = "Sunday" | "Monday";
-export type Preset = "today" | "last7" | "last14" | "last28";
+export type Preset = "today" | "last7" | "last14" | "last30" | "last90" | "last365";
 
 export interface Range {
   start: Date;
@@ -39,8 +39,12 @@ export function rangeForPreset(preset: Preset, now: Date = new Date()): Range {
       return { start: addDays(today, -6), end };
     case "last14":
       return { start: addDays(today, -13), end };
-    case "last28":
-      return { start: addDays(today, -27), end };
+    case "last30":
+      return { start: addDays(today, -29), end };
+    case "last90":
+      return { start: addDays(today, -89), end };
+    case "last365":
+      return { start: addDays(today, -364), end };
   }
 }
 
