@@ -5,6 +5,7 @@
 
 export type WeekStart = "Sunday" | "Monday";
 export type Preset = "today" | "last7" | "last14" | "last30" | "last90" | "last365";
+export type RollingPreset = "last7" | "last30" | "last90" | "last365";
 
 export interface Range {
   start: Date;
@@ -45,6 +46,30 @@ export function rangeForPreset(preset: Preset, now: Date = new Date()): Range {
       return { start: addDays(today, -89), end };
     case "last365":
       return { start: addDays(today, -364), end };
+  }
+}
+
+export function isRollingPreset(preset: Preset): preset is RollingPreset {
+  return preset === "last7" || preset === "last30" || preset === "last90" || preset === "last365";
+}
+
+/** Calendar-aligned windows ending today (inclusive). */
+export function rangeForCalendarPreset(
+  preset: RollingPreset,
+  weekStart: WeekStart = "Sunday",
+  now: Date = new Date(),
+): Range {
+  const today = startOfDay(now);
+  const end = addDays(today, 1);
+  switch (preset) {
+    case "last7":
+      return { start: startOfWeek(today, weekStart), end };
+    case "last30":
+      return { start: new Date(today.getFullYear(), today.getMonth(), 1), end };
+    case "last90":
+      return { start: new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1), end };
+    case "last365":
+      return { start: new Date(today.getFullYear(), 0, 1), end };
   }
 }
 

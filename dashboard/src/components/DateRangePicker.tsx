@@ -1,5 +1,5 @@
 import { Select, TextInput } from "./ui";
-import { addDays, parseDateInput, type Preset, type Range } from "../lib/time";
+import { addDays, isRollingPreset, parseDateInput, type Preset, type Range } from "../lib/time";
 
 export type PresetOrCustom = Preset | "custom" | "alltime";
 
@@ -22,18 +22,21 @@ function toInputValue(d: Date): string {
 export default function DateRangePicker({
   preset,
   range,
+  rolling,
   onPreset,
+  onRollingChange,
   onCustomRange,
 }: {
   preset: PresetOrCustom;
   range: Range;
+  rolling: boolean;
   onPreset: (p: PresetOrCustom) => void;
+  onRollingChange: (rolling: boolean) => void;
   onCustomRange: (r: Range) => void;
 }) {
   // range.end is exclusive; the UI shows the inclusive last day.
   const lastDay = addDays(range.end, -1);
-  // "All time" has a fixed start, so only the fixed-width windows are "rolling".
-  const isRollingPreset = preset !== "today" && preset !== "custom" && preset !== "alltime";
+  const supportsRolling = preset !== "custom" && preset !== "alltime" && isRollingPreset(preset);
 
   const commitCustom = (startStr: string, endStr: string) => {
     const start = parseDateInput(startStr);
@@ -44,12 +47,29 @@ export default function DateRangePicker({
 
   return (
     <div className="flex items-center gap-2">
-      <span
-        className={`w-11 text-right text-[11px] text-ink-3 ${isRollingPreset ? "" : "invisible"}`}
-        aria-hidden={!isRollingPreset}
-      >
-        Rolling
-      </span>
+      <div className="flex w-16 justify-end">
+        {supportsRolling && (
+          <label className="group flex cursor-pointer items-center gap-1.5 text-[11px] text-ink-3">
+            <input
+              type="checkbox"
+              checked={rolling}
+              onChange={(event) => onRollingChange(event.target.checked)}
+              className="peer sr-only"
+            />
+            <span
+              aria-hidden="true"
+              className="flex h-3 w-3 items-center justify-center rounded-[3px] border border-edge bg-surface text-ink-3 transition-colors group-hover:border-edge-2 peer-focus-visible:outline peer-focus-visible:outline-1 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-edge-2"
+            >
+              {rolling && (
+                <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none">
+                  <path d="m2.5 6 2.1 2.1 4.9-4.9" stroke="currentColor" strokeWidth="1.4" />
+                </svg>
+              )}
+            </span>
+            Rolling
+          </label>
+        )}
+      </div>
       <Select
         value={preset}
         onChange={(v) => onPreset(v as PresetOrCustom)}
