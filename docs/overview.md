@@ -1,8 +1,8 @@
-# Overview tab
+# Insights tab
 
 This tab focuses on your recent behavior. The date picker in the top-right corner offers Today, Last 7/14/28 days, and a custom range.
 
-![Overview tab](images/overview.png)
+![Insights tab](images/overview.png)
 
 ## KPI cards
 

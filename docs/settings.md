@@ -8,7 +8,7 @@ Every knob lives in the database and is edited here. You do not need to edit con
 
 | Setting | What it controls |
 | --- | --- |
-| **Weekly productive goal** | The target the Overview goal-pace card measures against. |
+| **Weekly productive goal** | The target the Insights goal-pace card measures against. |
 | **Day starts/ends at** | The hour window drawn on the Timeline and Hour-of-Day plots. Activity outside the window still counts in all totals. |
 | **AFK idle threshold** | How long without input counts as away. The AFK boundary is back-dated to the last real input, so the threshold doesn't leak into the stats. Note this means passively watching video without touching the mouse or keyboard counts as away. |
 | **Focus chain max gap** | The longest break between productive sessions that still counts as one focus chain. |
