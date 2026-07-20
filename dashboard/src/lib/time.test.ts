@@ -8,6 +8,7 @@ import {
   listDays,
   parseDateInput,
   previousRange,
+  rangeForCalendarPreset,
   rangeForPreset,
   startOfWeek,
 } from "./time";
@@ -58,6 +59,40 @@ describe("rangeForPreset (rolling windows ending today)", () => {
     const r = rangeForPreset("last365", NOW);
     expect(calendarDays(r)).toBe(365);
     expect(r.end).toEqual(new Date(2026, 5, 10));
+  });
+});
+
+describe("rangeForCalendarPreset (calendar-aligned windows ending today)", () => {
+  it("starts a week according to the configured week start", () => {
+    expect(rangeForCalendarPreset("last7", "Sunday", NOW)).toEqual({
+      start: new Date(2026, 5, 7),
+      end: new Date(2026, 5, 10),
+    });
+    expect(rangeForCalendarPreset("last7", "Monday", NOW)).toEqual({
+      start: new Date(2026, 5, 8),
+      end: new Date(2026, 5, 10),
+    });
+  });
+
+  it("starts a month on its first day", () => {
+    expect(rangeForCalendarPreset("last30", "Sunday", NOW)).toEqual({
+      start: new Date(2026, 5, 1),
+      end: new Date(2026, 5, 10),
+    });
+  });
+
+  it("starts a quarter on its first day", () => {
+    expect(rangeForCalendarPreset("last90", "Sunday", NOW)).toEqual({
+      start: new Date(2026, 3, 1),
+      end: new Date(2026, 5, 10),
+    });
+  });
+
+  it("starts a year on January 1", () => {
+    expect(rangeForCalendarPreset("last365", "Sunday", NOW)).toEqual({
+      start: new Date(2026, 0, 1),
+      end: new Date(2026, 5, 10),
+    });
   });
 });
 

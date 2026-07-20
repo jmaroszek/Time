@@ -7,7 +7,7 @@ import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
 import { deleteCategory, fetchEarliestSessionStart, fetchTrackerStatus, updateSetting, type TrackerStatus } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
-import { allTimeRange, rangeForPreset, type Range } from "./lib/time";
+import { allTimeRange, isRollingPreset, rangeForCalendarPreset, rangeForPreset, type Range } from "./lib/time";
 import { BannerProvider } from "./state/banner";
 import { MetaProvider, useMeta } from "./state/meta";
 import AppsTab from "./tabs/AppsTab";
@@ -36,6 +36,7 @@ function Shell() {
   const meta = useMeta();
   const [tab, setTab] = useState<Tab>("overview");
   const [preset, setPreset] = useState<PresetOrCustom>("last7");
+  const [rolling, setRolling] = useState(true);
   const [customRange, setCustomRange] = useState<Range | null>(null);
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [firstSessionSec, setFirstSessionSec] = useState<number | null>(null);
@@ -43,8 +44,9 @@ function Shell() {
   const range = useMemo<Range>(() => {
     if (preset === "custom") return customRange ?? rangeForPreset("last7");
     if (preset === "alltime") return allTimeRange(firstSessionSec);
+    if (!rolling && isRollingPreset(preset)) return rangeForCalendarPreset(preset, meta.weekStart);
     return rangeForPreset(preset);
-  }, [preset, customRange, firstSessionSec]);
+  }, [preset, rolling, customRange, firstSessionSec, meta.weekStart]);
 
   // An empty DB (the tracker hasn't run yet) is a waiting state, not an
   // error. Retry until the tracker's first bootstrap creates the schema.
@@ -123,7 +125,9 @@ function Shell() {
           <DateRangePicker
             preset={preset}
             range={range}
+            rolling={rolling}
             onPreset={setPreset}
+            onRollingChange={setRolling}
             onCustomRange={(r) => {
               setCustomRange(r);
               setPreset("custom");
