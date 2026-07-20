@@ -1,4 +1,7 @@
 __pycache__/
+# A stray root-level npm install; the dashboard's own deps are ignored under
+# dashboard/.gitignore. Anchored so it can't mask a tracked node_modules deeper in.
+/node_modules/
 tracker/build/
 tracker/dist/
 dashboard/src-tauri/binaries/
