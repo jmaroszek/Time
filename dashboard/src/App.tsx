@@ -14,10 +14,10 @@ import AppsTab from "./tabs/AppsTab";
 import OverviewTab from "./tabs/OverviewTab";
 import SettingsTab from "./tabs/SettingsTab";
 
-type Tab = "overview" | "apps" | "settings";
+type Tab = "insights" | "apps" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "overview", label: "Overview" },
+  { id: "insights", label: "Insights" },
   { id: "apps", label: "Apps" },
   { id: "settings", label: "Settings" },
 ];
@@ -34,7 +34,7 @@ export default function App() {
 
 function Shell() {
   const meta = useMeta();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("insights");
   const [preset, setPreset] = useState<PresetOrCustom>("last7");
   const [rolling, setRolling] = useState(true);
   const [customRange, setCustomRange] = useState<Range | null>(null);
@@ -102,7 +102,7 @@ function Shell() {
   if (meta.error) return <DbErrorScreen error={meta.error} />;
   if (meta.settings.privacy_onboarding_complete !== "1") return <PrivacyOnboarding />;
 
-  const showRange = tab === "overview" || tab === "apps";
+  const showRange = tab === "insights" || tab === "apps";
 
   return (
     <div className="mx-auto flex min-h-full max-w-6xl flex-col gap-4 px-6 py-5">
@@ -139,7 +139,7 @@ function Shell() {
       {firstRun && <FirstRunPanel status={status} />}
 
       <main className="flex-1">
-        {tab === "overview" && <OverviewTab range={range} preset={preset} />}
+        {tab === "insights" && <OverviewTab range={range} preset={preset} />}
         {tab === "apps" && <AppsTab range={range} />}
         {tab === "settings" && <SettingsTab />}
       </main>
