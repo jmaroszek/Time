@@ -2,7 +2,6 @@ import { useMemo } from "react";
 
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import {
-  dailyActivitySummaries,
   metricSeconds,
   metricTrackedShare,
   ACTIVITY_METRIC_WORDS,
@@ -17,8 +16,6 @@ import {
   type Range,
   type WeekStart,
 } from "../lib/time";
-import type { Classifier } from "../lib/classify";
-import type { Session } from "../lib/metrics";
 import { useMeta } from "../state/meta";
 import { ACTIVITY_METRIC_RAMPS, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
@@ -48,23 +45,15 @@ const MONTH_NAMES = [
 ];
 
 export default function ActivityCalendar({
-  sessions,
+  summaries,
   range,
-  classifier,
   metric = "tracked",
 }: {
-  sessions: Session[];
+  summaries: DailyActivitySummary[];
   range: Range;
-  classifier: Classifier;
   metric?: ActivityMetric;
 }) {
   const { aliases, weekStart } = useMeta();
-  // Metric-independent aggregation: each day cell carries all four state totals,
-  // so a metric switch only re-shades instead of re-walking every session.
-  const summaries = useMemo(
-    () => dailyActivitySummaries(sessions, range, classifier),
-    [sessions, range, classifier],
-  );
   const option = useMemo<EChartsOption>(() => {
     const byKey = new Map(summaries.map((day) => [day.key, day]));
     const shaded = (day: DailyActivitySummary) => metricSeconds(day, metric);

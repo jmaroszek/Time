@@ -1,10 +1,7 @@
 import { useMemo } from "react";
 
-import type { Classifier } from "../lib/classify";
 import { fmtDuration } from "../lib/format";
-import type { Session } from "../lib/metrics";
-import { hourlyActivitySummaries } from "../lib/overview";
-import type { Range } from "../lib/time";
+import type { HourlyActivitySummary } from "../lib/overview";
 import {
   CHROME,
   NEUTRAL_BAR,
@@ -17,26 +14,11 @@ import EChart, { type EChartsOption } from "./EChart";
 import { shouldShowUncategorized } from "./ProductiveHoursChart";
 
 export default function HourlyActivityChart({
-  sessions,
-  range,
-  classifier,
-  dayStartHour,
-  dayEndHour,
+  hours,
 }: {
-  sessions: Session[];
-  range: Range;
-  classifier: Classifier;
-  dayStartHour: number;
-  dayEndHour: number;
+  hours: HourlyActivitySummary[];
 }) {
   const option = useMemo<EChartsOption>(() => {
-    const hours = hourlyActivitySummaries(
-      sessions,
-      range,
-      classifier,
-      dayStartHour,
-      dayEndHour,
-    );
     const toMinutes = (seconds: number) => Math.round(seconds / 6) / 10;
     const productive = hours.map((hour) => toMinutes(hour.productiveSeconds));
     const neutral = hours.map((hour) => toMinutes(hour.neutralSeconds));
@@ -138,7 +120,7 @@ export default function HourlyActivityChart({
           : []),
       ],
     };
-  }, [sessions, range, classifier, dayStartHour, dayEndHour]);
+  }, [hours]);
 
   return <EChart option={option} height={254} />;
 }

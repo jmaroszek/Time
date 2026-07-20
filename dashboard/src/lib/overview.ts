@@ -1,5 +1,9 @@
 import { categoryKind, type Classifier } from "./classify";
-import { clipSessions, splitAtMidnights, type Session } from "./metrics";
+import {
+  forEachClippedSession,
+  forEachDayChunk,
+  type Session,
+} from "./metrics";
 import {
   addDays,
   calendarDays,
@@ -153,10 +157,10 @@ export function hourlyActivitySummaries(
   const startSec = range.start.getTime() / 1000;
   const endSec = range.end.getTime() / 1000;
 
-  for (const session of clipSessions(sessions, startSec, endSec)) {
-    if (session.isAfk) continue;
+  forEachClippedSession(sessions, startSec, endSec, (session) => {
+    if (session.isAfk) return;
     const category = classifier(session);
-    if (category?.isIgnored) continue;
+    if (category?.isIgnored) return;
     let cursor = session.start;
     while (cursor < session.end) {
       const date = new Date(cursor * 1000);
@@ -181,7 +185,7 @@ export function hourlyActivitySummaries(
       }
       cursor = chunkEnd;
     }
-  }
+  });
 
   return hours;
 }
@@ -241,10 +245,10 @@ export function weekdayRhythmSummaries(
 
   const startSec = range.start.getTime() / 1000;
   const endSec = range.end.getTime() / 1000;
-  for (const session of clipSessions(sessions, startSec, endSec)) {
-    if (session.isAfk) continue;
+  forEachClippedSession(sessions, startSec, endSec, (session) => {
+    if (session.isAfk) return;
     const category = classifier(session);
-    if (category?.isIgnored) continue;
+    if (category?.isIgnored) return;
     let cursor = session.start;
     while (cursor < session.end) {
       const date = new Date(cursor * 1000);
@@ -270,7 +274,7 @@ export function weekdayRhythmSummaries(
       }
       cursor = chunkEnd;
     }
-  }
+  });
 
   return {
     cells: cells.map(({ appSeconds, ...cell }) => {
@@ -311,13 +315,13 @@ export function dailyActivitySummaries(
   const startSec = range.start.getTime() / 1000;
   const endSec = range.end.getTime() / 1000;
 
-  for (const session of clipSessions(sessions, startSec, endSec)) {
-    if (session.isAfk) continue;
+  forEachClippedSession(sessions, startSec, endSec, (session) => {
+    if (session.isAfk) return;
     const category = classifier(session);
-    if (category?.isIgnored) continue;
-    for (const chunk of splitAtMidnights(session.start, session.end)) {
+    if (category?.isIgnored) return;
+    forEachDayChunk(session.start, session.end, (chunk) => {
       const day = byKey.get(dayKey(chunk.dayStart));
-      if (!day) continue;
+      if (!day) return;
       const seconds = chunk.endSec - chunk.startSec;
       day.trackedSeconds += seconds;
       if (!category) day.uncategorizedSeconds += seconds;
@@ -329,8 +333,8 @@ export function dailyActivitySummaries(
       }
       addCategorySeconds(day.categorySeconds, category?.name, seconds);
       day.appSeconds.set(session.process, (day.appSeconds.get(session.process) ?? 0) + seconds);
-    }
-  }
+    });
+  });
 
   return [...byKey.values()].map(({ appSeconds, ...day }) => {
     let topApp: DailyActivitySummary["topApp"] = null;
@@ -391,13 +395,13 @@ export function monthlyActivitySummaries(
 
   const startSec = range.start.getTime() / 1000;
   const endSec = range.end.getTime() / 1000;
-  for (const session of clipSessions(sessions, startSec, endSec)) {
-    if (session.isAfk) continue;
+  forEachClippedSession(sessions, startSec, endSec, (session) => {
+    if (session.isAfk) return;
     const category = classifier(session);
-    if (category?.isIgnored) continue;
-    for (const chunk of splitAtMidnights(session.start, session.end)) {
+    if (category?.isIgnored) return;
+    forEachDayChunk(session.start, session.end, (chunk) => {
       const month = byKey.get(monthKey(chunk.dayStart.getFullYear(), chunk.dayStart.getMonth()));
-      if (!month) continue;
+      if (!month) return;
       const seconds = chunk.endSec - chunk.startSec;
       month.trackedSeconds += seconds;
       if (!category) month.uncategorizedSeconds += seconds;
@@ -409,8 +413,8 @@ export function monthlyActivitySummaries(
       }
       addCategorySeconds(month.categorySeconds, category?.name, seconds);
       month.appSeconds.set(session.process, (month.appSeconds.get(session.process) ?? 0) + seconds);
-    }
-  }
+    });
+  });
 
   return [...byKey.values()].map(({ appSeconds, ...month }) => {
     let topApp: MonthlyActivitySummary["topApp"] = null;

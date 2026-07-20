@@ -6,7 +6,7 @@ use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 mod database;
 
-use database::{database_path, ExecuteResult, TimeDatabase};
+use database::{database_path, ExecuteResult, SessionColumns, TimeDatabase};
 
 /// Resolve the shared SQLite path (%LOCALAPPDATA%\Time\time_log.db) and ensure
 /// the directory exists. The tracker derives the same location in
@@ -36,6 +36,18 @@ async fn db_execute(
     values: Vec<serde_json::Value>,
 ) -> Result<ExecuteResult, String> {
     database.execute(query, values).await
+}
+
+#[tauri::command]
+async fn fetch_sessions(
+    database: tauri::State<'_, TimeDatabase>,
+    start_sec: f64,
+    end_sec: f64,
+    min_start_sec: f64,
+) -> Result<SessionColumns, String> {
+    database
+        .fetch_sessions(start_sec, end_sec, min_start_sec)
+        .await
 }
 
 #[tauri::command]
@@ -146,6 +158,7 @@ pub fn run() {
             db_path,
             db_select,
             db_execute,
+            fetch_sessions,
             backup_database,
             erase_history,
             compact_database,

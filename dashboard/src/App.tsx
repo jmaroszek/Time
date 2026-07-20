@@ -139,7 +139,9 @@ function Shell() {
       {firstRun && <FirstRunPanel status={status} />}
 
       <main className="flex-1">
-        {tab === "insights" && <OverviewTab range={range} preset={preset} />}
+        {tab === "insights" && (
+          <OverviewTab range={range} preset={preset} firstSessionSec={firstSessionSec} />
+        )}
         {tab === "apps" && <AppsTab range={range} />}
         {tab === "settings" && <SettingsTab />}
       </main>
