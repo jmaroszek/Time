@@ -5,21 +5,19 @@ import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePick
 import { Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
-import { deleteCategory, fetchTrackerStatus, updateSetting, type TrackerStatus } from "./lib/queries";
+import { deleteCategory, fetchEarliestSessionStart, fetchTrackerStatus, updateSetting, type TrackerStatus } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
-import { rangeForPreset, type Range } from "./lib/time";
+import { allTimeRange, rangeForPreset, type Range } from "./lib/time";
 import { BannerProvider } from "./state/banner";
 import { MetaProvider, useMeta } from "./state/meta";
 import AppsTab from "./tabs/AppsTab";
 import OverviewTab from "./tabs/OverviewTab";
 import SettingsTab from "./tabs/SettingsTab";
-import TrendsTab from "./tabs/TrendsTab";
 
-type Tab = "overview" | "trends" | "apps" | "settings";
+type Tab = "overview" | "apps" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
-  { id: "trends", label: "Trends" },
   { id: "apps", label: "Apps" },
   { id: "settings", label: "Settings" },
 ];
@@ -40,11 +38,13 @@ function Shell() {
   const [preset, setPreset] = useState<PresetOrCustom>("last7");
   const [customRange, setCustomRange] = useState<Range | null>(null);
   const [status, setStatus] = useState<TrackerStatus | null>(null);
+  const [firstSessionSec, setFirstSessionSec] = useState<number | null>(null);
 
   const range = useMemo<Range>(() => {
-    if (preset === "custom" && customRange) return customRange;
-    return rangeForPreset(preset === "custom" ? "last7" : preset);
-  }, [preset, customRange]);
+    if (preset === "custom") return customRange ?? rangeForPreset("last7");
+    if (preset === "alltime") return allTimeRange(firstSessionSec);
+    return rangeForPreset(preset);
+  }, [preset, customRange, firstSessionSec]);
 
   // An empty DB (the tracker hasn't run yet) is a waiting state, not an
   // error. Retry until the tracker's first bootstrap creates the schema.
@@ -57,6 +57,25 @@ function Shell() {
 
   // First-run panel data: poll tracker status only until the first session exists.
   const ready = meta.loaded && meta.error === null;
+
+  // Earliest session, for the "All time" range. Re-read while the DB is still
+  // empty so the preset works as soon as the first session lands.
+  useEffect(() => {
+    if (!ready || firstSessionSec !== null) return;
+    let cancelled = false;
+    const load = () =>
+      void fetchEarliestSessionStart()
+        .then((sec) => {
+          if (!cancelled && sec !== null) setFirstSessionSec(sec);
+        })
+        .catch(() => {});
+    load();
+    const id = setInterval(load, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [ready, firstSessionSec]);
   const firstRun = status !== null && status.totalSessionCount === 0;
   useEffect(() => {
     if (!ready || (status !== null && status.totalSessionCount > 0)) return;
@@ -117,7 +136,6 @@ function Shell() {
 
       <main className="flex-1">
         {tab === "overview" && <OverviewTab range={range} preset={preset} />}
-        {tab === "trends" && <TrendsTab />}
         {tab === "apps" && <AppsTab range={range} />}
         {tab === "settings" && <SettingsTab />}
       </main>

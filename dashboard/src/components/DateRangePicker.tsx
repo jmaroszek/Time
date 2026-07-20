@@ -1,7 +1,7 @@
 import { Select, TextInput } from "./ui";
 import { addDays, parseDateInput, type Preset, type Range } from "../lib/time";
 
-export type PresetOrCustom = Preset | "custom";
+export type PresetOrCustom = Preset | "custom" | "alltime";
 
 const PRESETS: { value: PresetOrCustom; label: string }[] = [
   { value: "today", label: "Today" },
@@ -9,6 +9,7 @@ const PRESETS: { value: PresetOrCustom; label: string }[] = [
   { value: "last30", label: "Month" },
   { value: "last90", label: "Quarter" },
   { value: "last365", label: "Year" },
+  { value: "alltime", label: "All time" },
   { value: "custom", label: "Custom" },
 ];
 
@@ -31,7 +32,8 @@ export default function DateRangePicker({
 }) {
   // range.end is exclusive; the UI shows the inclusive last day.
   const lastDay = addDays(range.end, -1);
-  const isRollingPreset = preset !== "today" && preset !== "custom";
+  // "All time" has a fixed start, so only the fixed-width windows are "rolling".
+  const isRollingPreset = preset !== "today" && preset !== "custom" && preset !== "alltime";
 
   const commitCustom = (startStr: string, endStr: string) => {
     const start = parseDateInput(startStr);

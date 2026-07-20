@@ -26,8 +26,8 @@ export function startOfWeek(d: Date, weekStart: WeekStart = "Sunday"): Date {
 }
 
 /**
- * Rolling windows ending today (inclusive). The Overview tab is "recent
- * activity"; week-aligned and longer horizons live on the Trends tab.
+ * Rolling windows ending today (inclusive). Longer horizons are reached with a
+ * custom range or the "All time" preset (see allTimeRange).
  */
 export function rangeForPreset(preset: Preset, now: Date = new Date()): Range {
   const today = startOfDay(now);
@@ -46,6 +46,16 @@ export function rangeForPreset(preset: Preset, now: Date = new Date()): Range {
     case "last365":
       return { start: addDays(today, -364), end };
   }
+}
+
+/**
+ * First tracked day through end of today. With no sessions yet (null), collapses
+ * to just today — a harmless one-day window rather than an empty range.
+ */
+export function allTimeRange(firstSessionSec: number | null, now: Date = new Date()): Range {
+  const end = addDays(startOfDay(now), 1);
+  const start = firstSessionSec != null ? startOfDay(new Date(firstSessionSec * 1000)) : startOfDay(now);
+  return { start, end };
 }
 
 export function calendarDays(r: Range): number {

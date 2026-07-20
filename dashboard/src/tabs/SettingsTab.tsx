@@ -178,7 +178,7 @@ export default function SettingsTab() {
           <Row label="Day ends at" help="Last hour drawn on Timeline & Hour-of-Day plots. Activity outside the window still counts in all totals." control={numberControl(SPECS.end, undefined, true)} />
           <Row
             label="Week starts on"
-            help="Affects weekly presets, trends, and goal pacing."
+            help="Affects weekly presets, weekly bucketing, and goal pacing."
             control={<Segmented options={["Monday", "Sunday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
           />
         </Section>
