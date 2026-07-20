@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-import { Button, Spinner } from "../components/ui";
+import { Spinner } from "../components/ui";
 import { getDbPath } from "../lib/db";
 import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
@@ -179,7 +179,7 @@ export default function SettingsTab() {
           <Row
             label="Week starts on"
             help="Affects weekly presets, trends, and goal pacing."
-            control={<Segmented options={["auto", "Monday", "Sunday"]} value={drafts.week_start ?? "auto"} onChange={(value) => selectSetting("week_start", value)} />}
+            control={<Segmented options={["Monday", "Sunday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
           />
         </Section>
 
@@ -194,7 +194,28 @@ export default function SettingsTab() {
             help="Initial size of the Overview top-apps list."
             control={<Segmented options={["5", "10", "15", "20"]} value={drafts.default_top_n_apps ?? "5"} onChange={(value) => selectSetting("default_top_n_apps", value)} />}
           />
-          <Row label="Minimum app time" help="Apps below this in the range are hidden from the lists. 0 shows everything." control={numberControl(SPECS.minimum, "min")} />
+          <Row
+            label="Minimum app time"
+            help="Hides apps below this much time in the selected range. It's a fixed amount, not a percentage — so a longer range clears it more easily. 0 shows everything."
+            control={numberControl(SPECS.minimum, "min")}
+          />
+        </Section>
+
+        <Section title="Advanced">
+          <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
+          <Row
+            label="Browser processes"
+            help="Comma-separated. Site splitting needs an optional third-party extension that appends the URL to the window title; review its browsing-data permissions before installing it."
+            control={
+              <input
+                value={drafts.browser_processes ?? ""}
+                onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
+                onBlur={() => void saveText("browser_processes")}
+                onKeyDown={(event) => { if (event.key === "Enter") void saveText("browser_processes"); }}
+                className="w-[150px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs text-ink outline-none focus:border-accent/60"
+              />
+            }
+          />
         </Section>
       </div>
 
@@ -223,7 +244,7 @@ export default function SettingsTab() {
           </div>
         </section>
 
-        <Section title="Tracking & Privacy">
+        <Section title="Recording & startup">
           <Row
             label="Record activity"
             help="Stores foreground app names and timing only after you enable it."
@@ -253,7 +274,7 @@ export default function SettingsTab() {
         </Section>
 
         <section>
-          <SectionLabel>Database</SectionLabel>
+          <SectionLabel>Data & backups</SectionLabel>
           <div className="rounded-[13px] border border-edge bg-surface-dim p-4">
             <p className="mb-[9px] text-[11.5px] text-ink-3">Database path</p>
             <div className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface-2 p-[9px] pl-[13px]">
@@ -304,27 +325,7 @@ export default function SettingsTab() {
           </div>
         </section>
 
-        <PrivacySection />
-
-        <section>
-          <SectionLabel>Advanced</SectionLabel>
-          <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
-            <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
-            <Row
-              label="Browser processes"
-              help="Comma-separated. Site splitting needs an optional third-party extension that appends the URL to the window title; review its browsing-data permissions before installing it."
-              control={
-                <input
-                  value={drafts.browser_processes ?? ""}
-                  onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
-                  onBlur={() => void saveText("browser_processes")}
-                  onKeyDown={(event) => { if (event.key === "Enter") void saveText("browser_processes"); }}
-                  className="w-[150px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs text-ink outline-none focus:border-accent/60"
-                />
-              }
-            />
-          </div>
-        </section>
+        <DeleteHistorySection />
       </div>
     </div>
   );
@@ -349,7 +350,7 @@ function VersionsLine({ trackerVersion }: { trackerVersion: string | undefined }
 
 /** Selective history deletion. Both actions show the affected count
  *  and require an explicit confirm; the copy points at backup first. */
-function PrivacySection() {
+function DeleteHistorySection() {
   const meta = useMeta();
   const banner = useBanner();
   const [matchText, setMatchText] = useState("");
@@ -431,7 +432,7 @@ function PrivacySection() {
 
   return (
     <section>
-      <SectionLabel>Privacy</SectionLabel>
+      <SectionLabel>Delete history</SectionLabel>
       <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
         <Row
           label="Delete history matching"
@@ -447,16 +448,9 @@ function PrivacySection() {
                 }}
                 className={inputClass}
               />
-              <Button variant="danger" disabled={!matchText.trim()} onClick={() => void deleteMatching()}>
-                Delete…
-              </Button>
+              <DeleteButton label="Delete matching history" disabled={!matchText.trim()} onClick={() => void deleteMatching()} />
             </span>
           }
-        />
-        <Row
-          label="Erase all recorded history"
-          help="Stops tracking, removes every session, truncates SQLite's WAL, and compacts free pages. Separate backup files remain."
-          control={<Button variant="danger" onClick={() => void eraseEverything()}>Erase all…</Button>}
         />
         <Row
           label="Delete history older than"
@@ -472,15 +466,51 @@ function PrivacySection() {
                 className={`${inputClass} w-[64px] text-right`}
               />
               <span className="text-[11px] text-ink-3">days</span>
-              <Button variant="danger" onClick={() => void deleteOlder()}>
-                Delete…
-              </Button>
+              <DeleteButton label="Delete older history" onClick={() => void deleteOlder()} />
             </span>
           }
         />
+        <div className="flex items-center justify-between gap-4 border-t border-surface-2 bg-bad/[.03] px-4 py-[13px]">
+          <p className="text-xs text-ink-3">Erase all recorded history & compact the database</p>
+          <button
+            type="button"
+            className="shrink-0 text-xs font-semibold text-bad transition-colors hover:text-bad/80"
+            onClick={() => void eraseEverything()}
+          >
+            Erase all…
+          </button>
+        </div>
         {message && <p className="border-t border-surface-2 px-4 py-3 text-[11.5px] text-ink-2">{message}</p>}
       </div>
     </section>
+  );
+}
+
+function DeleteButton({
+  label,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex h-8 w-8 items-center justify-center rounded-[9px] border border-bad/30 text-bad transition-colors hover:border-bad/50 hover:bg-bad/5 disabled:cursor-not-allowed disabled:opacity-35"
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 6h18" />
+        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+        <path d="M10 11v6M14 11v6" />
+      </svg>
+    </button>
   );
 }
 
@@ -556,7 +586,7 @@ function NumberStepper({
   return (
     <div className="flex items-center rounded-[10px] border border-edge bg-surface-2 p-[3px]">
       <button type="button" className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-base text-ink-2 hover:bg-white/5 hover:text-ink" onClick={onMinus}>−</button>
-      <div className={`flex items-baseline justify-center ${unit ? "min-w-[48px] gap-1.5" : "min-w-[48px]"}`}>
+      <div className={`flex items-baseline justify-center ${display ? "w-[46px]" : unit ? "min-w-[34px] gap-1" : "min-w-[34px]"}`}>
         <input
           type={readOnly ? "text" : "number"}
           readOnly={readOnly}
