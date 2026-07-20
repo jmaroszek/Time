@@ -58,10 +58,10 @@ export default function OverviewTab({
     const kpis = computeKpis(current, meta.classifier, meta.focusChainMaxGapSeconds);
     const pace = goalPace(kpis.prodSec, range, meta.weeklyGoalHours);
     const n = topN ?? meta.defaultTopN;
+    const rankedApps = topApps(current, meta.classifier);
+    const eligibleApps = rankedApps.filter((a) => a.seconds >= meta.minAppSeconds);
     const apps = withDeltas(
-      topApps(current, meta.classifier)
-        .filter((a) => a.seconds >= meta.minAppSeconds)
-        .slice(0, n),
+      eligibleApps.slice(0, n),
       topApps(previous, meta.classifier),
       {
         currentDaily: dailySecondsByApp(current, range),
@@ -73,23 +73,35 @@ export default function OverviewTab({
       addDays(range.start, -6).getTime() / 1000,
       rangeEndSec,
     );
-    return { current, kpis, pace, apps, history };
+    return {
+      current,
+      kpis,
+      pace,
+      apps,
+      hiddenAppCount: rankedApps.length - eligibleApps.length,
+      history,
+    };
   }, [sessions, rangeStartSec, rangeEndSec, prev.start, prev.end, meta, topN, range]);
 
   if (loading) return <Spinner />;
   if (error) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
 
-  const { kpis, pace, apps, current, history } = derived;
+  const { kpis, pace, apps, hiddenAppCount, current, history } = derived;
   const n = topN ?? meta.defaultTopN;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <MetricCard
-          label="Average productivity per day"
+          label="Daily productive time"
           value={fmtDuration(kpis.prodSec / calendarDays(range))}
+          hint="Total productive time in this range divided by the number of days it spans."
         />
-        <MetricCard label="Productivity percent" value={fmtPct(kpis.prodFraction)} />
+        <MetricCard
+          label="Productive share"
+          value={fmtPct(kpis.prodFraction)}
+          hint="Share of tracked time spent in apps and sites you've marked productive."
+        />
         <MetricCard
           label="Longest focus"
           value={fmtDuration(kpis.longestFocusSec)}
@@ -97,7 +109,7 @@ export default function OverviewTab({
         />
         <MetricCard
           label="Goal pace"
-          value={meta.weeklyGoalHours > 0 ? `${pace.doneHours.toFixed(1)}h / ${pace.targetHours.toFixed(0)}h` : "Not set"}
+          value={meta.weeklyGoalHours > 0 ? `${pace.doneHours.toFixed(0)}h / ${pace.targetHours.toFixed(0)}h` : "Not set"}
           hint={meta.weeklyGoalHours > 0
             ? "Productive time in this range vs your weekly goal, prorated to the range's length."
             : "Set an optional weekly goal in Settings."}
@@ -176,26 +188,32 @@ export default function OverviewTab({
       <div className="grid gap-4 lg:grid-cols-2">
         <Card
           title="Top Apps"
+          className="h-[345px]"
           right={
-            <div className="flex items-center gap-2 text-xs text-ink-2">
-              <span>vs previous period</span>
-              <Select
-                value={String(n)}
-                onChange={(v) => setTopN(Number(v))}
-                options={[5, 10, 15, 20].map((x) => ({ value: String(x), label: `Top ${x}` }))}
-              />
-            </div>
+            <Select
+              value={String(n)}
+              onChange={(v) => setTopN(Number(v))}
+              options={[5, 10, 15, 20].map((x) => ({ value: String(x), label: `Top ${x}` }))}
+            />
           }
         >
-          <TopAppsList apps={apps} />
+          <div className="pt-2">
+            <TopAppsList
+              apps={apps}
+              comparisonDays={calendarDays(prev)}
+              hiddenAppCount={apps.length < n ? hiddenAppCount : 0}
+            />
+          </div>
         </Card>
-        <Card title="Daily Hours">
-          <ProductiveHoursChart
-            historySessions={history}
-            range={range}
-            classifier={meta.classifier}
-            labelMode={preset === "last7" ? "weekday" : "date"}
-          />
+        <Card title="Daily Hours" className="h-[345px]">
+          <div className="pt-2">
+            <ProductiveHoursChart
+              historySessions={history}
+              range={range}
+              classifier={meta.classifier}
+              labelMode={preset === "last7" ? "weekday" : "date"}
+            />
+          </div>
         </Card>
       </div>
     </div>

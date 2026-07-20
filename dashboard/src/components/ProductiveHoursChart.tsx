@@ -13,6 +13,7 @@ import EChart, { type EChartsOption } from "./EChart";
 import { ANNOTATION, CHROME, GOOD_DATA, NON_PRODUCTIVE_BAR, TOOLTIP_STYLE } from "../lib/chartTheme";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const PRODUCTIVE_AVG = "7-day productive avg";
 
 export default function ProductiveHoursChart({
   historySessions,
@@ -44,22 +45,29 @@ export default function ProductiveHoursChart({
 
     return {
       animation: false,
-      grid: { left: 36, right: 12, top: 24, bottom: 24 },
+      grid: { left: 36, right: 12, top: 12, bottom: 58 },
       tooltip: {
         trigger: "axis",
         ...TOOLTIP_STYLE,
-        valueFormatter: (v: number) => `${v.toFixed(1)}h`,
+        formatter: (params: Array<{ axisValueLabel: string; marker: string; seriesName: string; value: number }>) => {
+          const byName = new Map(params.map((p) => [p.seriesName, p]));
+          const rows = [PRODUCTIVE_AVG, "Productive", "Non-productive"]
+            .map((name) => byName.get(name))
+            .filter((p): p is NonNullable<typeof p> => p !== undefined)
+            .map((p) => `${p.marker}${p.seriesName}: <b>${Number(p.value).toFixed(1)}h</b>`);
+          return [params[0]?.axisValueLabel, ...rows].filter(Boolean).join("<br/>");
+        },
       },
       legend: {
         show: true,
-        top: 0,
-        right: 0,
+        bottom: 0,
+        left: "center",
         data: [
           "Productive",
           "Non-productive",
           {
-            name: "7-day avg (productive)",
-            icon: "path://M0,3 L14,3 L14,5 L0,5 Z",
+            name: PRODUCTIVE_AVG,
+            icon: "path://M0,4 L4,4 L4,6 L0,6 Z M6,4 L10,4 L10,6 L6,6 Z M12,4 L16,4 L16,6 L12,6 Z",
           },
         ],
         textStyle: { color: CHROME.axisLabel, fontSize: 11 },
@@ -98,7 +106,7 @@ export default function ProductiveHoursChart({
           barMaxWidth: 36,
         },
         {
-          name: "7-day avg (productive)",
+          name: PRODUCTIVE_AVG,
           type: "line",
           data: avgLine,
           symbol: "none",
@@ -109,5 +117,5 @@ export default function ProductiveHoursChart({
     };
   }, [historySessions, range, classifier, labelMode]);
 
-  return <EChart option={option} height={240} />;
+  return <EChart option={option} height={254} />;
 }
