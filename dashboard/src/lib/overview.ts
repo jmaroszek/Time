@@ -91,6 +91,104 @@ export function hourlyActivitySummaries(
   return hours;
 }
 
+export interface RhythmCell {
+  /** Local weekday, 0 = Sunday. */
+  weekday: number;
+  /** Local hour of day. */
+  hour: number;
+  trackedSeconds: number;
+  productiveSeconds: number;
+  neutralSeconds: number;
+  unproductiveSeconds: number;
+  uncategorizedSeconds: number;
+  topApp: { process: string; seconds: number } | null;
+}
+
+export interface WeekdayRhythmSummary {
+  /** Weekday-major, zero-filled cells for each visible local hour. */
+  cells: RhythmCell[];
+  /** Calendar days of each weekday (Sun..Sat) inside the range — the
+   *  denominator for per-occurrence averages. */
+  weekdayCounts: number[];
+}
+
+/** Non-AFK activity keyed by (weekday, visible local hour) for the rhythm
+ *  heatmap. Totals here; callers divide by `weekdayCounts` so a range with
+ *  five Mondays but four Sundays compares fairly. */
+export function weekdayRhythmSummaries(
+  sessions: Session[],
+  range: Range,
+  classifier: Classifier,
+  startHour: number,
+  endHour: number,
+): WeekdayRhythmSummary {
+  const cells: (RhythmCell & { appSeconds: Map<string, number> })[] = [];
+  const byKey = new Map<number, (typeof cells)[number]>();
+  for (let weekday = 0; weekday < 7; weekday++) {
+    for (let hour = startHour; hour < endHour; hour++) {
+      const cell = {
+        weekday,
+        hour,
+        trackedSeconds: 0,
+        productiveSeconds: 0,
+        neutralSeconds: 0,
+        unproductiveSeconds: 0,
+        uncategorizedSeconds: 0,
+        topApp: null,
+        appSeconds: new Map<string, number>(),
+      };
+      cells.push(cell);
+      byKey.set(weekday * 24 + hour, cell);
+    }
+  }
+  const weekdayCounts = Array(7).fill(0) as number[];
+  for (const day of listDays(range)) weekdayCounts[day.getDay()] += 1;
+
+  const startSec = range.start.getTime() / 1000;
+  const endSec = range.end.getTime() / 1000;
+  for (const session of clipSessions(sessions, startSec, endSec)) {
+    if (session.isAfk) continue;
+    const category = classifier(session);
+    if (category?.isIgnored) continue;
+    let cursor = session.start;
+    while (cursor < session.end) {
+      const date = new Date(cursor * 1000);
+      const nextHour = new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate(),
+        date.getHours() + 1,
+      ).getTime() / 1000;
+      const chunkEnd = Math.min(session.end, nextHour > cursor ? nextHour : cursor + 3600);
+      const cell = byKey.get(date.getDay() * 24 + date.getHours());
+      if (cell) {
+        const seconds = chunkEnd - cursor;
+        cell.trackedSeconds += seconds;
+        if (!category) cell.uncategorizedSeconds += seconds;
+        else {
+          const kind = categoryKind(category);
+          if (kind === "productive") cell.productiveSeconds += seconds;
+          else if (kind === "neutral") cell.neutralSeconds += seconds;
+          else cell.unproductiveSeconds += seconds;
+        }
+        cell.appSeconds.set(session.process, (cell.appSeconds.get(session.process) ?? 0) + seconds);
+      }
+      cursor = chunkEnd;
+    }
+  }
+
+  return {
+    cells: cells.map(({ appSeconds, ...cell }) => {
+      let topApp: RhythmCell["topApp"] = null;
+      for (const [process, seconds] of appSeconds) {
+        if (!topApp || seconds > topApp.seconds) topApp = { process, seconds };
+      }
+      return { ...cell, topApp };
+    }),
+    weekdayCounts,
+  };
+}
+
 /** Zero-filled, non-AFK activity by local calendar day within `range`. */
 export function dailyActivitySummaries(
   sessions: Session[],

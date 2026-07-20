@@ -8,10 +8,12 @@ import {
   isCompleteHoursBucket,
   overviewGranularity,
   overviewHistoryStart,
+  weekdayRhythmSummaries,
 } from "./overview";
 import { addDays, dayKey, type Range } from "./time";
 import type { Session } from "./metrics";
 import { formatActivityCalendarTooltip } from "../components/ActivityCalendar";
+import { formatRhythmTooltip } from "../components/RhythmChart";
 import {
   formatHoursBucketRange,
   shouldShowUncategorized,
@@ -130,6 +132,68 @@ describe("hourlyActivitySummaries", () => {
     expect(summaries.map((hour) => hour.neutralSeconds)).toEqual([0, 900, 900]);
     expect(summaries.map((hour) => hour.unproductiveSeconds)).toEqual([0, 0, 900]);
     expect(summaries.map((hour) => hour.uncategorizedSeconds)).toEqual([0, 0, 1800]);
+  });
+});
+
+describe("weekdayRhythmSummaries", () => {
+  // Mon Jun 8 – Mon Jun 22, 2026 (15 days): three Mondays, two of everything else.
+  const range = rangeFrom(new Date(2026, 5, 8), 15);
+  const at = (day: number, hour: number, minute = 0) =>
+    new Date(2026, 5, day, hour, minute).getTime() / 1000;
+  const summary = () =>
+    weekdayRhythmSummaries(
+      [
+        session(at(8, 9), at(8, 10, 30), "code.exe"),
+        session(at(15, 9, 15), at(15, 9, 45), "game.exe"),
+        session(at(10, 11), at(10, 11, 15), "unknown.exe"),
+        session(at(9, 8), at(9, 9), "code.exe"), // before the visible window
+        session(at(8, 11), at(8, 11, 30), "secret.exe"), // ignored
+        session(at(8, 9), at(8, 9, 30), "idle", true), // AFK
+      ],
+      range,
+      classify,
+      9,
+      12,
+    );
+
+  const cell = (weekday: number, hour: number) =>
+    summary().cells.find((c) => c.weekday === weekday && c.hour === hour)!;
+
+  it("counts weekday occurrences from calendar days in the range", () => {
+    expect(summary().weekdayCounts).toEqual([2, 3, 2, 2, 2, 2, 2]);
+  });
+
+  it("zero-fills every visible weekday-hour cell", () => {
+    expect(summary().cells).toHaveLength(7 * 3);
+    expect(cell(0, 9)).toMatchObject({ trackedSeconds: 0, topApp: null });
+  });
+
+  it("totals sessions into (weekday, hour) cells, excluding AFK, ignored, and out-of-window hours", () => {
+    expect(cell(1, 9)).toMatchObject({
+      trackedSeconds: 5400,
+      productiveSeconds: 3600,
+      unproductiveSeconds: 1800,
+      topApp: { process: "code.exe", seconds: 3600 },
+    });
+    expect(cell(1, 10)).toMatchObject({ trackedSeconds: 1800, productiveSeconds: 1800 });
+    expect(cell(1, 11).trackedSeconds).toBe(0); // ignored session invisible
+    expect(cell(2, 9).trackedSeconds).toBe(0); // 8am session stays out of the window
+    expect(cell(3, 11)).toMatchObject({ trackedSeconds: 900, uncategorizedSeconds: 900 });
+  });
+
+  it("formats the tooltip with per-occurrence averages and an aliased top app", () => {
+    const tooltip = formatRhythmTooltip(cell(1, 9), 3, { "code.exe": "Editor <Main>" });
+    expect(tooltip).toContain("Monday · 9am–10am");
+    expect(tooltip).toContain("Avg tracked: 30m");
+    expect(tooltip).toContain("(over 3 Mondays)");
+    expect(tooltip).toContain("Productive: 20m");
+    expect(tooltip).toContain("Unproductive: 10m");
+    expect(tooltip).toContain("Neutral: 0s");
+    expect(tooltip).toContain("Top app: Editor &lt;Main&gt; · 1h 0m total");
+  });
+
+  it("uses the singular weekday name for a single occurrence", () => {
+    expect(formatRhythmTooltip(cell(0, 9), 1)).toContain("(over 1 Sunday)");
   });
 });
 
