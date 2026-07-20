@@ -84,6 +84,13 @@ export function metricSeconds(totals: ActivityTotals, metric: ActivityMetric): n
   }
 }
 
+/** The metric's whole-percent share of tracked time, or null when it carries no
+ *  meaning: for tracked itself (always 100%) or an empty cell. */
+export function metricTrackedShare(totals: ActivityTotals, metric: ActivityMetric): number | null {
+  if (metric === "tracked" || totals.trackedSeconds <= 0) return null;
+  return Math.round((metricSeconds(totals, metric) / totals.trackedSeconds) * 100);
+}
+
 /** Past two years, monthly bars run to 24+ and keep growing; yearly bars stay
  *  legible out to decades. The middle calendar switches to month cells a little
  *  earlier (see MONTH_CALENDAR_MIN_DAYS) — bars tolerate more marks than a grid

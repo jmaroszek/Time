@@ -13,6 +13,7 @@ import { cleanProcessName, fmtDuration } from "../lib/format";
 import type { Session } from "../lib/metrics";
 import {
   metricSeconds,
+  metricTrackedShare,
   weekdayRhythmSummaries,
   ACTIVITY_METRIC_WORDS,
   type ActivityMetric,
@@ -119,26 +120,19 @@ export function formatRhythmTooltip(
   aliases?: Record<string, string>,
 ): string {
   const avg = (seconds: number) => fmtDuration(weekdayCount > 0 ? seconds / weekdayCount : 0);
-  const occurrences = `${weekdayCount} ${FULL_DAY_NAMES[cell.weekday]}${weekdayCount === 1 ? "" : "s"}`;
   const topApp = cell.topApp
     ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(cell.topApp.process, aliases))} · ${fmtDuration(cell.topApp.seconds)} total</div>`
     : "";
-  // The shaded metric leads, so the headline always names what the color means;
-  // the rest follow in a fixed order so rows don't jump between metrics.
-  const rows: [ActivityMetric | "uncategorized", string, number][] = [
-    ["tracked", "Tracked", cell.trackedSeconds],
-    ["productive", "Productive", cell.productiveSeconds],
-    ["neutral", "Neutral", cell.neutralSeconds],
-    ["unproductive", "Unproductive", cell.unproductiveSeconds],
-    ["uncategorized", "Uncategorized", cell.uncategorizedSeconds],
-  ];
-  const lead = rows.find(([key]) => key === metric)!;
+  // The dropdown already frames which state the reader is asking about, so the
+  // tooltip answers just that: the shaded metric plus tracked as its
+  // denominator. The full state breakdown lives one dropdown pick away.
+  const share = metricTrackedShare(cell, metric);
   return [
     `<b>${FULL_DAY_NAMES[cell.weekday]} · ${compactHour(cell.hour)}–${compactHour(cell.hour + 1)}</b>`,
-    `<div>Avg ${ACTIVITY_METRIC_WORDS[metric]}: ${avg(lead[2])} <span style="color:${CHROME.axisLabel}">(over ${occurrences})</span></div>`,
-    ...rows
-      .filter(([key]) => key !== metric)
-      .map(([, label, seconds]) => `<div>${label}: ${avg(seconds)}</div>`),
+    `<div>Avg ${ACTIVITY_METRIC_WORDS[metric]}: ${avg(metricSeconds(cell, metric))}${share === null ? "" : ` <span style="color:${CHROME.axisLabel}">(${share}% of tracked)</span>`}</div>`,
+    metric === "tracked"
+      ? ""
+      : `<div style="color:${CHROME.axisLabel}">Tracked: ${avg(cell.trackedSeconds)}</div>`,
     topApp,
   ].join("");
 }
