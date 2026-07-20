@@ -29,6 +29,7 @@ import {
   ACTIVITY_METRIC_LABELS,
   ACTIVITY_METRIC_WORDS,
   type ActivityMetric,
+  type ActivityStack,
 } from "../lib/overview";
 import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
@@ -48,6 +49,7 @@ export default function OverviewTab({
   // null = follow the range-length default; an explicit pick sticks until changed.
   const [aggregateView, setAggregateView] = useState<"rhythm" | "calendar" | null>(null);
   const [metric, setMetric] = useState<ActivityMetric>("tracked");
+  const [stackBy, setStackBy] = useState<ActivityStack>("state");
 
   // One fetch covers the visible range, the previous period (deltas), and the
   // 6 days before the range (7-day rolling average).
@@ -286,6 +288,16 @@ export default function OverviewTab({
         <Card
           title={isSingleDay ? "Hourly Activity" : granularity === "daily" ? "Daily Hours" : granularity === "weekly" ? "Weekly Hours" : "Monthly Hours"}
           className="h-[345px]"
+          right={isSingleDay ? undefined : (
+            <Select
+              value={stackBy}
+              onChange={(v) => setStackBy(v as ActivityStack)}
+              options={[
+                { value: "state", label: "By state" },
+                { value: "category", label: "By category" },
+              ]}
+            />
+          )}
         >
           <div className="pt-2">
             {isSingleDay ? (
@@ -304,6 +316,8 @@ export default function OverviewTab({
                 labelMode={preset === "last7" ? "weekday" : "date"}
                 granularity={granularity}
                 weekStart={meta.weekStart}
+                stackBy={stackBy}
+                categories={meta.categories}
               />
             )}
           </div>
