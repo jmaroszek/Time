@@ -182,7 +182,11 @@ export default function ProductiveHoursChart({
     return () => ro.disconnect();
   }, []);
 
-  const option = useMemo<EChartsOption>(() => {
+  // Bars, labels, the rolling average, and the on-screen buckets are all
+  // independent of the stack dropdown and the container width — they walk the
+  // sessions, so they live in their own memo. Only the stack selection and the
+  // legend/grid geometry below react to stackBy / categories / chartWidth.
+  const agg = useMemo(() => {
     const round2 = (h: number) => Math.round(h * 100) / 100;
     let labels: string[];
     let prodBars: number[];
@@ -262,6 +266,11 @@ export default function ProductiveHoursChart({
         ? [{ name: "Uncategorized", color: UNCATEGORIZED_BAR, hours: uncategorizedBars }]
         : []),
     ];
+    return { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks };
+  }, [historySessions, range, classifier, labelMode, granularity, weekStart]);
+
+  const option = useMemo<EChartsOption>(() => {
+    const { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks } = agg;
     const categoryStacks = categorySeries(visible, categories);
     const stacks = stackBy === "category" ? categoryStacks : stateStacks;
     const stackNames = stacks.map((stack) => stack.name);
@@ -369,7 +378,7 @@ export default function ProductiveHoursChart({
         }] : []),
       ],
     };
-  }, [historySessions, range, classifier, labelMode, granularity, weekStart, stackBy, categories, chartWidth]);
+  }, [agg, stackBy, categories, chartWidth]);
 
   return (
     <div ref={wrapRef}>
