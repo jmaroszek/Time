@@ -1,21 +1,51 @@
 // Top apps with quiet, category-aware deltas vs the previous period.
 
+import { useState } from "react";
+
 import type { AppDelta } from "../lib/metrics";
 import { cleanProcessName, fmtDuration } from "../lib/format";
+import { saveProcessAliases } from "../lib/queries";
+import { useBanner } from "../state/banner";
 import { useMeta } from "../state/meta";
-import { CategoryDot } from "./ui";
+import { CategoryDot, FloatingTooltip } from "./ui";
 
 export default function TopAppsList({
   apps,
   comparisonDays,
+  comparisonAvailable,
   hiddenAppCount,
 }: {
   apps: AppDelta[];
   comparisonDays: number;
+  comparisonAvailable: boolean;
   hiddenAppCount: number;
 }) {
-  const { aliases, minAppSeconds } = useMeta();
+  const meta = useMeta();
+  const banner = useBanner();
+  const { aliases, browserSet, minAppSeconds } = meta;
+  const [editingProcess, setEditingProcess] = useState<string | null>(null);
+  const [aliasDraft, setAliasDraft] = useState("");
   const max = apps[0]?.seconds ?? 1;
+  const beginRename = (process: string) => {
+    setEditingProcess(process);
+    setAliasDraft(aliases[process.toLowerCase()] ?? "");
+  };
+  const commitRename = async (process: string) => {
+    const key = process.toLowerCase();
+    const alias = aliasDraft.trim();
+    const currentAlias = aliases[key] ?? "";
+    setEditingProcess(null);
+    if (alias === currentAlias) return;
+    const nextAliases = { ...aliases };
+    if (alias) nextAliases[key] = alias;
+    else delete nextAliases[key];
+    try {
+      await saveProcessAliases(nextAliases);
+      await meta.refresh();
+    } catch (error) {
+      banner.report(error, "name");
+    }
+  };
   return (
     <div>
       <div
@@ -23,9 +53,31 @@ export default function TopAppsList({
       >
         {apps.map((app) => (
           <div key={app.process} className="flex items-center gap-3 text-xs">
-            <span className="flex w-36 shrink-0 items-center gap-2 truncate" title={app.process}>
+            <span className="flex w-36 shrink-0 items-center gap-2 truncate">
               <CategoryDot color={app.category?.color ?? "#5b616b"} />
-              <span className="truncate">{cleanProcessName(app.process, aliases)}</span>
+              {editingProcess === app.process ? (
+                <input
+                  autoFocus
+                  value={aliasDraft}
+                  aria-label={`Rename ${cleanProcessName(app.process)}`}
+                  placeholder={cleanProcessName(app.process)}
+                  onChange={(event) => setAliasDraft(event.target.value)}
+                  onBlur={() => void commitRename(app.process)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void commitRename(app.process);
+                    else if (event.key === "Escape") setEditingProcess(null);
+                  }}
+                  className="w-full min-w-0 rounded-md border border-edge bg-surface-2 px-1.5 py-0.5 text-xs text-ink outline-none focus:border-accent/60"
+                />
+              ) : (
+                <span
+                  className="truncate cursor-text"
+                  title={`${app.process} — double-click to rename`}
+                  onDoubleClick={() => beginRename(app.process)}
+                >
+                  {cleanProcessName(app.process, aliases)}
+                </span>
+              )}
             </span>
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
               <div
@@ -37,7 +89,12 @@ export default function TopAppsList({
               />
             </div>
             <span className="w-14 shrink-0 text-right text-ink-2">{fmtDuration(app.seconds)}</span>
-            <DeltaBadge app={app} comparisonDays={comparisonDays} />
+            <DeltaBadge
+              app={app}
+              comparisonDays={comparisonDays}
+              comparisonAvailable={comparisonAvailable}
+              forceNeutral={browserSet.has(app.process.toLowerCase())}
+            />
           </div>
         ))}
         {apps.length === 0 && <p className="py-8 text-center text-ink-3">No activity in range</p>}
@@ -53,27 +110,37 @@ export default function TopAppsList({
   );
 }
 
-function DeltaBadge({ app, comparisonDays }: { app: AppDelta; comparisonDays: number }) {
+function DeltaBadge({
+  app,
+  comparisonDays,
+  comparisonAvailable,
+  forceNeutral,
+}: {
+  app: AppDelta;
+  comparisonDays: number;
+  comparisonAvailable: boolean;
+  forceNeutral: boolean;
+}) {
+  if (!comparisonAvailable) return null;
   if (app.deltaFraction === null) {
     return <span className="w-14 shrink-0 text-right text-[11px] text-ink-3">new</span>;
   }
   const pct = Math.round(app.deltaFraction * 100);
   const text = `${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct)}%`;
   const cls =
-    app.direction === "good"
+    !forceNeutral && app.direction === "good"
       ? "text-good"
-      : app.direction === "bad"
+      : !forceNeutral && app.direction === "bad"
         ? "text-bad"
         : "text-ink-2";
   const period = `the previous ${comparisonDays} ${comparisonDays === 1 ? "day" : "days"}`;
   const tooltip = `${text} vs ${period}${app.direction === "neutral" ? ", driven mostly by a single day" : ""}`;
   return (
-    <span
-      className={`w-14 shrink-0 text-right text-[11px] font-normal tracking-tight tabular-nums ${cls}`}
-      aria-label={`${pct > 0 ? "increased" : pct < 0 ? "decreased" : "unchanged"} ${Math.abs(pct)} percent`}
-      title={tooltip}
+    <FloatingTooltip
+      text={tooltip}
+      className={`w-14 shrink-0 text-right text-[11px] font-normal tracking-tight tabular-nums outline-none ${cls}`}
     >
       <span aria-hidden="true">{text}</span>
-    </span>
+    </FloatingTooltip>
   );
 }

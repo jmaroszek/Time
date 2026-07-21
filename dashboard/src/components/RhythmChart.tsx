@@ -4,7 +4,7 @@
 // The ramp follows the metric, matching the convention in chartTheme: blue
 // encodes amount of tracked time without the productive/non-productive
 // judgment (same as ActivityCalendar), green encodes productive time (same as
-// the productive bars). Either way the tooltip carries the full breakdown.
+// the productive bars). The tooltip stays scoped to the selected metric.
 
 import { useMemo } from "react";
 
@@ -107,19 +107,17 @@ export function formatRhythmTooltip(
   aliases?: Record<string, string>,
 ): string {
   const avg = (seconds: number) => fmtDuration(weekdayCount > 0 ? seconds / weekdayCount : 0);
-  const topApp = cell.topApp
+  const topApp = metric === "tracked" && cell.topApp
     ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(cell.topApp.process, aliases))} · ${fmtDuration(cell.topApp.seconds)} total</div>`
     : "";
-  // The dropdown already frames which state the reader is asking about, so the
-  // tooltip answers just that: the shaded metric plus tracked as its
-  // denominator. The full state breakdown lives one dropdown pick away.
   const share = metricTrackedShare(cell, metric);
+  const word = ACTIVITY_METRIC_WORDS[metric];
   return [
     `<b>${FULL_DAY_NAMES[cell.weekday]} · ${compactHour(cell.hour)}–${compactHour(cell.hour + 1)}</b>`,
-    `<div>Avg ${ACTIVITY_METRIC_WORDS[metric]}: ${avg(metricSeconds(cell, metric))}${share === null ? "" : ` <span style="color:${CHROME.axisLabel}">(${share}% of tracked)</span>`}</div>`,
-    metric === "tracked"
+    `<div>Avg ${word}: ${avg(metricSeconds(cell, metric))}</div>`,
+    share === null
       ? ""
-      : `<div style="color:${CHROME.axisLabel}">Tracked: ${avg(cell.trackedSeconds)}</div>`,
+      : `<div style="color:${CHROME.axisLabel}">${share}% of tracked time</div>`,
     topApp,
   ].join("");
 }

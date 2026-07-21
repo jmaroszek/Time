@@ -1,14 +1,16 @@
 // Long-range calendar: one cell per calendar month, years as rows and the
 // twelve months as columns. The day-cell ActivityCalendar slices too thin past
 // ~14 months; this stays a clean 12-wide grid from one year to forty, scrolling
-// vertically once the years pile up. Same metric ramps and tooltip breakdown as
-// the day calendar — it is that view zoomed out one level.
+// vertically once the years pile up. Same metric ramps and selected-metric
+// tooltip as the day calendar — it is that view zoomed out one level.
 
 import { useMemo } from "react";
 
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import {
+  ACTIVITY_METRIC_WORDS,
   metricSeconds,
+  metricTrackedShare,
   type ActivityMetric,
   type MonthlyActivitySummary,
 } from "../lib/overview";
@@ -75,7 +77,7 @@ export default function MonthCalendarChart({
         ...TOOLTIP_STYLE,
         formatter: (p: { data: [number, number, number] }) => {
           const month = byPoint.get(`${p.data[0]},${p.data[1]}`);
-          return month ? formatMonthCalendarTooltip(month, aliases) : "";
+          return month ? formatMonthCalendarTooltip(month, metric, aliases) : "";
         },
       },
       xAxis: {
@@ -127,21 +129,24 @@ export default function MonthCalendarChart({
 
 export function formatMonthCalendarTooltip(
   month: MonthlyActivitySummary,
+  metric: ActivityMetric = "tracked",
   aliases?: Record<string, string>,
 ): string {
-  const productiveShare = month.trackedSeconds > 0
-    ? Math.round((month.productiveSeconds / month.trackedSeconds) * 100)
-    : 0;
-  const topApp = month.topApp
+  const share = metricTrackedShare(month, metric);
+  const word = ACTIVITY_METRIC_WORDS[metric];
+  const label = word.replace(/^./, (c) => c.toUpperCase());
+  const topApp = metric === "tracked" && month.topApp
     ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(month.topApp.process, aliases))} · ${fmtDuration(month.topApp.seconds)}</div>`
     : "";
   return [
     `<b>${FULL_MONTH_NAMES[month.month]} ${month.year}</b>`,
-    `<div>Tracked: ${fmtDuration(month.trackedSeconds)}</div>`,
-    `<div>Productive: ${fmtDuration(month.productiveSeconds)} (${productiveShare}%)</div>`,
-    `<div>Neutral: ${fmtDuration(month.neutralSeconds)}</div>`,
-    `<div>Unproductive: ${fmtDuration(month.unproductiveSeconds)}</div>`,
-    `<div>Uncategorized: ${fmtDuration(month.uncategorizedSeconds)}</div>`,
+    `<div>${label}: ${fmtDuration(metricSeconds(month, metric))}</div>`,
+    share === null
+      ? ""
+      : `<div style="color:${CHROME.axisLabel}">${share}% of tracked time</div>`,
+    metric === "productive"
+      ? `<div style="color:${CHROME.axisLabel}">Longest focus: ${fmtDuration(month.longestFocusSeconds)}</div>`
+      : "",
     topApp,
   ].join("");
 }

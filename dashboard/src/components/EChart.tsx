@@ -20,7 +20,33 @@ export default function EChart({
     chartRef.current = chart;
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(containerRef.current!);
+
+    // ECharts 6.1 does not clear its delayed-show timer on globalout. Cancel
+    // that one private timer at the chart boundary while leaving native item
+    // and axis tooltip handling intact. Remove this shim when ECharts does so.
+    const cancelPendingTooltip = () => {
+      type InternalComponentModel = object;
+      const internalChart = chart as unknown as {
+        getModel: () => {
+          getComponent: (mainType: string) => InternalComponentModel | null;
+        };
+        getViewOfComponentModel: (component: InternalComponentModel) => {
+          _showTimout?: number | null;
+        } | null;
+      };
+      const model = internalChart.getModel().getComponent("tooltip");
+      if (!model) return;
+      const view = internalChart.getViewOfComponentModel(model);
+      if (view?._showTimout != null) {
+        window.clearTimeout(view._showTimout);
+        view._showTimout = null;
+      }
+    };
+    chart.getZr().on("globalout", cancelPendingTooltip);
+
     return () => {
+      cancelPendingTooltip();
+      chart.getZr().off("globalout", cancelPendingTooltip);
       ro.disconnect();
       chart.dispose();
       chartRef.current = null;
