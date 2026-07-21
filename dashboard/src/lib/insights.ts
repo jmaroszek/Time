@@ -39,6 +39,8 @@ import {
 
 interface MutableDay extends DailyActivitySummary {
   appSeconds: Map<string, number>;
+  focusRunSeconds: number;
+  focusChainEnd: number | null;
 }
 
 interface InsightsAggregation {
@@ -126,7 +128,10 @@ function makeDays(range: Range): Map<string, MutableDay> {
           uncategorizedSeconds: 0,
           categorySeconds: new Map<string, number>(),
           topApp: null,
+          longestFocusSeconds: 0,
           appSeconds: new Map<string, number>(),
+          focusRunSeconds: 0,
+          focusChainEnd: null,
         },
       ];
     }),
@@ -157,7 +162,7 @@ function addDaySeconds(
 }
 
 function finalizeDays(days: Map<string, MutableDay>): DailyActivitySummary[] {
-  return [...days.values()].map(({ appSeconds, ...day }) => {
+  return [...days.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...day }) => {
     let topApp: DailyActivitySummary["topApp"] = null;
     for (const [process, seconds] of appSeconds) {
       if (!topApp || seconds > topApp.seconds) topApp = { process, seconds };
@@ -274,18 +279,35 @@ export function aggregateInsightsSessions(
       });
     }
 
-    if (inHistory && !inHistory.isAfk) {
-      const currentValues = inCurrent
+    if (inHistory) {
+      const currentValues = inCurrent && !inHistory.isAfk
         ? dailyArray(currentDaily, inCurrent.process, currentDayIndex.size)
         : null;
       forEachDayChunk(inHistory.start, inHistory.end, (chunk) => {
         const key = dayKey(chunk.dayStart);
-        addDaySeconds(
-          historyDays.get(key),
-          inHistory,
-          category,
-          chunk.endSec - chunk.startSec,
-        );
+        const day = historyDays.get(key);
+        if (inHistory.isAfk) {
+          if (day) {
+            day.focusRunSeconds = 0;
+            day.focusChainEnd = null;
+          }
+          return;
+        }
+        const seconds = chunk.endSec - chunk.startSec;
+        addDaySeconds(day, inHistory, category, seconds);
+        if (day) {
+          if (category?.isProductive) {
+            day.focusRunSeconds =
+              day.focusChainEnd !== null && chunk.startSec - day.focusChainEnd <= focusChainMaxGapSeconds
+                ? day.focusRunSeconds + seconds
+                : seconds;
+            day.focusChainEnd = chunk.endSec;
+            day.longestFocusSeconds = Math.max(day.longestFocusSeconds, day.focusRunSeconds);
+          } else {
+            day.focusRunSeconds = 0;
+            day.focusChainEnd = null;
+          }
+        }
         if (inCurrent && currentValues) {
           const overlapStart = Math.max(chunk.startSec, inCurrent.start);
           const overlapEnd = Math.min(chunk.endSec, inCurrent.end);
@@ -349,7 +371,12 @@ function buildInsightsModelWithClassifier(
       : null;
   const monthly =
     rangeDays >= MONTH_CALENDAR_MIN_DAYS
-      ? monthlyActivitySummaries(aggregation.current, request.range, classifier)
+      ? monthlyActivitySummaries(
+          aggregation.current,
+          request.range,
+          classifier,
+          request.focusChainMaxGapSeconds,
+        )
       : null;
   const hourly =
     rangeDays === 1

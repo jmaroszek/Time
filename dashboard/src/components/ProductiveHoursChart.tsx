@@ -281,13 +281,16 @@ export default function ProductiveHoursChart({
     const tooltip = {
       trigger: "axis" as const,
       ...TOOLTIP_STYLE,
-      formatter: (params: Array<{ axisValueLabel: string; dataIndex: number; marker: string; seriesName: string; value: number }>) => {
+      formatter: (params: Array<{ axisValueLabel: string; dataIndex: number; marker: string; seriesName: string; value: unknown }>) => {
         if (!params.length) return "";
         const byName = new Map(params.map((p) => [p.seriesName, p]));
         const rows = [...(showProductiveAverage ? [averageName] : []), ...stackNames]
           .map((name) => byName.get(name))
           .filter((p): p is NonNullable<typeof p> => p !== undefined)
-          .map((p) => `${p.marker}${p.seriesName}: <b>${formatHoursTooltipValue(p.value)}</b>`);
+          .flatMap((p) => {
+            const value = formatHoursTooltipValue(p.value);
+            return value === null ? [] : [`${p.marker}${p.seriesName}: <b>${value}</b>`];
+          });
         return [`<b>${tooltipHeaders[params[0].dataIndex]}</b>`, ...rows].join("<br/>");
       },
     };
@@ -390,10 +393,10 @@ export default function ProductiveHoursChart({
   );
 }
 
-export function formatHoursTooltipValue(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "NA";
+export function formatHoursTooltipValue(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
   const hours = Number(value);
-  return Number.isFinite(hours) ? `${hours.toFixed(1)}h` : "NA";
+  return Number.isFinite(hours) ? `${hours.toFixed(1)}h` : null;
 }
 
 export function formatHoursBucketRange(bucket: HoursBucket): string {

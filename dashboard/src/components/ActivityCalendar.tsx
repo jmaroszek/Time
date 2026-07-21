@@ -167,20 +167,21 @@ export function formatActivityCalendarTooltip(
   aliases?: Record<string, string>,
 ): string {
   const date = `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}`;
-  const topApp = day.topApp
+  const topApp = metric === "tracked" && day.topApp
     ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(day.topApp.process, aliases))} · ${fmtDuration(day.topApp.seconds)}</div>`
     : "";
-  // Matches the rhythm tooltip: the shaded metric leads, with tracked as its
-  // denominator. The dropdown selects the state, so the tooltip need not list
-  // every one.
   const share = metricTrackedShare(day, metric);
   const word = ACTIVITY_METRIC_WORDS[metric];
+  const label = word.replace(/^./, (c) => c.toUpperCase());
   return [
     `<b>${date}</b>`,
-    `<div>${word.replace(/^./, (c) => c.toUpperCase())}: ${fmtDuration(metricSeconds(day, metric))}${share === null ? "" : ` <span style="color:${CHROME.axisLabel}">(${share}% of tracked)</span>`}</div>`,
-    metric === "tracked"
+    `<div>${label}: ${fmtDuration(metricSeconds(day, metric))}</div>`,
+    share === null
       ? ""
-      : `<div style="color:${CHROME.axisLabel}">Tracked: ${fmtDuration(day.trackedSeconds)}</div>`,
+      : `<div style="color:${CHROME.axisLabel}">${share}% of tracked time</div>`,
+    metric === "productive"
+      ? `<div style="color:${CHROME.axisLabel}">Longest focus: ${fmtDuration(day.longestFocusSeconds)}</div>`
+      : "",
     topApp,
   ].join("");
 }

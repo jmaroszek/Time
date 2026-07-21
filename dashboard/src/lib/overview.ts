@@ -28,17 +28,17 @@ export type ActivityMetric = "tracked" | "productive" | "unproductive" | "neutra
 export const ACTIVITY_METRICS: ActivityMetric[] = [
   "tracked",
   "productive",
-  "unproductive",
   "neutral",
+  "unproductive",
 ];
 
-/** Dropdown label per metric. "Total" rather than "Tracked" — the control is
- *  read next to the others, where "total vs productive" is the clearer pair. */
+/** Compact dropdown labels: this control reads as one phrase with the adjacent
+ *  Rhythm/Calendar selector (for example, "Productive Calendar"). */
 export const ACTIVITY_METRIC_LABELS: Record<ActivityMetric, string> = {
-  tracked: "Total time",
-  productive: "Productive time",
-  unproductive: "Unproductive time",
-  neutral: "Neutral time",
+  tracked: "Total",
+  productive: "Productive",
+  unproductive: "Unproductive",
+  neutral: "Neutral",
 };
 
 /** Adjective for chart subtitles and tooltip rows. */
@@ -125,6 +125,8 @@ export interface DailyActivitySummary {
   /** Seconds per category name, UNCATEGORIZED_LABEL for unmatched sessions. */
   categorySeconds: Map<string, number>;
   topApp: { process: string; seconds: number } | null;
+  /** Longest productive chain contained within this calendar day. */
+  longestFocusSeconds: number;
 }
 
 export interface HourlyActivitySummary {
@@ -293,6 +295,7 @@ export function dailyActivitySummaries(
   sessions: Session[],
   range: Range,
   classifier: Classifier,
+  focusChainMaxGapSeconds = 120,
 ): DailyActivitySummary[] {
   const days = listDays(range);
   const byKey = new Map(
@@ -308,21 +311,29 @@ export function dailyActivitySummaries(
         uncategorizedSeconds: 0,
         categorySeconds: new Map<string, number>(),
         topApp: null,
+        longestFocusSeconds: 0,
         appSeconds: new Map<string, number>(),
+        focusRunSeconds: 0,
+        focusChainEnd: null as number | null,
       },
     ]),
   );
   const startSec = range.start.getTime() / 1000;
   const endSec = range.end.getTime() / 1000;
 
-  forEachClippedSession(sessions, startSec, endSec, (session) => {
-    if (session.isAfk) return;
+  const ordered = [...sessions].sort((left, right) => left.start - right.start || left.id - right.id);
+  forEachClippedSession(ordered, startSec, endSec, (session) => {
     const category = classifier(session);
     if (category?.isIgnored) return;
     forEachDayChunk(session.start, session.end, (chunk) => {
       const day = byKey.get(dayKey(chunk.dayStart));
       if (!day) return;
       const seconds = chunk.endSec - chunk.startSec;
+      if (session.isAfk) {
+        day.focusRunSeconds = 0;
+        day.focusChainEnd = null;
+        return;
+      }
       day.trackedSeconds += seconds;
       if (!category) day.uncategorizedSeconds += seconds;
       else {
@@ -333,10 +344,21 @@ export function dailyActivitySummaries(
       }
       addCategorySeconds(day.categorySeconds, category?.name, seconds);
       day.appSeconds.set(session.process, (day.appSeconds.get(session.process) ?? 0) + seconds);
+      if (category?.isProductive) {
+        day.focusRunSeconds =
+          day.focusChainEnd !== null && chunk.startSec - day.focusChainEnd <= focusChainMaxGapSeconds
+            ? day.focusRunSeconds + seconds
+            : seconds;
+        day.focusChainEnd = chunk.endSec;
+        day.longestFocusSeconds = Math.max(day.longestFocusSeconds, day.focusRunSeconds);
+      } else {
+        day.focusRunSeconds = 0;
+        day.focusChainEnd = null;
+      }
     });
   });
 
-  return [...byKey.values()].map(({ appSeconds, ...day }) => {
+  return [...byKey.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...day }) => {
     let topApp: DailyActivitySummary["topApp"] = null;
     for (const [process, seconds] of appSeconds) {
       if (!topApp || seconds > topApp.seconds) topApp = { process, seconds };
@@ -357,6 +379,8 @@ export interface MonthlyActivitySummary {
   uncategorizedSeconds: number;
   categorySeconds: Map<string, number>;
   topApp: { process: string; seconds: number } | null;
+  /** Longest productive chain contained within this calendar month. */
+  longestFocusSeconds: number;
 }
 
 function monthKey(year: number, month: number): string {
@@ -370,10 +394,15 @@ export function monthlyActivitySummaries(
   sessions: Session[],
   range: Range,
   classifier: Classifier,
+  focusChainMaxGapSeconds = 120,
 ): MonthlyActivitySummary[] {
   const byKey = new Map<
     string,
-    MonthlyActivitySummary & { appSeconds: Map<string, number> }
+    MonthlyActivitySummary & {
+      appSeconds: Map<string, number>;
+      focusRunSeconds: number;
+      focusChainEnd: number | null;
+    }
   >();
   const first = new Date(range.start.getFullYear(), range.start.getMonth(), 1);
   for (let m = first; m < range.end; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
@@ -389,20 +418,27 @@ export function monthlyActivitySummaries(
       uncategorizedSeconds: 0,
       categorySeconds: new Map<string, number>(),
       topApp: null,
+      longestFocusSeconds: 0,
       appSeconds: new Map<string, number>(),
+      focusRunSeconds: 0,
+      focusChainEnd: null,
     });
   }
 
   const startSec = range.start.getTime() / 1000;
   const endSec = range.end.getTime() / 1000;
   forEachClippedSession(sessions, startSec, endSec, (session) => {
-    if (session.isAfk) return;
     const category = classifier(session);
     if (category?.isIgnored) return;
     forEachDayChunk(session.start, session.end, (chunk) => {
       const month = byKey.get(monthKey(chunk.dayStart.getFullYear(), chunk.dayStart.getMonth()));
       if (!month) return;
       const seconds = chunk.endSec - chunk.startSec;
+      if (session.isAfk) {
+        month.focusRunSeconds = 0;
+        month.focusChainEnd = null;
+        return;
+      }
       month.trackedSeconds += seconds;
       if (!category) month.uncategorizedSeconds += seconds;
       else {
@@ -413,10 +449,21 @@ export function monthlyActivitySummaries(
       }
       addCategorySeconds(month.categorySeconds, category?.name, seconds);
       month.appSeconds.set(session.process, (month.appSeconds.get(session.process) ?? 0) + seconds);
+      if (category?.isProductive) {
+        month.focusRunSeconds =
+          month.focusChainEnd !== null && chunk.startSec - month.focusChainEnd <= focusChainMaxGapSeconds
+            ? month.focusRunSeconds + seconds
+            : seconds;
+        month.focusChainEnd = chunk.endSec;
+        month.longestFocusSeconds = Math.max(month.longestFocusSeconds, month.focusRunSeconds);
+      } else {
+        month.focusRunSeconds = 0;
+        month.focusChainEnd = null;
+      }
     });
   });
 
-  return [...byKey.values()].map(({ appSeconds, ...month }) => {
+  return [...byKey.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...month }) => {
     let topApp: MonthlyActivitySummary["topApp"] = null;
     for (const [process, seconds] of appSeconds) {
       if (!topApp || seconds > topApp.seconds) topApp = { process, seconds };

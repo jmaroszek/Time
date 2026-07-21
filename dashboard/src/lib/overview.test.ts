@@ -136,8 +136,10 @@ describe("dailyActivitySummaries", () => {
     )[0];
     const tooltip = formatActivityCalendarTooltip(day, "productive");
     expect(tooltip).toContain("Productive: 1h 0m");
-    expect(tooltip).toContain("(67% of tracked)");
-    expect(tooltip).toContain("Tracked: 1h 30m");
+    expect(tooltip).toContain("67% of tracked time");
+    expect(tooltip).toContain("Longest focus: 1h 0m");
+    expect(tooltip).not.toContain("Tracked: 1h 30m");
+    expect(tooltip).not.toContain("Top app:");
   });
 });
 
@@ -183,11 +185,16 @@ describe("monthlyActivitySummaries", () => {
   });
 
   it("formats the month tooltip with a share and aliased top app", () => {
-    const tooltip = formatMonthCalendarTooltip(month("2025-11"), { "code.exe": "Editor" });
+    const tooltip = formatMonthCalendarTooltip(month("2025-11"), "tracked", { "code.exe": "Editor" });
     expect(tooltip).toContain("November 2025");
     expect(tooltip).toContain("Tracked: 2h 0m");
-    expect(tooltip).toContain("Productive: 2h 0m (100%)");
     expect(tooltip).toContain("Top app: Editor · 2h 0m");
+
+    const productive = formatMonthCalendarTooltip(month("2025-11"), "productive");
+    expect(productive).toContain("Productive: 2h 0m");
+    expect(productive).toContain("100% of tracked time");
+    expect(productive).toContain("Longest focus: 2h 0m");
+    expect(productive).not.toContain("Top app:");
   });
 });
 
@@ -220,6 +227,10 @@ describe("hourlyActivitySummaries", () => {
 });
 
 describe("activity metrics", () => {
+  it("orders the selector like the Apps productivity classification", () => {
+    expect(ACTIVITY_METRICS).toEqual(["tracked", "productive", "neutral", "unproductive"]);
+  });
+
   it("gives every metric a ramp, a label, and a word", () => {
     for (const metric of ACTIVITY_METRICS) {
       expect(ACTIVITY_METRIC_RAMPS[metric]).toHaveLength(4);
@@ -334,11 +345,11 @@ describe("categorySeries", () => {
 });
 
 describe("formatHoursTooltipValue", () => {
-  it("formats finite durations and labels missing rolling averages as NA", () => {
+  it("formats finite durations and omits missing rolling-average values", () => {
     expect(formatHoursTooltipValue(1.25)).toBe("1.3h");
-    expect(formatHoursTooltipValue("-")).toBe("NA");
-    expect(formatHoursTooltipValue(null)).toBe("NA");
-    expect(formatHoursTooltipValue(Number.NaN)).toBe("NA");
+    expect(formatHoursTooltipValue("-")).toBeNull();
+    expect(formatHoursTooltipValue(null)).toBeNull();
+    expect(formatHoursTooltipValue(Number.NaN)).toBeNull();
   });
 });
 
@@ -412,8 +423,9 @@ describe("weekdayRhythmSummaries", () => {
   it("leads a subset metric with its value and share of tracked", () => {
     const tooltip = formatRhythmTooltip(cell(1, 9), 3, "productive");
     expect(tooltip).toContain("Avg productive: 20m");
-    expect(tooltip).toContain("(67% of tracked)");
-    expect(tooltip).toContain("Tracked: 30m");
+    expect(tooltip).toContain("67% of tracked time");
+    expect(tooltip).not.toContain("Tracked: 30m");
+    expect(tooltip).not.toContain("Top app:");
     // No occurrence count, and the other subset states stay out.
     expect(tooltip).not.toContain("Mondays");
     expect(tooltip).not.toContain("Unproductive");
@@ -423,13 +435,13 @@ describe("weekdayRhythmSummaries", () => {
   it("shares are relative to tracked for unproductive and neutral too", () => {
     const unproductive = formatRhythmTooltip(cell(1, 9), 3, "unproductive");
     expect(unproductive).toContain("Avg unproductive: 10m");
-    expect(unproductive).toContain("(33% of tracked)");
-    expect(unproductive).toContain("Tracked: 30m");
+    expect(unproductive).toContain("33% of tracked time");
+    expect(unproductive).not.toContain("Tracked: 30m");
 
     const neutral = formatRhythmTooltip(cell(1, 9), 3, "neutral");
     expect(neutral).toContain("Avg neutral: 0s");
-    expect(neutral).toContain("(0% of tracked)");
-    expect(neutral).toContain("Tracked: 30m");
+    expect(neutral).toContain("0% of tracked time");
+    expect(neutral).not.toContain("Tracked: 30m");
   });
 
   it("reads every metric off the same totals", () => {

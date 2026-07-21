@@ -15,6 +15,7 @@ export const CHROME = {
 
 /** The one tooltip look, spread into any ECharts `tooltip` option. */
 export const TOOLTIP_STYLE = {
+  showDelay: 500,
   backgroundColor: "#1d2026", // --color-surface-2
   borderColor: "#2a2e36", // --color-edge
   textStyle: { color: CHROME.text, fontSize: 12 },

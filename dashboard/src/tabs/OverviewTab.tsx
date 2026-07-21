@@ -197,12 +197,12 @@ export default function OverviewTab({
 
   return (
     <div className="relative flex flex-col gap-4" aria-busy={refreshing}>
-      {(refreshing || updateError) && (
+      {updateError && (
         <span
-          className={`pointer-events-none absolute right-1 -top-3 text-[10px] ${updateError ? "text-bad" : "text-ink-3"}`}
-          title={updateError ?? undefined}
+          className="pointer-events-none absolute right-1 -top-3 text-[10px] text-bad"
+          title={updateError}
         >
-          {updateError ? "Update failed" : "Updating…"}
+          Update failed
         </span>
       )}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -370,6 +370,7 @@ export default function OverviewTab({
             <TopAppsList
               apps={apps}
               comparisonDays={calendarDays(prev)}
+              comparisonAvailable={preset !== "alltime"}
               hiddenAppCount={apps.length < n ? hiddenAppCount : 0}
             />
           </div>
