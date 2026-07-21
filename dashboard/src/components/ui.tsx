@@ -63,7 +63,7 @@ function InfoHint({ text }: { text: string }) {
   return (
     <span
       role="tooltip"
-      className="pointer-events-none absolute left-0 top-5 z-20 hidden w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-[11px] font-normal leading-snug text-ink-2 shadow-lg group-hover:block group-focus:block"
+      className="pointer-events-none invisible absolute left-0 top-5 z-20 w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-[11px] font-normal leading-snug text-ink-2 opacity-0 shadow-lg transition-opacity delay-0 duration-100 group-hover:visible group-hover:opacity-100 group-hover:delay-300 group-focus:visible group-focus:opacity-100 group-focus:delay-0"
     >
       {text}
     </span>

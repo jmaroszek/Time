@@ -90,6 +90,16 @@ const PRODUCTIVE_AVERAGES = {
 const AVERAGE_WINDOWS = { weekly: 4, monthly: 3, yearly: 3 } as const;
 const MIN_UNCATEGORIZED_SERIES_HOURS = 1;
 
+/**
+ * Empty history buckets before tracking began are zero-filled for aligned bars,
+ * but a zero there is not evidence of a measured productivity average.
+ */
+export function visibleAverageHours(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const rounded = Math.round(value * 100) / 100;
+  return rounded > 0 ? rounded : null;
+}
+
 // Legend geometry, mirrored from the `legend` option below so the row estimate
 // matches what ECharts actually lays out.
 const LEGEND_FONT = "11px sans-serif";
@@ -214,7 +224,7 @@ export default function ProductiveHoursChart({
       uncategorizedBars = visibleDays.map((day) => round2(day.uncategorizedSeconds / 3600));
       avgLine = rollingMean(historyDays.map((day) => day.productiveSeconds / 3600), 7)
         .slice(offset)
-        .map(round2);
+        .map(visibleAverageHours);
     } else {
       buckets = bucketActivityHours(visibleDays, range, granularity, weekStart);
       visible = buckets;
@@ -228,7 +238,9 @@ export default function ProductiveHoursChart({
         historyBuckets.map((bucket) => bucket.productiveSeconds / 3600),
         averageWindow,
       );
-      const averageByKey = new Map(historyBuckets.map((bucket, index) => [bucket.key, round2(averages[index])]));
+      const averageByKey = new Map(
+        historyBuckets.map((bucket, index) => [bucket.key, visibleAverageHours(averages[index])]),
+      );
       labels = buckets.map((bucket) => {
         if (granularity === "weekly") return fmtShortDate(bucket.periodStart);
         if (granularity === "yearly") return String(bucket.periodStart.getFullYear());

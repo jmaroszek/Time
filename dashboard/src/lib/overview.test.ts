@@ -26,6 +26,7 @@ import {
   formatHoursTooltipValue,
   formatHoursBucketRange,
   shouldShowUncategorized,
+  visibleAverageHours,
 } from "../components/ProductiveHoursChart";
 
 const CATEGORIES: Category[] = [
@@ -338,6 +339,15 @@ describe("formatHoursTooltipValue", () => {
     expect(formatHoursTooltipValue("-")).toBe("NA");
     expect(formatHoursTooltipValue(null)).toBe("NA");
     expect(formatHoursTooltipValue(Number.NaN)).toBe("NA");
+  });
+});
+
+describe("visibleAverageHours", () => {
+  it("hides zero rolling averages and preserves positive values", () => {
+    expect(visibleAverageHours(0)).toBeNull();
+    expect(visibleAverageHours(0.004)).toBeNull();
+    expect(visibleAverageHours(null)).toBeNull();
+    expect(visibleAverageHours(1.236)).toBe(1.24);
   });
 });
 
