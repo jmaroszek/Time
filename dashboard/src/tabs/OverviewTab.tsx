@@ -163,6 +163,16 @@ export default function OverviewTab({
   const displayedEndMs = model?.range.end.getTime() ?? null;
   useEffect(() => setSelected(null), [displayedStartMs, displayedEndMs]);
 
+  // Pin the aggregate view the first time the range is long enough to show one.
+  // The range-length default is a starting point, not a rule: without this, any
+  // change to the range's length (toggling Rolling on the same preset, say)
+  // would silently move the picker off the view that's already on screen.
+  const aggregateRangeDays = model && model.rangeDays > 14 ? model.rangeDays : null;
+  useEffect(() => {
+    if (aggregateRangeDays === null) return;
+    setAggregateView((current) => current ?? (aggregateRangeDays <= 30 ? "rhythm" : "calendar"));
+  }, [aggregateRangeDays]);
+
   if (!model) {
     const error = sessionData.error ?? analyzed.error;
     if (error) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
@@ -176,8 +186,8 @@ export default function OverviewTab({
   const isSingleDay = rangeDays === 1;
   // The timeline stops being readable past ~two weeks of rows. Beyond that the
   // rhythm grid (collapsed into a typical week) and the calendar (every date
-  // laid out) are both useful, so the range length picks the default and the
-  // card header lets you override it.
+  // laid out) are both useful, so the range length picks the first default
+  // (pinned above) and the card header lets you override it from then on.
   const middleView =
     rangeDays <= 14 ? "timeline" : (aggregateView ?? (rangeDays <= 30 ? "rhythm" : "calendar"));
   // Past ~14 months, day cells slice too thin; the calendar shows month cells
