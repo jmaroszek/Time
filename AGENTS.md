@@ -32,6 +32,12 @@ CI runs the first three (the dashboard suite twice, under two timezones,
 because date handling is timezone-sensitive). **It does not run `cargo test`** —
 run it locally when you touch `src-tauri/`.
 
+## Branches
+
+**Work on the checked-out branch — normally `main` — and do not create a branch
+unless the owner asks for one.** Size of the change is not a reason to branch;
+ask if you think one is warranted.
+
 ## Personal documents
 
 `docs/personal/` is the home for owner-only material: audits, roadmaps,

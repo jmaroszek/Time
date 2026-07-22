@@ -7,14 +7,13 @@ import {
   type ReactNode,
 } from "react";
 
-import { Button, Card, CategoryDot, Spinner, TrashButton } from "../components/ui";
+import { Button, Card, CategoryDot, RemoveButton, Spinner } from "../components/ui";
 import { withAlias } from "../lib/aliases";
 import {
   type ActivityClassificationFilter,
   type ActivityEntitySummary,
   type ActivityQuery,
   type ActivityQueryResult,
-  type ActivityRuleUsage,
   type ActivitySessionRow,
   type ActivitySort,
   type ActivitySortDirection,
@@ -28,8 +27,9 @@ import {
   type Category,
   type CategoryState,
   type MatchType,
+  type Productivity,
 } from "../lib/classify";
-import { UNCATEGORIZED } from "../lib/chartTheme";
+import { CATEGORY_SWATCHES, UNCATEGORIZED } from "../lib/chartTheme";
 import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
 import { fmtDuration } from "../lib/format";
 import { clipSessions } from "../lib/metrics";
@@ -43,8 +43,10 @@ import {
   deleteCategory,
   deleteRule,
   fetchSessionCorrection,
+  listTrackingExclusions,
   previewActivityDelete,
   previewTrackingExclusion,
+  removeTrackingExclusion,
   resetSessionCorrection,
   saveActivityExport,
   saveProcessAliases,
@@ -52,6 +54,7 @@ import {
   type ActivityDeletePreview,
   type ActivityDeleteRequest,
   type SessionCorrection,
+  type TrackingExclusion,
   type TrackingExclusionKind,
 } from "../lib/queries";
 import { allTimeRange, type Range } from "../lib/time";
@@ -62,18 +65,9 @@ import { useSessions } from "../state/useSessions";
 
 type ActivityView = "library" | "rules";
 
-const CATEGORY_SWATCHES = [
-  "#9c8ff0",
-  "#2f6fc0",
-  "#56c8d8",
-  "#43c88a",
-  "#1d9e75",
-  "#e0a53a",
-  "#e8663d",
-  "#e75fa0",
-  "#b08a5e",
-  "#828994",
-];
+/** "Excluded" is a view of the pre-capture exclusion list, not a property of a
+ *  recorded entity — the classification dropdown is only its entry point. */
+type LibraryFilter = ActivityClassificationFilter | "excluded";
 
 const STATE_COLORS: Record<CategoryState, string> = {
   productive: "#4fb389",
@@ -81,6 +75,11 @@ const STATE_COLORS: Record<CategoryState, string> = {
   unproductive: "#d07d7d",
   ignored: "#5b616b",
 };
+
+/** The three productivity states a category can be given. Ignoring is not among
+ *  them: the built-in Ignored category is the one ignore mechanism, so the flag
+ *  is no longer something an ordinary category can be put into. */
+const ASSIGNABLE_STATES: Productivity[] = ["productive", "neutral", "unproductive"];
 
 const RULE_LABELS: Record<MatchType, string> = {
   domain: "Website",
@@ -93,6 +92,30 @@ const RULE_HELP: Record<MatchType, string> = {
   title: "Matches words in a stored browser window title.",
   process: "Matches the foreground executable, such as code.exe.",
 };
+
+/** Rule kinds are told apart by shape, not hue: color in this app means
+ *  category identity, so a colored chip per kind would overload it. */
+function RuleKindGlyph({ matchType }: { matchType: MatchType }) {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+      {matchType === "process" && <rect x="4" y="4" width="16" height="16" rx="3" />}
+      {matchType === "title" && <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></>}
+      {matchType === "domain" && <><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 3.6 9 14 14 0 0 1-3.6 9 14 14 0 0 1-3.6-9A14 14 0 0 1 12 3Z" /></>}
+    </svg>
+  );
+}
+
+/** The built-in Ignored row, told apart from a category a previous release let
+ *  the user flag ignored. Names are unique, and an ignored category could never
+ *  be renamed, so the seeded name still identifies it. Legacy flagged
+ *  categories stay editable so they have a way back out of that state. */
+function isBuiltInIgnored(category: Category): boolean {
+  return category.isIgnored && category.name === "Ignored";
+}
+
+/** Small pages keep the scroll well shallow: "load more" should deepen it a
+ *  little, not add a screen of rows at a time. */
+const ENTITY_PAGE = 50;
 
 function formatDateTime(seconds: number): string {
   return new Date(seconds * 1000).toLocaleString([], {
@@ -131,12 +154,11 @@ export default function ActivityTab({
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [typeFilter, setTypeFilter] = useState<ActivityTypeFilter>("all");
-  const [classificationFilter, setClassificationFilter] =
-    useState<ActivityClassificationFilter>("all");
+  const [classificationFilter, setClassificationFilter] = useState<LibraryFilter>("all");
   const [sort, setSort] = useState<ActivitySort>("seconds");
   const [direction, setDirection] = useState<ActivitySortDirection>("desc");
   const [includeNoise, setIncludeNoise] = useState(false);
-  const [entityLimit, setEntityLimit] = useState(100);
+  const [entityLimit, setEntityLimit] = useState(ENTITY_PAGE);
   const [windowLimit, setWindowLimit] = useState(50);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
@@ -173,7 +195,7 @@ export default function ActivityTab({
     endSec: range.end.getTime() / 1000,
     search: deferredSearch,
     typeFilter,
-    classificationFilter,
+    classificationFilter: classificationFilter === "excluded" ? "all" : classificationFilter,
     sort,
     direction,
     noise: meta.noisePolicy,
@@ -206,7 +228,7 @@ export default function ActivityTab({
   const result = analyzed.result;
 
   useEffect(() => {
-    setEntityLimit(100);
+    setEntityLimit(ENTITY_PAGE);
     setWindowLimit(50);
     setSelectedSessionIds(new Set());
   }, [deferredSearch, typeFilter, classificationFilter, range.start, range.end]);
@@ -314,53 +336,39 @@ export default function ActivityTab({
   const error = sessionData.error ?? analyzed.error;
   if (error && !result) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
 
+  const showingExclusions = classificationFilter === "excluded";
   return (
     <div className="relative flex flex-col gap-4" aria-busy={analyzed.refreshing || sessionData.refreshing}>
-      <div className="flex items-center justify-between">
-        <div className="flex rounded-[10px] border border-edge bg-surface p-1">
-          <ViewButton active={view === "library"} onClick={() => setView("library")}>Activity Library</ViewButton>
-          <ViewButton active={view === "rules"} onClick={() => setView("rules")}>Categories & Rules</ViewButton>
-        </div>
-        <span className="flex items-center gap-3">
-          {(analyzed.refreshing || sessionData.refreshing) && result && (
-            <span className="text-[10.5px] text-ink-3">Updating…</span>
-          )}
-          {view === "library" && source && result && (
-            <ActivityExportMenu
-              source={source}
-              range={range}
-              hasStoredTitles={result.hasStoredTitles}
-            />
-          )}
-        </span>
-      </div>
+      {view === "library" && showDomainHint && (
+        <section className="rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-[11.5px] text-ink-2">
+          Browser time is not being split by website. Install the third-party &quot;URL in title&quot;
+          extension so Time can read websites from browser window titles.
+        </section>
+      )}
 
-      {view === "library" ? (
-        <>
-          {showDomainHint && (
-            <section className="rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-[11.5px] text-ink-2">
-              Browser time is not being split by website. Install the third-party &quot;URL in title&quot;
-              extension so Time can read websites from browser window titles.
-            </section>
-          )}
-          {result && (result.currentAttention.entities > 0 || result.allHistoryAttention.entities > 0) && (
-            <NeedsAttention
-              result={result}
-              categories={meta.categories}
-              onAssign={assignEntity}
-              onShowAll={() => {
-                setSearch("");
-                setTypeFilter("all");
-                setClassificationFilter("needs_attention");
-              }}
-              onTryAllTime={onTryAllTime}
-              isAllTime={isAllTime}
-            />
-          )}
-          <Card
-            title="Activity Library"
-            right={result ? (
-              <span className="flex items-center gap-2 text-[11px] text-ink-3">
+      {/* One card, whose title is the switcher: a floating control row above it
+          left the page reading as two stacked chromes instead of "date picker
+          up top, one card below". */}
+      <Card
+        title={<ViewSwitcher view={view} onView={setView} />}
+        right={view === "library" ? (
+          <span className="flex items-center gap-3 text-[11px] text-ink-3">
+            {result && !showingExclusions && (
+              <>
+                {result.uncategorized.entities > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setClassificationFilter(
+                      classificationFilter === "uncategorized" ? "all" : "uncategorized",
+                    )}
+                    className={`hover:text-ink-2 ${classificationFilter === "uncategorized" ? "text-ink-2" : ""}`}
+                    title={classificationFilter === "uncategorized"
+                      ? "Show every classification again"
+                      : "Show only items with uncategorized time"}
+                  >
+                    {result.uncategorized.entities} uncategorized · {fmtDuration(result.uncategorized.seconds)}
+                  </button>
+                )}
                 <span>{result.catalog.total} items in range</span>
                 {result.noiseHidden > 0 && (
                   <button
@@ -374,9 +382,22 @@ export default function ActivityTab({
                       : `${result.noiseHidden} filtered · Show`}
                   </button>
                 )}
-              </span>
-            ) : undefined}
-          >
+              </>
+            )}
+            {source && result && (
+              <ActivityExportMenu
+                source={source}
+                range={range}
+                hasStoredTitles={result.hasStoredTitles}
+              />
+            )}
+          </span>
+        ) : (
+          <span className="text-[11px] text-ink-3">{meta.categories.length} categories · {meta.rules.length} rules</span>
+        )}
+      >
+        {view === "library" ? (
+          <>
             <LibraryControls
               search={search}
               onSearch={setSearch}
@@ -386,52 +407,54 @@ export default function ActivityTab({
               onClassificationFilter={setClassificationFilter}
               categories={meta.categories}
             />
-            {result && (
-              deferredSearch.trim() && result.searchResults ? (
-                <GroupedSearchResults
-                  result={result}
-                  sort={sort}
-                  direction={direction}
-                  onSort={(next) => updateSort(next, sort, direction, setSort, setDirection)}
-                  selectedEntityId={selectedEntityId}
-                  onSelectEntity={setSelectedEntityId}
-                  selectedSessionIds={selectedSessionIds}
-                  onToggleSession={toggleSession}
-                  onDeleteSelected={requestSelectedDeletion}
-                  onEditSession={setEditingSessionId}
-                  canLoadEntities={
-                    result.searchResults.apps.total > result.searchResults.apps.rows.length ||
-                    result.searchResults.websites.total > result.searchResults.websites.rows.length
-                  }
-                  onLoadEntities={() => setEntityLimit((limit) => limit + 100)}
-                  canLoadWindows={result.searchResults.windowTotal > result.searchResults.windowMatches.length}
-                  onLoadWindows={() => setWindowLimit((limit) => limit + 50)}
-                  isAllTime={isAllTime}
-                  onTryAllTime={onTryAllTime}
-                />
-              ) : (
-                <EntityCatalog
-                  page={result.catalog}
-                  sort={sort}
-                  direction={direction}
-                  onSort={(next) => updateSort(next, sort, direction, setSort, setDirection)}
-                  selectedEntityId={selectedEntityId}
-                  onSelect={setSelectedEntityId}
-                  onLoadMore={() => setEntityLimit((limit) => limit + 100)}
-                  isAllTime={isAllTime}
-                  onTryAllTime={onTryAllTime}
-                />
+            {showingExclusions ? (
+              <ExcludedPanel />
+            ) : (
+              result && (
+                <TableRegion>
+                  {deferredSearch.trim() && result.searchResults ? (
+                    <GroupedSearchResults
+                      result={result}
+                      sort={sort}
+                      direction={direction}
+                      onSort={(next) => updateSort(next, sort, direction, setSort, setDirection)}
+                      selectedEntityId={selectedEntityId}
+                      onSelectEntity={setSelectedEntityId}
+                      selectedSessionIds={selectedSessionIds}
+                      onToggleSession={toggleSession}
+                      onDeleteSelected={requestSelectedDeletion}
+                      onEditSession={setEditingSessionId}
+                      canLoadEntities={
+                        result.searchResults.apps.total > result.searchResults.apps.rows.length ||
+                        result.searchResults.websites.total > result.searchResults.websites.rows.length
+                      }
+                      onLoadEntities={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
+                      canLoadWindows={result.searchResults.windowTotal > result.searchResults.windowMatches.length}
+                      onLoadWindows={() => setWindowLimit((limit) => limit + 50)}
+                      isAllTime={isAllTime}
+                      onTryAllTime={onTryAllTime}
+                    />
+                  ) : (
+                    <EntityCatalog
+                      page={result.catalog}
+                      sort={sort}
+                      direction={direction}
+                      onSort={(next) => updateSort(next, sort, direction, setSort, setDirection)}
+                      selectedEntityId={selectedEntityId}
+                      onSelect={setSelectedEntityId}
+                      onLoadMore={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
+                      isAllTime={isAllTime}
+                      onTryAllTime={onTryAllTime}
+                    />
+                  )}
+                </TableRegion>
               )
             )}
-          </Card>
-        </>
-      ) : (
-        <CategoriesAndRules
-          ruleUsage={result?.ruleUsage ?? []}
-          categoryUsage={result?.categoryUsage ?? []}
-          onChanged={refreshMeta}
-        />
-      )}
+          </>
+        ) : (
+          <CategoriesAndRules appliedRuleIds={result?.appliedRuleIds ?? null} onChanged={refreshMeta} />
+        )}
+      </Card>
 
       {result?.selectedEntity && (
         <EntityDrawer
@@ -492,16 +515,38 @@ export default function ActivityTab({
   );
 }
 
+/** Rendered as the card's title, so the two views read as one card's two faces
+ *  rather than a control row floating above it. */
+function ViewSwitcher({ view, onView }: { view: ActivityView; onView: (view: ActivityView) => void }) {
+  return (
+    <span className="flex items-center gap-2.5">
+      <ViewButton active={view === "library"} onClick={() => onView("library")}>Activity Library</ViewButton>
+      <span aria-hidden="true" className="text-edge-2">|</span>
+      <ViewButton active={view === "rules"} onClick={() => onView("rules")}>Categories &amp; Rules</ViewButton>
+    </span>
+  );
+}
+
 function ViewButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
-      className={`rounded-[7px] px-3 py-1.5 text-xs transition-colors ${active ? "bg-surface-3 text-ink" : "text-ink-3 hover:text-ink-2"}`}
+      className={`transition-colors ${active ? "text-ink" : "font-normal text-ink-3 hover:text-ink-2"}`}
     >
       {children}
     </button>
   );
+}
+
+/** One bounded well for whatever the Library is showing. Without the bound the
+ *  card stretches the page every time "load more" is pressed; with it, the
+ *  footprint is stable and only the well gets deeper. */
+function TableRegion({ children }: { children: ReactNode }) {
+  // pr-4 is the scrollbar's gutter: the last column is right-aligned, so
+  // without it the session counts sit against the scrollbar.
+  return <div className="scroll-well max-h-[62vh] overflow-auto pr-4">{children}</div>;
 }
 
 function LibraryControls({
@@ -517,106 +562,61 @@ function LibraryControls({
   onSearch: (value: string) => void;
   typeFilter: ActivityTypeFilter;
   onTypeFilter: (value: ActivityTypeFilter) => void;
-  classificationFilter: ActivityClassificationFilter;
-  onClassificationFilter: (value: ActivityClassificationFilter) => void;
+  classificationFilter: LibraryFilter;
+  onClassificationFilter: (value: LibraryFilter) => void;
   categories: Category[];
 }) {
+  // Search and type narrow recorded activity; the excluded list is not
+  // recorded activity, so leaving them enabled there would be a lie.
+  const searching = classificationFilter !== "excluded";
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-edge/50 pb-4">
-      <label className="relative min-w-[240px] flex-1">
-        <span className="sr-only">Search activity</span>
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="absolute left-3 top-2.5 h-3.5 w-3.5 text-ink-3">
-          <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
-        </svg>
-        <input
-          value={search}
-          onChange={(event) => onSearch(event.target.value)}
-          placeholder="Search apps, websites, and windows…"
-          className="w-full rounded-[9px] border border-edge bg-surface-2 py-2 pl-9 pr-3 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
-        />
-      </label>
-      <select
-        aria-label="Activity type"
-        value={typeFilter}
-        onChange={(event) => onTypeFilter(event.target.value as ActivityTypeFilter)}
-        className="rounded-[9px] border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none focus:border-accent/60"
-      >
-        <option value="all">All types</option>
-        <option value="app">Apps</option>
-        <option value="website">Websites</option>
-      </select>
+      {searching ? (
+        <>
+          <label className="relative min-w-[240px] flex-1">
+            <span className="sr-only">Search activity</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="absolute left-3 top-2.5 h-3.5 w-3.5 text-ink-3">
+              <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
+            </svg>
+            <input
+              value={search}
+              onChange={(event) => onSearch(event.target.value)}
+              placeholder="Search apps, websites, and windows…"
+              className="w-full rounded-[9px] border border-edge bg-surface-2 py-2 pl-9 pr-3 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
+            />
+          </label>
+          <select
+            aria-label="Activity type"
+            value={typeFilter}
+            onChange={(event) => onTypeFilter(event.target.value as ActivityTypeFilter)}
+            className="rounded-[9px] border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none focus:border-accent/60"
+          >
+            <option value="all">All types</option>
+            <option value="app">Apps</option>
+            <option value="website">Websites</option>
+          </select>
+        </>
+      ) : (
+        <span className="min-w-[240px] flex-1 text-[11.5px] text-ink-3">
+          Apps and websites Time is not allowed to record.
+        </span>
+      )}
       <select
         aria-label="Classification filter"
         value={classificationFilter}
-        onChange={(event) => onClassificationFilter(event.target.value as ActivityClassificationFilter)}
+        onChange={(event) => onClassificationFilter(event.target.value as LibraryFilter)}
         className="rounded-[9px] border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none focus:border-accent/60"
       >
         <option value="all">All classifications</option>
-        <option value="needs_attention">Needs attention</option>
+        <option value="uncategorized">Uncategorized</option>
         <option value="mixed">Mixed</option>
         <option value="ignored">Ignored</option>
         {categories.filter((category) => !category.isIgnored).map((category) => (
           <option key={category.id} value={`category:${category.id}`}>{category.name}</option>
         ))}
+        <option value="excluded">Excluded from tracking</option>
       </select>
     </div>
-  );
-}
-
-function NeedsAttention({
-  result,
-  categories,
-  onAssign,
-  onShowAll,
-  onTryAllTime,
-  isAllTime,
-}: {
-  result: ActivityQueryResult;
-  categories: Category[];
-  onAssign: (entity: ActivityEntitySummary, categoryId: number) => Promise<void>;
-  onShowAll: () => void;
-  onTryAllTime: () => void;
-  isAllTime: boolean;
-}) {
-  return (
-    <section className="rounded-[14px] border border-edge bg-surface px-4 py-3.5">
-      <div className="mb-3 flex items-center gap-2">
-        <span className="h-2 w-2 rounded-full bg-ink-2" />
-        <span className="text-[13px] font-semibold">Needs attention</span>
-        <span className="text-[11px] text-ink-3">
-          {result.currentAttention.entities} items · {fmtDuration(result.currentAttention.seconds)} uncategorized
-        </span>
-        <span className="flex-1" />
-        {!isAllTime && result.allHistoryAttention.entities > result.currentAttention.entities && (
-          <button type="button" onClick={onTryAllTime} className="text-[11px] text-ink-3 hover:text-ink-2">
-            {result.allHistoryAttention.entities} across all history
-          </button>
-        )}
-        {result.needsAttentionTotal > result.needsAttention.length && (
-          <button type="button" onClick={onShowAll} className="text-[11px] text-accent hover:text-accent/80">Show all</button>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {result.needsAttention.map((entity) => (
-          <span key={entity.id} className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface-2 px-3 py-2 text-xs">
-            <span className="max-w-40 truncate">{entity.displayName}</span>
-            <span className="text-[10.5px] text-ink-3">{fmtDuration(entity.uncategorizedSeconds)}</span>
-            <select
-              aria-label={`Categorize ${entity.displayName}`}
-              defaultValue=""
-              onChange={(event) => {
-                if (event.target.value) void onAssign(entity, Number(event.target.value));
-                event.currentTarget.value = "";
-              }}
-              className="rounded-md border border-edge bg-surface px-1.5 py-1 text-[10.5px] text-ink-2 outline-none focus:border-accent/60"
-            >
-              <option value="">Assign…</option>
-              {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-            </select>
-          </span>
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -632,6 +632,14 @@ function updateSort(
     setSort(next);
     setDirection(next === "name" ? "asc" : "desc");
   }
+}
+
+function StickyHead({ children }: { children: ReactNode }) {
+  return (
+    <thead className="sticky top-0 z-10 bg-surface shadow-[0_1px_0_var(--color-edge)]">
+      {children}
+    </thead>
+  );
 }
 
 function SortHeading({
@@ -786,17 +794,19 @@ function EntityTable({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div className="overflow-x-auto">
+    <div>
       <table className="w-full min-w-[760px] table-fixed text-xs">
-        <thead>
-          <tr className="border-b border-edge text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
+        {/* Sticky via a shadow, not a border: a collapsed table's borders do not
+            travel with a stuck header row. */}
+        <StickyHead>
+          <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
             <SortHeading label="Name" field="name" active={sort === "name"} direction={direction} onSort={onSort} className="w-[32%] text-left" />
             <th className="w-[28%] pb-2 font-medium">Classification</th>
             <SortHeading label="Time" field="seconds" active={sort === "seconds"} direction={direction} onSort={onSort} className="w-[13%] text-right" />
             <SortHeading label="Last seen" field="lastSeen" active={sort === "lastSeen"} direction={direction} onSort={onSort} className="w-[17%] text-right" />
             <SortHeading label="Sessions" field="sessions" active={sort === "sessions"} direction={direction} onSort={onSort} className="w-[10%] text-right" />
           </tr>
-        </thead>
+        </StickyHead>
         <tbody>
           {rows.map((entity) => (
             <tr
@@ -882,10 +892,10 @@ function ClassificationLabel({ entity }: { entity: ActivityEntitySummary }) {
 
 function SessionTable({ rows, selected, onToggle, onEdit }: { rows: ActivitySessionRow[]; selected: Set<number>; onToggle: (id: number) => void; onEdit: (id: number) => void }) {
   return (
-    <div className="overflow-x-auto">
+    <div>
       <table className="w-full min-w-[760px] table-fixed text-xs">
-        <thead>
-          <tr className="border-b border-edge text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
+        <StickyHead>
+          <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
             <th className="w-9 pb-2"><span className="sr-only">Select</span></th>
             <th className="w-[20%] pb-2 font-medium">When</th>
             <th className="w-[18%] pb-2 font-medium">App / Website</th>
@@ -894,7 +904,7 @@ function SessionTable({ rows, selected, onToggle, onEdit }: { rows: ActivitySess
             <th className="w-[10%] pb-2 text-right font-medium">Time</th>
             <th className="w-12 pb-2"><span className="sr-only">Actions</span></th>
           </tr>
-        </thead>
+        </StickyHead>
         <tbody>
           {rows.map((session) => (
             <tr key={session.id} className="border-b border-edge/40">
@@ -914,6 +924,118 @@ function SessionTable({ rows, selected, onToggle, onEdit }: { rows: ActivitySess
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** Exclusions are per-entity curation, like corrections and deletions, so they
+ *  live beside them instead of behind a second CRUD surface in Settings. */
+function ExcludedPanel() {
+  const banner = useBanner();
+  const [items, setItems] = useState<TrackingExclusion[] | null>(null);
+  const [kind, setKind] = useState<TrackingExclusionKind>("app");
+  const [draft, setDraft] = useState("");
+  const [deleteHistory, setDeleteHistory] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const load = () => listTrackingExclusions()
+    .then(setItems)
+    .catch((error: unknown) => banner.report(error, "tracking exclusions"));
+  useEffect(() => { void load(); }, []);
+
+  const add = async () => {
+    if (!draft.trim()) return;
+    setSaving(true);
+    try {
+      const preview = await previewTrackingExclusion(kind, draft);
+      if (deleteHistory && preview.count > 0 && !window.confirm(
+        `Delete ${preview.count} existing session${preview.count === 1 ? "" : "s"} (${fmtDuration(preview.seconds)}) for ${preview.normalizedPattern}?\n\nThis cannot be undone without a backup.`,
+      )) {
+        setSaving(false);
+        return;
+      }
+      const result = await addTrackingExclusion(kind, draft, deleteHistory);
+      banner.show(deleteHistory
+        ? `Excluded ${result.normalizedPattern} and deleted ${result.deletedCount} historical session${result.deletedCount === 1 ? "" : "s"}.`
+        : `Excluded ${result.normalizedPattern} from future tracking.`);
+      setDraft("");
+      setDeleteHistory(false);
+      await load();
+    } catch (error) {
+      banner.report(error, "tracking exclusion");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const lift = async (item: TrackingExclusion) => {
+    try {
+      await removeTrackingExclusion(item.kind, item.pattern);
+      banner.show(`${item.pattern} can be tracked again. Deleted history was not restored.`);
+      await load();
+    } catch (error) {
+      banner.report(error, "tracking exclusion");
+    }
+  };
+
+  if (items === null) return <Spinner />;
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-[11px] leading-snug text-ink-3">
+        Exact exclusions stop matching apps or detected websites from ever being stored, whenever
+        recording is enabled. Lifting one resumes tracking from now on; history deleted with the
+        exclusion is not restored.
+      </p>
+      <div className="scroll-well flex max-h-[46vh] flex-col gap-1.5 overflow-auto pr-4">
+        {items.map((item) => (
+          <div key={`${item.kind}:${item.pattern}`} className="flex items-center gap-2.5 rounded-lg border border-edge/60 bg-surface-2 px-3 py-2">
+            <RuleKindGlyph matchType={item.kind === "app" ? "process" : "domain"} />
+            <span className="w-[70px] shrink-0 text-[10px] uppercase tracking-[.04em] text-ink-3">{item.kind === "app" ? "App" : "Website"}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-2" title={item.pattern}>{item.pattern}</span>
+            <span className="shrink-0 text-[10.5px] text-ink-3">since {formatShortDate(item.createdTs)}</span>
+            <RemoveButton label={`Allow ${item.pattern} to be tracked again`} onClick={() => void lift(item)} />
+          </div>
+        ))}
+        {items.length === 0 && (
+          <p className="py-6 text-center text-[11.5px] text-ink-3">
+            Nothing is excluded. Open an app or website and choose “Do not track…” to add one.
+          </p>
+        )}
+      </div>
+      <div className="border-t border-edge/50 pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex rounded-lg border border-edge bg-surface-2 p-0.5">
+            {(["app", "website"] as TrackingExclusionKind[]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={`rounded-md px-2.5 py-1 text-[10.5px] ${kind === option ? "bg-surface-3 text-ink-2" : "text-ink-3 hover:text-ink-2"}`}
+                onClick={() => setKind(option)}
+              >
+                {option === "app" ? "App" : "Website"}
+              </button>
+            ))}
+          </span>
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") void add(); }}
+            placeholder={kind === "app" ? "code.exe" : "example.com"}
+            aria-label={kind === "app" ? "App to exclude" : "Website to exclude"}
+            className="min-w-0 flex-1 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
+          />
+          <Button variant="primary" disabled={saving || !draft.trim()} onClick={() => void add()}>Do not track</Button>
+        </div>
+        <label className="mt-2 flex items-center gap-2 text-[10.5px] text-ink-3">
+          <input type="checkbox" checked={deleteHistory} onChange={(event) => setDeleteHistory(event.target.checked)} />
+          Also delete matching history, after a count preview
+        </label>
+        {kind === "website" && (
+          <p className="mt-1 text-[10px] text-ink-3">
+            Website exclusions need a detected browser domain; otherwise exclude the whole browser as an App.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1001,7 +1123,7 @@ function EntityDrawer({
           </div>
           <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink">✕</button>
         </div>
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="scroll-well flex-1 overflow-y-auto p-5">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <DetailMetric label="Time in range" value={fmtDuration(entity.seconds)} />
             <DetailMetric label="Sessions" value={String(entity.sessionCount)} />
@@ -1345,12 +1467,12 @@ function DeleteActivityDialog({
 }
 
 function CategoriesAndRules({
-  ruleUsage,
-  categoryUsage,
+  appliedRuleIds,
   onChanged,
 }: {
-  ruleUsage: ActivityRuleUsage[];
-  categoryUsage: Array<{ categoryId: number; sessions: number; seconds: number; lastUsed: number }>;
+  /** null while history is still being read — no rule is "unused" until we
+   *  have looked, and a tag that flashes on and off is worse than none. */
+  appliedRuleIds: number[] | null;
   onChanged: () => Promise<void>;
 }) {
   const meta = useMeta();
@@ -1362,8 +1484,7 @@ function CategoriesAndRules({
   const [renameDraft, setRenameDraft] = useState("");
   const [newName, setNewName] = useState("");
   const [drafts, setDrafts] = useState<Record<number, { type: MatchType; pattern: string }>>({});
-  const usageByRule = new Map(ruleUsage.map((usage) => [usage.ruleId, usage]));
-  const usageByCategory = new Map(categoryUsage.map((usage) => [usage.categoryId, usage]));
+  const applied = appliedRuleIds === null ? null : new Set(appliedRuleIds);
 
   const draftFor = (id: number) => drafts[id] ?? { type: "domain" as const, pattern: "" };
   const setDraft = (id: number, patch: Partial<{ type: MatchType; pattern: string }>) =>
@@ -1397,7 +1518,7 @@ function CategoriesAndRules({
       banner.report(error, "category");
     }
   };
-  const setCategoryState = async (category: Category, option: CategoryState) => {
+  const setCategoryState = async (category: Category, option: Productivity) => {
     try { await updateCategory({ ...category, ...categoryStateFlags(option) }); await onChanged(); }
     catch (error) { banner.report(error, "category"); }
   };
@@ -1427,7 +1548,7 @@ function CategoriesAndRules({
   };
 
   return (
-    <Card title="Categories & Rules" right={<span className="text-[11px] text-ink-3">{meta.categories.length} categories · {meta.rules.length} rules</span>}>
+    <>
       {(stateMenu !== null || colorMenu !== null) && <button type="button" aria-label="Close menu" className="fixed inset-0 z-40 cursor-default" onClick={() => { setStateMenu(null); setColorMenu(null); }} />}
       <p className="mb-1 text-[11px] text-ink-3">Rules classify all matching historical and future activity.</p>
       <p className="mb-4 text-[11px] text-ink-3">When several rules match, Website wins, then Window, then App.</p>
@@ -1435,9 +1556,10 @@ function CategoriesAndRules({
         {meta.categories.map((category) => {
           const open = expanded.has(category.id);
           const state = categoryState(category);
+          const locked = isBuiltInIgnored(category);
           const rules = meta.rules.filter((rule) => rule.categoryId === category.id);
           const draft = draftFor(category.id);
-          const categoryStats = usageByCategory.get(category.id);
+          const beginRename = () => { setRenaming(category.id); setRenameDraft(category.name); };
           return (
             <div key={category.id} className={`rounded-[11px] border border-edge bg-surface-2 ${stateMenu === category.id || colorMenu === category.id ? "overflow-visible" : "overflow-hidden"}`}>
               <div className="flex items-center gap-2.5 px-3 py-3 text-xs">
@@ -1446,23 +1568,48 @@ function CategoriesAndRules({
                   <button type="button" title="Change color" aria-label={`Change color of ${category.name}`} className="block h-3 w-3 rounded hover:shadow-[0_0_0_2px_var(--color-edge-2)]" style={{ backgroundColor: category.color }} onClick={() => { setColorMenu(colorMenu === category.id ? null : category.id); setStateMenu(null); }} />
                   {colorMenu === category.id && <span className="menu-pop absolute left-0 top-[calc(100%+6px)] z-50 grid w-[136px] grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-[0_12px_34px_rgba(0,0,0,.5)]">{CATEGORY_SWATCHES.map((swatch) => <button key={swatch} type="button" aria-label={`Use color ${swatch}`} className={`h-4 w-4 rounded hover:shadow-[0_0_0_2px_var(--color-ink-3)] ${swatch === category.color.toLowerCase() ? "shadow-[0_0_0_2px_var(--color-ink-2)]" : ""}`} style={{ backgroundColor: swatch }} onClick={() => { setColorMenu(null); void setCategoryColor(category, swatch); }} />)}</span>}
                 </span>
-                {renaming === category.id ? <input autoFocus value={renameDraft} aria-label={`Rename ${category.name}`} onChange={(event) => setRenameDraft(event.target.value)} onBlur={() => void saveRename(category)} onKeyDown={(event) => { if (event.key === "Enter") void saveRename(category); else if (event.key === "Escape") setRenaming(null); }} className="w-44 rounded-md border border-edge bg-surface px-1.5 py-0.5 text-xs font-semibold outline-none focus:border-accent/60" /> : <span className="font-semibold">{category.name}</span>}
-                <button type="button" disabled={category.isIgnored} title={category.isIgnored ? "The built-in Ignored category cannot be renamed" : `Rename ${category.name}`} aria-label={category.isIgnored ? "Ignored cannot be renamed" : `Rename ${category.name}`} onClick={() => { setRenaming(category.id); setRenameDraft(category.name); }} className="flex h-6 w-6 items-center justify-center rounded-md text-ink-3 hover:bg-surface-3 hover:text-ink-2 disabled:cursor-not-allowed disabled:opacity-35"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m4 20 4.2-1 10.7-10.7a2 2 0 0 0-2.8-2.8L5.4 16.2 4 20Z" /><path d="m14.7 6.9 2.8 2.8" /></svg></button>
-                <span className="ml-1 text-[10.5px] text-ink-3">{categoryStats ? `${fmtDuration(categoryStats.seconds)} · ${categoryStats.sessions} sessions` : "No applied activity"}</span>
+                {/* Double-click renames; the expanded footer keeps a labeled
+                    Rename button, because a double-click is invisible to anyone
+                    working from the keyboard. */}
+                {renaming === category.id ? (
+                  <input autoFocus value={renameDraft} aria-label={`Rename ${category.name}`} onChange={(event) => setRenameDraft(event.target.value)} onBlur={() => void saveRename(category)} onKeyDown={(event) => { if (event.key === "Enter") void saveRename(category); else if (event.key === "Escape") setRenaming(null); }} className="w-44 rounded-md border border-edge bg-surface px-1.5 py-0.5 text-xs font-semibold outline-none focus:border-accent/60" />
+                ) : (
+                  <span
+                    className={`font-semibold ${locked ? "" : "cursor-text"}`}
+                    title={locked ? "The built-in Ignored category cannot be renamed" : "Double-click to rename"}
+                    onDoubleClick={locked ? undefined : beginRename}
+                  >
+                    {category.name}
+                  </span>
+                )}
                 <span className="flex-1" />
                 <span className="relative w-[112px] shrink-0">
-                  <button type="button" className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10.5px] capitalize text-ink-3 hover:bg-surface-3" onClick={() => { setStateMenu(stateMenu === category.id ? null : category.id); setColorMenu(null); }}><CategoryDot color={STATE_COLORS[state]} />{state}</button>
-                  {stateMenu === category.id && <span className="menu-pop absolute right-0 top-[calc(100%+5px)] z-50 min-w-[155px] rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-[0_12px_34px_rgba(0,0,0,.5)]">{(["productive", "neutral", "unproductive", "ignored"] as CategoryState[]).map((option) => <button type="button" key={option} className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] capitalize hover:bg-surface-3 ${option === state ? "bg-surface-3" : ""}`} onClick={() => { setStateMenu(null); void setCategoryState(category, option); }}><CategoryDot color={STATE_COLORS[option]} /><span className="flex-1">{option}</span>{option === state && <span className="text-accent">✓</span>}</button>)}</span>}
+                  <button type="button" disabled={locked} title={locked ? "The built-in Ignored category is the one ignore mechanism" : `Set how ${category.name} counts`} className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10.5px] capitalize text-ink-3 hover:bg-surface-3 disabled:cursor-not-allowed disabled:hover:bg-transparent" onClick={() => { setStateMenu(stateMenu === category.id ? null : category.id); setColorMenu(null); }}><CategoryDot color={STATE_COLORS[state]} />{state}</button>
+                  {stateMenu === category.id && (
+                    <span className="menu-pop absolute right-0 top-[calc(100%+5px)] z-50 min-w-[172px] rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-[0_12px_34px_rgba(0,0,0,.5)]">
+                      {/* A category left over from when "ignored" was a state
+                          here shows it until one of the three is chosen. */}
+                      {state === "ignored" && <span className="block px-2.5 py-1.5 text-[10px] leading-snug text-ink-3">Ignored is no longer a category state. Pick one to bring this category back into Insights.</span>}
+                      {ASSIGNABLE_STATES.map((option) => <button type="button" key={option} className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] capitalize hover:bg-surface-3 ${option === state ? "bg-surface-3" : ""}`} onClick={() => { setStateMenu(null); void setCategoryState(category, option); }}><CategoryDot color={STATE_COLORS[option]} /><span className="flex-1">{option}</span>{option === state && <span className="text-accent">✓</span>}</button>)}
+                    </span>
+                  )}
                 </span>
                 <span className="w-[64px] text-right text-[10.5px] text-ink-3">{rules.length} {rules.length === 1 ? "rule" : "rules"}</span>
               </div>
               {open && (
                 <div id={`category-rules-${category.id}`} className="ml-[46px] border-t border-edge/50 px-3 py-3">
                   <div className="flex flex-col gap-1.5">
-                    {rules.map((rule) => {
-                      const usage = usageByRule.get(rule.id);
-                      return <div key={rule.id} className="-mx-2 flex items-center gap-2 rounded-lg px-2 py-1 text-[11.5px] hover:bg-white/[.028]"><span className="w-[70px] shrink-0 rounded-md bg-surface-3 px-1.5 py-1 text-center text-[9.5px] uppercase text-ink-2">{RULE_LABELS[rule.matchType]}</span><span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span><span className="shrink-0 text-[10.5px] text-ink-3">{usage ? `${usage.sessions} applied · ${fmtDuration(usage.seconds)} · last ${formatShortDate(usage.lastUsed)}` : "No applied activity"}</span><TrashButton compact label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} /></div>;
-                    })}
+                    {rules.map((rule) => (
+                      <div key={rule.id} className="-mx-2 flex items-center gap-2 rounded-lg px-2 py-1 text-[11.5px] hover:bg-white/[.028]">
+                        <span className="flex w-[74px] shrink-0 items-center gap-1.5 text-[9.5px] uppercase tracking-[.04em] text-ink-3">
+                          <RuleKindGlyph matchType={rule.matchType} />
+                          {RULE_LABELS[rule.matchType]}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
+                        {applied !== null && !applied.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3" title="Nothing in your history has ever matched this rule.">unused</span>}
+                        <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
+                      </div>
+                    ))}
                     {rules.length === 0 && <p className="py-1 text-[11px] italic text-ink-3">No rules yet — add one below.</p>}
                   </div>
                   <div className="mt-3 border-t border-edge/40 pt-3">
@@ -1479,7 +1626,26 @@ function CategoriesAndRules({
                         : " Future window title capture is off; existing stored titles can still match.")}
                     </p>
                   </div>
-                  <div className="mt-3 flex justify-end border-t border-edge/40 pt-3"><TrashButton label={category.isIgnored ? "The built-in Ignored category cannot be deleted" : `Delete ${category.name}`} disabled={category.isIgnored} onClick={() => void removeCategory(category, rules.length)} /></div>
+                  {/* Deleting a category cascades over its rules, so it gets
+                      words rather than an icon — destructive weight should
+                      scale with blast radius. */}
+                  <div className="mt-3 flex justify-end gap-2 border-t border-edge/40 pt-3">
+                    <Button
+                      disabled={locked}
+                      title={locked ? "The built-in Ignored category cannot be renamed" : undefined}
+                      onClick={beginRename}
+                    >
+                      Rename
+                    </Button>
+                    <Button
+                      variant="danger"
+                      disabled={locked}
+                      title={locked ? "The built-in Ignored category cannot be deleted" : undefined}
+                      onClick={() => void removeCategory(category, rules.length)}
+                    >
+                      Delete category…
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1487,6 +1653,6 @@ function CategoriesAndRules({
         })}
       </div>
       <div className="mt-4 flex items-center gap-2 border-t border-edge/50 pt-4"><input value={newName} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submitCategory(); }} placeholder="New category name" className="w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" /><Button variant="primary" disabled={!newName.trim()} onClick={() => void submitCategory()}>+ Add category</Button></div>
-    </Card>
+    </>
   );
 }

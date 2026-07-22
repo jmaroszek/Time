@@ -11,7 +11,11 @@ export interface SessionData {
   /** True when `sessions` covers the window requested by this render. */
   ready: boolean;
   loading: boolean;
-  /** Cached data is usable now while its live edge is refreshed in place. */
+  /** Cached data is usable now while an in-flight load refreshes its live edge.
+   *  Staleness alone must never set this: the cache marks any live-edge window
+   *  stale seconds after its last refresh, but only a window or history change
+   *  starts a fetch, so a stale peek with no fetch behind it would latch on
+   *  forever. */
   refreshing: boolean;
   error: string | null;
 }
@@ -98,7 +102,7 @@ export function useSessions(startSec: number, endSec: number, bump = 0): Session
       sessions: cached.sessions,
       ready: true,
       loading: false,
-      refreshing: cached.stale || (stateMatches && state.refreshing),
+      refreshing: stateMatches && state.refreshing,
       error: stateMatches ? state.error : null,
     };
   }

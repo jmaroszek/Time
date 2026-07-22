@@ -48,7 +48,7 @@ export default function TopAppsList({
   return (
     <div>
       <div
-        className={`flex flex-col gap-2.5 overflow-y-auto pr-3 ${hiddenAppCount > 0 ? "max-h-[231px]" : "max-h-[250px]"}`}
+        className={`scroll-well flex flex-col gap-2.5 overflow-y-auto pr-4 ${hiddenAppCount > 0 ? "max-h-[231px]" : "max-h-[250px]"}`}
       >
         {apps.map((app) => (
           <div key={app.process} className="flex items-center gap-3 text-xs">

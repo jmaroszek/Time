@@ -94,7 +94,7 @@ WITH starter(name, color, is_productive, is_neutral, is_ignored, sort_order) AS 
         ('Focus', '#2f6fc0', 1, 0, 0, 1),
         ('Learning', '#9c8ff0', 1, 0, 0, 2),
         ('Communication', '#56c8d8', 0, 1, 0, 3),
-        ('Entertainment', '#e8663d', 0, 0, 0, 4),
+        ('Entertainment', '#e75fa0', 0, 0, 0, 4),
         ('Utilities', '#828994', 0, 1, 0, 5),
         ('Ignored', '#44474e', 0, 0, 1, 99)
 )
@@ -109,7 +109,6 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('idle_threshold_seconds','180'),
     ('heartbeat_seconds','15'),
     ('week_start','auto'),
-    ('default_top_n_apps','5'),
     ('browser_processes','chrome.exe,msedge.exe,firefox.exe,brave.exe,opera.exe,vivaldi.exe,arc.exe,chromium.exe'),
     ('min_app_seconds_per_day','0'),
     ('focus_chain_max_gap_seconds','120'),

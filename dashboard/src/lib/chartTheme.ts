@@ -66,3 +66,28 @@ export const ACTIVITY_METRIC_RAMPS: Record<ActivityMetric, string[]> = {
 
 /** Gray for uncategorized/unknown items, matching the dashed-ring affordance. */
 export const UNCATEGORIZED = "#5b616b";
+
+/** Hue arcs (degrees) that productivity owns. A category tinted from one of
+ *  these renders in charts with the hue that elsewhere means productive or
+ *  unproductive — one pixel color, two meanings depending on the chart. */
+export const PROTECTED_HUE_ZONES: ReadonlyArray<readonly [number, number]> = [
+  [150, 165], // productive green: GOOD_DATA, PRODUCTIVE_BAR, --color-good
+  [10, 25], // unproductive red-orange: UNPRODUCTIVE_BAR
+];
+
+/** Colors offered when a category is created or recolored, assigned in order.
+ *  Every entry stays clear of PROTECTED_HUE_ZONES — chartTheme.ts already keeps
+ *  its heatmap ramps off the category hues for the same reason, and
+ *  chartTheme.test.ts holds this list to the rule. */
+export const CATEGORY_SWATCHES = [
+  "#9c8ff0", // violet
+  "#2f6fc0", // blue
+  "#56c8d8", // cyan
+  "#e0a53a", // amber
+  "#e75fa0", // magenta
+  "#b06fd8", // orchid
+  "#8fbf4a", // lime
+  "#c7c157", // yellow
+  "#b08a5e", // warm brown
+  "#828994", // gray
+];

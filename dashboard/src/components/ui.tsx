@@ -202,6 +202,23 @@ export function TrashButton({
   );
 }
 
+/** Row-level delete. A trash can carries the weight of a destructive command;
+ *  removing one line from a list it sits in does not, so the quiet ✕ only picks
+ *  up the danger tint on hover. Deletes with real blast radius keep words. */
+export function RemoveButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sm leading-none text-ink-3 transition-colors hover:bg-bad/10 hover:text-bad"
+    >
+      ✕
+    </button>
+  );
+}
+
 export function TextInput({
   value,
   onChange,

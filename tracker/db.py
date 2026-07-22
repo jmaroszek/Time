@@ -92,11 +92,14 @@ END;
 # A small, broadly applicable starter taxonomy reduces first-run setup without
 # guessing which applications or sites serve those purposes. Every category is
 # editable/deletable except the functional Ignored row; no rules are preloaded.
+# Colors come from the dashboard's category swatch list and must stay out of the
+# hue arcs productivity reserves (green ~150-165deg, red-orange ~10-25deg), or a
+# category renders in charts with the hue that means productive/unproductive.
 _SEED_CATEGORIES = [
     ("Focus", "#2f6fc0", 1, 0, 1),
     ("Learning", "#9c8ff0", 1, 0, 2),
     ("Communication", "#56c8d8", 0, 1, 3),
-    ("Entertainment", "#e8663d", 0, 0, 4),
+    ("Entertainment", "#e75fa0", 0, 0, 4),
     ("Utilities", "#828994", 0, 1, 5),
     ("Ignored", "#44474e", 0, 0, 99),
 ]
@@ -113,7 +116,6 @@ DEFAULT_SETTINGS = {
     "idle_threshold_seconds": "180",
     "heartbeat_seconds": "15",
     "week_start": "auto",
-    "default_top_n_apps": "5",
     "browser_processes": (
         "chrome.exe,msedge.exe,firefox.exe,brave.exe,"
         "opera.exe,vivaldi.exe,arc.exe,chromium.exe"

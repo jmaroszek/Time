@@ -32,7 +32,6 @@ export interface Meta {
   classifier: Classifier;
   weekStart: WeekStart;
   weeklyGoalHours: number;
-  defaultTopN: number;
   /** Apps averaging less than this many seconds per active day are hidden from
    *  Insights' Top Apps. A rate, so the bar means the same thing on Today and
    *  on Year. */
@@ -97,7 +96,6 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       classifier: memoizeClassifierById(buildClassifier(categories, rules, browserSet)),
       weekStart: resolveWeekStart(settings.week_start),
       weeklyGoalHours: finiteNonNegative(settings.weekly_goal_hours),
-      defaultTopN: Number(settings.default_top_n_apps) || 5,
       minAppSecondsPerDay: Math.max(0, Number(settings.min_app_seconds_per_day) || 0),
       focusChainMaxGapSeconds: Math.max(0, Number(settings.focus_chain_max_gap_seconds) || 120),
       noisePolicy: noisePolicyFromSettings(settings),
