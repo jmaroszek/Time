@@ -81,9 +81,47 @@ def test_current_schema_constraints_and_category_cleanup(conn):
         "INSERT INTO rules (match_type,pattern,category_id,priority) VALUES ('process','editor.exe',?,3)",
         (category_id,),
     )
+    session_id = conn.execute(
+        "INSERT INTO sessions (start_ts,end_ts,process) VALUES (10,20,'editor.exe') RETURNING id"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO session_corrections (session_id,category_id,updated_ts) VALUES (?,?,1)",
+        (session_id, category_id),
+    )
     conn.execute("DELETE FROM categories WHERE id=?", (category_id,))
     assert conn.execute("SELECT COUNT(*) FROM rules WHERE category_id=?", (category_id,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM session_corrections WHERE session_id=?", (session_id,)).fetchone()[0] == 0
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_v1_database_migrates_to_v2_without_rewriting_sessions(tmp_path):
+    path = tmp_path / "v1.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE sessions (id INTEGER PRIMARY KEY,start_ts INTEGER NOT NULL,"
+        "end_ts INTEGER NOT NULL,process TEXT NOT NULL,title TEXT NOT NULL DEFAULT '',"
+        "domain TEXT,is_afk INTEGER NOT NULL DEFAULT 0,source TEXT NOT NULL DEFAULT 'live');"
+        "CREATE TABLE categories (id INTEGER PRIMARY KEY,name TEXT UNIQUE NOT NULL,"
+        "color TEXT NOT NULL,is_productive INTEGER NOT NULL DEFAULT 0,"
+        "is_neutral INTEGER NOT NULL DEFAULT 0,is_ignored INTEGER NOT NULL DEFAULT 0,"
+        "sort_order INTEGER);"
+        "CREATE TABLE rules (id INTEGER PRIMARY KEY,match_type TEXT NOT NULL,pattern TEXT NOT NULL,"
+        "category_id INTEGER NOT NULL REFERENCES categories(id),priority INTEGER NOT NULL DEFAULT 0);"
+        "CREATE TABLE settings (key TEXT PRIMARY KEY,value TEXT);"
+        "INSERT INTO settings VALUES ('schema_version','1');"
+        "INSERT INTO sessions (id,start_ts,end_ts,process) VALUES (7,10,20,'code.exe');"
+    )
+    conn.close()
+
+    migrated = db.open_db(path)
+    assert db.read_settings_raw(migrated)["schema_version"] == "2"
+    assert migrated.execute("SELECT process FROM sessions WHERE id=7").fetchone()[0] == "code.exe"
+    tables = {
+        row[0]
+        for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    assert {"tracking_exclusions", "session_corrections"} <= tables
+    migrated.close()
 
 
 def test_tracker_refuses_newer_schema_without_mutating_it(tmp_path):
@@ -92,7 +130,7 @@ def test_tracker_refuses_newer_schema_without_mutating_it(tmp_path):
     conn.executescript(
         "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);"
         "CREATE TABLE sentinel (value TEXT);"
-        "INSERT INTO settings VALUES ('schema_version','2');"
+        f"INSERT INTO settings VALUES ('schema_version','{db.SCHEMA_VERSION + 1}');"
         "INSERT INTO sentinel VALUES ('untouched');"
     )
     conn.close()
@@ -152,6 +190,14 @@ def test_get_settings_parses_and_clamps(conn):
     conn.execute("UPDATE settings SET value='garbage' WHERE key='idle_threshold_seconds'")
     assert db.get_settings(conn).idle_threshold_seconds == 180.0  # fallback
 
+    conn.execute(
+        "INSERT INTO tracking_exclusions VALUES ('app','code.exe',1),"
+        "('website','example.com',1)"
+    )
+    parsed = db.get_settings(conn)
+    assert parsed.excluded_processes == frozenset({"code.exe"})
+    assert parsed.excluded_domains == frozenset({"example.com"})
+
 
 def test_store_open_heartbeat_close_roundtrip(conn):
     store = db.SqliteStore(conn)
@@ -172,6 +218,19 @@ def test_store_truncates_long_titles(conn):
     sid = store.open_session(1000.0, "x.exe", "t" * 2000, None, False)
     title = conn.execute("SELECT title FROM sessions WHERE id=?", (sid,)).fetchone()[0]
     assert len(title) == 512
+
+
+def test_store_refuses_excluded_sessions_even_with_stale_manager_settings(conn):
+    store = db.SqliteStore(conn)
+    conn.execute(
+        "INSERT INTO tracking_exclusions VALUES ('app','code.exe',1),"
+        "('website','example.com',1)"
+    )
+    assert store.open_session(1, "code.exe", "private", None, False) is None
+    assert store.open_session(2, "chrome.exe", "private", "example.com", False) is None
+    allowed = store.open_session(3, "chrome.exe", "allowed", "openai.com", False)
+    assert allowed is not None
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
 
 
 def test_retry_recovers_from_transient_lock(monkeypatch):

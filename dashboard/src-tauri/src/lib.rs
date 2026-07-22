@@ -1,5 +1,6 @@
 use std::{fs, path::PathBuf, process::Command};
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 
 #[cfg(windows)]
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
@@ -8,7 +9,8 @@ mod database;
 
 use database::{
     database_path, ActivityDeletePreview, ActivityDeleteRequest, ActivityDeleteResult,
-    ExecuteResult, SessionColumns, TimeDatabase,
+    ExecuteResult, SessionColumns, SessionCorrection, SessionCorrectionRequest, TimeDatabase,
+    TrackingExclusion, TrackingExclusionPreview, TrackingExclusionResult,
 };
 
 /// Resolve the shared SQLite path (%LOCALAPPDATA%\Time\time_log.db) and ensure
@@ -85,6 +87,99 @@ async fn delete_history_before(
     cutoff_sec: f64,
 ) -> Result<u64, String> {
     database.delete_history_before(cutoff_sec).await
+}
+
+#[tauri::command]
+async fn list_tracking_exclusions(
+    database: tauri::State<'_, TimeDatabase>,
+) -> Result<Vec<TrackingExclusion>, String> {
+    database.list_tracking_exclusions().await
+}
+
+#[tauri::command]
+async fn preview_tracking_exclusion(
+    database: tauri::State<'_, TimeDatabase>,
+    kind: String,
+    pattern: String,
+) -> Result<TrackingExclusionPreview, String> {
+    database.preview_tracking_exclusion(&kind, &pattern).await
+}
+
+#[tauri::command]
+async fn add_tracking_exclusion(
+    database: tauri::State<'_, TimeDatabase>,
+    kind: String,
+    pattern: String,
+    delete_history: bool,
+) -> Result<TrackingExclusionResult, String> {
+    database
+        .add_tracking_exclusion(&kind, &pattern, delete_history)
+        .await
+}
+
+#[tauri::command]
+async fn remove_tracking_exclusion(
+    database: tauri::State<'_, TimeDatabase>,
+    kind: String,
+    pattern: String,
+) -> Result<u64, String> {
+    database.remove_tracking_exclusion(&kind, &pattern).await
+}
+
+#[tauri::command]
+async fn fetch_session_correction(
+    database: tauri::State<'_, TimeDatabase>,
+    session_id: i64,
+) -> Result<SessionCorrection, String> {
+    database.fetch_session_correction(session_id).await
+}
+
+#[tauri::command]
+async fn correct_session(
+    database: tauri::State<'_, TimeDatabase>,
+    request: SessionCorrectionRequest,
+) -> Result<SessionCorrection, String> {
+    database.correct_session(&request).await
+}
+
+#[tauri::command]
+async fn reset_session_correction(
+    database: tauri::State<'_, TimeDatabase>,
+    session_id: i64,
+) -> Result<u64, String> {
+    database.reset_session_correction(session_id).await
+}
+
+#[tauri::command]
+fn save_activity_export(
+    app: tauri::AppHandle,
+    suggested_name: String,
+    contents: String,
+) -> Result<Option<String>, String> {
+    if contents.len() > 256 * 1024 * 1024 {
+        return Err("Export is too large to write safely".into());
+    }
+    let name = suggested_name.trim();
+    if name.is_empty()
+        || name.len() > 180
+        || name.contains('/')
+        || name.contains('\\')
+        || !name.to_ascii_lowercase().ends_with(".csv")
+    {
+        return Err("Invalid export filename".into());
+    }
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .set_file_name(name)
+        .add_filter("CSV", &["csv"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = file_path.into_path().map_err(|error| error.to_string())?;
+    fs::write(&path, contents).map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 fn tracker_path() -> Result<PathBuf, String> {
@@ -167,6 +262,7 @@ fn set_launch_at_login(enabled: bool) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let base = app.path().local_data_dir()?;
             let path = database_path(&base);
@@ -186,6 +282,14 @@ pub fn run() {
             preview_activity_delete,
             delete_activity,
             delete_history_before,
+            list_tracking_exclusions,
+            preview_tracking_exclusion,
+            add_tracking_exclusion,
+            remove_tracking_exclusion,
+            fetch_session_correction,
+            correct_session,
+            reset_session_correction,
+            save_activity_export,
             start_tracker,
             stop_tracker,
             set_launch_at_login

@@ -123,11 +123,11 @@ def test_schema_too_new_is_reported_without_a_stack(info_log, monkeypatch):
     monkeypatch.setattr(tracker, "acquire_single_instance", lambda: True)
 
     def _too_new() -> None:
-        raise db.SchemaTooNewError("database schema 2 is newer than tracker schema 1")
+        raise db.SchemaTooNewError("database schema 3 is newer than tracker schema 2")
 
     monkeypatch.setattr(tracker, "run", _too_new)
     assert tracker.main() == 1
-    assert "Startup aborted: database schema 2 is newer" in info_log.text
+    assert "Startup aborted: database schema 3 is newer" in info_log.text
     assert "Traceback" not in info_log.text
 
 

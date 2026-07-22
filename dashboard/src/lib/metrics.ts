@@ -12,6 +12,8 @@ export interface Session {
   title: string;
   domain: string | null;
   isAfk: boolean;
+  categoryOverrideId?: number | null;
+  isCorrected?: boolean;
 }
 
 /** Default max gap (s) between sessions that still counts as one continuous

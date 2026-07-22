@@ -93,6 +93,8 @@ export interface ActivitySessionRow {
   winningRuleId: number | null;
   winningRuleType: MatchType | null;
   winningRulePattern: string | null;
+  classificationSource: "rule" | "session_override" | "none";
+  isCorrected: boolean;
 }
 
 export type ActivityClassificationFilter =
@@ -275,6 +277,8 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
       winningRuleId: explanation.winningRule?.id ?? null,
       winningRuleType: explanation.winningRule?.matchType ?? null,
       winningRulePattern: explanation.winningRule?.pattern ?? null,
+      classificationSource: explanation.source,
+      isCorrected: session.isCorrected ?? false,
     });
   }
 
@@ -559,6 +563,8 @@ export interface PackedActivitySource {
   titleIndices: Uint32Array;
   domainIndices: Int32Array;
   isAfk: Uint8Array;
+  categoryOverrideIds: Int32Array;
+  isCorrected: Uint8Array;
   processes: string[];
   titles: string[];
   domains: string[];
@@ -598,6 +604,8 @@ export function packActivitySource(source: ActivitySource): PackedActivitySource
     titleIndices: new Uint32Array(count),
     domainIndices: new Int32Array(count).fill(-1),
     isAfk: new Uint8Array(count),
+    categoryOverrideIds: new Int32Array(count).fill(-1),
+    isCorrected: new Uint8Array(count),
     processes,
     titles,
     domains,
@@ -614,6 +622,8 @@ export function packActivitySource(source: ActivitySource): PackedActivitySource
     packed.titleIndices[index] = intern(session.title, titles, titleMap);
     if (session.domain !== null) packed.domainIndices[index] = intern(session.domain, domains, domainMap);
     packed.isAfk[index] = session.isAfk ? 1 : 0;
+    if (session.categoryOverrideId != null) packed.categoryOverrideIds[index] = session.categoryOverrideId;
+    packed.isCorrected[index] = session.isCorrected ? 1 : 0;
   });
   return packed;
 }
@@ -626,7 +636,9 @@ export function unpackActivitySource(packed: PackedActivitySource): ActivitySour
     packed.processIndices.length !== count ||
     packed.titleIndices.length !== count ||
     packed.domainIndices.length !== count ||
-    packed.isAfk.length !== count
+    packed.isAfk.length !== count ||
+    packed.categoryOverrideIds.length !== count ||
+    packed.isCorrected.length !== count
   ) {
     throw new Error("Packed Activity columns have mismatched lengths");
   }
@@ -639,6 +651,8 @@ export function unpackActivitySource(packed: PackedActivitySource): ActivitySour
       title: packed.titles[packed.titleIndices[index]] ?? "",
       domain: packed.domainIndices[index] >= 0 ? (packed.domains[packed.domainIndices[index]] ?? null) : null,
       isAfk: packed.isAfk[index] !== 0,
+      categoryOverrideId: packed.categoryOverrideIds[index] >= 0 ? packed.categoryOverrideIds[index] : null,
+      isCorrected: packed.isCorrected[index] !== 0,
     })),
     categories: packed.categories,
     rules: packed.rules,

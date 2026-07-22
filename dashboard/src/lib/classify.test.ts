@@ -107,11 +107,20 @@ describe("buildClassificationExplainer", () => {
     expect(explain(session({ process: "unknown.exe" }))).toEqual({
       category: null,
       winningRule: null,
+      source: "none",
     });
     expect(explain(session({ isAfk: true }))).toEqual({
       category: null,
       winningRule: null,
+      source: "none",
     });
+  });
+
+  it("uses a session override before every rule", () => {
+    const result = explain(session({ domain: "youtube.com", categoryOverrideId: 3 }));
+    expect(result.category?.name).toBe("Dev");
+    expect(result.winningRule).toBeNull();
+    expect(result.source).toBe("session_override");
   });
 });
 
@@ -136,6 +145,18 @@ describe("memoizeClassifierById", () => {
     });
     memoized(session({}));
     memoized(session({}));
+    expect(calls).toBe(2);
+  });
+
+  it("reclassifies a session id when its override changes", () => {
+    let calls = 0;
+    const memoized = memoizeClassifierById((value) => {
+      calls += 1;
+      return value.categoryOverrideId === 2 ? CATS[1] : CATS[0];
+    });
+    const original = { id: 9, ...session({}) };
+    expect(memoized(original)).toBe(CATS[0]);
+    expect(memoized({ ...original, categoryOverrideId: 2 })).toBe(CATS[1]);
     expect(calls).toBe(2);
   });
 });

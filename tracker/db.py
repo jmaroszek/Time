@@ -11,7 +11,7 @@ from typing import Callable, TypeVar
 from tracker.session_manager import Settings
 
 T = TypeVar("T")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class SchemaTooNewError(RuntimeError):
@@ -56,7 +56,37 @@ BEFORE DELETE ON categories
 FOR EACH ROW
 BEGIN
     DELETE FROM rules WHERE category_id = OLD.id;
-END
+END;
+
+CREATE TABLE IF NOT EXISTS tracking_exclusions (
+    kind       TEXT NOT NULL CHECK(kind IN ('app','website')),
+    pattern    TEXT NOT NULL,
+    created_ts INTEGER NOT NULL,
+    PRIMARY KEY(kind, pattern)
+);
+
+CREATE TABLE IF NOT EXISTS session_corrections (
+    session_id         INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    corrected_start_ts INTEGER,
+    corrected_end_ts   INTEGER,
+    category_id        INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    updated_ts         INTEGER NOT NULL,
+    CHECK (
+        (corrected_start_ts IS NULL AND corrected_end_ts IS NULL)
+        OR
+        (corrected_start_ts IS NOT NULL AND corrected_end_ts IS NOT NULL
+         AND corrected_end_ts > corrected_start_ts)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_session_corrections_category
+    ON session_corrections(category_id);
+CREATE TRIGGER IF NOT EXISTS cleanup_empty_session_corrections
+AFTER DELETE ON categories
+FOR EACH ROW
+BEGIN
+    DELETE FROM session_corrections
+    WHERE corrected_start_ts IS NULL AND corrected_end_ts IS NULL AND category_id IS NULL;
+END;
 """
 
 # A small, broadly applicable starter taxonomy reduces first-run setup without
@@ -148,6 +178,7 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
         conn.execute("PRAGMA temp_store=MEMORY;")
         conn.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA)
         try:
+            _migrate(conn, version)
             _seed(conn)
             conn.execute("COMMIT")
         except Exception:
@@ -177,6 +208,42 @@ def _read_schema_version(conn: sqlite3.Connection) -> int:
     if version < 0:
         raise RuntimeError("database schema_version cannot be negative")
     return version
+
+
+def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
+    """Apply known upgrades inside open_db's single immediate transaction."""
+    if from_version not in {0, 1, SCHEMA_VERSION}:
+        raise RuntimeError(f"unsupported database schema {from_version}")
+    if from_version == 1:
+        # _SCHEMA is the authoritative fresh-install shape and has already run
+        # with IF NOT EXISTS. These statements make the v1 -> v2 transition
+        # explicit and restart-safe if a prior attempt stopped partway through.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS tracking_exclusions ("
+            "kind TEXT NOT NULL CHECK(kind IN ('app','website')),"
+            "pattern TEXT NOT NULL,created_ts INTEGER NOT NULL,"
+            "PRIMARY KEY(kind,pattern))"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS session_corrections ("
+            "session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,"
+            "corrected_start_ts INTEGER,corrected_end_ts INTEGER,"
+            "category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,"
+            "updated_ts INTEGER NOT NULL,"
+            "CHECK ((corrected_start_ts IS NULL AND corrected_end_ts IS NULL) OR "
+            "(corrected_start_ts IS NOT NULL AND corrected_end_ts IS NOT NULL "
+            "AND corrected_end_ts > corrected_start_ts)))"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_corrections_category "
+            "ON session_corrections(category_id)"
+        )
+        conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS cleanup_empty_session_corrections "
+            "AFTER DELETE ON categories FOR EACH ROW BEGIN "
+            "DELETE FROM session_corrections WHERE corrected_start_ts IS NULL "
+            "AND corrected_end_ts IS NULL AND category_id IS NULL; END"
+        )
 
 
 def _seed(conn: sqlite3.Connection) -> None:
@@ -241,6 +308,15 @@ def get_settings(conn: sqlite3.Connection) -> Settings:
         for p in raw.get("browser_processes", DEFAULT_SETTINGS["browser_processes"]).split(",")
         if p.strip()
     )
+    exclusions = conn.execute(
+        "SELECT kind, pattern FROM tracking_exclusions"
+    ).fetchall()
+    excluded_processes = frozenset(
+        row["pattern"].lower() for row in exclusions if row["kind"] == "app"
+    )
+    excluded_domains = frozenset(
+        row["pattern"].lower() for row in exclusions if row["kind"] == "website"
+    )
     return Settings(
         idle_threshold_seconds=_float("idle_threshold_seconds", 180.0, 30.0, 3600.0),
         heartbeat_seconds=_float("heartbeat_seconds", 15.0, 5.0, 300.0),
@@ -248,6 +324,8 @@ def get_settings(conn: sqlite3.Connection) -> Settings:
         tracking_paused=is_paused(raw),
         recording_consent=raw.get("recording_consent") == "1",
         record_window_titles=raw.get("record_window_titles") == "1",
+        excluded_processes=excluded_processes,
+        excluded_domains=excluded_domains,
     )
 
 
@@ -291,19 +369,30 @@ class SqliteStore:
 
     def open_session(
         self, start_ts: float, process: str, title: str, domain: str | None, is_afk: bool
-    ) -> int:
-        def _do() -> int:
+    ) -> int | None:
+        def _do() -> int | None:
             cur = self._conn.execute(
                 "INSERT INTO sessions (start_ts, end_ts, process, title, domain, is_afk, source)"
-                " VALUES (?,?,?,?,?,?,'live')",
-                (int(start_ts), int(start_ts), process, title[:512], domain, int(is_afk)),
+                " SELECT ?,?,?,?,?,?,'live'"
+                " WHERE ? OR NOT EXISTS ("
+                " SELECT 1 FROM tracking_exclusions"
+                " WHERE (kind='app' AND pattern=lower(?))"
+                " OR (kind='website' AND ? IS NOT NULL AND pattern=lower(?))"
+                " )",
+                (
+                    int(start_ts), int(start_ts), process, title[:512], domain, int(is_afk),
+                    int(is_afk), process, domain, domain,
+                ),
             )
+            if cur.rowcount == 0:
+                return None
             return int(cur.lastrowid)
 
         session_id = _retry(_do, op="open_session")
         # DEBUG, not INFO: window titles are sensitive, and an INFO-level log
         # would archive them in plain text alongside the database.
-        logging.debug("OPEN  %s | %s", process, title[:120])
+        if session_id is not None:
+            logging.debug("OPEN  %s | %s", process, title[:120])
         return session_id
 
     def close_session(self, session_id: int, end_ts: float) -> None:

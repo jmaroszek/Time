@@ -1,6 +1,6 @@
 /** Schema compatibility boundary shared with tracker/db.py. */
 
-export const SUPPORTED_SCHEMA_VERSION = 1;
+export const SUPPORTED_SCHEMA_VERSION = 2;
 const NEWER_SCHEMA_PREFIX = "DatabaseSchemaTooNew:";
 
 /** Missing means the pre-versioning legacy schema, which remains readable. */

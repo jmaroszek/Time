@@ -207,7 +207,26 @@ describe("Activity index", () => {
   });
 
   it("round-trips packed worker transport", () => {
-    expect(unpackActivitySource(packActivitySource(source))).toEqual(source);
+    expect(unpackActivitySource(packActivitySource(source))).toEqual({
+      ...source,
+      sessions: source.sessions.map((session) => ({
+        ...session,
+        categoryOverrideId: null,
+        isCorrected: false,
+      })),
+    });
+  });
+
+  it("preserves corrections through worker transport and applies override precedence", () => {
+    const corrected: ActivitySource = {
+      ...source,
+      sessions: [{ ...source.sessions[0], categoryOverrideId: 2, isCorrected: true }],
+    };
+    const unpacked = unpackActivitySource(packActivitySource(corrected));
+    const row = queryActivityIndex(buildActivityIndex(unpacked), baseQuery).catalog.rows[0];
+    expect(row.categories[0].name).toBe("Media");
+    expect(buildActivityIndex(unpacked).sessions[0].classificationSource).toBe("session_override");
+    expect(buildActivityIndex(unpacked).sessions[0].isCorrected).toBe(true);
   });
 });
 

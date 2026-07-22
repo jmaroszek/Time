@@ -21,6 +21,7 @@ import {
   type ActivitySource,
   type ActivityTypeFilter,
 } from "../lib/activity";
+import { buildActivityExport, type ActivityExportKind } from "../lib/activityExport";
 import {
   categoryState,
   categoryStateFlags,
@@ -35,15 +36,23 @@ import { clipSessions } from "../lib/metrics";
 import {
   addCategory,
   addRule,
+  addTrackingExclusion,
   backupDatabase,
+  correctSession,
   deleteActivity,
   deleteCategory,
   deleteRule,
+  fetchSessionCorrection,
   previewActivityDelete,
+  previewTrackingExclusion,
+  resetSessionCorrection,
+  saveActivityExport,
   saveProcessAliases,
   updateCategory,
   type ActivityDeletePreview,
   type ActivityDeleteRequest,
+  type SessionCorrection,
+  type TrackingExclusionKind,
 } from "../lib/queries";
 import { allTimeRange, type Range } from "../lib/time";
 import { useBanner } from "../state/banner";
@@ -134,6 +143,12 @@ export default function ActivityTab({
   const [detailLimit, setDetailLimit] = useState(50);
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<number>>(() => new Set());
   const [deleteScope, setDeleteScope] = useState<{ request: ActivityDeleteRequest; label: string } | null>(null);
+  const [excludeScope, setExcludeScope] = useState<{
+    kind: TrackingExclusionKind;
+    pattern: string;
+    label: string;
+  } | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
 
   const allRange = useMemo(() => allTimeRange(firstSessionSec), [firstSessionSec, historyRevision]);
   const sessionData = useSessions(
@@ -306,9 +321,18 @@ export default function ActivityTab({
           <ViewButton active={view === "library"} onClick={() => setView("library")}>Activity Library</ViewButton>
           <ViewButton active={view === "rules"} onClick={() => setView("rules")}>Categories & Rules</ViewButton>
         </div>
-        {(analyzed.refreshing || sessionData.refreshing) && result && (
-          <span className="text-[10.5px] text-ink-3">Updating…</span>
-        )}
+        <span className="flex items-center gap-3">
+          {(analyzed.refreshing || sessionData.refreshing) && result && (
+            <span className="text-[10.5px] text-ink-3">Updating…</span>
+          )}
+          {view === "library" && source && result && (
+            <ActivityExportMenu
+              source={source}
+              range={range}
+              hasStoredTitles={result.hasStoredTitles}
+            />
+          )}
+        </span>
       </div>
 
       {view === "library" ? (
@@ -374,6 +398,7 @@ export default function ActivityTab({
                   selectedSessionIds={selectedSessionIds}
                   onToggleSession={toggleSession}
                   onDeleteSelected={requestSelectedDeletion}
+                  onEditSession={setEditingSessionId}
                   canLoadEntities={
                     result.searchResults.apps.total > result.searchResults.apps.rows.length ||
                     result.searchResults.websites.total > result.searchResults.websites.rows.length
@@ -424,6 +449,12 @@ export default function ActivityTab({
           onToggleSession={toggleSession}
           onDeleteSelected={requestSelectedDeletion}
           onDeleteEntity={() => requestEntityDeletion(result.selectedEntity!)}
+          onExclude={() => setExcludeScope({
+            kind: result.selectedEntity!.kind === "app" ? "app" : "website",
+            pattern: result.selectedEntity!.key,
+            label: result.selectedEntity!.displayName,
+          })}
+          onEditSession={setEditingSessionId}
           onAssign={(categoryId) => assignEntity(result.selectedEntity!, categoryId)}
           onSaveAlias={(alias) => saveAlias(result.selectedEntity!.key, alias)}
           onRemoveExactRule={() => removeExactRules(result.selectedEntity!)}
@@ -438,6 +469,23 @@ export default function ActivityTab({
             setDeleteScope(null);
             historyDeleted(request.mode === "entity");
           }}
+        />
+      )}
+      {excludeScope && (
+        <TrackingExclusionDialog
+          scope={excludeScope}
+          onClose={() => setExcludeScope(null)}
+          onAdded={(deletedHistory) => {
+            setExcludeScope(null);
+            if (deletedHistory) setSelectedEntityId(null);
+          }}
+        />
+      )}
+      {editingSessionId !== null && (
+        <SessionCorrectionDialog
+          sessionId={editingSessionId}
+          categories={meta.categories}
+          onClose={() => setEditingSessionId(null)}
         />
       )}
     </div>
@@ -657,6 +705,7 @@ function GroupedSearchResults({
   selectedSessionIds,
   onToggleSession,
   onDeleteSelected,
+  onEditSession,
   canLoadEntities,
   onLoadEntities,
   canLoadWindows,
@@ -673,6 +722,7 @@ function GroupedSearchResults({
   selectedSessionIds: Set<number>;
   onToggleSession: (id: number) => void;
   onDeleteSelected: () => void;
+  onEditSession: (id: number) => void;
   canLoadEntities: boolean;
   onLoadEntities: () => void;
   canLoadWindows: boolean;
@@ -698,7 +748,7 @@ function GroupedSearchResults({
       {canLoadEntities && <LoadMore shown={groups.apps.rows.length + groups.websites.rows.length} total={groups.apps.total + groups.websites.total} onClick={onLoadEntities} />}
       {groups.windowTotal > 0 && (
         <ResultGroup title="Window matches" count={groups.windowTotal}>
-          <SessionTable rows={groups.windowMatches} selected={selectedSessionIds} onToggle={onToggleSession} />
+          <SessionTable rows={groups.windowMatches} selected={selectedSessionIds} onToggle={onToggleSession} onEdit={onEditSession} />
           {selectedSessionIds.size > 0 && (
             <div className="mt-3 flex justify-end"><Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button></div>
           )}
@@ -830,7 +880,7 @@ function ClassificationLabel({ entity }: { entity: ActivityEntitySummary }) {
   );
 }
 
-function SessionTable({ rows, selected, onToggle }: { rows: ActivitySessionRow[]; selected: Set<number>; onToggle: (id: number) => void }) {
+function SessionTable({ rows, selected, onToggle, onEdit }: { rows: ActivitySessionRow[]; selected: Set<number>; onToggle: (id: number) => void; onEdit: (id: number) => void }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] table-fixed text-xs">
@@ -842,6 +892,7 @@ function SessionTable({ rows, selected, onToggle }: { rows: ActivitySessionRow[]
             <th className="w-[32%] pb-2 font-medium">Window</th>
             <th className="w-[20%] pb-2 font-medium">Classification</th>
             <th className="w-[10%] pb-2 text-right font-medium">Time</th>
+            <th className="w-12 pb-2"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -854,10 +905,11 @@ function SessionTable({ rows, selected, onToggle }: { rows: ActivitySessionRow[]
               <td className="py-2.5 pr-3 text-ink-2">
                 <span className="flex items-center gap-2">
                   <CategoryDot color={session.categoryColor ?? UNCATEGORIZED} />
-                  <span className="min-w-0"><span className="block truncate">{session.categoryName ?? "Uncategorized"}</span><span className="block truncate text-[10px] text-ink-3">{session.winningRulePattern ? `${RULE_LABELS[session.winningRuleType!]} · ${session.winningRulePattern}` : "No matching rule"}</span></span>
+                  <span className="min-w-0"><span className="block truncate">{session.categoryName ?? "Uncategorized"}</span><span className="block truncate text-[10px] text-ink-3">{session.classificationSource === "session_override" ? "Session override" : session.winningRulePattern ? `${RULE_LABELS[session.winningRuleType!]} · ${session.winningRulePattern}` : "No matching rule"}</span></span>
                 </span>
               </td>
               <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(session.seconds)}</td>
+              <td className="py-2.5 text-right"><button type="button" onClick={() => onEdit(session.id)} className="rounded px-1.5 py-1 text-[10.5px] text-accent hover:bg-accent/10">Edit</button></td>
             </tr>
           ))}
         </tbody>
@@ -899,6 +951,8 @@ function EntityDrawer({
   onToggleSession,
   onDeleteSelected,
   onDeleteEntity,
+  onExclude,
+  onEditSession,
   onAssign,
   onSaveAlias,
   onRemoveExactRule,
@@ -917,6 +971,8 @@ function EntityDrawer({
   onToggleSession: (id: number) => void;
   onDeleteSelected: () => void;
   onDeleteEntity: () => void;
+  onExclude: () => void;
+  onEditSession: (id: number) => void;
   onAssign: (categoryId: number) => Promise<void>;
   onSaveAlias: (alias: string) => Promise<void>;
   onRemoveExactRule: () => Promise<void>;
@@ -1001,19 +1057,23 @@ function EntityDrawer({
             {hasStoredTitles && <input value={detailSearch} onChange={(event) => onDetailSearch(event.target.value)} placeholder="Filter windows…" className="mt-3 w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" />}
             <div className="mt-3 flex flex-col gap-1.5">
               {sessions.map((session) => (
-                <label key={session.id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-edge/60 px-2.5 py-2 text-[11px] hover:bg-white/[.018]">
+                <div key={session.id} className="flex items-start gap-2 rounded-lg border border-edge/60 px-2.5 py-2 text-[11px] hover:bg-white/[.018]">
                   <input type="checkbox" checked={selectedSessionIds.has(session.id)} onChange={() => onToggleSession(session.id)} className="mt-0.5" />
-                  <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="text-ink-2">{formatDateTime(session.start)}</span><span className="text-ink-3">{fmtDuration(session.seconds)}</span></span>{session.title && <span className="mt-0.5 block truncate text-ink-3" title={session.title}>{session.title}</span>}<span className="mt-0.5 flex items-center gap-1.5 text-ink-3"><CategoryDot color={session.categoryColor ?? UNCATEGORIZED} />{session.categoryName ?? "Uncategorized"}{session.winningRuleType && ` · ${RULE_LABELS[session.winningRuleType]} rule`}</span></span>
-                </label>
+                  <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="text-ink-2">{formatDateTime(session.start)}</span><span className="text-ink-3">{fmtDuration(session.seconds)}</span>{session.isCorrected && <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] text-accent">Corrected</span>}</span>{session.title && <span className="mt-0.5 block truncate text-ink-3" title={session.title}>{session.title}</span>}<span className="mt-0.5 flex items-center gap-1.5 text-ink-3"><CategoryDot color={session.categoryColor ?? UNCATEGORIZED} />{session.categoryName ?? "Uncategorized"}{session.classificationSource === "session_override" ? " · Session override" : session.winningRuleType ? ` · ${RULE_LABELS[session.winningRuleType]} rule` : ""}</span></span>
+                  <button type="button" onClick={() => onEditSession(session.id)} className="rounded px-1.5 py-1 text-[10.5px] text-accent hover:bg-accent/10">Edit</button>
+                </div>
               ))}
               {sessions.length === 0 && <p className="py-5 text-center text-[11px] text-ink-3">No sessions match this filter.</p>}
             </div>
             {sessions.length < sessionTotal && <LoadMore shown={sessions.length} total={sessionTotal} onClick={onLoadMore} />}
           </section>
         </div>
-        <div className="flex items-center justify-between border-t border-edge px-5 py-4">
+        <div className="flex items-center justify-between gap-3 border-t border-edge px-5 py-4">
           <p className="max-w-72 text-[10.5px] leading-snug text-ink-3">Deletes complete session rows overlapping the visible range. Categories, rules, and aliases are kept.</p>
-          <Button variant="danger" onClick={onDeleteEntity}>Delete activity in range…</Button>
+          <span className="flex shrink-0 items-center gap-2">
+            <Button onClick={onExclude}>Do not track…</Button>
+            <Button variant="danger" onClick={onDeleteEntity}>Delete activity in range…</Button>
+          </span>
         </div>
       </aside>
     </>
@@ -1022,6 +1082,196 @@ function EntityDrawer({
 
 function DetailMetric({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-edge bg-surface-2 p-3"><p className="text-[10px] text-ink-3">{label}</p><p className="mt-1 text-sm font-semibold tabular-nums">{value}</p></div>;
+}
+
+function ActivityExportMenu({
+  source,
+  range,
+  hasStoredTitles,
+}: {
+  source: ActivitySource;
+  range: Range;
+  hasStoredTitles: boolean;
+}) {
+  const banner = useBanner();
+  const [includeTitles, setIncludeTitles] = useState(false);
+  const [exporting, setExporting] = useState<ActivityExportKind | null>(null);
+  const run = async (kind: ActivityExportKind) => {
+    setExporting(kind);
+    try {
+      const file = buildActivityExport(
+        kind,
+        source,
+        range.start.getTime() / 1000,
+        range.end.getTime() / 1000,
+        kind === "sessions" && includeTitles,
+      );
+      const path = await saveActivityExport(file.suggestedName, file.contents);
+      if (path) banner.show(`Export saved to ${path}`);
+    } catch (error) {
+      banner.report(error, "export");
+    } finally {
+      setExporting(null);
+    }
+  };
+  return (
+    <details className="relative">
+      <summary className="cursor-pointer list-none rounded-lg border border-edge px-3 py-1.5 text-xs text-ink-2 hover:bg-white/[.035]">Export</summary>
+      <div className="absolute right-0 top-9 z-30 w-64 rounded-xl border border-edge bg-surface p-3 shadow-xl">
+        <p className="text-[10.5px] leading-snug text-ink-3">Uses the selected date range. Search and library filters do not remove rows.</p>
+        <div className="mt-3 flex flex-col gap-2">
+          <Button disabled={exporting !== null} onClick={() => void run("summary")}>{exporting === "summary" ? "Preparing…" : "Activity summary CSV"}</Button>
+          <Button disabled={exporting !== null} onClick={() => void run("sessions")}>{exporting === "sessions" ? "Preparing…" : "Session details CSV"}</Button>
+        </div>
+        {hasStoredTitles && (
+          <label className="mt-3 flex items-start gap-2 text-[10.5px] leading-snug text-ink-3">
+            <input type="checkbox" checked={includeTitles} onChange={(event) => setIncludeTitles(event.target.checked)} className="mt-0.5" />
+            Include stored window titles in session details. Titles may contain private document or message text.
+          </label>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function TrackingExclusionDialog({
+  scope,
+  onClose,
+  onAdded,
+}: {
+  scope: { kind: TrackingExclusionKind; pattern: string; label: string };
+  onClose: () => void;
+  onAdded: (deletedHistory: boolean) => void;
+}) {
+  const banner = useBanner();
+  const [preview, setPreview] = useState<{ count: number; seconds: number; normalizedPattern: string } | null>(null);
+  const [deleteHistory, setDeleteHistory] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void previewTrackingExclusion(scope.kind, scope.pattern).then(
+      (value) => { if (!cancelled) setPreview(value); },
+      (error) => { if (!cancelled) { banner.report(error, "tracking exclusion"); onClose(); } },
+    );
+    return () => { cancelled = true; };
+  }, [scope]);
+  const save = async () => {
+    setSaving(true);
+    try {
+      const result = await addTrackingExclusion(scope.kind, scope.pattern, deleteHistory);
+      banner.show(
+        deleteHistory
+          ? `Future tracking stopped and ${result.deletedCount} historical session${result.deletedCount === 1 ? " was" : "s were"} deleted.`
+          : `Time will no longer track ${scope.label}.`,
+      );
+      onAdded(deleteHistory);
+    } catch (error) {
+      banner.report(error, "tracking exclusion");
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="exclude-title">
+      <div className="w-full max-w-md rounded-2xl border border-edge bg-surface p-5 shadow-2xl">
+        <h2 id="exclude-title" className="text-base font-semibold">Do not track {scope.label}</h2>
+        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">This exact {scope.kind === "website" ? "website" : "app"} identity will be excluded whenever recording is enabled.</p>
+        <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 font-mono text-[11px] text-ink-2">{preview?.normalizedPattern ?? scope.pattern}</p>
+        {scope.kind === "website" && <p className="mt-2 text-[10.5px] text-ink-3">Website exclusions work only when Time can detect the browser domain.</p>}
+        <label className="mt-4 flex items-start gap-2 rounded-lg border border-bad/20 bg-bad/[.035] p-3 text-[11px] leading-snug text-ink-2">
+          <input type="checkbox" checked={deleteHistory} onChange={(event) => setDeleteHistory(event.target.checked)} className="mt-0.5" />
+          <span><span className="block font-medium">Also delete existing history</span>{preview ? `${preview.count} session${preview.count === 1 ? "" : "s"} · ${fmtDuration(preview.seconds)}. This cannot be undone without a backup.` : "Checking matching history…"}</span>
+        </label>
+        <div className="mt-5 flex justify-end gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || !preview} onClick={() => void save()}>{saving ? "Saving…" : "Add exclusion"}</Button></div>
+      </div>
+    </div>
+  );
+}
+
+function localInputValue(seconds: number): string {
+  const date = new Date(seconds * 1000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function SessionCorrectionDialog({
+  sessionId,
+  categories,
+  onClose,
+}: {
+  sessionId: number;
+  categories: Category[];
+  onClose: () => void;
+}) {
+  const banner = useBanner();
+  const [session, setSession] = useState<SessionCorrection | null>(null);
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSessionCorrection(sessionId).then(
+      (value) => {
+        if (cancelled) return;
+        setSession(value);
+        setStart(localInputValue(value.start));
+        setEnd(localInputValue(value.end));
+        setCategoryId(value.categoryId == null ? "" : String(value.categoryId));
+      },
+      (error) => { if (!cancelled) { banner.report(error, "session"); onClose(); } },
+    );
+    return () => { cancelled = true; };
+  }, [sessionId]);
+  const save = async () => {
+    if (!session) return;
+    const startSec = new Date(start).getTime() / 1000;
+    const endSec = new Date(end).getTime() / 1000;
+    setSaving(true);
+    try {
+      await correctSession({
+        sessionId,
+        startSec,
+        endSec,
+        categoryId: categoryId ? Number(categoryId) : null,
+      });
+      banner.show("Session correction saved.");
+      onClose();
+    } catch (error) {
+      banner.report(error, "session correction");
+      setSaving(false);
+    }
+  };
+  const reset = async () => {
+    setSaving(true);
+    try {
+      await resetSessionCorrection(sessionId);
+      banner.show("Session restored to its captured values.");
+      onClose();
+    } catch (error) {
+      banner.report(error, "session correction");
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="correction-title">
+      <div className="w-full max-w-lg rounded-2xl border border-edge bg-surface p-5 shadow-2xl">
+        <h2 id="correction-title" className="text-base font-semibold">Correct session</h2>
+        {!session ? <div className="py-10"><Spinner /></div> : (
+          <>
+            <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px]"><p className="font-medium">{session.domain ?? session.process}</p>{session.title && <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>}</div>
+            {(session.isLive || session.isAfk) && <p className="mt-3 rounded-lg border border-bad/30 bg-bad/[.04] px-3 py-2 text-[11px] text-bad">{session.isLive ? "The current live session cannot be edited." : "AFK sessions are not editable in this version."}</p>}
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="text-[11px] text-ink-3">Start<input type="datetime-local" step="1" value={start} onChange={(event) => setStart(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
+              <label className="text-[11px] text-ink-3">End<input type="datetime-local" step="1" value={end} onChange={(event) => setEnd(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
+            </div>
+            <label className="mt-3 block text-[11px] text-ink-3">Category<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60"><option value="">Use automatic classification</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            <p className="mt-3 text-[10.5px] leading-snug text-ink-3">Times use your local timezone. Corrections cannot overlap another recorded session or end in the future.</p>
+            <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="danger" disabled={saving} onClick={() => void reset()}>Reset corrections</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save correction"}</Button></span></div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function DeleteActivityDialog({

@@ -17,6 +17,8 @@ interface SessionColumns {
   titles: string[];
   domains: Array<string | null>;
   isAfk: boolean[];
+  categoryOverrideIds: Array<number | null>;
+  isCorrected: boolean[];
 }
 
 /** Sessions overlapping [startSec, endSec), ordered by start. Clip before use. */
@@ -33,7 +35,9 @@ export async function fetchSessions(startSec: number, endSec: number): Promise<S
     columns.processes.length !== count ||
     columns.titles.length !== count ||
     columns.domains.length !== count ||
-    columns.isAfk.length !== count
+    columns.isAfk.length !== count ||
+    columns.categoryOverrideIds.length !== count ||
+    columns.isCorrected.length !== count
   ) {
     throw new Error("Native session query returned mismatched column lengths");
   }
@@ -45,6 +49,8 @@ export async function fetchSessions(startSec: number, endSec: number): Promise<S
     title: columns.titles[index],
     domain: columns.domains[index],
     isAfk: columns.isAfk[index],
+    categoryOverrideId: columns.categoryOverrideIds[index],
+    isCorrected: columns.isCorrected[index],
   }));
 }
 
@@ -200,8 +206,13 @@ export async function updateCategory(cat: Category): Promise<void> {
 
 export async function deleteCategory(categoryId: number): Promise<void> {
   const db = await getDb();
-  // Schema v1's trigger removes dependent rules in this same statement.
-  await db.execute("DELETE FROM categories WHERE id = $1", [categoryId]);
+  try {
+    // The schema removes dependent rules and category-only session overrides
+    // in this same statement.
+    await db.execute("DELETE FROM categories WHERE id = $1", [categoryId]);
+  } finally {
+    invalidateHistory();
+  }
 }
 
 // ---------------- history deletion ----------------
@@ -257,11 +268,120 @@ export async function deleteActivity(
   }
 }
 
+// ---------------- pre-capture exclusions ----------------
+
+export type TrackingExclusionKind = "app" | "website";
+
+export interface TrackingExclusion {
+  kind: TrackingExclusionKind;
+  pattern: string;
+  createdTs: number;
+}
+
+export interface TrackingExclusionPreview {
+  count: number;
+  seconds: number;
+  normalizedPattern: string;
+}
+
+export interface TrackingExclusionResult {
+  normalizedPattern: string;
+  deletedCount: number;
+}
+
+export async function listTrackingExclusions(): Promise<TrackingExclusion[]> {
+  return invoke<TrackingExclusion[]>("list_tracking_exclusions");
+}
+
+export async function previewTrackingExclusion(
+  kind: TrackingExclusionKind,
+  pattern: string,
+): Promise<TrackingExclusionPreview> {
+  return invoke<TrackingExclusionPreview>("preview_tracking_exclusion", { kind, pattern });
+}
+
+export async function addTrackingExclusion(
+  kind: TrackingExclusionKind,
+  pattern: string,
+  deleteHistory: boolean,
+): Promise<TrackingExclusionResult> {
+  try {
+    return await invoke<TrackingExclusionResult>("add_tracking_exclusion", {
+      kind,
+      pattern,
+      deleteHistory,
+    });
+  } finally {
+    if (deleteHistory) invalidateHistory();
+  }
+}
+
+export async function removeTrackingExclusion(
+  kind: TrackingExclusionKind,
+  pattern: string,
+): Promise<number> {
+  return invoke<number>("remove_tracking_exclusion", { kind, pattern });
+}
+
+// ---------------- session correction ----------------
+
+export interface SessionCorrection {
+  sessionId: number;
+  originalStart: number;
+  originalEnd: number;
+  start: number;
+  end: number;
+  process: string;
+  title: string;
+  domain: string | null;
+  categoryId: number | null;
+  isAfk: boolean;
+  isLive: boolean;
+  isCorrected: boolean;
+}
+
+export interface SessionCorrectionRequest {
+  sessionId: number;
+  startSec: number;
+  endSec: number;
+  categoryId: number | null;
+}
+
+export async function fetchSessionCorrection(sessionId: number): Promise<SessionCorrection> {
+  return invoke<SessionCorrection>("fetch_session_correction", { sessionId });
+}
+
+export async function correctSession(
+  request: SessionCorrectionRequest,
+): Promise<SessionCorrection> {
+  try {
+    return await invoke<SessionCorrection>("correct_session", { request });
+  } finally {
+    invalidateHistory();
+  }
+}
+
+export async function resetSessionCorrection(sessionId: number): Promise<number> {
+  try {
+    return await invoke<number>("reset_session_correction", { sessionId });
+  } finally {
+    invalidateHistory();
+  }
+}
+
+export async function saveActivityExport(
+  suggestedName: string,
+  contents: string,
+): Promise<string | null> {
+  return invoke<string | null>("save_activity_export", { suggestedName, contents });
+}
+
 /** Sessions that ended before `cutoffSec` (unix seconds). */
 export async function countSessionsOlderThan(cutoffSec: number): Promise<number> {
   const db = await getDb();
   const rows = await db.select<{ n: number }[]>(
-    "SELECT COUNT(*) AS n FROM sessions WHERE end_ts < $1",
+    "SELECT COUNT(*) AS n FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id" +
+      " WHERE COALESCE(c.corrected_end_ts,s.end_ts) < $1",
     [Math.floor(cutoffSec)],
   );
   return rows[0].n;
@@ -299,7 +419,8 @@ export async function fetchTrackerStatus(): Promise<TrackerStatus> {
 export async function fetchEarliestSessionStart(): Promise<number | null> {
   const db = await getDb();
   const rows = await db.select<{ first_ts: number | null }[]>(
-    "SELECT MIN(start_ts) AS first_ts FROM sessions",
+    "SELECT MIN(COALESCE(c.corrected_start_ts,s.start_ts)) AS first_ts FROM sessions s" +
+      " LEFT JOIN session_corrections c ON c.session_id=s.id",
   );
   return rows[0]?.first_ts ?? null;
 }
