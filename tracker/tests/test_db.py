@@ -199,6 +199,22 @@ def test_get_settings_parses_and_clamps(conn):
     assert parsed.excluded_domains == frozenset({"example.com"})
 
 
+def test_browser_processes_are_normalized_to_stored_process_names(conn):
+    conn.execute(
+        "UPDATE settings SET value=? WHERE key='browser_processes'",
+        (" Chrome , FIREFOX.EXE ,C:\\Program Files\\Opera\\opera.exe,,chrome",),
+    )
+    assert db.get_settings(conn).browser_processes == frozenset(
+        {"chrome.exe", "firefox.exe", "opera.exe"}
+    )
+
+
+def test_empty_browser_processes_fall_back_to_the_shipped_list(conn):
+    conn.execute("UPDATE settings SET value=' , ' WHERE key='browser_processes'")
+    browsers = db.get_settings(conn).browser_processes
+    assert {"chrome.exe", "msedge.exe", "firefox.exe"} <= browsers
+
+
 def test_store_open_heartbeat_close_roundtrip(conn):
     store = db.SqliteStore(conn)
     sid = store.open_session(1000.0, "code.exe", "main.py", None, False)

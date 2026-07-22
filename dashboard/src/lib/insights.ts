@@ -51,6 +51,8 @@ interface InsightsAggregation {
   currentDaily: Map<string, number[]>;
   previousDaily: Map<string, number[]>;
   historyDays: DailyActivitySummary[];
+  /** Days in range that recorded any non-AFK activity. */
+  activeDays: number;
 }
 
 export interface InsightsRequest {
@@ -61,7 +63,7 @@ export interface InsightsRequest {
   browserProcesses: string[];
   weekStart: WeekStart;
   weeklyGoalHours: number;
-  minAppSeconds: number;
+  minAppSecondsPerDay: number;
   focusChainMaxGapSeconds: number;
   dayStartHour: number;
   dayEndHour: number;
@@ -212,6 +214,7 @@ export function aggregateInsightsSessions(
   const previousDaily = new Map<string, number[]>();
   const currentApps = new Map<string, AppUsage>();
   const previousApps = new Map<string, AppUsage>();
+  const activeDayKeys = new Set<string>();
   const current: Session[] = [];
   let totalSec = 0;
   let prodSec = 0;
@@ -314,7 +317,10 @@ export function aggregateInsightsSessions(
           const seconds = overlapEnd - overlapStart;
           if (seconds > 0) {
             const index = currentDayIndex.get(key);
-            if (index !== undefined) currentValues[index] += seconds;
+            if (index !== undefined) {
+              currentValues[index] += seconds;
+              activeDayKeys.add(key);
+            }
           }
         }
       });
@@ -334,6 +340,7 @@ export function aggregateInsightsSessions(
     currentDaily,
     previousDaily,
     historyDays: finalizeDays(historyDays),
+    activeDays: activeDayKeys.size,
   };
 }
 
@@ -351,8 +358,15 @@ function buildInsightsModelWithClassifier(
     request.focusChainMaxGapSeconds,
     request.weekStart,
   );
+  // The filter is a rate, not a total: a flat "hide under 2 minutes" bar is
+  // most of a day's use of a rare app on Today and invisible on Year, so the
+  // same list would churn purely from changing the range. Scaling by days that
+  // recorded something — not calendar days — keeps holidays and pre-install
+  // stretches inside a long range from inflating the bar.
+  const minAppThresholdSeconds =
+    request.minAppSecondsPerDay * Math.max(aggregation.activeDays, 1);
   const eligibleApps = aggregation.currentRanked.filter(
-    (app) => app.seconds >= request.minAppSeconds,
+    (app) => app.seconds >= minAppThresholdSeconds,
   );
   const apps = withDeltas(eligibleApps.slice(0, 20), aggregation.previousRanked, {
     currentDaily: aggregation.currentDaily,

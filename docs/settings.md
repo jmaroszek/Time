@@ -12,12 +12,12 @@ Every knob lives in the database and is edited here. You do not need to edit con
 | **Day starts/ends at** | The hour window drawn on the Timeline and Hour-of-Day plots. Activity outside the window still counts in all totals. |
 | **AFK idle threshold** | How long without input counts as away. The AFK boundary is back-dated to the last real input, so the threshold doesn't leak into the stats. Note this means passively watching video without touching the mouse or keyboard counts as away. |
 | **Focus chain max gap** | The longest break between productive sessions that still counts as one focus chain. |
-| **Minimum app time** | Apps below this in the range are hidden only from Insights' Top Apps. Activity always shows the complete catalog. |
+| **Minimum app time** | A rate: apps averaging less than this per tracked day are hidden only from Insights' Top Apps. Because it scales with the days that recorded activity, the same apps clear the bar on Today and on Year. Activity always shows the complete catalog. |
 | **Fold noisy items** | Which throwaway rows the Activity Library hides: nothing, one-offs, or one-offs plus installers, drivers, and local files. Totals and Insights are untouched, categorized items are never folded, and the Library header can reveal what was folded. |
 | **One-off time limit** / **One-off session limit** | An item counts as a one-off only when it is under the time limit *and* at or under the session limit. |
 | **Heartbeat interval** | How often the open session's end time is flushed to disk; this is the upper bound on data lost in a crash. |
 | **Week starts on** | Affects weekly presets, weekly bucketing, and goal pacing. |
-| **Browser processes** | Which apps can be split into Websites and use Website or Window rules. |
+| **Browser processes** | Which apps can be split into Websites and use Website or Window rules. The common browsers ship in the list, and entries are normalized on save — `Chrome` and a pasted install path both become `chrome.exe`. |
 | **Record activity** | Explicit consent switch for all foreground-app recording. |
 | **Store window titles** | Separate sensitive-data opt-in; off by default. Browser URLs are sanitized even when enabled. |
 | **Start at Windows sign-in** | Per-user startup registration; available only after recording is enabled. |

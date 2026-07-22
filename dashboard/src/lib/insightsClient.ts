@@ -31,7 +31,7 @@ export function insightsRequestKey(request: InsightsRequest): string {
     request.browserProcesses.join(","),
     request.weekStart,
     request.weeklyGoalHours,
-    request.minAppSeconds,
+    request.minAppSecondsPerDay,
     request.focusChainMaxGapSeconds,
     request.dayStartHour,
     request.dayEndHour,

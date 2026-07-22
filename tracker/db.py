@@ -114,8 +114,11 @@ DEFAULT_SETTINGS = {
     "heartbeat_seconds": "15",
     "week_start": "auto",
     "default_top_n_apps": "5",
-    "browser_processes": "chrome.exe,msedge.exe,firefox.exe,brave.exe",
-    "min_app_seconds": "0",
+    "browser_processes": (
+        "chrome.exe,msedge.exe,firefox.exe,brave.exe,"
+        "opera.exe,vivaldi.exe,arc.exe,chromium.exe"
+    ),
+    "min_app_seconds_per_day": "0",
     # Activity Library noise folding (dashboard-only; the tracker records
     # everything regardless). off | one_off | utilities.
     "activity_noise_filter": "utilities",
@@ -136,6 +139,23 @@ DEFAULT_SETTINGS = {
     "privacy_onboarding_complete": "0",
     "launch_at_login": "0",
 }
+
+
+def normalize_browser_processes(raw: str) -> frozenset[str]:
+    """Parse the comma-separated browser list into the shape sessions store.
+
+    Win32 reports lowercase image names, so a match only lands when the setting
+    is lowercase and carries the extension. Asking a user to know that is a
+    trap: "Chrome" and a pasted install path both mean chrome.exe. The
+    dashboard normalizes on save; this repeats it because the row can also be
+    hand-edited or written by an older build.
+    """
+    names: set[str] = set()
+    for part in raw.split(","):
+        base = part.strip().lower().replace("\\", "/").rsplit("/", 1)[-1]
+        if base:
+            names.add(base if "." in base else base + ".exe")
+    return frozenset(names)
 
 
 def is_paused(raw: dict[str, str], now: float | None = None) -> bool:
@@ -303,10 +323,8 @@ def get_settings(conn: sqlite3.Connection) -> Settings:
             return default
         return min(max(val, lo), hi)
 
-    browsers = frozenset(
-        p.strip().lower()
-        for p in raw.get("browser_processes", DEFAULT_SETTINGS["browser_processes"]).split(",")
-        if p.strip()
+    browsers = normalize_browser_processes(
+        raw.get("browser_processes", DEFAULT_SETTINGS["browser_processes"])
     )
     exclusions = conn.execute(
         "SELECT kind, pattern FROM tracking_exclusions"
@@ -320,7 +338,8 @@ def get_settings(conn: sqlite3.Connection) -> Settings:
     return Settings(
         idle_threshold_seconds=_float("idle_threshold_seconds", 180.0, 30.0, 3600.0),
         heartbeat_seconds=_float("heartbeat_seconds", 15.0, 5.0, 300.0),
-        browser_processes=browsers or frozenset({"chrome.exe"}),
+        browser_processes=browsers
+        or normalize_browser_processes(DEFAULT_SETTINGS["browser_processes"]),
         tracking_paused=is_paused(raw),
         recording_consent=raw.get("recording_consent") == "1",
         record_window_titles=raw.get("record_window_titles") == "1",

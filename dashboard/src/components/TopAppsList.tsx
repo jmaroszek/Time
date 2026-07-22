@@ -23,7 +23,7 @@ export default function TopAppsList({
 }) {
   const meta = useMeta();
   const banner = useBanner();
-  const { aliases, browserSet, minAppSeconds } = meta;
+  const { aliases, browserSet, minAppSecondsPerDay } = meta;
   const [editingProcess, setEditingProcess] = useState<string | null>(null);
   const [aliasDraft, setAliasDraft] = useState("");
   const max = apps[0]?.seconds ?? 1;
@@ -101,7 +101,7 @@ export default function TopAppsList({
       {hiddenAppCount > 0 && (
         <div className="mt-2 flex h-[15px] items-center">
           <p className="translate-y-px text-[11px] text-ink-3">
-            {hiddenAppCount} {hiddenAppCount === 1 ? "app" : "apps"} under {fmtDuration(minAppSeconds)} hidden
+            {hiddenAppCount} {hiddenAppCount === 1 ? "app" : "apps"} under {fmtDuration(minAppSecondsPerDay)}/day hidden
           </p>
         </div>
       )}
