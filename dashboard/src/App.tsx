@@ -1,24 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePicker";
 import { Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
+import { currentHistoryRevision, subscribeHistoryInvalidation } from "./lib/historyInvalidation";
 import { deleteCategory, fetchEarliestSessionStart, fetchTrackerStatus, updateSetting, type TrackerStatus } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
 import { allTimeRange, isRollingPreset, rangeForCalendarPreset, rangeForPreset, type Range } from "./lib/time";
 import { BannerProvider } from "./state/banner";
 import { MetaProvider, useMeta } from "./state/meta";
-import AppsTab from "./tabs/AppsTab";
+import ActivityTab from "./tabs/ActivityTab";
 import OverviewTab from "./tabs/OverviewTab";
 import SettingsTab from "./tabs/SettingsTab";
 
-type Tab = "insights" | "apps" | "settings";
+type Tab = "insights" | "activity" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "insights", label: "Insights" },
-  { id: "apps", label: "Apps" },
+  { id: "activity", label: "Activity" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -40,6 +41,7 @@ function Shell() {
   const [customRange, setCustomRange] = useState<Range | null>(null);
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [firstSessionSec, setFirstSessionSec] = useState<number | null>(null);
+  const [historyRevision, setHistoryRevision] = useState(currentHistoryRevision);
 
   const range = useMemo<Range>(() => {
     if (preset === "custom") return customRange ?? rangeForPreset("last7");
@@ -60,24 +62,26 @@ function Shell() {
   // First-run panel data: poll tracker status only until the first session exists.
   const ready = meta.loaded && meta.error === null;
 
+  const refreshFirstSession = useCallback(async () => {
+    const first = await fetchEarliestSessionStart();
+    setFirstSessionSec(first);
+  }, []);
+
+  useEffect(() => subscribeHistoryInvalidation((revision) => {
+    setHistoryRevision(revision);
+    void refreshFirstSession().catch(() => {});
+    void fetchTrackerStatus().then(setStatus).catch(() => {});
+  }), [refreshFirstSession]);
+
   // Earliest session, for the "All time" range. Re-read while the DB is still
   // empty so the preset works as soon as the first session lands.
   useEffect(() => {
     if (!ready || firstSessionSec !== null) return;
-    let cancelled = false;
-    const load = () =>
-      void fetchEarliestSessionStart()
-        .then((sec) => {
-          if (!cancelled && sec !== null) setFirstSessionSec(sec);
-        })
-        .catch(() => {});
+    const load = () => void refreshFirstSession().catch(() => {});
     load();
     const id = setInterval(load, 30_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [ready, firstSessionSec]);
+    return () => clearInterval(id);
+  }, [ready, firstSessionSec, refreshFirstSession]);
   const firstRun = status !== null && status.totalSessionCount === 0;
   useEffect(() => {
     if (!ready || (status !== null && status.totalSessionCount > 0)) return;
@@ -102,7 +106,7 @@ function Shell() {
   if (meta.error) return <DbErrorScreen error={meta.error} />;
   if (meta.settings.privacy_onboarding_complete !== "1") return <PrivacyOnboarding />;
 
-  const showRange = tab === "insights" || tab === "apps";
+  const showRange = tab === "insights" || tab === "activity";
 
   return (
     <div className="mx-auto flex min-h-full max-w-6xl flex-col gap-4 px-6 py-5">
@@ -142,7 +146,15 @@ function Shell() {
         {tab === "insights" && (
           <OverviewTab range={range} preset={preset} firstSessionSec={firstSessionSec} />
         )}
-        {tab === "apps" && <AppsTab range={range} />}
+        {tab === "activity" && (
+          <ActivityTab
+            range={range}
+            firstSessionSec={firstSessionSec}
+            historyRevision={historyRevision}
+            isAllTime={preset === "alltime"}
+            onTryAllTime={() => setPreset("alltime")}
+          />
+        )}
         {tab === "settings" && <SettingsTab />}
       </main>
     </div>

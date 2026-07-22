@@ -179,3 +179,13 @@ export function analyzeInsights(request: InsightsRequest): Promise<InsightsModel
 export async function warmInsightsModel(request: InsightsRequest): Promise<void> {
   await analyzeInsights(request);
 }
+
+export function clearInsightsModels(): void {
+  const error = new Error("Insights data was refreshed");
+  for (const pending of pendingById.values()) pending.reject(error);
+  modelCache.clear();
+  pendingByKey.clear();
+  pendingById.clear();
+  worker?.terminate();
+  worker = null;
+}

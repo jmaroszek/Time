@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { AppDelta } from "../lib/metrics";
+import { withAlias } from "../lib/aliases";
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import { saveProcessAliases } from "../lib/queries";
 import { useBanner } from "../state/banner";
@@ -36,9 +37,7 @@ export default function TopAppsList({
     const currentAlias = aliases[key] ?? "";
     setEditingProcess(null);
     if (alias === currentAlias) return;
-    const nextAliases = { ...aliases };
-    if (alias) nextAliases[key] = alias;
-    else delete nextAliases[key];
+    const nextAliases = withAlias(aliases, key, alias);
     try {
       await saveProcessAliases(nextAliases);
       await meta.refresh();
