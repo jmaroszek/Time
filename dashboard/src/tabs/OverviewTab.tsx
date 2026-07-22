@@ -84,7 +84,7 @@ export default function OverviewTab({
       browserProcesses: [...meta.browserSet].sort(),
       weekStart: meta.weekStart,
       weeklyGoalHours: meta.weeklyGoalHours,
-      minAppSeconds: meta.minAppSeconds,
+      minAppSecondsPerDay: meta.minAppSecondsPerDay,
       focusChainMaxGapSeconds: meta.focusChainMaxGapSeconds,
       dayStartHour: meta.dayStartHour,
       dayEndHour: meta.dayEndHour,

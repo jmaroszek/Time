@@ -96,6 +96,44 @@ describe("aggregateInsightsSessions", () => {
   });
 });
 
+describe("minimum app time", () => {
+  // Two days of real use inside a ten-day window, plus two small apps that
+  // straddle a 1 min/day bar: 150s clears two active days, 100s does not.
+  const rare: Session[] = [
+    make(1, at(8, 9), at(8, 11), "code.exe"),
+    make(2, at(9, 9), at(9, 11), "code.exe"),
+    make(3, at(8, 12), at(8, 12) + 150, "often.exe"),
+    make(4, at(9, 12), at(9, 12) + 100, "seldom.exe"),
+  ];
+  const modelOver = (start: Date, end: Date) =>
+    buildInsightsModel({
+      sessions: rare,
+      range: { start, end },
+      categories,
+      rules,
+      browserProcesses: [],
+      weekStart: "Sunday",
+      weeklyGoalHours: 0,
+      minAppSecondsPerDay: 60,
+      focusChainMaxGapSeconds: 120,
+      dayStartHour: 0,
+      dayEndHour: 24,
+      labelMode: "date",
+    });
+
+  it("scales the bar by days that recorded activity, not calendar days", () => {
+    const model = modelOver(new Date(2026, 5, 1), new Date(2026, 5, 11));
+    expect(model.apps.map((app) => app.process)).toEqual(["code.exe", "often.exe"]);
+    expect(model.hiddenAppCount).toBe(1);
+  });
+
+  it("keeps the same apps eligible when the range widens", () => {
+    const wide = modelOver(new Date(2026, 5, 1), new Date(2026, 5, 11));
+    const tight = modelOver(new Date(2026, 5, 8), new Date(2026, 5, 10));
+    expect(tight.apps.map((app) => app.process)).toEqual(wide.apps.map((app) => app.process));
+  });
+});
+
 describe("packed Insights transport", () => {
   it("preserves long-range model output without transferring titles or domains", () => {
     const longRange: Range = {
@@ -110,7 +148,7 @@ describe("packed Insights transport", () => {
       browserProcesses: [] as string[],
       weekStart: "Sunday" as const,
       weeklyGoalHours: 10,
-      minAppSeconds: 0,
+      minAppSecondsPerDay: 0,
       focusChainMaxGapSeconds: 120,
       dayStartHour: 0,
       dayEndHour: 24,
@@ -130,7 +168,7 @@ describe("packed Insights transport", () => {
       browserProcesses: [] as string[],
       weekStart: "Sunday" as const,
       weeklyGoalHours: 10,
-      minAppSeconds: 0,
+      minAppSecondsPerDay: 0,
       focusChainMaxGapSeconds: 120,
       dayStartHour: 0,
       dayEndHour: 24,

@@ -110,8 +110,8 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('heartbeat_seconds','15'),
     ('week_start','auto'),
     ('default_top_n_apps','5'),
-    ('browser_processes','chrome.exe,msedge.exe,firefox.exe,brave.exe'),
-    ('min_app_seconds','0'),
+    ('browser_processes','chrome.exe,msedge.exe,firefox.exe,brave.exe,opera.exe,vivaldi.exe,arc.exe,chromium.exe'),
+    ('min_app_seconds_per_day','0'),
     ('focus_chain_max_gap_seconds','120'),
     ('day_start_hour','0'),
     ('day_end_hour','24'),
@@ -1163,6 +1163,12 @@ fn normalize_exclusion(kind: &str, raw: &str) -> Result<String, String> {
             {
                 return Err("Enter an executable name such as code.exe".into());
             }
+            // Exclusions match stored process names exactly, so a bare "code"
+            // would silently never fire. The caller shows the normalized
+            // pattern back, so the added suffix is visible rather than magic.
+            if !normalized.contains('.') {
+                normalized.push_str(".exe");
+            }
         }
         "website" => {
             if let Some(scheme) = normalized.find("://") {
@@ -1344,6 +1350,15 @@ mod tests {
                 1
             );
         });
+    }
+
+    #[test]
+    fn app_exclusions_supply_the_extension_sessions_are_stored_with() {
+        assert_eq!(super::normalize_exclusion("app", " Code ").unwrap(), "code.exe");
+        assert_eq!(super::normalize_exclusion("app", "CODE.EXE").unwrap(), "code.exe");
+        // A dotted name is already specific enough to match on its own.
+        assert_eq!(super::normalize_exclusion("app", "vim.bat").unwrap(), "vim.bat");
+        assert!(super::normalize_exclusion("app", "C:\\apps\\code.exe").is_err());
     }
 
     #[test]

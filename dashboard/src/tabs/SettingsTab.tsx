@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { Spinner, TrashButton } from "../components/ui";
+import { normalizeBrowserProcesses } from "../lib/browsers";
 import { getDbPath } from "../lib/db";
 import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
@@ -36,7 +37,7 @@ interface NumericSpec {
 // tracker/db.py get_settings — keep the two in sight of each other.
 const SPECS = {
   goal: { key: "weekly_goal_hours", min: 0, max: 100, scale: 1 },
-  minimum: { key: "min_app_seconds", min: 0, max: 30, scale: 60 },
+  minimum: { key: "min_app_seconds_per_day", min: 0, max: 30, scale: 60 },
   start: { key: "day_start_hour", min: 0, max: 23, scale: 1 },
   end: { key: "day_end_hour", min: 1, max: 24, scale: 1 },
   idle: { key: "idle_threshold_seconds", min: 1, max: 60, scale: 60 },
@@ -117,8 +118,8 @@ export default function SettingsTab() {
     const fallback = Number(displayValue(spec, meta.settings[spec.key])) || spec.min;
     void saveNumeric(spec, (Number.isFinite(current) ? current : fallback) + direction * (spec.step ?? 1));
   };
-  const saveText = async (key: string) => {
-    const value = (drafts[key] ?? "").trim();
+  const saveText = async (key: string, normalize?: (raw: string) => string) => {
+    const value = normalize ? normalize(drafts[key] ?? "") : (drafts[key] ?? "").trim();
     if (!value) {
       setDrafts((current) => ({ ...current, [key]: meta.settings[key] ?? "" }));
       return;
@@ -208,8 +209,8 @@ export default function SettingsTab() {
           />
           <Row
             label="Minimum app time"
-            help="Hides apps below this much time in the Insights Top Apps list. Activity always shows the complete catalog."
-            control={numberControl(SPECS.minimum, "min")}
+            help="Hides apps averaging less than this per day you were tracked, in the Insights Top Apps list. A rate rather than a total, so widening the range doesn't change who clears the bar. Activity always shows the complete catalog."
+            control={numberControl(SPECS.minimum, "min/day")}
           />
         </Section>
 
@@ -242,14 +243,15 @@ export default function SettingsTab() {
           <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
           <Row
             label="Browser processes"
-            help="Comma-separated. Site splitting needs an optional third-party extension that appends the URL to the window title; review its browsing-data permissions before installing it."
+            help="Comma-separated; the common browsers are already listed. Names are tidied for you — “Chrome” is saved as chrome.exe. Site splitting needs an optional third-party extension that appends the URL to the window title; review its browsing-data permissions before installing it."
             control={
-              <input
+              <textarea
+                rows={4}
+                aria-label="Browser processes"
                 value={drafts.browser_processes ?? ""}
                 onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
-                onBlur={() => void saveText("browser_processes")}
-                onKeyDown={(event) => { if (event.key === "Enter") void saveText("browser_processes"); }}
-                className="w-[150px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs text-ink outline-none focus:border-accent/60"
+                onBlur={() => void saveText("browser_processes", (raw) => normalizeBrowserProcesses(raw).join(","))}
+                className="w-[172px] resize-none rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs leading-relaxed text-ink outline-none focus:border-accent/60"
               />
             }
           />

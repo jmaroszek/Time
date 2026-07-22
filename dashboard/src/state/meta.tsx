@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { DEFAULT_BROWSER_PROCESSES, normalizeBrowserProcesses } from "../lib/browsers";
 import {
   buildClassifier,
   memoizeClassifierById,
@@ -32,8 +33,10 @@ export interface Meta {
   weekStart: WeekStart;
   weeklyGoalHours: number;
   defaultTopN: number;
-  /** Apps with less than this many seconds in range are hidden from Insights' Top Apps. */
-  minAppSeconds: number;
+  /** Apps averaging less than this many seconds per active day are hidden from
+   *  Insights' Top Apps. A rate, so the bar means the same thing on Today and
+   *  on Year. */
+  minAppSecondsPerDay: number;
   /** Max gap (s) between productive sessions that still counts as one focus streak. */
   focusChainMaxGapSeconds: number;
   /** Which one-off and system-utility rows the Activity Library folds away. */
@@ -83,10 +86,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Meta>(() => {
     const browserSet = new Set(
-      (settings.browser_processes ?? "chrome.exe,msedge.exe,firefox.exe,brave.exe")
-        .split(",")
-        .map((p) => p.trim().toLowerCase())
-        .filter(Boolean),
+      normalizeBrowserProcesses(settings.browser_processes ?? DEFAULT_BROWSER_PROCESSES),
     );
     return {
       categories,
@@ -98,7 +98,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       weekStart: resolveWeekStart(settings.week_start),
       weeklyGoalHours: finiteNonNegative(settings.weekly_goal_hours),
       defaultTopN: Number(settings.default_top_n_apps) || 5,
-      minAppSeconds: Math.max(0, Number(settings.min_app_seconds) || 0),
+      minAppSecondsPerDay: Math.max(0, Number(settings.min_app_seconds_per_day) || 0),
       focusChainMaxGapSeconds: Math.max(0, Number(settings.focus_chain_max_gap_seconds) || 120),
       noisePolicy: noisePolicyFromSettings(settings),
       ...parseDayWindow(settings.day_start_hour, settings.day_end_hour),
