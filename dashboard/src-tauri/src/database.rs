@@ -22,7 +22,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+const MAX_SESSION_SPAN_SEC: i64 = 7 * 86_400;
 const BOOTSTRAP_SQL: &str = r#"
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS sessions (
@@ -59,6 +60,32 @@ CREATE TRIGGER IF NOT EXISTS delete_category_rules
 BEFORE DELETE ON categories FOR EACH ROW BEGIN
     DELETE FROM rules WHERE category_id = OLD.id;
 END;
+CREATE TABLE IF NOT EXISTS tracking_exclusions (
+    kind TEXT NOT NULL CHECK(kind IN ('app','website')),
+    pattern TEXT NOT NULL,
+    created_ts INTEGER NOT NULL,
+    PRIMARY KEY(kind, pattern)
+);
+CREATE TABLE IF NOT EXISTS session_corrections (
+    session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    corrected_start_ts INTEGER,
+    corrected_end_ts INTEGER,
+    category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    updated_ts INTEGER NOT NULL,
+    CHECK (
+        (corrected_start_ts IS NULL AND corrected_end_ts IS NULL)
+        OR
+        (corrected_start_ts IS NOT NULL AND corrected_end_ts IS NOT NULL
+         AND corrected_end_ts > corrected_start_ts)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_session_corrections_category
+    ON session_corrections(category_id);
+CREATE TRIGGER IF NOT EXISTS cleanup_empty_session_corrections
+AFTER DELETE ON categories FOR EACH ROW BEGIN
+    DELETE FROM session_corrections
+    WHERE corrected_start_ts IS NULL AND corrected_end_ts IS NULL AND category_id IS NULL;
+END;
 INSERT OR IGNORE INTO settings (key,value)
     SELECT 'starter_categories_pending','1'
     WHERE NOT EXISTS (SELECT 1 FROM categories);
@@ -76,7 +103,7 @@ INSERT OR IGNORE INTO categories
     SELECT * FROM starter
     WHERE (SELECT COUNT(*) FROM categories) = 0;
 INSERT OR IGNORE INTO settings (key,value) VALUES
-    ('schema_version','1'),
+    ('schema_version','2'),
     ('rule_priority_scheme','low-wins-v1'),
     ('weekly_goal_hours','0'),
     ('idle_threshold_seconds','180'),
@@ -123,6 +150,57 @@ pub struct SessionColumns {
     titles: Vec<String>,
     domains: Vec<Option<String>>,
     is_afk: Vec<bool>,
+    category_override_ids: Vec<Option<i64>>,
+    is_corrected: Vec<bool>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackingExclusion {
+    pub kind: String,
+    pub pattern: String,
+    pub created_ts: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackingExclusionPreview {
+    pub count: u64,
+    pub seconds: i64,
+    pub normalized_pattern: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackingExclusionResult {
+    pub normalized_pattern: String,
+    pub deleted_count: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCorrectionRequest {
+    pub session_id: i64,
+    pub start_sec: f64,
+    pub end_sec: f64,
+    pub category_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCorrection {
+    pub session_id: i64,
+    pub original_start: i64,
+    pub original_end: i64,
+    pub start: i64,
+    pub end: i64,
+    pub process: String,
+    pub title: String,
+    pub domain: Option<String>,
+    pub category_id: Option<i64>,
+    pub is_afk: bool,
+    pub is_live: bool,
+    pub is_corrected: bool,
 }
 
 #[derive(Deserialize)]
@@ -330,8 +408,14 @@ impl TimeDatabase {
             return Err("Invalid session window".into());
         }
         let rows = sqlx::query(
-            "SELECT id, start_ts, end_ts, process, title, domain, is_afk FROM sessions \
-             WHERE end_ts > ? AND start_ts < ? AND start_ts > ? ORDER BY start_ts ASC",
+            "SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
+             COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end,s.process,s.title,s.domain, \
+             s.is_afk,c.category_id,c.session_id IS NOT NULL AS is_corrected \
+             FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
+             WHERE COALESCE(c.corrected_end_ts,s.end_ts)>? \
+             AND COALESCE(c.corrected_start_ts,s.start_ts)<? \
+             AND COALESCE(c.corrected_start_ts,s.start_ts)>? \
+             ORDER BY effective_start ASC,s.id ASC",
         )
         .bind(start_sec)
         .bind(end_sec)
@@ -348,14 +432,20 @@ impl TimeDatabase {
             titles: Vec::with_capacity(rows.len()),
             domains: Vec::with_capacity(rows.len()),
             is_afk: Vec::with_capacity(rows.len()),
+            category_override_ids: Vec::with_capacity(rows.len()),
+            is_corrected: Vec::with_capacity(rows.len()),
         };
         for row in rows {
             out.ids
                 .push(row.try_get("id").map_err(|error| error.to_string())?);
-            out.starts
-                .push(row.try_get("start_ts").map_err(|error| error.to_string())?);
-            out.ends
-                .push(row.try_get("end_ts").map_err(|error| error.to_string())?);
+            out.starts.push(
+                row.try_get("effective_start")
+                    .map_err(|error| error.to_string())?,
+            );
+            out.ends.push(
+                row.try_get("effective_end")
+                    .map_err(|error| error.to_string())?,
+            );
             out.processes
                 .push(row.try_get("process").map_err(|error| error.to_string())?);
             out.titles
@@ -364,6 +454,14 @@ impl TimeDatabase {
                 .push(row.try_get("domain").map_err(|error| error.to_string())?);
             let is_afk: i64 = row.try_get("is_afk").map_err(|error| error.to_string())?;
             out.is_afk.push(is_afk != 0);
+            out.category_override_ids.push(
+                row.try_get("category_id")
+                    .map_err(|error| error.to_string())?,
+            );
+            let is_corrected: i64 = row
+                .try_get("is_corrected")
+                .map_err(|error| error.to_string())?;
+            out.is_corrected.push(is_corrected != 0);
         }
         Ok(out)
     }
@@ -442,8 +540,12 @@ impl TimeDatabase {
                 let placeholders = std::iter::repeat_n("?", chunk.len())
                     .collect::<Vec<_>>()
                     .join(",");
-                let sql =
-                    format!("SELECT id,start_ts,end_ts FROM sessions WHERE id IN ({placeholders})");
+                let sql = format!(
+                    "SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
+                     COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end FROM sessions s \
+                     LEFT JOIN session_corrections c ON c.session_id=s.id \
+                     WHERE s.id IN ({placeholders})"
+                );
                 let mut query = sqlx::query(&sql);
                 for id in chunk {
                     query = query.bind(id);
@@ -455,8 +557,12 @@ impl TimeDatabase {
                 {
                     candidates.push(DeletionCandidate {
                         id: row.try_get("id").map_err(|error| error.to_string())?,
-                        start: row.try_get("start_ts").map_err(|error| error.to_string())?,
-                        end: row.try_get("end_ts").map_err(|error| error.to_string())?,
+                        start: row
+                            .try_get("effective_start")
+                            .map_err(|error| error.to_string())?,
+                        end: row
+                            .try_get("effective_end")
+                            .map_err(|error| error.to_string())?,
                     });
                 }
             }
@@ -489,8 +595,11 @@ impl TimeDatabase {
             .collect::<HashSet<_>>();
         let rows = match entity_kind {
             "app" => sqlx::query(
-                "SELECT id,start_ts,end_ts,process,domain FROM sessions \
-                 WHERE lower(process)=? AND end_ts>? AND start_ts<?",
+                "SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
+                 COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end,s.process,s.domain \
+                 FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
+                 WHERE lower(s.process)=? AND COALESCE(c.corrected_end_ts,s.end_ts)>? \
+                 AND COALESCE(c.corrected_start_ts,s.start_ts)<?",
             )
             .bind(&entity_key)
             .bind(start_sec)
@@ -499,8 +608,11 @@ impl TimeDatabase {
             .await
             .map_err(|error| error.to_string())?,
             "website" => sqlx::query(
-                "SELECT id,start_ts,end_ts,process,domain FROM sessions \
-                 WHERE lower(IFNULL(domain,''))=? AND end_ts>? AND start_ts<?",
+                "SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
+                 COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end,s.process,s.domain \
+                 FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
+                 WHERE lower(IFNULL(s.domain,''))=? AND COALESCE(c.corrected_end_ts,s.end_ts)>? \
+                 AND COALESCE(c.corrected_start_ts,s.start_ts)<?",
             )
             .bind(&entity_key)
             .bind(start_sec)
@@ -528,8 +640,12 @@ impl TimeDatabase {
             if belongs {
                 candidates.push(DeletionCandidate {
                     id: row.try_get("id").map_err(|error| error.to_string())?,
-                    start: row.try_get("start_ts").map_err(|error| error.to_string())?,
-                    end: row.try_get("end_ts").map_err(|error| error.to_string())?,
+                    start: row
+                        .try_get("effective_start")
+                        .map_err(|error| error.to_string())?,
+                    end: row
+                        .try_get("effective_end")
+                        .map_err(|error| error.to_string())?,
                 });
             }
         }
@@ -688,16 +804,287 @@ impl TimeDatabase {
         })
     }
 
+    pub async fn list_tracking_exclusions(&self) -> Result<Vec<TrackingExclusion>, String> {
+        let rows = sqlx::query(
+            "SELECT kind,pattern,created_ts FROM tracking_exclusions ORDER BY kind,pattern",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(TrackingExclusion {
+                    kind: row.try_get("kind").map_err(|error| error.to_string())?,
+                    pattern: row.try_get("pattern").map_err(|error| error.to_string())?,
+                    created_ts: row
+                        .try_get("created_ts")
+                        .map_err(|error| error.to_string())?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn preview_tracking_exclusion(
+        &self,
+        kind: &str,
+        pattern: &str,
+    ) -> Result<TrackingExclusionPreview, String> {
+        let normalized = normalize_exclusion(kind, pattern)?;
+        let predicate = match kind {
+            "app" => "lower(s.process)=?",
+            "website" => "lower(IFNULL(s.domain,''))=?",
+            _ => return Err("Unsupported tracking exclusion kind".into()),
+        };
+        let sql = format!(
+            "SELECT COUNT(*) AS n,COALESCE(SUM(MAX(0,COALESCE(c.corrected_end_ts,s.end_ts)- \
+             COALESCE(c.corrected_start_ts,s.start_ts))),0) AS seconds \
+             FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id WHERE {predicate}"
+        );
+        let row = sqlx::query(&sql)
+            .bind(&normalized)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(TrackingExclusionPreview {
+            count: row
+                .try_get::<i64, _>("n")
+                .map_err(|error| error.to_string())? as u64,
+            seconds: row.try_get("seconds").map_err(|error| error.to_string())?,
+            normalized_pattern: normalized,
+        })
+    }
+
+    pub async fn add_tracking_exclusion(
+        &self,
+        kind: &str,
+        pattern: &str,
+        delete_history: bool,
+    ) -> Result<TrackingExclusionResult, String> {
+        self.ensure_writable_schema()?;
+        let normalized = normalize_exclusion(kind, pattern)?;
+        let now = unix_now()?;
+        let mut transaction = self.pool.begin().await.map_err(|error| error.to_string())?;
+        sqlx::query(
+            "INSERT INTO tracking_exclusions (kind,pattern,created_ts) VALUES (?,?,?) \
+             ON CONFLICT(kind,pattern) DO NOTHING",
+        )
+        .bind(kind)
+        .bind(&normalized)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        let deleted_count = if delete_history {
+            let sql = match kind {
+                "app" => "DELETE FROM sessions WHERE lower(process)=?",
+                "website" => "DELETE FROM sessions WHERE lower(IFNULL(domain,''))=?",
+                _ => return Err("Unsupported tracking exclusion kind".into()),
+            };
+            sqlx::query(sql)
+                .bind(&normalized)
+                .execute(&mut *transaction)
+                .await
+                .map_err(|error| error.to_string())?
+                .rows_affected()
+        } else {
+            0
+        };
+        transaction
+            .commit()
+            .await
+            .map_err(|error| error.to_string())?;
+        if deleted_count > 0 {
+            self.compact().await?;
+        }
+        Ok(TrackingExclusionResult {
+            normalized_pattern: normalized,
+            deleted_count,
+        })
+    }
+
+    pub async fn remove_tracking_exclusion(
+        &self,
+        kind: &str,
+        pattern: &str,
+    ) -> Result<u64, String> {
+        self.ensure_writable_schema()?;
+        let normalized = normalize_exclusion(kind, pattern)?;
+        sqlx::query("DELETE FROM tracking_exclusions WHERE kind=? AND pattern=?")
+            .bind(kind)
+            .bind(normalized)
+            .execute(&self.pool)
+            .await
+            .map(|result| result.rows_affected())
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn fetch_session_correction(
+        &self,
+        session_id: i64,
+    ) -> Result<SessionCorrection, String> {
+        let row = sqlx::query(
+            "SELECT s.id,s.start_ts,s.end_ts,s.process,s.title,s.domain,s.is_afk, \
+             COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
+             COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end,c.category_id, \
+             c.session_id IS NOT NULL AS is_corrected \
+             FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id WHERE s.id=?",
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or("Session no longer exists")?;
+        let protected = self.protected_live_session_id().await?;
+        Ok(SessionCorrection {
+            session_id,
+            original_start: row.try_get("start_ts").map_err(|error| error.to_string())?,
+            original_end: row.try_get("end_ts").map_err(|error| error.to_string())?,
+            start: row
+                .try_get("effective_start")
+                .map_err(|error| error.to_string())?,
+            end: row
+                .try_get("effective_end")
+                .map_err(|error| error.to_string())?,
+            process: row.try_get("process").map_err(|error| error.to_string())?,
+            title: row.try_get("title").map_err(|error| error.to_string())?,
+            domain: row.try_get("domain").map_err(|error| error.to_string())?,
+            category_id: row
+                .try_get("category_id")
+                .map_err(|error| error.to_string())?,
+            is_afk: row
+                .try_get::<i64, _>("is_afk")
+                .map_err(|error| error.to_string())?
+                != 0,
+            is_live: protected == Some(session_id),
+            is_corrected: row
+                .try_get::<i64, _>("is_corrected")
+                .map_err(|error| error.to_string())?
+                != 0,
+        })
+    }
+
+    pub async fn correct_session(
+        &self,
+        request: &SessionCorrectionRequest,
+    ) -> Result<SessionCorrection, String> {
+        self.ensure_writable_schema()?;
+        if !request.start_sec.is_finite() || !request.end_sec.is_finite() {
+            return Err("Session times must be finite".into());
+        }
+        let start = request.start_sec.floor() as i64;
+        let end = request.end_sec.floor() as i64;
+        if end <= start {
+            return Err("Session end must be after its start".into());
+        }
+        if end - start > MAX_SESSION_SPAN_SEC {
+            return Err("A corrected session cannot be longer than seven days".into());
+        }
+        if end > unix_now()? {
+            return Err("A corrected session cannot end in the future".into());
+        }
+        let original = sqlx::query("SELECT start_ts,end_ts,is_afk FROM sessions WHERE id=?")
+            .bind(request.session_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or("Session no longer exists")?;
+        if original
+            .try_get::<i64, _>("is_afk")
+            .map_err(|error| error.to_string())?
+            != 0
+        {
+            return Err("AFK sessions cannot be edited".into());
+        }
+        if self.protected_live_session_id().await? == Some(request.session_id) {
+            return Err("The current live session cannot be edited".into());
+        }
+        if let Some(category_id) = request.category_id {
+            let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories WHERE id=?")
+                .bind(category_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|error| error.to_string())?;
+            if exists == 0 {
+                return Err("The selected category no longer exists".into());
+            }
+        }
+        let overlaps: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sessions s \
+             LEFT JOIN session_corrections c ON c.session_id=s.id \
+             WHERE s.id<>? AND COALESCE(c.corrected_end_ts,s.end_ts)>? \
+             AND COALESCE(c.corrected_start_ts,s.start_ts)<?",
+        )
+        .bind(request.session_id)
+        .bind(start)
+        .bind(end)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        if overlaps > 0 {
+            return Err("Corrected times overlap another recorded session".into());
+        }
+        let original_start: i64 = original
+            .try_get("start_ts")
+            .map_err(|error| error.to_string())?;
+        let original_end: i64 = original
+            .try_get("end_ts")
+            .map_err(|error| error.to_string())?;
+        if start == original_start && end == original_end && request.category_id.is_none() {
+            sqlx::query("DELETE FROM session_corrections WHERE session_id=?")
+                .bind(request.session_id)
+                .execute(&self.pool)
+                .await
+                .map_err(|error| error.to_string())?;
+        } else {
+            let corrected_start = (start != original_start || end != original_end).then_some(start);
+            let corrected_end = (start != original_start || end != original_end).then_some(end);
+            sqlx::query(
+                "INSERT INTO session_corrections \
+                 (session_id,corrected_start_ts,corrected_end_ts,category_id,updated_ts) \
+                 VALUES (?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET \
+                 corrected_start_ts=excluded.corrected_start_ts, \
+                 corrected_end_ts=excluded.corrected_end_ts,category_id=excluded.category_id, \
+                 updated_ts=excluded.updated_ts",
+            )
+            .bind(request.session_id)
+            .bind(corrected_start)
+            .bind(corrected_end)
+            .bind(request.category_id)
+            .bind(unix_now()?)
+            .execute(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
+        }
+        self.fetch_session_correction(request.session_id).await
+    }
+
+    pub async fn reset_session_correction(&self, session_id: i64) -> Result<u64, String> {
+        self.ensure_writable_schema()?;
+        if self.protected_live_session_id().await? == Some(session_id) {
+            return Err("The current live session cannot be edited".into());
+        }
+        sqlx::query("DELETE FROM session_corrections WHERE session_id=?")
+            .bind(session_id)
+            .execute(&self.pool)
+            .await
+            .map(|result| result.rows_affected())
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn delete_history_before(&self, cutoff_sec: f64) -> Result<u64, String> {
         self.ensure_writable_schema()?;
         if !cutoff_sec.is_finite() {
             return Err("Invalid history cutoff".into());
         }
-        let result = sqlx::query("DELETE FROM sessions WHERE end_ts < ?")
-            .bind(cutoff_sec.floor() as i64)
-            .execute(&self.pool)
-            .await
-            .map_err(|error| error.to_string())?;
+        let result = sqlx::query(
+            "DELETE FROM sessions WHERE id IN (SELECT s.id FROM sessions s \
+             LEFT JOIN session_corrections c ON c.session_id=s.id \
+             WHERE COALESCE(c.corrected_end_ts,s.end_ts) < ?)",
+        )
+        .bind(cutoff_sec.floor() as i64)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?;
         if result.rows_affected() > 0 {
             self.compact().await?;
         }
@@ -756,6 +1143,57 @@ impl TimeDatabase {
         }
         Ok(())
     }
+}
+
+fn unix_now() -> Result<i64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .map_err(|error| error.to_string())
+}
+
+fn normalize_exclusion(kind: &str, raw: &str) -> Result<String, String> {
+    let mut normalized = raw.trim().to_ascii_lowercase();
+    match kind {
+        "app" => {
+            if normalized.is_empty()
+                || normalized.len() > 255
+                || normalized.contains('/')
+                || normalized.contains('\\')
+            {
+                return Err("Enter an executable name such as code.exe".into());
+            }
+        }
+        "website" => {
+            if let Some(scheme) = normalized.find("://") {
+                normalized = normalized[(scheme + 3)..].to_owned();
+            }
+            normalized = normalized
+                .split(['/', '?', '#'])
+                .next()
+                .unwrap_or("")
+                .rsplit('@')
+                .next()
+                .unwrap_or("")
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .trim_matches('.')
+                .to_owned();
+            if let Some(stripped) = normalized.strip_prefix("www.") {
+                normalized = stripped.to_owned();
+            }
+            if normalized.is_empty()
+                || normalized.len() > 253
+                || normalized.chars().any(char::is_whitespace)
+                || !normalized.contains('.')
+            {
+                return Err("Enter a website such as example.com".into());
+            }
+        }
+        _ => return Err("Unsupported tracking exclusion kind".into()),
+    }
+    Ok(normalized)
 }
 
 fn bind_value<'q>(
@@ -820,7 +1258,7 @@ pub fn database_path(base: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActivityDeleteRequest, TimeDatabase};
+    use super::{ActivityDeleteRequest, SessionCorrectionRequest, TimeDatabase};
 
     #[test]
     fn rejects_dangerous_or_multi_statement_sql() {
@@ -845,6 +1283,157 @@ mod tests {
         );
         assert!(TimeDatabase::validate_mutation_target("UPDATE settings SET value='1'").is_err());
         assert!(TimeDatabase::validate_mutation_target("DELETE FROM settings").is_err());
+    }
+
+    #[test]
+    fn exclusions_are_normalized_and_can_atomically_delete_history() {
+        let path = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("database-exclusion-test.db");
+        for candidate in [
+            path.clone(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            if candidate.exists() {
+                std::fs::remove_file(candidate).unwrap();
+            }
+        }
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process,domain) VALUES \
+                 (1,10,40,'chrome.exe','example.com'),(2,40,70,'code.exe',NULL)",
+            )
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            let preview = database
+                .preview_tracking_exclusion("website", "https://www.Example.com/path")
+                .await
+                .unwrap();
+            assert_eq!(
+                (
+                    preview.normalized_pattern.as_str(),
+                    preview.count,
+                    preview.seconds
+                ),
+                ("example.com", 1, 30)
+            );
+            let result = database
+                .add_tracking_exclusion("website", "https://www.Example.com/path", true)
+                .await
+                .unwrap();
+            assert_eq!(result.deleted_count, 1);
+            assert_eq!(database.list_tracking_exclusions().await.unwrap().len(), 1);
+            let remaining: Vec<i64> = sqlx::query_scalar("SELECT id FROM sessions ORDER BY id")
+                .fetch_all(&database.pool)
+                .await
+                .unwrap();
+            assert_eq!(remaining, vec![2]);
+            database
+                .add_tracking_exclusion("app", "CODE.EXE", false)
+                .await
+                .unwrap();
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sessions")
+                    .fetch_one(&database.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn corrections_overlay_raw_sessions_and_validate_timeline_rules() {
+        let path = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("database-correction-test.db");
+        for candidate in [
+            path.clone(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            if candidate.exists() {
+                std::fs::remove_file(candidate).unwrap();
+            }
+        }
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            let now = super::unix_now().unwrap();
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process,is_afk) VALUES \
+                 (1,?,?, 'code.exe',0),(2,?,?,'other.exe',0),(3,?,?,'afk',1)",
+            )
+            .bind(now - 300)
+            .bind(now - 250)
+            .bind(now - 200)
+            .bind(now - 150)
+            .bind(now - 100)
+            .bind(now - 50)
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            let category_id: i64 =
+                sqlx::query_scalar("SELECT id FROM categories ORDER BY id LIMIT 1")
+                    .fetch_one(&database.pool)
+                    .await
+                    .unwrap();
+            let corrected = database
+                .correct_session(&SessionCorrectionRequest {
+                    session_id: 1,
+                    start_sec: (now - 290) as f64,
+                    end_sec: (now - 240) as f64,
+                    category_id: Some(category_id),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                (corrected.start, corrected.end, corrected.category_id),
+                (now - 290, now - 240, Some(category_id))
+            );
+            let raw: (i64, i64) = sqlx::query_as("SELECT start_ts,end_ts FROM sessions WHERE id=1")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+            assert_eq!(raw, (now - 300, now - 250));
+            let columns = database
+                .fetch_sessions((now - 400) as f64, now as f64, (now - 500) as f64)
+                .await
+                .unwrap();
+            assert_eq!(columns.starts[0], now - 290);
+            assert_eq!(columns.category_override_ids[0], Some(category_id));
+            assert!(columns.is_corrected[0]);
+            let overlap = database
+                .correct_session(&SessionCorrectionRequest {
+                    session_id: 1,
+                    start_sec: (now - 220) as f64,
+                    end_sec: (now - 180) as f64,
+                    category_id: None,
+                })
+                .await;
+            assert!(overlap.unwrap_err().contains("overlap"));
+            let afk = database
+                .correct_session(&SessionCorrectionRequest {
+                    session_id: 3,
+                    start_sec: (now - 100) as f64,
+                    end_sec: (now - 50) as f64,
+                    category_id: None,
+                })
+                .await;
+            assert!(afk.unwrap_err().contains("AFK"));
+            assert_eq!(database.reset_session_correction(1).await.unwrap(), 1);
+            assert!(
+                !database
+                    .fetch_session_correction(1)
+                    .await
+                    .unwrap()
+                    .is_corrected
+            );
+        });
     }
 
     #[test]

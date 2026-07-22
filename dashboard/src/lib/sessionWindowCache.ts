@@ -33,7 +33,9 @@ function sameSession(left: Session, right: Session): boolean {
     left.process === right.process &&
     left.title === right.title &&
     left.domain === right.domain &&
-    left.isAfk === right.isAfk
+    left.isAfk === right.isAfk &&
+    left.categoryOverrideId === right.categoryOverrideId &&
+    left.isCorrected === right.isCorrected
   );
 }
 

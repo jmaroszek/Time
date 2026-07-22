@@ -84,13 +84,17 @@ export interface Classifiable {
   title: string;
   domain: string | null;
   isAfk: boolean;
+  categoryOverrideId?: number | null;
 }
+
+export type ClassificationSource = "rule" | "session_override" | "none";
 
 export type Classifier = (s: Classifiable) => Category | null;
 
 export interface ClassificationExplanation {
   category: Category | null;
   winningRule: Rule | null;
+  source: ClassificationSource;
 }
 
 export type ClassificationExplainer = (s: Classifiable) => ClassificationExplanation;
@@ -100,13 +104,18 @@ export type ClassificationExplainer = (s: Classifiable) => ClassificationExplana
  *  invalidate every entry automatically. Non-session samples still work and
  *  simply bypass the id cache. */
 export function memoizeClassifierById(classifier: Classifier): Classifier {
-  const categoryById = new Map<number, Category | null>();
+  const categoryById = new Map<number, {
+    overrideId: number | null;
+    category: Category | null;
+  }>();
   return (session: Classifiable): Category | null => {
     const id = (session as Classifiable & { id?: unknown }).id;
     if (typeof id !== "number") return classifier(session);
-    if (categoryById.has(id)) return categoryById.get(id)!;
+    const overrideId = session.categoryOverrideId ?? null;
+    const cached = categoryById.get(id);
+    if (cached && cached.overrideId === overrideId) return cached.category;
     const category = classifier(session);
-    categoryById.set(id, category);
+    categoryById.set(id, { overrideId, category });
     return category;
   };
 }
@@ -147,7 +156,14 @@ export function buildClassificationExplainer(
   }
 
   return (s: Classifiable): ClassificationExplanation => {
-    if (s.isAfk) return { category: null, winningRule: null };
+    if (s.isAfk) return { category: null, winningRule: null, source: "none" };
+    if (s.categoryOverrideId != null) {
+      return {
+        category: catById.get(s.categoryOverrideId) ?? null,
+        winningRule: null,
+        source: catById.has(s.categoryOverrideId) ? "session_override" : "none",
+      };
+    }
     let best: Candidate | null = null;
     const consider = (candidate: Candidate | undefined) => {
       if (candidate && (!best || candidate.rule.priority < best.rule.priority)) best = candidate;
@@ -186,11 +202,12 @@ export function buildClassificationExplainer(
       }
     }
 
-    if (!best) return { category: null, winningRule: null };
+    if (!best) return { category: null, winningRule: null, source: "none" };
     const winningRule = (best as Candidate).rule;
     return {
       category: catById.get(winningRule.categoryId) ?? null,
       winningRule,
+      source: "rule",
     };
   };
 }

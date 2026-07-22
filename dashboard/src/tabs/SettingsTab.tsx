@@ -7,13 +7,19 @@ import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
 import {
   backupDatabase,
+  addTrackingExclusion,
   countSessionsOlderThan,
   deleteHistoryBefore,
   eraseAllHistory,
   fetchSettings,
+  listTrackingExclusions,
+  previewTrackingExclusion,
+  removeTrackingExclusion,
   fetchTrackerStatus,
   updateSetting,
   type TrackerStatus,
+  type TrackingExclusion,
+  type TrackingExclusionKind,
 } from "../lib/queries";
 import { useBanner } from "../state/banner";
 import { useMeta } from "../state/meta";
@@ -304,6 +310,8 @@ export default function SettingsTab() {
           />
         </Section>
 
+        <TrackingExclusionsSection />
+
         <section>
           <SectionLabel>Data & backups</SectionLabel>
           <div className="rounded-[13px] border border-edge bg-surface-dim p-4">
@@ -358,6 +366,89 @@ export default function SettingsTab() {
 
         <HistoryRetentionSection />
       </div>
+    </div>
+  );
+}
+
+function TrackingExclusionsSection() {
+  const banner = useBanner();
+  const [items, setItems] = useState<TrackingExclusion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const load = () => listTrackingExclusions()
+    .then(setItems)
+    .catch((error: unknown) => banner.report(error, "tracking exclusions"))
+    .finally(() => setLoading(false));
+  useEffect(() => { void load(); }, []);
+  return (
+    <Section title="Do not track">
+      <p className="px-4 pb-1 pt-3 text-[11px] leading-snug text-ink-3">Exact exclusions prevent matching apps or detected websites from being stored. They apply whenever recording is enabled.</p>
+      {loading ? <div className="py-5"><Spinner /></div> : (
+        <>
+          <ExclusionGroup kind="app" items={items.filter((item) => item.kind === "app")} onChanged={load} />
+          <ExclusionGroup kind="website" items={items.filter((item) => item.kind === "website")} onChanged={load} />
+        </>
+      )}
+    </Section>
+  );
+}
+
+function ExclusionGroup({
+  kind,
+  items,
+  onChanged,
+}: {
+  kind: TrackingExclusionKind;
+  items: TrackingExclusion[];
+  onChanged: () => Promise<unknown>;
+}) {
+  const banner = useBanner();
+  const [draft, setDraft] = useState("");
+  const [deleteHistory, setDeleteHistory] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const label = kind === "app" ? "Apps" : "Websites";
+  const add = async () => {
+    if (!draft.trim()) return;
+    setSaving(true);
+    try {
+      const preview = await previewTrackingExclusion(kind, draft);
+      if (deleteHistory && preview.count > 0 && !window.confirm(
+        `Delete ${preview.count} existing session${preview.count === 1 ? "" : "s"} (${fmtDuration(preview.seconds)}) for ${preview.normalizedPattern}?\n\nThis cannot be undone without a backup.`,
+      )) {
+        setSaving(false);
+        return;
+      }
+      const result = await addTrackingExclusion(kind, draft, deleteHistory);
+      banner.show(deleteHistory
+        ? `Excluded ${result.normalizedPattern} and deleted ${result.deletedCount} historical session${result.deletedCount === 1 ? "" : "s"}.`
+        : `Excluded ${result.normalizedPattern} from future tracking.`);
+      setDraft("");
+      setDeleteHistory(false);
+      await onChanged();
+    } catch (error) {
+      banner.report(error, "tracking exclusion");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const remove = async (item: TrackingExclusion) => {
+    try {
+      await removeTrackingExclusion(item.kind, item.pattern);
+      banner.show(`${item.pattern} can be tracked again. Deleted history was not restored.`);
+      await onChanged();
+    } catch (error) {
+      banner.report(error, "tracking exclusion");
+    }
+  };
+  return (
+    <div className="border-t border-surface-2 px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="w-20 shrink-0 text-xs font-medium text-ink-2">{label}</span>
+        <input value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void add(); }} placeholder={kind === "app" ? "code.exe" : "example.com"} className="min-w-0 flex-1 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" />
+        <button type="button" disabled={saving || !draft.trim()} onClick={() => void add()} className="rounded-lg border border-accent/30 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/10 disabled:opacity-40">Add</button>
+      </div>
+      <label className="ml-[88px] mt-2 flex items-center gap-2 text-[10.5px] text-ink-3"><input type="checkbox" checked={deleteHistory} onChange={(event) => setDeleteHistory(event.target.checked)} />Also delete matching history after a count preview</label>
+      {kind === "website" && <p className="ml-[88px] mt-1 text-[10px] text-ink-3">Requires detected browser domains; otherwise exclude the whole browser under Apps.</p>}
+      {items.length > 0 && <div className="ml-[88px] mt-3 flex flex-col gap-1.5">{items.map((item) => <div key={item.pattern} className="flex items-center gap-2 rounded-lg border border-edge/60 bg-surface-2 px-2.5 py-1.5"><span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-2" title={item.pattern}>{item.pattern}</span><TrashButton compact label={`Allow ${item.pattern} to be tracked again`} onClick={() => void remove(item)} /></div>)}</div>}
     </div>
   );
 }

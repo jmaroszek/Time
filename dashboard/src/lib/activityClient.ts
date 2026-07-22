@@ -181,6 +181,8 @@ export function analyzeActivity(
                   packed.titleIndices.buffer,
                   packed.domainIndices.buffer,
                   packed.isAfk.buffer,
+                  packed.categoryOverrideIds.buffer,
+                  packed.isCorrected.buffer,
                 ]
               : [],
           );

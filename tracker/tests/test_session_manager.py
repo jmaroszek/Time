@@ -222,6 +222,46 @@ def test_non_browser_session_has_no_domain(manager, store):
     assert store.opened[0][4] is None
 
 
+def test_app_exclusion_closes_allowed_session_and_suppresses_capture(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(1000.0, process="code.exe"))
+    manager.settings = Settings(excluded_processes=frozenset({"code.exe"}))
+    manager.tick(active(1001.0, process="code.exe", title="secret.py"))
+    manager.tick(active(1002.0, process="code.exe", title="secret.py"))
+    assert store.closed[1] == 1001.0
+    assert len(store.opened) == 1
+
+
+def test_website_exclusion_works_when_title_storage_is_disabled(store):
+    manager = SessionManager(
+        store=store,
+        settings=Settings(
+            record_window_titles=False,
+            excluded_domains=frozenset({"example.com"}),
+        ),
+    )
+    manager.tick(
+        active(1000.0, process="chrome.exe", title="Private - https://example.com/path")
+    )
+    assert store.opened == []
+    manager.tick(
+        active(1001.0, process="chrome.exe", title="Docs - https://openai.com/docs")
+    )
+    assert store.opened[0][3] == ""
+    assert store.opened[0][4] == "openai.com"
+
+
+def test_excluded_website_bypasses_title_debounce(store):
+    manager = SessionManager(
+        store=store,
+        settings=Settings(excluded_domains=frozenset({"example.com"})),
+    )
+    manager.tick(active(1000.0, process="chrome.exe", title="Open - https://openai.com"))
+    manager.tick(active(1001.0, process="chrome.exe", title="Secret - https://example.com"))
+    assert store.closed[1] == 1001.0
+    assert len(store.opened) == 1
+
+
 # ---------------- shutdown ----------------
 
 

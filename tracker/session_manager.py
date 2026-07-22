@@ -50,12 +50,17 @@ class Settings:
     # Set from the tray (or dashboard) via the tracking_paused settings keys;
     # picked up by the live tracker on its next one-second poll.
     tracking_paused: bool = False
+    # Exact, normalized identities that must never produce a stored session.
+    # Domains are still derived when title storage is disabled, so website
+    # exclusions do not weaken the title-privacy default.
+    excluded_processes: frozenset[str] = frozenset()
+    excluded_domains: frozenset[str] = frozenset()
 
 
 class Store(Protocol):
     def open_session(
         self, start_ts: float, process: str, title: str, domain: str | None, is_afk: bool
-    ) -> int: ...
+    ) -> int | None: ...
 
     def close_session(self, session_id: int, end_ts: float) -> None: ...
 
@@ -137,6 +142,19 @@ class SessionManager:
     def _tick_active(self, snap: Snapshot) -> None:
         cur = self._current
 
+        # Exclusions bypass the title debounce: once an excluded website or app
+        # is visible, the previous allowed session ends immediately and no part
+        # of the excluded identity is opened as a session.
+        if snap.process is not None:
+            _, domain = self._privacy_fields(snap.process, snap.title)
+            if self._is_excluded(snap.process, domain):
+                if cur is not None:
+                    boundary = max(snap.now, cur.start_ts)
+                    self._close(cur.id, boundary)
+                    self._current = None
+                self._reset_pending()
+                return
+
         if cur is None:
             if snap.process is not None:
                 self._open(snap.now, snap.process, snap.title)
@@ -199,8 +217,21 @@ class SessionManager:
         session_id = self.store.open_session(
             start_ts, process, stored_title, domain, is_afk
         )
+        if session_id is None:
+            self._current = None
+            return
         self._current = _Current(
             session_id, start_ts, process, stored_title, domain, is_afk
+        )
+
+    def _is_excluded(self, process: str, domain: str | None) -> bool:
+        normalized_process = process.lower()
+        if normalized_process in self.settings.excluded_processes:
+            return True
+        return bool(
+            normalized_process in self.settings.browser_processes
+            and domain
+            and domain.lower() in self.settings.excluded_domains
         )
 
     def _privacy_fields(self, process: str, raw_title: str) -> tuple[str, str | None]:

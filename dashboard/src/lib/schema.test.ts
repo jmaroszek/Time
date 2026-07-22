@@ -25,7 +25,7 @@ describe("schema compatibility", () => {
       message = String(error);
     }
     expect(isNewerSchemaError(message)).toBe(true);
-    expect(message).toContain("dashboard supports 1");
+    expect(message).toContain(`dashboard supports ${SUPPORTED_SCHEMA_VERSION}`);
   });
 
   it("rejects malformed versions", () => {
