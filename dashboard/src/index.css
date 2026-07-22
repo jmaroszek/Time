@@ -35,6 +35,22 @@
 .menu-pop { animation: menu-pop 140ms ease-out; }
 .live-pulse { animation: live-pulse 2s ease-out infinite; }
 
+/* Chart selectors stay legible without competing with the visualization.
+   Their full control contrast returns once the user interacts with them. */
+.chart-select {
+  color: color-mix(in srgb, var(--color-ink-3) 84%, var(--color-ink));
+  background-color: color-mix(in srgb, var(--color-surface-2) 62%, transparent);
+  border-color: color-mix(in srgb, var(--color-edge) 72%, transparent);
+  padding-block: 0.3125rem;
+}
+
+.chart-select:hover,
+.chart-select:focus {
+  color: var(--color-ink);
+  background-color: var(--color-surface-2);
+  border-color: var(--color-edge);
+}
+
 html,
 body,
 #root {

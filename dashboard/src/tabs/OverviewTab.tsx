@@ -262,6 +262,8 @@ export default function OverviewTab({
               )}
         right={middleView === "timeline" ? (
           <Select
+            className="chart-select"
+            blurOnChange
             value={String(blockMinutes)}
             onChange={(v) => {
               setBlockMinutes(Number(v));
@@ -278,6 +280,8 @@ export default function OverviewTab({
         ) : (
           <span className="flex items-center gap-2">
             <Select
+              className="chart-select"
+              blurOnChange
               value={metric}
               onChange={(v) => setMetric(v as ActivityMetric)}
               options={ACTIVITY_METRICS.map((m) => ({
@@ -286,6 +290,8 @@ export default function OverviewTab({
               }))}
             />
             <Select
+              className="chart-select"
+              blurOnChange
               value={middleView}
               onChange={(v) => setAggregateView(v as "rhythm" | "calendar")}
               options={[
@@ -370,6 +376,8 @@ export default function OverviewTab({
           className="h-[345px]"
           right={
             <Select
+              className="chart-select"
+              blurOnChange
               value={String(n)}
               onChange={(v) => setTopN(Number(v))}
               options={[5, 10, 15, 20].map((x) => ({ value: String(x), label: `Top ${x}` }))}
@@ -390,6 +398,8 @@ export default function OverviewTab({
           className="h-[345px]"
           right={isSingleDay ? undefined : (
             <Select
+              className="chart-select"
+              blurOnChange
               value={stackBy}
               onChange={(v) => setStackBy(v as ActivityStack)}
               options={[

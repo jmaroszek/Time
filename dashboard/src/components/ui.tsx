@@ -241,16 +241,21 @@ export function Select({
   onChange,
   options,
   className = "",
+  blurOnChange = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   className?: string;
+  blurOnChange?: boolean;
 }) {
   return (
     <select
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => {
+        onChange(e.target.value);
+        if (blurOnChange) e.currentTarget.blur();
+      }}
       className={`rounded-lg border border-edge bg-surface-2 px-2 py-1.5 text-xs text-ink outline-none focus:border-accent/60 ${className}`}
     >
       {options.map((o) => (
