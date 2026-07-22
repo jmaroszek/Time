@@ -150,17 +150,28 @@ describe("Activity index", () => {
     expect(appsOnly.searchResults?.windowMatches.map((row) => row.id)).toEqual([3]);
   });
 
-  it("filters Needs attention without hiding low-duration identities", () => {
+  it("filters Uncategorized without hiding low-duration identities", () => {
     const index = buildActivityIndex(source);
     const result = queryActivityIndex(index, {
       ...baseQuery,
-      classificationFilter: "needs_attention",
+      classificationFilter: "uncategorized",
     });
     expect(result.catalog.rows.map((row) => row.id)).toEqual([
       "website:example.com",
       "app:unknown.exe",
     ]);
-    expect(result.allHistoryAttention.entities).toBe(2);
+    expect(result.uncategorized).toEqual({ entities: 2, seconds: 60 });
+  });
+
+  it("reports a rule as applied only while something in history matches it", () => {
+    const applied = queryActivityIndex(buildActivityIndex(source), baseQuery).appliedRuleIds;
+    expect([...applied].sort()).toEqual([1, 3, 4, 5]);
+
+    const unmatched = buildActivityIndex({
+      ...source,
+      rules: [...rules, { id: 9, matchType: "process", pattern: "never.exe", categoryId: 1, priority: 3 }],
+    });
+    expect(queryActivityIndex(unmatched, baseQuery).appliedRuleIds).not.toContain(9);
   });
 
   it("returns paginated detail sessions with provenance", () => {
@@ -243,6 +254,20 @@ describe("Activity noise folding", () => {
     expect(folded.noiseHidden).toBe(1);
     expect(folded.catalog.rows.map((row) => row.id)).not.toContain("app:unknown.exe");
     expect(folded.catalog.total).toBe(plain.catalog.total - 1);
+  });
+
+  it("leaves folded rows out of the uncategorized count the header shows", () => {
+    // Counting what the catalog does not list makes the number and the list
+    // disagree, and folded-away garbage is never worth triaging.
+    expect(queryActivityIndex(index, baseQuery).uncategorized).toEqual({ entities: 2, seconds: 60 });
+
+    const folded = queryActivityIndex(index, { ...baseQuery, noise: policy });
+    expect(folded.catalog.rows.map((row) => row.id)).not.toContain("app:unknown.exe");
+    expect(folded.uncategorized).toEqual({ entities: 1, seconds: 30 });
+
+    // Revealing folded rows is a view toggle, not a change to what counts.
+    const shown = queryActivityIndex(index, { ...baseQuery, noise: policy, includeNoise: true });
+    expect(shown.uncategorized).toEqual(folded.uncategorized);
   });
 
   it("shows folded rows tagged when includeNoise is set", () => {

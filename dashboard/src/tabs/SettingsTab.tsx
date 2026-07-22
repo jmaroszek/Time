@@ -8,19 +8,14 @@ import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
 import {
   backupDatabase,
-  addTrackingExclusion,
   countSessionsOlderThan,
   deleteHistoryBefore,
   eraseAllHistory,
   fetchSettings,
   listTrackingExclusions,
-  previewTrackingExclusion,
-  removeTrackingExclusion,
   fetchTrackerStatus,
   updateSetting,
   type TrackerStatus,
-  type TrackingExclusion,
-  type TrackingExclusionKind,
 } from "../lib/queries";
 import { useBanner } from "../state/banner";
 import { useMeta } from "../state/meta";
@@ -68,9 +63,6 @@ export default function SettingsTab() {
   const banner = useBanner();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<TrackerStatus | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [backupMessage, setBackupMessage] = useState<string | null>(null);
-  const [backupDetail, setBackupDetail] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     const next = { ...meta.settings };
@@ -180,278 +172,164 @@ export default function SettingsTab() {
   );
 
   return (
-    <div className="grid grid-cols-2 items-start gap-6">
-      <div className="flex flex-col gap-[26px]">
-        <Section title="Goals">
-          <Row label="Weekly productive goal" help="Optional. Set 0 to leave goal pace unset." control={numberControl(SPECS.goal, "h")} />
-        </Section>
-
-        <Section title="Timeline Window">
-          <Row label="Day starts at" help="First hour drawn on Timeline & Hour-of-Day plots. Activity outside the window still counts in all totals." control={numberControl(SPECS.start, undefined, true)} />
-          <Row label="Day ends at" help="Last hour drawn on Timeline & Hour-of-Day plots. Activity outside the window still counts in all totals." control={numberControl(SPECS.end, undefined, true)} />
-          <Row
-            label="Week starts on"
-            help="Affects weekly presets, weekly bucketing, and goal pacing."
-            control={<Segmented options={["Monday", "Sunday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
-          />
-        </Section>
-
-        <Section title="Focus & Idle">
-          <Row label="AFK idle threshold" help="No input for this long marks you AFK — watching video without touching the mouse or keyboard counts as away." control={numberControl(SPECS.idle, "min")} />
-          <Row label="Focus chain max gap" help="Short gaps won't break a productive focus chain." control={numberControl(SPECS.focus, "min")} />
-        </Section>
-
-        <Section title="Insights Apps">
-          <Row
-            label="Default top apps shown"
-            help="Initial size of the Overview top-apps list."
-            control={<Segmented options={["5", "10", "15", "20"]} value={drafts.default_top_n_apps ?? "5"} onChange={(value) => selectSetting("default_top_n_apps", value)} />}
-          />
-          <Row
-            label="Minimum app time"
-            help="Hides apps averaging less than this per day you were tracked, in the Insights Top Apps list. A rate rather than a total, so widening the range doesn't change who clears the bar. Activity always shows the complete catalog."
-            control={numberControl(SPECS.minimum, "min/day")}
-          />
-        </Section>
-
-        <Section title="Activity Library">
-          <Row
-            label="Fold noisy items"
-            help="Hides throwaway rows from the Activity list — never from your totals. One-offs are items that are both brief and rarely seen; utilities are installers, driver bundles, and local files opened in a browser. Anything you have categorized always stays visible, and the list header says how many rows are folded."
-            control={
-              <Segmented
-                options={["off", "one_off", "utilities"]}
-                labels={NOISE_MODE_LABELS}
-                value={drafts.activity_noise_filter ?? "utilities"}
-                onChange={(value) => selectSetting("activity_noise_filter", value)}
-              />
-            }
-          />
-          <Row
-            label="One-off time limit"
-            help="An item is a one-off only when it is under this much time AND at or under the session limit below. Both conditions must hold, so a short app you open constantly stays in the list."
-            control={numberControl(SPECS.noiseTime, "min")}
-          />
-          <Row
-            label="One-off session limit"
-            help="How many times you can have seen an item and still have it count as a one-off."
-            control={numberControl(SPECS.noiseSessions, "sessions")}
-          />
-        </Section>
-
-        <Section title="Advanced">
-          <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
-          <Row
-            label="Browser processes"
-            help="Comma-separated; the common browsers are already listed. Names are tidied for you — “Chrome” is saved as chrome.exe. Site splitting needs an optional third-party extension that appends the URL to the window title; review its browsing-data permissions before installing it."
-            control={
-              <textarea
-                rows={4}
-                aria-label="Browser processes"
-                value={drafts.browser_processes ?? ""}
-                onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
-                onBlur={() => void saveText("browser_processes", (raw) => normalizeBrowserProcesses(raw).join(","))}
-                className="w-[172px] resize-none rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs leading-relaxed text-ink outline-none focus:border-accent/60"
-              />
-            }
-          />
-        </Section>
-      </div>
-
-      <div className="flex flex-col gap-[26px]">
-        <section>
-          <SectionLabel>Tracker Status</SectionLabel>
-          <div className="flex items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-[18px] py-4">
-            <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-good-data" : "bg-bad"}`} />
-            <div>
-              <p className="text-[13px] font-semibold text-ink">
-                {!trackingEnabled ? "Tracking disabled" : pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
-              </p>
-              <p className="mt-[3px] text-[11.5px] text-ink-3">
-                {!trackingEnabled
-                  ? "No new activity is being recorded"
-                  : pause.paused
-                  ? pause.until > Date.now() / 1000
-                    ? `Resumes at ${new Date(pause.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — or sooner from the tray icon`
-                    : "Resume from the tray icon"
-                  : trackerLive
-                    ? "Collecting activity in real time"
-                    : "No heartbeat in the last two minutes"}
-              </p>
-            </div>
-            {heartbeatAge !== null && <span className="ml-auto text-[11.5px] tabular-nums text-ink-3">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
-          </div>
-        </section>
-
-        <Section title="Recording & startup">
-          <Row
-            label="Record activity"
-            help="Stores foreground app names and timing only after you enable it."
-            control={<PrivacyToggle enabled={trackingEnabled} onChange={(enabled) => void setTrackingEnabled(enabled)} />}
-          />
-          <Row
-            label="Store window titles"
-            help="Optional and off by default. Browser URLs are stripped even when enabled."
-            control={
-              <PrivacyToggle
-                enabled={meta.settings.record_window_titles === "1"}
-                onChange={(enabled) => selectSetting("record_window_titles", enabled ? "1" : "0")}
-              />
-            }
-          />
-          <Row
-            label="Start at Windows sign-in"
-            help="Registers only the tracker for this Windows account."
-            control={
-              <PrivacyToggle
-                enabled={meta.settings.launch_at_login === "1"}
-                disabled={!trackingEnabled}
-                onChange={(enabled) => void setStartAtLogin(enabled)}
-              />
-            }
-          />
-        </Section>
-
-        <TrackingExclusionsSection />
-
-        <section>
-          <SectionLabel>Data & backups</SectionLabel>
-          <div className="rounded-[13px] border border-edge bg-surface-dim p-4">
-            <p className="mb-[9px] text-[11.5px] text-ink-3">Database path</p>
-            <div className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface-2 p-[9px] pl-[13px]">
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2" title={getDbPath()}>{getDbPath()}</span>
-              <button
-                type="button"
-                className="rounded-[7px] border border-edge px-2.5 py-[5px] text-[11px] text-ink-2 transition-colors hover:border-edge-2 hover:text-ink"
-                onClick={() => void navigator.clipboard.writeText(getDbPath()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}
-              >
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setBackupMessage(null);
-                setBackupDetail(null);
-                void backupDatabase()
-                  .then((target) => {
-                    setBackupMessage("✓ Backup written");
-                    setBackupDetail({ ok: true, text: `Saved to ${target}` });
-                    setTimeout(() => setBackupMessage(null), 2000);
-                  })
-                  .catch((e: unknown) => {
-                    setBackupMessage("Backup failed");
-                    setBackupDetail({ ok: false, text: explainDbError(e, "backup") });
-                  });
-              }}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-[12.5px] font-semibold text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 3v11" /><path d="M7 9l5 5 5-5" /><path d="M4 20h16" />
-              </svg>
-              {backupMessage ?? "Back up database now"}
-            </button>
-            {backupDetail && (
-              <p className={`mt-2 break-all text-[11px] ${backupDetail.ok ? "text-ink-3" : "text-bad"}`}>
-                {backupDetail.text}
-              </p>
-            )}
-            <p className="mt-3 text-[11px] leading-snug text-ink-3">
-              Everything Time records stays in this file on your machine — nothing is ever
-              uploaded. To restore a backup: quit the tracker and dashboard, replace the
-              database file with the backup copy, then restart (full steps in docs/restore.md).
+    // One column, not two. Any masonry layout re-balances whenever a section
+    // changes height, so a second column would make the page look uneven again
+    // the next time a setting is added. Length is the only thing that grows here.
+    <div className="mx-auto flex w-full max-w-[600px] flex-col gap-[26px]">
+      <section>
+        <SectionLabel>Tracker Status</SectionLabel>
+        <div className="flex items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-[18px] py-4">
+          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-good-data" : "bg-bad"}`} />
+          <div>
+            <p className="text-[13px] font-semibold text-ink">
+              {!trackingEnabled ? "Tracking disabled" : pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
             </p>
-            <VersionsLine trackerVersion={meta.settings.tracker_version} />
+            <p className="mt-[3px] text-[11.5px] text-ink-3">
+              {!trackingEnabled
+                ? "No new activity is being recorded"
+                : pause.paused
+                ? pause.until > Date.now() / 1000
+                  ? `Resumes at ${new Date(pause.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — or sooner from the tray icon`
+                  : "Resume from the tray icon"
+                : trackerLive
+                  ? "Collecting activity in real time"
+                  : "No heartbeat in the last two minutes"}
+            </p>
           </div>
-        </section>
+          {heartbeatAge !== null && <span className="ml-auto text-[11.5px] tabular-nums text-ink-3">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
+        </div>
+      </section>
 
-        <HistoryRetentionSection />
-      </div>
+      <Section title="Recording & startup">
+        <Row
+          label="Record activity"
+          help="Stores foreground app names and timing only after you enable it."
+          control={<PrivacyToggle enabled={trackingEnabled} onChange={(enabled) => void setTrackingEnabled(enabled)} />}
+        />
+        <Row
+          label="Store window titles"
+          help="Optional and off by default. Browser URLs are stripped even when enabled."
+          control={
+            <PrivacyToggle
+              enabled={meta.settings.record_window_titles === "1"}
+              onChange={(enabled) => selectSetting("record_window_titles", enabled ? "1" : "0")}
+            />
+          }
+        />
+        <Row
+          label="Start at Windows sign-in"
+          help="Registers only the tracker for this Windows account."
+          control={
+            <PrivacyToggle
+              enabled={meta.settings.launch_at_login === "1"}
+              disabled={!trackingEnabled}
+              onChange={(enabled) => void setStartAtLogin(enabled)}
+            />
+          }
+        />
+        <ExclusionSummary />
+      </Section>
+
+      <Section title="Goals">
+        <Row label="Weekly productive goal" help="Optional. Set 0 to leave goal pace unset." control={numberControl(SPECS.goal, "h")} />
+      </Section>
+
+      <Section title="Timeline Window">
+        <Row label="Day starts at" help="First hour drawn on Timeline & Hour-of-Day plots. Activity outside the window still counts in all totals." control={numberControl(SPECS.start, undefined, true)} />
+        <Row label="Day ends at" help="Last hour drawn on Timeline & Hour-of-Day plots. Activity outside the window still counts in all totals." control={numberControl(SPECS.end, undefined, true)} />
+        <Row
+          label="Week starts on"
+          help="Affects weekly presets, weekly bucketing, and goal pacing."
+          control={<Segmented options={["Monday", "Sunday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
+        />
+      </Section>
+
+      <Section title="Focus & Idle">
+        <Row label="AFK idle threshold" help="No input for this long marks you AFK — watching video without touching the mouse or keyboard counts as away." control={numberControl(SPECS.idle, "min")} />
+        <Row label="Focus chain max gap" help="Short gaps won't break a productive focus chain." control={numberControl(SPECS.focus, "min")} />
+      </Section>
+
+      <Section
+        title="Activity Library"
+        intro="Folding hides throwaway rows from the Activity list only — totals, Insights, and anything you have categorized are untouched, and the list header says how many rows are folded. One-offs are items that are both brief and rarely seen; utilities are installers, driver bundles, and local files opened in a browser."
+      >
+        <Row
+          label="Fold noisy items"
+          help="Hides throwaway rows from the list — never from totals."
+          control={
+            <Segmented
+              options={["off", "one_off", "utilities"]}
+              labels={NOISE_MODE_LABELS}
+              value={drafts.activity_noise_filter ?? "utilities"}
+              onChange={(value) => selectSetting("activity_noise_filter", value)}
+            />
+          }
+        />
+        <Row
+          label="One-off time limit"
+          help="One-offs must be under this much total time."
+          control={numberControl(SPECS.noiseTime, "min")}
+        />
+        <Row
+          label="One-off session limit"
+          help="…and seen at most this many times."
+          control={numberControl(SPECS.noiseSessions, "sessions")}
+        />
+      </Section>
+
+      <Section title="Advanced">
+        <Row
+          label="Minimum app time"
+          help="Hides apps averaging less than this per tracked day from Insights' Top Apps."
+          control={numberControl(SPECS.minimum, "min/day")}
+        />
+        <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
+        <Row
+          label="Browser processes"
+          help="Comma-separated process names. Common browsers are already included."
+          control={
+            <textarea
+              rows={4}
+              aria-label="Browser processes"
+              value={drafts.browser_processes ?? ""}
+              onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
+              onBlur={() => void saveText("browser_processes", (raw) => normalizeBrowserProcesses(raw).join(","))}
+              className="w-[172px] resize-none rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs leading-relaxed text-ink outline-none focus:border-accent/60"
+            />
+          }
+        />
+      </Section>
+
+      <DataSection />
     </div>
   );
 }
 
-function TrackingExclusionsSection() {
-  const banner = useBanner();
-  const [items, setItems] = useState<TrackingExclusion[]>([]);
-  const [loading, setLoading] = useState(true);
-  const load = () => listTrackingExclusions()
-    .then(setItems)
-    .catch((error: unknown) => banner.report(error, "tracking exclusions"))
-    .finally(() => setLoading(false));
-  useEffect(() => { void load(); }, []);
+/** Privacy stays discoverable from Settings without Settings hosting the list:
+ *  exclusions are per-entity curation, and that belongs with the other
+ *  per-entity work in Activity. This row only says how many there are. */
+function ExclusionSummary() {
+  const [counts, setCounts] = useState<{ app: number; website: number } | null>(null);
+  useEffect(() => {
+    void listTrackingExclusions()
+      .then((items) => setCounts({
+        app: items.filter((item) => item.kind === "app").length,
+        website: items.filter((item) => item.kind === "website").length,
+      }))
+      .catch(() => setCounts(null));
+  }, []);
+  if (counts === null) return null;
+  const total = counts.app + counts.website;
+  const parts = [
+    `${counts.app} app${counts.app === 1 ? "" : "s"}`,
+    `${counts.website} website${counts.website === 1 ? "" : "s"}`,
+  ];
   return (
-    <Section title="Do not track">
-      <p className="px-4 pb-1 pt-3 text-[11px] leading-snug text-ink-3">Exact exclusions prevent matching apps or detected websites from being stored. They apply whenever recording is enabled.</p>
-      {loading ? <div className="py-5"><Spinner /></div> : (
-        <>
-          <ExclusionGroup kind="app" items={items.filter((item) => item.kind === "app")} onChanged={load} />
-          <ExclusionGroup kind="website" items={items.filter((item) => item.kind === "website")} onChanged={load} />
-        </>
-      )}
-    </Section>
-  );
-}
-
-function ExclusionGroup({
-  kind,
-  items,
-  onChanged,
-}: {
-  kind: TrackingExclusionKind;
-  items: TrackingExclusion[];
-  onChanged: () => Promise<unknown>;
-}) {
-  const banner = useBanner();
-  const [draft, setDraft] = useState("");
-  const [deleteHistory, setDeleteHistory] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const label = kind === "app" ? "Apps" : "Websites";
-  const add = async () => {
-    if (!draft.trim()) return;
-    setSaving(true);
-    try {
-      const preview = await previewTrackingExclusion(kind, draft);
-      if (deleteHistory && preview.count > 0 && !window.confirm(
-        `Delete ${preview.count} existing session${preview.count === 1 ? "" : "s"} (${fmtDuration(preview.seconds)}) for ${preview.normalizedPattern}?\n\nThis cannot be undone without a backup.`,
-      )) {
-        setSaving(false);
-        return;
-      }
-      const result = await addTrackingExclusion(kind, draft, deleteHistory);
-      banner.show(deleteHistory
-        ? `Excluded ${result.normalizedPattern} and deleted ${result.deletedCount} historical session${result.deletedCount === 1 ? "" : "s"}.`
-        : `Excluded ${result.normalizedPattern} from future tracking.`);
-      setDraft("");
-      setDeleteHistory(false);
-      await onChanged();
-    } catch (error) {
-      banner.report(error, "tracking exclusion");
-    } finally {
-      setSaving(false);
-    }
-  };
-  const remove = async (item: TrackingExclusion) => {
-    try {
-      await removeTrackingExclusion(item.kind, item.pattern);
-      banner.show(`${item.pattern} can be tracked again. Deleted history was not restored.`);
-      await onChanged();
-    } catch (error) {
-      banner.report(error, "tracking exclusion");
-    }
-  };
-  return (
-    <div className="border-t border-surface-2 px-4 py-3">
-      <div className="flex items-center gap-2">
-        <span className="w-20 shrink-0 text-xs font-medium text-ink-2">{label}</span>
-        <input value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void add(); }} placeholder={kind === "app" ? "code.exe" : "example.com"} className="min-w-0 flex-1 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" />
-        <button type="button" disabled={saving || !draft.trim()} onClick={() => void add()} className="rounded-lg border border-accent/30 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/10 disabled:opacity-40">Add</button>
-      </div>
-      <label className="ml-[88px] mt-2 flex items-center gap-2 text-[10.5px] text-ink-3"><input type="checkbox" checked={deleteHistory} onChange={(event) => setDeleteHistory(event.target.checked)} />Also delete matching history after a count preview</label>
-      {kind === "website" && <p className="ml-[88px] mt-1 text-[10px] text-ink-3">Requires detected browser domains; otherwise exclude the whole browser under Apps.</p>}
-      {items.length > 0 && <div className="ml-[88px] mt-3 flex flex-col gap-1.5">{items.map((item) => <div key={item.pattern} className="flex items-center gap-2 rounded-lg border border-edge/60 bg-surface-2 px-2.5 py-1.5"><span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-2" title={item.pattern}>{item.pattern}</span><TrashButton compact label={`Allow ${item.pattern} to be tracked again`} onClick={() => void remove(item)} /></div>)}</div>}
-    </div>
+    <p className="border-t border-surface-2 px-4 py-[13px] text-xs leading-snug text-ink-3">
+      {total === 0
+        ? "Nothing is excluded from tracking — mark an app or website “Do not track” in Activity."
+        : `${parts.join(" and ")} are never tracked — manage in Activity.`}
+    </p>
   );
 }
 
@@ -472,13 +350,39 @@ function VersionsLine({ trackerVersion }: { trackerVersion: string | undefined }
   );
 }
 
-/** Lifecycle-level deletion stays in Settings; exact record correction lives
- * in Activity. The cutoff action previews its count before native deletion. */
-function HistoryRetentionSection() {
+/** One card, one story: where the data lives, how to save it, how to shed it.
+ *  Retention sits with backups because the safe order is back up, then delete —
+ *  and it ends in the danger row so the destructive step is last, not floating
+ *  in its own card. Lifecycle-level deletion stays in Settings; exact record
+ *  correction lives in Activity. */
+function DataSection() {
   const meta = useMeta();
   const banner = useBanner();
   const [olderDays, setOlderDays] = useState("365");
   const [message, setMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [backupDetail, setBackupDetail] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const copyPath = () => void navigator.clipboard.writeText(getDbPath()).then(() => {
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  });
+
+  const backUpNow = () => {
+    setBackupMessage(null);
+    setBackupDetail(null);
+    void backupDatabase()
+      .then((target) => {
+        setBackupMessage("✓ Backup written");
+        setBackupDetail({ ok: true, text: `Saved to ${target}` });
+        setTimeout(() => setBackupMessage(null), 2000);
+      })
+      .catch((e: unknown) => {
+        setBackupMessage("Backup failed");
+        setBackupDetail({ ok: false, text: explainDbError(e, "backup") });
+      });
+  };
 
   const confirmAndDelete = async (
     count: number,
@@ -536,16 +440,48 @@ function HistoryRetentionSection() {
     }
   };
 
-  const inputClass =
-    "w-[110px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 text-xs text-ink outline-none focus:border-accent/60";
-
   return (
     <section>
-      <SectionLabel>History retention</SectionLabel>
+      <SectionLabel>Data</SectionLabel>
       <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
+        <div className="p-4">
+          <p className="mb-[9px] text-[11.5px] text-ink-3">Database path</p>
+          <div className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface-2 p-[9px] pl-[13px]">
+            <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2" title={getDbPath()}>{getDbPath()}</span>
+            <button
+              type="button"
+              className="rounded-[7px] border border-edge px-2.5 py-[5px] text-[11px] text-ink-2 transition-colors hover:border-edge-2 hover:text-ink"
+              onClick={copyPath}
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={backUpNow}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-[12.5px] font-semibold text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v11" /><path d="M7 9l5 5 5-5" /><path d="M4 20h16" />
+            </svg>
+            {backupMessage ?? "Back up database now"}
+          </button>
+          {backupDetail && (
+            <p className={`mt-2 break-all text-[11px] ${backupDetail.ok ? "text-ink-3" : "text-bad"}`}>
+              {backupDetail.text}
+            </p>
+          )}
+          <p className="mt-3 text-[11px] leading-snug text-ink-3">
+            Everything Time records stays in this file on your machine — nothing is ever
+            uploaded. To restore a backup: quit the tracker and dashboard, replace the
+            database file with the backup copy, then restart (full steps in docs/restore.md).
+          </p>
+          <VersionsLine trackerVersion={meta.settings.tracker_version} />
+        </div>
         <Row
           label="Delete history older than"
-          help="Removes everything recorded before the cutoff. Categories, rules, and settings are kept."
+          help="Removes everything recorded before the cutoff. Categories and rules are kept."
           control={
             <span className="flex items-center gap-2">
               <input
@@ -554,7 +490,7 @@ function HistoryRetentionSection() {
                 value={olderDays}
                 aria-label="Days of history to keep"
                 onChange={(event) => setOlderDays(event.target.value)}
-                className={`${inputClass} w-[64px] text-right`}
+                className="w-[64px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 text-right text-xs text-ink outline-none focus:border-accent/60"
               />
               <span className="text-[11px] text-ink-3">days</span>
               <TrashButton label="Delete older history" onClick={() => void deleteOlder()} />
@@ -606,11 +542,16 @@ function SectionLabel({ children }: { children: ReactNode }) {
   return <p className="mb-3 pl-0.5 text-[11px] font-bold uppercase tracking-[.09em] text-ink-2">{children}</p>;
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** `intro` carries the rationale a whole section shares, so its rows can keep
+ *  the one-sentence helps that make the column read evenly. */
+function Section({ title, intro, children }: { title: string; intro?: string; children: ReactNode }) {
   return (
     <section>
       <SectionLabel>{title}</SectionLabel>
-      <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">{children}</div>
+      <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
+        {intro && <p className="px-4 pb-1 pt-3 text-[11px] leading-snug text-ink-3">{intro}</p>}
+        {children}
+      </div>
     </section>
   );
 }

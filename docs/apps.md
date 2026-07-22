@@ -8,16 +8,26 @@ into charts, totals, comparisons, and trends.
 ![Activity tab](images/apps.png)
 
 Activity and Insights share the date picker in the top-right. Switching tabs
-does not reset it. Every Activity total, result, and Needs Attention item uses
-that visible range; a quiet **Try All time** action appears when a search finds
-nothing in a narrower range.
+does not reset it. Every Activity total and result uses that visible range; a
+quiet **Try All time** action appears when a search finds nothing in a narrower
+range.
+
+The tab is one card with two faces, chosen from its title: **Activity Library**
+and **Categories & Rules**.
 
 ## Activity Library
 
 With no search text, the Library is a complete catalog of Apps and Websites in
 the visible range. It includes ignored activity, excludes AFK identities, and
 never uses Insights' minimum-app threshold. Name, classification, time, last
-seen, and session count can be sorted; large catalogs load 100 items at a time.
+seen, and session count can be sorted. The table sits in a fixed-height region
+with its header row pinned, and loads 50 items at a time, so **Load more**
+deepens that region instead of stretching the page.
+
+The card header counts how many items are in range, and — when there are any —
+how many carry uncategorized time. Clicking that count applies the
+**Uncategorized** filter, and clicking it again clears it. Rows the noise fold
+hides are left out of the count as well as the list, so the two always agree.
 
 ### Folded rows
 
@@ -54,11 +64,6 @@ remain searchable if future title capture is later disabled. The type filter
 narrows Apps and Websites; Window matches stay separately labeled. Date and
 classification filters apply throughout.
 
-**Needs Attention** surfaces every identity with uncategorized time, including
-brief activity. Its six largest items can be classified directly, **Show all**
-applies the matching filter, and an all-history count can move the shared date
-picker to All time.
-
 Classification status describes the activity represented by the current range:
 
 - **Uncategorized** has no categorized time.
@@ -91,14 +96,38 @@ after that session closes if it also needs correction. Targeted deletion never
 stops the tracker and keeps categories, rules, aliases, settings, and separate
 backup files.
 
+## Excluded from tracking
+
+The last entry in the classification filter, **Excluded from tracking**, lists
+the apps and websites Time is not allowed to record at all. An exclusion stops
+matching activity from ever reaching the database, so it is stronger than any
+category or rule and is not a property of anything recorded.
+
+Add one from an App or Website's details with **Do not track…**, or by name
+from this list. Adding can optionally delete the matching history it finds,
+after showing the count. Lifting an exclusion resumes tracking from that moment
+on; history deleted along with it is not restored. Settings shows only how many
+exclusions exist.
+
 ## Categories & Rules
 
-The second internal view manages classification. Categories start collapsed;
-the chevron alone opens their rules, and the pencil alone renames them. Enter or
-focus-out saves a name and Escape cancels, so ordinary spaces never toggle the
-row. The built-in Ignored category cannot be renamed or deleted. Trash buttons
-remove ordinary categories and rules, with category/rule counts confirmed
-before category deletion.
+The second face of the card manages classification. Categories start collapsed;
+the chevron opens their rules. Double-click a name to rename it — Enter or
+focus-out saves and Escape cancels — and the opened category repeats **Rename**
+as a labeled button, which is what keeps renaming reachable from the keyboard.
+**Delete category…** sits beside it and confirms the rule count it will take
+with it. The built-in Ignored category can do neither.
+
+A category is productive, neutral, or unproductive. Ignoring is not one of
+these states: the built-in Ignored category is the single ignore mechanism.
+A category left flagged ignored by an older release keeps showing that state
+until one of the three is chosen for it.
+
+Rules are removed with a quiet ✕ on their row. Each rule's kind is marked by a
+small glyph — a square for App, a titled frame for Window, a globe for Website —
+because color in this app means category identity. A rule nothing has ever
+matched is tagged **unused**, which is the one case worth acting on; per-rule
+usage in context lives in each item's details, under **Rules in use**.
 
 The interface uses plain rule names while keeping the same matching behavior:
 
@@ -110,6 +139,5 @@ The interface uses plain rule names while keeping the same matching behavior:
 
 When several rules match, Website wins, then Window, then App. Rules are
 evaluated against history instead of baked into session rows, so edits
-reclassify existing and future activity. All-time category and rule usage shows
-which rules actually win, including applied session count, duration, and last
-use; overridden or unused rules say **No applied activity**.
+reclassify existing and future activity — which is also why **unused** is
+measured against all of history and not the visible range.

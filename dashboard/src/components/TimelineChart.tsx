@@ -192,7 +192,7 @@ export default function TimelineChart({
     <EChart option={option} height={Math.max(days.length * 34 + 40, 110)} onClick={handleClick} />
   );
   return days.length > 14
-    ? <div className="max-h-[516px] overflow-y-auto pr-1">{chart}</div>
+    ? <div className="scroll-well max-h-[516px] overflow-y-auto pr-1">{chart}</div>
     : chart;
 }
 

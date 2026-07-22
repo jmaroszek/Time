@@ -123,7 +123,7 @@ export default function MonthCalendarChart({
     </div>
   );
   return years.length > SCROLL_ROWS
-    ? <div className="max-h-[476px] overflow-y-auto pr-1">{chart}</div>
+    ? <div className="scroll-well max-h-[476px] overflow-y-auto pr-1">{chart}</div>
     : chart;
 }
 

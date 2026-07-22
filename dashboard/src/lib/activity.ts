@@ -41,20 +41,6 @@ export interface ActivityEntityRuleSlice {
   seconds: number;
 }
 
-export interface ActivityRuleUsage {
-  ruleId: number;
-  sessions: number;
-  seconds: number;
-  lastUsed: number;
-}
-
-export interface ActivityCategoryUsage {
-  categoryId: number;
-  sessions: number;
-  seconds: number;
-  lastUsed: number;
-}
-
 export interface ActivityEntitySummary {
   id: string;
   kind: ActivityEntityKind;
@@ -99,7 +85,7 @@ export interface ActivitySessionRow {
 
 export type ActivityClassificationFilter =
   | "all"
-  | "needs_attention"
+  | "uncategorized"
   | "mixed"
   | "ignored"
   | `category:${number}`;
@@ -138,7 +124,10 @@ export interface ActivitySearchResults {
   windowTotal: number;
 }
 
-export interface ActivityAttentionSummary {
+/** Triage counter for the library header. Folded rows are left out on purpose:
+ *  uncategorized *and* noise-folded is garbage, and counting what the list
+ *  below does not show makes the number and the list disagree. */
+export interface ActivityUncategorizedSummary {
   entities: number;
   seconds: number;
 }
@@ -149,16 +138,13 @@ export interface ActivityQueryResult {
    *  includeNoise is currently showing them. Zero while searching. */
   noiseHidden: number;
   searchResults: ActivitySearchResults | null;
-  needsAttention: ActivityEntitySummary[];
-  needsAttentionTotal: number;
-  currentAttention: ActivityAttentionSummary;
-  allHistoryAttention: ActivityAttentionSummary;
+  /** Entities with uncategorized time in range, after the noise fold. */
+  uncategorized: ActivityUncategorizedSummary;
   selectedEntity: ActivityEntitySummary | null;
   detailSessions: ActivitySessionRow[];
   detailTotal: number;
   hasStoredTitles: boolean;
-  ruleUsage: ActivityRuleUsage[];
-  categoryUsage: ActivityCategoryUsage[];
+  appliedRuleIds: number[];
 }
 
 interface IndexedSession extends ActivitySessionRow {
@@ -171,9 +157,10 @@ export interface ActivityIndex {
   rules: Rule[];
   exactRuleByEntity: Map<string, number>;
   hasStoredTitles: boolean;
-  ruleUsage: ActivityRuleUsage[];
-  categoryUsage: ActivityCategoryUsage[];
-  allHistoryAttention: ActivityAttentionSummary;
+  /** Rules that won at least one session in all of history. A rule missing here
+   *  is the one actionable usage signal left: nothing matches it, so it is a
+   *  deletion candidate. Per-rule detail lives in the entity drawer instead. */
+  appliedRuleIds: number[];
 }
 
 interface MutableEntity {
@@ -211,26 +198,11 @@ function activityDisplayName(
   return kind === "app" ? cleanProcessName(key, aliases) : cleanDomainName(key, aliases);
 }
 
-function incrementUsage<T extends { sessions: number; seconds: number; lastUsed: number }>(
-  map: Map<number, T>,
-  key: number,
-  make: () => T,
-  seconds: number,
-  lastUsed: number,
-): void {
-  const usage = map.get(key) ?? make();
-  usage.sessions += 1;
-  usage.seconds += seconds;
-  usage.lastUsed = Math.max(usage.lastUsed, lastUsed);
-  map.set(key, usage);
-}
-
 export function buildActivityIndex(source: ActivitySource): ActivityIndex {
   const browserProcesses = new Set(source.browserProcesses.map((process) => process.toLowerCase()));
   const explain = buildClassificationExplainer(source.categories, source.rules, browserProcesses);
   const indexed: IndexedSession[] = [];
-  const ruleUsage = new Map<number, ActivityRuleUsage>();
-  const categoryUsage = new Map<number, ActivityCategoryUsage>();
+  const appliedRuleIds = new Set<number>();
   let hasStoredTitles = false;
 
   for (const session of source.sessions) {
@@ -239,24 +211,7 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
     const explanation = explain(session);
     const seconds = session.end - session.start;
     if (session.title) hasStoredTitles = true;
-    if (explanation.winningRule) {
-      incrementUsage(
-        ruleUsage,
-        explanation.winningRule.id,
-        () => ({ ruleId: explanation.winningRule!.id, sessions: 0, seconds: 0, lastUsed: 0 }),
-        seconds,
-        session.end,
-      );
-    }
-    if (explanation.category) {
-      incrementUsage(
-        categoryUsage,
-        explanation.category.id,
-        () => ({ categoryId: explanation.category!.id, sessions: 0, seconds: 0, lastUsed: 0 }),
-        seconds,
-        session.end,
-      );
-    }
+    if (explanation.winningRule) appliedRuleIds.add(explanation.winningRule.id);
     indexed.push({
       id: session.id,
       start: session.start,
@@ -291,19 +246,14 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
         : null;
     if (entityId !== null && !exactRuleByEntity.has(entityId)) exactRuleByEntity.set(entityId, rule.id);
   }
-  const index: ActivityIndex = {
+  return {
     sessions: indexed,
     categories: source.categories,
     rules: source.rules,
     exactRuleByEntity,
     hasStoredTitles,
-    ruleUsage: [...ruleUsage.values()],
-    categoryUsage: [...categoryUsage.values()],
-    allHistoryAttention: { entities: 0, seconds: 0 },
+    appliedRuleIds: [...appliedRuleIds],
   };
-  const allEntities = aggregateEntities(index, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY);
-  index.allHistoryAttention = attentionSummary(allEntities);
-  return index;
 }
 
 function aggregateEntities(index: ActivityIndex, startSec: number, endSec: number): ActivityEntitySummary[] {
@@ -417,7 +367,7 @@ function matchesClassification(
   filter: ActivityClassificationFilter,
 ): boolean {
   if (filter === "all") return true;
-  if (filter === "needs_attention") return entity.uncategorizedSeconds > 0;
+  if (filter === "uncategorized") return entity.uncategorizedSeconds > 0;
   if (filter === "mixed") return entity.status === "mixed";
   if (filter === "ignored") return entity.status === "ignored";
   const categoryId = Number(filter.slice("category:".length));
@@ -439,11 +389,13 @@ function compareEntities(
   };
 }
 
-function attentionSummary(entities: ActivityEntitySummary[]): ActivityAttentionSummary {
-  const needingAttention = entities.filter((entity) => entity.uncategorizedSeconds > 0);
+function uncategorizedSummary(entities: ActivityEntitySummary[]): ActivityUncategorizedSummary {
+  const pending = entities.filter(
+    (entity) => entity.uncategorizedSeconds > 0 && entity.noise === null,
+  );
   return {
-    entities: needingAttention.length,
-    seconds: needingAttention.reduce((total, entity) => total + entity.uncategorizedSeconds, 0),
+    entities: pending.length,
+    seconds: pending.reduce((total, entity) => total + entity.uncategorizedSeconds, 0),
   };
 }
 
@@ -517,9 +469,6 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     };
   }
 
-  const attention = allEntities
-    .filter((entity) => entity.uncategorizedSeconds > 0)
-    .sort((left, right) => right.uncategorizedSeconds - left.uncategorizedSeconds || left.displayName.localeCompare(right.displayName));
   const selectedEntity = query.selectedEntityId
     ? (entitiesById.get(query.selectedEntityId) ?? null)
     : null;
@@ -540,18 +489,14 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     catalog,
     noiseHidden,
     searchResults,
-    needsAttention: attention.slice(0, 6),
-    needsAttentionTotal: attention.length,
-    currentAttention: attentionSummary(allEntities),
-    allHistoryAttention: index.allHistoryAttention,
+    uncategorized: uncategorizedSummary(allEntities),
     selectedEntity,
     detailSessions: page(detailRows, query.detailOffset ?? 0, query.detailLimit ?? 50).map(
       (session) => exposeDetailTitles ? session : { ...session, title: "" },
     ),
     detailTotal: detailRows.length,
     hasStoredTitles: index.hasStoredTitles,
-    ruleUsage: index.ruleUsage,
-    categoryUsage: index.categoryUsage,
+    appliedRuleIds: index.appliedRuleIds,
   };
 }
 

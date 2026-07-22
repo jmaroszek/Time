@@ -80,12 +80,14 @@ SYSTEM = [
 
 # Demo-only taxonomy and rules. These are intentionally kept out of production
 # bootstrap so screenshots stay rich without assigning values to real users.
+# Colors come from the dashboard's category swatch list, which stays clear of
+# the hues productivity reserves — screenshots are where a collision shows.
 DEMO_CATEGORIES = [
     ("Notes", "#9c8ff0", 1, 0, 1),
     ("Dev", "#2f6fc0", 1, 0, 2),
-    ("AI tools", "#43c88a", 1, 0, 3),
+    ("AI tools", "#56c8d8", 1, 0, 3),
     ("Browsing", "#e0a53a", 0, 1, 4),
-    ("Gaming", "#e8663d", 0, 1, 5),
+    ("Gaming", "#b06fd8", 0, 1, 5),
     ("Media", "#e75fa0", 0, 0, 6),
     ("System", "#828994", 0, 1, 7),
 ]

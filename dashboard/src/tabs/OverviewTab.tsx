@@ -39,6 +39,9 @@ import { useMeta } from "../state/meta";
 import { useInsightsModel } from "../state/useInsightsModel";
 import { useSessions } from "../state/useSessions";
 
+const TOP_APPS_OPTIONS = [5, 10, 15, 20];
+const DEFAULT_TOP_APPS = TOP_APPS_OPTIONS[0];
+
 const HOURS_CARD_TITLES = {
   daily: "Daily Hours",
   weekly: "Weekly Hours",
@@ -64,7 +67,9 @@ export default function OverviewTab({
   firstSessionSec: number | null;
 }) {
   const meta = useMeta();
-  const [topN, setTopN] = useState<number | null>(null);
+  // The card's own selector is the only place this is set: a Settings knob for
+  // the starting value would configure one control's default and nothing else.
+  const [topN, setTopN] = useState(DEFAULT_TOP_APPS);
   const [selected, setSelected] = useState<TimelineSegment | null>(null);
   const [blockMinutes, setBlockMinutes] = useState(15);
   // null = follow the range-length default; an explicit pick sticks until changed.
@@ -197,8 +202,7 @@ export default function OverviewTab({
     (day) => day.date >= displayRange.start && day.date < displayRange.end,
   );
 
-  const n = topN ?? meta.defaultTopN;
-  const apps = model.apps.slice(0, n);
+  const apps = model.apps.slice(0, topN);
   const updateError = sessionData.error ?? analyzed.error;
   const refreshing =
     !updateError &&
@@ -378,9 +382,9 @@ export default function OverviewTab({
             <Select
               className="chart-select"
               blurOnChange
-              value={String(n)}
+              value={String(topN)}
               onChange={(v) => setTopN(Number(v))}
-              options={[5, 10, 15, 20].map((x) => ({ value: String(x), label: `Top ${x}` }))}
+              options={TOP_APPS_OPTIONS.map((x) => ({ value: String(x), label: `Top ${x}` }))}
             />
           }
         >
@@ -389,7 +393,7 @@ export default function OverviewTab({
               apps={apps}
               comparisonDays={calendarDays(prev)}
               comparisonAvailable={preset !== "alltime"}
-              hiddenAppCount={apps.length < n ? hiddenAppCount : 0}
+              hiddenAppCount={apps.length < topN ? hiddenAppCount : 0}
             />
           </div>
         </Card>
