@@ -33,8 +33,8 @@ how that is changing over time.
   contain no personal categories or classification rules. Changes apply to all history, and the tracker
   picks them up within seconds — no config files, no restarts.
 - **Friendly app names.** Cryptic executable names can be
-  renamed in place — double-click any app in the Apps tab — and the friendly
-  name shows everywhere, with the real process name still a hover away.
+  renamed in Insights' Top Apps or the Activity Library, and the friendly name
+  shows everywhere with the recorded executable still available in Activity.
 - **Tells you what actually changed.** Week-over-week shifts in app usage are
   highlighted only when they're statistically real (a Welch's t-test on daily
   usage), and color depends on direction: more time in a productive app is
@@ -49,8 +49,8 @@ how that is changing over time.
 | Tab | What it shows |
 | --- | --- |
 | **[Insights](docs/overview.md)** | KPI cards (total, productive %, longest focus chain, goal pace); an adaptive main view that shifts with the range — a per-day timeline, a weekday×hour rhythm heatmap, or a day/month calendar (shadeable by total, productive, unproductive, or neutral time); top apps with category-aware deltas; and activity hours stacked by state or category. Ranges run from a single day to all time. |
-| **[Apps](docs/apps.md)** | Every app and domain in range with time, share, and category — plus full category and rule management. |
-| **[Settings](docs/settings.md)** | Goals, AFK threshold, heartbeat, week start, browser processes — all editable in-app — plus live tracker status and one-click backup. |
+| **[Activity](docs/apps.md)** | Search and correct the apps, websites, windows, and sessions in the shared range; classify them with categories and rules; or delete exact recorded activity. |
+| **[Settings](docs/settings.md)** | Goals, AFK threshold, heartbeat, week start, browser processes, history retention, live tracker status, and one-click backup. |
 
 ## Architecture
 

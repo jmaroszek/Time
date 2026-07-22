@@ -6,7 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
 import { assertSupportedSchemaVersion } from "./schema";
-import { clearSessionWindowCache, MAX_SESSION_SPAN_SEC } from "./sessionWindowCache";
+import { MAX_SESSION_SPAN_SEC } from "./sessionWindowCache";
+import { invalidateHistory } from "./historyInvalidation";
 
 interface SessionColumns {
   ids: number[];
@@ -204,31 +205,56 @@ export async function deleteCategory(categoryId: number): Promise<void> {
 }
 
 // ---------------- history deletion ----------------
-// The dashboard's only destructive surface. Callers confirm with the user
-// (showing the count) before calling the delete variants.
+// The renderer describes a fixed scope; native commands own the SQL, live-edge
+// protection, snapshot boundary, and secure compaction.
 
-const MATCH_SQL =
-  " FROM sessions WHERE process LIKE $1 ESCAPE '\\'" +
-  " OR title LIKE $1 ESCAPE '\\' OR IFNULL(domain,'') LIKE $1 ESCAPE '\\'";
+export type ActivityDeleteRequest =
+  | {
+      mode: "sessions";
+      sessionIds: number[];
+      snapshotMaxId?: number;
+      previewProtectedSessionId?: number | null;
+    }
+  | {
+      mode: "entity";
+      entityKind: "app" | "website";
+      entityKey: string;
+      startSec: number;
+      endSec: number;
+      browserProcesses: string[];
+      snapshotMaxId?: number;
+      previewProtectedSessionId?: number | null;
+    };
 
-function likePattern(text: string): string {
-  return `%${text.toLowerCase().replace(/[\\%_]/g, (m) => "\\" + m)}%`;
+export interface ActivityDeletePreview {
+  count: number;
+  seconds: number;
+  earliestStart: number | null;
+  latestEnd: number | null;
+  protectedCount: number;
+  snapshotMaxId: number;
+  protectedSessionId: number | null;
 }
 
-/** Sessions whose app, window title, or site contains `text` (case-insensitive). */
-export async function countSessionsMatching(text: string): Promise<number> {
-  const db = await getDb();
-  const rows = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n" + MATCH_SQL, [
-    likePattern(text),
-  ]);
-  return rows[0].n;
+export interface ActivityDeleteResult {
+  deletedCount: number;
+  protectedCount: number;
 }
 
-export async function deleteSessionsMatching(text: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE" + MATCH_SQL, [likePattern(text)]);
-  clearSessionWindowCache();
-  await invoke("compact_database");
+export async function previewActivityDelete(
+  request: ActivityDeleteRequest,
+): Promise<ActivityDeletePreview> {
+  return invoke<ActivityDeletePreview>("preview_activity_delete", { request });
+}
+
+export async function deleteActivity(
+  request: ActivityDeleteRequest & { snapshotMaxId: number },
+): Promise<ActivityDeleteResult> {
+  try {
+    return await invoke<ActivityDeleteResult>("delete_activity", { request });
+  } finally {
+    invalidateHistory();
+  }
 }
 
 /** Sessions that ended before `cutoffSec` (unix seconds). */
@@ -241,11 +267,12 @@ export async function countSessionsOlderThan(cutoffSec: number): Promise<number>
   return rows[0].n;
 }
 
-export async function deleteSessionsOlderThan(cutoffSec: number): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM sessions WHERE end_ts < $1", [Math.floor(cutoffSec)]);
-  clearSessionWindowCache();
-  await invoke("compact_database");
+export async function deleteHistoryBefore(cutoffSec: number): Promise<number> {
+  try {
+    return await invoke<number>("delete_history_before", { cutoffSec });
+  } finally {
+    invalidateHistory();
+  }
 }
 
 // ---------------- status / maintenance ----------------
@@ -291,6 +318,6 @@ export async function eraseAllHistory(): Promise<number> {
   } finally {
     // The native command deletes before checkpoint/compaction. Even if that
     // cleanup step fails, no renderer cache may keep showing erased rows.
-    clearSessionWindowCache();
+    invalidateHistory();
   }
 }

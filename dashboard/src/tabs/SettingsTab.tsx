@@ -1,16 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-import { Spinner } from "../components/ui";
+import { Spinner, TrashButton } from "../components/ui";
 import { getDbPath } from "../lib/db";
 import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
 import {
   backupDatabase,
-  countSessionsMatching,
   countSessionsOlderThan,
-  deleteSessionsMatching,
-  deleteSessionsOlderThan,
+  deleteHistoryBefore,
   eraseAllHistory,
   fetchSettings,
   fetchTrackerStatus,
@@ -188,7 +186,7 @@ export default function SettingsTab() {
           <Row label="Focus chain max gap" help="Short gaps won't break a productive focus chain." control={numberControl(SPECS.focus, "min")} />
         </Section>
 
-        <Section title="App Lists">
+        <Section title="Insights Apps">
           <Row
             label="Default top apps shown"
             help="Initial size of the Overview top-apps list."
@@ -196,7 +194,7 @@ export default function SettingsTab() {
           />
           <Row
             label="Minimum app time"
-            help="Hides apps below this much time in the selected range. It's a fixed amount, not a percentage — so a longer range clears it more easily. 0 shows everything."
+            help="Hides apps below this much time in the Insights Top Apps list. Activity always shows the complete catalog."
             control={numberControl(SPECS.minimum, "min")}
           />
         </Section>
@@ -325,7 +323,7 @@ export default function SettingsTab() {
           </div>
         </section>
 
-        <DeleteHistorySection />
+        <HistoryRetentionSection />
       </div>
     </div>
   );
@@ -348,19 +346,18 @@ function VersionsLine({ trackerVersion }: { trackerVersion: string | undefined }
   );
 }
 
-/** Selective history deletion. Both actions show the affected count
- *  and require an explicit confirm; the copy points at backup first. */
-function DeleteHistorySection() {
+/** Lifecycle-level deletion stays in Settings; exact record correction lives
+ * in Activity. The cutoff action previews its count before native deletion. */
+function HistoryRetentionSection() {
   const meta = useMeta();
   const banner = useBanner();
-  const [matchText, setMatchText] = useState("");
   const [olderDays, setOlderDays] = useState("365");
   const [message, setMessage] = useState<string | null>(null);
 
   const confirmAndDelete = async (
     count: number,
     what: string,
-    run: () => Promise<void>,
+    run: () => Promise<unknown>,
   ): Promise<boolean> => {
     if (count === 0) {
       setMessage(`No recorded sessions ${what}.`);
@@ -377,20 +374,6 @@ function DeleteHistorySection() {
     return true;
   };
 
-  const deleteMatching = async () => {
-    const text = matchText.trim();
-    if (!text) return;
-    try {
-      const n = await countSessionsMatching(text);
-      const done = await confirmAndDelete(n, `matching “${text}”`, () =>
-        deleteSessionsMatching(text),
-      );
-      if (done) setMatchText("");
-    } catch (e) {
-      banner.report(e, "deletion");
-    }
-  };
-
   const deleteOlder = async () => {
     const days = Math.floor(Number(olderDays));
     if (!Number.isFinite(days) || days < 1) {
@@ -401,7 +384,7 @@ function DeleteHistorySection() {
       const cutoff = Date.now() / 1000 - days * 86_400;
       const n = await countSessionsOlderThan(cutoff);
       await confirmAndDelete(n, `older than ${days} day${days === 1 ? "" : "s"}`, () =>
-        deleteSessionsOlderThan(cutoff),
+        deleteHistoryBefore(cutoff),
       );
     } catch (e) {
       banner.report(e, "deletion");
@@ -432,26 +415,8 @@ function DeleteHistorySection() {
 
   return (
     <section>
-      <SectionLabel>Delete history</SectionLabel>
+      <SectionLabel>History retention</SectionLabel>
       <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
-        <Row
-          label="Delete history matching"
-          help="Removes recorded sessions whose app, window title, or site contains this text."
-          control={
-            <span className="flex items-center gap-2">
-              <input
-                value={matchText}
-                placeholder="text or site…"
-                onChange={(event) => setMatchText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void deleteMatching();
-                }}
-                className={inputClass}
-              />
-              <DeleteButton label="Delete matching history" disabled={!matchText.trim()} onClick={() => void deleteMatching()} />
-            </span>
-          }
-        />
         <Row
           label="Delete history older than"
           help="Removes everything recorded before the cutoff. Categories, rules, and settings are kept."
@@ -466,7 +431,7 @@ function DeleteHistorySection() {
                 className={`${inputClass} w-[64px] text-right`}
               />
               <span className="text-[11px] text-ink-3">days</span>
-              <DeleteButton label="Delete older history" onClick={() => void deleteOlder()} />
+              <TrashButton label="Delete older history" onClick={() => void deleteOlder()} />
             </span>
           }
         />
@@ -483,34 +448,6 @@ function DeleteHistorySection() {
         {message && <p className="border-t border-surface-2 px-4 py-3 text-[11.5px] text-ink-2">{message}</p>}
       </div>
     </section>
-  );
-}
-
-function DeleteButton({
-  label,
-  disabled = false,
-  onClick,
-}: {
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="flex h-8 w-8 items-center justify-center rounded-[9px] border border-bad/30 text-bad transition-colors hover:border-bad/50 hover:bg-bad/5 disabled:cursor-not-allowed disabled:opacity-35"
-    >
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M3 6h18" />
-        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-        <path d="M10 11v6M14 11v6" />
-      </svg>
-    </button>
   );
 }
 

@@ -10,13 +10,14 @@
 //! tracker's first run, or the reverse). The two must stay identical; the
 //! Python side owns migrations.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
     Column, Row, SqlitePool, TypeInfo, Value, ValueRef,
 };
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -122,6 +123,48 @@ pub struct SessionColumns {
     titles: Vec<String>,
     domains: Vec<Option<String>>,
     is_afk: Vec<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityDeleteRequest {
+    pub mode: String,
+    #[serde(default)]
+    pub session_ids: Vec<i64>,
+    pub entity_kind: Option<String>,
+    pub entity_key: Option<String>,
+    pub start_sec: Option<f64>,
+    pub end_sec: Option<f64>,
+    #[serde(default)]
+    pub browser_processes: Vec<String>,
+    pub snapshot_max_id: Option<i64>,
+    pub preview_protected_session_id: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityDeletePreview {
+    pub count: u64,
+    pub seconds: i64,
+    pub earliest_start: Option<i64>,
+    pub latest_end: Option<i64>,
+    pub protected_count: u64,
+    pub snapshot_max_id: i64,
+    pub protected_session_id: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityDeleteResult {
+    pub deleted_count: u64,
+    pub protected_count: u64,
+}
+
+#[derive(Clone)]
+struct DeletionCandidate {
+    id: i64,
+    start: i64,
+    end: i64,
 }
 
 impl TimeDatabase {
@@ -348,9 +391,9 @@ impl TimeDatabase {
     ///
     /// The asymmetries are deliberate. `settings` accepts INSERT (the dashboard
     /// upserts preferences) but not UPDATE or DELETE, so no renderer bug can
-    /// blank a privacy gate or the schema version. `sessions` accepts DELETE
-    /// only — that is the user's history-deletion surface — and never INSERT or
-    /// UPDATE, because the tracker is the sole author of session rows.
+    /// blank a privacy gate or the schema version. Session deletion uses fixed,
+    /// structured native commands instead of renderer-authored SQL; the tracker
+    /// remains the sole author of session rows.
     ///
     /// The shape match reads the target table positionally, so a statement it
     /// cannot parse is rejected rather than allowed by default.
@@ -369,7 +412,7 @@ impl TimeDatabase {
         let allowed = match words.first().map(String::as_str) {
             Some("INSERT") => ["SETTINGS", "RULES", "CATEGORIES"].contains(&target),
             Some("UPDATE") => ["CATEGORIES"].contains(&target),
-            Some("DELETE") => ["RULES", "CATEGORIES", "SESSIONS"].contains(&target),
+            Some("DELETE") => ["RULES", "CATEGORIES"].contains(&target),
             _ => false,
         };
         if !allowed {
@@ -378,6 +421,287 @@ impl TimeDatabase {
             ));
         }
         Ok(())
+    }
+
+    async fn activity_delete_candidates(
+        &self,
+        request: &ActivityDeleteRequest,
+    ) -> Result<Vec<DeletionCandidate>, String> {
+        if request.mode == "sessions" {
+            if request.session_ids.is_empty() {
+                return Err("Select at least one session".into());
+            }
+            if request.session_ids.len() > 100_000 {
+                return Err("Too many sessions selected at once".into());
+            }
+            let mut unique = request.session_ids.iter().copied().collect::<HashSet<_>>();
+            unique.retain(|id| *id > 0);
+            let ids = unique.into_iter().collect::<Vec<_>>();
+            let mut candidates = Vec::new();
+            for chunk in ids.chunks(500) {
+                let placeholders = std::iter::repeat_n("?", chunk.len())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql =
+                    format!("SELECT id,start_ts,end_ts FROM sessions WHERE id IN ({placeholders})");
+                let mut query = sqlx::query(&sql);
+                for id in chunk {
+                    query = query.bind(id);
+                }
+                for row in query
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    candidates.push(DeletionCandidate {
+                        id: row.try_get("id").map_err(|error| error.to_string())?,
+                        start: row.try_get("start_ts").map_err(|error| error.to_string())?,
+                        end: row.try_get("end_ts").map_err(|error| error.to_string())?,
+                    });
+                }
+            }
+            return Ok(candidates);
+        }
+
+        if request.mode != "entity" {
+            return Err("Unsupported Activity deletion mode".into());
+        }
+        let entity_kind = request
+            .entity_kind
+            .as_deref()
+            .ok_or("Missing entity kind")?;
+        let entity_key = request
+            .entity_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .ok_or("Missing entity key")?
+            .to_ascii_lowercase();
+        let start_sec = request.start_sec.ok_or("Missing deletion start")?;
+        let end_sec = request.end_sec.ok_or("Missing deletion end")?;
+        if !start_sec.is_finite() || !end_sec.is_finite() || end_sec <= start_sec {
+            return Err("Invalid Activity deletion range".into());
+        }
+        let browser_processes = request
+            .browser_processes
+            .iter()
+            .map(|process| process.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        let rows = match entity_kind {
+            "app" => sqlx::query(
+                "SELECT id,start_ts,end_ts,process,domain FROM sessions \
+                 WHERE lower(process)=? AND end_ts>? AND start_ts<?",
+            )
+            .bind(&entity_key)
+            .bind(start_sec)
+            .bind(end_sec)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?,
+            "website" => sqlx::query(
+                "SELECT id,start_ts,end_ts,process,domain FROM sessions \
+                 WHERE lower(IFNULL(domain,''))=? AND end_ts>? AND start_ts<?",
+            )
+            .bind(&entity_key)
+            .bind(start_sec)
+            .bind(end_sec)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?,
+            _ => return Err("Unsupported Activity entity kind".into()),
+        };
+        let mut candidates = Vec::new();
+        for row in rows {
+            let process = row
+                .try_get::<String, _>("process")
+                .map_err(|error| error.to_string())?
+                .to_ascii_lowercase();
+            let domain = row
+                .try_get::<Option<String>, _>("domain")
+                .map_err(|error| error.to_string())?;
+            let has_domain = domain.as_deref().is_some_and(|value| !value.is_empty());
+            let belongs = match entity_kind {
+                "app" => !browser_processes.contains(&process) || !has_domain,
+                "website" => browser_processes.contains(&process) && has_domain,
+                _ => false,
+            };
+            if belongs {
+                candidates.push(DeletionCandidate {
+                    id: row.try_get("id").map_err(|error| error.to_string())?,
+                    start: row.try_get("start_ts").map_err(|error| error.to_string())?,
+                    end: row.try_get("end_ts").map_err(|error| error.to_string())?,
+                });
+            }
+        }
+        Ok(candidates)
+    }
+
+    async fn protected_live_session_id(&self) -> Result<Option<i64>, String> {
+        let rows = sqlx::query(
+            "SELECT key,value FROM settings WHERE key IN \
+             ('recording_consent','tracking_paused','tracking_paused_until','heartbeat_seconds')",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        let mut consent = false;
+        let mut paused = false;
+        let mut paused_until = 0_i64;
+        let mut heartbeat = 15_i64;
+        for row in rows {
+            let key: String = row.try_get("key").map_err(|error| error.to_string())?;
+            let value: String = row.try_get("value").map_err(|error| error.to_string())?;
+            match key.as_str() {
+                "recording_consent" => consent = value == "1",
+                "tracking_paused" => paused = value == "1",
+                "tracking_paused_until" => paused_until = value.parse().unwrap_or(0),
+                "heartbeat_seconds" => heartbeat = value.parse().unwrap_or(15),
+                _ => {}
+            }
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_secs() as i64;
+        if !consent || paused || paused_until > now {
+            return Ok(None);
+        }
+        let row = sqlx::query(
+            "SELECT id,end_ts FROM sessions WHERE source='live' \
+             ORDER BY start_ts DESC,id DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        let Some(row) = row else { return Ok(None) };
+        let end: i64 = row.try_get("end_ts").map_err(|error| error.to_string())?;
+        let freshness = 120_i64.max(heartbeat.clamp(5, 300) * 4);
+        if end < now - freshness {
+            return Ok(None);
+        }
+        row.try_get("id")
+            .map(Some)
+            .map_err(|error| error.to_string())
+    }
+
+    async fn max_session_id(&self) -> Result<i64, String> {
+        let row = sqlx::query("SELECT COALESCE(MAX(id),0) AS max_id FROM sessions")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
+        row.try_get("max_id").map_err(|error| error.to_string())
+    }
+
+    pub async fn preview_activity_delete(
+        &self,
+        request: &ActivityDeleteRequest,
+    ) -> Result<ActivityDeletePreview, String> {
+        let snapshot_max_id = self.max_session_id().await?;
+        let protected = self.protected_live_session_id().await?;
+        let candidates = self.activity_delete_candidates(request).await?;
+        let mut count = 0_u64;
+        let mut seconds = 0_i64;
+        let mut earliest_start: Option<i64> = None;
+        let mut latest_end: Option<i64> = None;
+        let mut protected_count = 0_u64;
+        for candidate in candidates {
+            if candidate.id > snapshot_max_id {
+                continue;
+            }
+            if Some(candidate.id) == protected {
+                protected_count += 1;
+                continue;
+            }
+            count += 1;
+            seconds += (candidate.end - candidate.start).max(0);
+            earliest_start =
+                Some(earliest_start.map_or(candidate.start, |value| value.min(candidate.start)));
+            latest_end = Some(latest_end.map_or(candidate.end, |value| value.max(candidate.end)));
+        }
+        Ok(ActivityDeletePreview {
+            count,
+            seconds,
+            earliest_start,
+            latest_end,
+            protected_count,
+            snapshot_max_id,
+            protected_session_id: protected,
+        })
+    }
+
+    pub async fn delete_activity(
+        &self,
+        request: &ActivityDeleteRequest,
+    ) -> Result<ActivityDeleteResult, String> {
+        self.ensure_writable_schema()?;
+        let snapshot_max_id = request
+            .snapshot_max_id
+            .ok_or("Preview Activity deletion before confirming")?;
+        let protected = self.protected_live_session_id().await?;
+        let preview_protected = request.preview_protected_session_id;
+        let candidates = self.activity_delete_candidates(request).await?;
+        let mut protected_count = 0_u64;
+        let ids = candidates
+            .into_iter()
+            .filter_map(|candidate| {
+                if candidate.id > snapshot_max_id {
+                    return None;
+                }
+                if Some(candidate.id) == protected || Some(candidate.id) == preview_protected {
+                    protected_count += 1;
+                    return None;
+                }
+                Some(candidate.id)
+            })
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
+            return Ok(ActivityDeleteResult {
+                deleted_count: 0,
+                protected_count,
+            });
+        }
+        let mut transaction = self.pool.begin().await.map_err(|error| error.to_string())?;
+        let mut deleted_count = 0_u64;
+        for chunk in ids.chunks(500) {
+            let placeholders = std::iter::repeat_n("?", chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!("DELETE FROM sessions WHERE id IN ({placeholders})");
+            let mut query = sqlx::query(&sql);
+            for id in chunk {
+                query = query.bind(id);
+            }
+            deleted_count += query
+                .execute(&mut *transaction)
+                .await
+                .map_err(|error| error.to_string())?
+                .rows_affected();
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|error| error.to_string())?;
+        self.compact().await?;
+        Ok(ActivityDeleteResult {
+            deleted_count,
+            protected_count,
+        })
+    }
+
+    pub async fn delete_history_before(&self, cutoff_sec: f64) -> Result<u64, String> {
+        self.ensure_writable_schema()?;
+        if !cutoff_sec.is_finite() {
+            return Err("Invalid history cutoff".into());
+        }
+        let result = sqlx::query("DELETE FROM sessions WHERE end_ts < ?")
+            .bind(cutoff_sec.floor() as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
+        if result.rows_affected() > 0 {
+            self.compact().await?;
+        }
+        Ok(result.rows_affected())
     }
 
     pub async fn backup(&self) -> Result<String, String> {
@@ -408,7 +732,7 @@ impl TimeDatabase {
         Ok(result.rows_affected())
     }
 
-    pub async fn compact(&self) -> Result<(), String> {
+    async fn compact(&self) -> Result<(), String> {
         self.ensure_writable_schema()?;
         sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
             .execute(&self.pool)
@@ -496,7 +820,7 @@ pub fn database_path(base: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::TimeDatabase;
+    use super::{ActivityDeleteRequest, TimeDatabase};
 
     #[test]
     fn rejects_dangerous_or_multi_statement_sql() {
@@ -516,7 +840,9 @@ mod tests {
             "INSERT INTO settings (key,value) VALUES ($1,$2)"
         )
         .is_ok());
-        assert!(TimeDatabase::validate_mutation_target("DELETE FROM sessions WHERE id=$1").is_ok());
+        assert!(
+            TimeDatabase::validate_mutation_target("DELETE FROM sessions WHERE id=$1").is_err()
+        );
         assert!(TimeDatabase::validate_mutation_target("UPDATE settings SET value='1'").is_err());
         assert!(TimeDatabase::validate_mutation_target("DELETE FROM settings").is_err());
     }
@@ -673,6 +999,239 @@ mod tests {
             assert_eq!(sessions.ends, vec![30, 60]);
             assert_eq!(sessions.processes, vec!["second.exe", "first.exe"]);
             assert_eq!(sessions.is_afk, vec![true, false]);
+        });
+    }
+
+    #[test]
+    fn activity_delete_is_exact_and_snapshot_bounded() {
+        let path = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("database-activity-delete-test.db");
+        for candidate in [
+            path.clone(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            if candidate.exists() {
+                std::fs::remove_file(candidate).unwrap();
+            }
+        }
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            for values in [
+                (1_i64, "chrome.exe", Some("example.com")),
+                (2, "chrome.exe", Some("other.com")),
+                (3, "chrome.exe", None),
+                (4, "code.exe", None),
+            ] {
+                sqlx::query(
+                    "INSERT INTO sessions (id,start_ts,end_ts,process,domain) VALUES (?,?,?, ?,?)",
+                )
+                .bind(values.0)
+                .bind(values.0 * 20)
+                .bind(values.0 * 20 + 10)
+                .bind(values.1)
+                .bind(values.2)
+                .execute(&database.pool)
+                .await
+                .unwrap();
+            }
+            let mut request = ActivityDeleteRequest {
+                mode: "entity".into(),
+                session_ids: vec![],
+                entity_kind: Some("website".into()),
+                entity_key: Some("example.com".into()),
+                start_sec: Some(0.0),
+                end_sec: Some(1_000.0),
+                browser_processes: vec!["chrome.exe".into()],
+                snapshot_max_id: None,
+                preview_protected_session_id: None,
+            };
+            let preview = database.preview_activity_delete(&request).await.unwrap();
+            assert_eq!(
+                (preview.count, preview.seconds, preview.snapshot_max_id),
+                (1, 10, 4)
+            );
+
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process,domain) \
+                 VALUES (5,100,110,'chrome.exe','example.com')",
+            )
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            request.snapshot_max_id = Some(preview.snapshot_max_id);
+            request.preview_protected_session_id = preview.protected_session_id;
+            let deleted = database.delete_activity(&request).await.unwrap();
+            assert_eq!(deleted.deleted_count, 1);
+            let remaining: Vec<i64> = sqlx::query_scalar("SELECT id FROM sessions ORDER BY id")
+                .fetch_all(&database.pool)
+                .await
+                .unwrap();
+            assert_eq!(remaining, vec![2, 3, 4, 5]);
+
+            let app_preview = database
+                .preview_activity_delete(&ActivityDeleteRequest {
+                    mode: "entity".into(),
+                    session_ids: vec![],
+                    entity_kind: Some("app".into()),
+                    entity_key: Some("chrome.exe".into()),
+                    start_sec: Some(0.0),
+                    end_sec: Some(1_000.0),
+                    browser_processes: vec!["chrome.exe".into()],
+                    snapshot_max_id: None,
+                    preview_protected_session_id: None,
+                })
+                .await
+                .unwrap();
+            assert_eq!(app_preview.count, 1);
+
+            let mut selected_request = ActivityDeleteRequest {
+                mode: "sessions".into(),
+                session_ids: vec![2, 4, 999],
+                entity_kind: None,
+                entity_key: None,
+                start_sec: None,
+                end_sec: None,
+                browser_processes: vec![],
+                snapshot_max_id: None,
+                preview_protected_session_id: None,
+            };
+            let selected_preview = database
+                .preview_activity_delete(&selected_request)
+                .await
+                .unwrap();
+            assert_eq!((selected_preview.count, selected_preview.seconds), (2, 20));
+            selected_request.snapshot_max_id = Some(selected_preview.snapshot_max_id);
+            selected_request.preview_protected_session_id = selected_preview.protected_session_id;
+            let selected_deleted = database.delete_activity(&selected_request).await.unwrap();
+            assert_eq!(selected_deleted.deleted_count, 2);
+            let selected_remaining: Vec<i64> =
+                sqlx::query_scalar("SELECT id FROM sessions ORDER BY id")
+                    .fetch_all(&database.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(selected_remaining, vec![3, 5]);
+            let free_pages: i64 = sqlx::query_scalar("PRAGMA freelist_count")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+            assert_eq!(free_pages, 0);
+        });
+    }
+
+    #[test]
+    fn targeted_and_retention_deletion_reject_a_newer_schema() {
+        let path = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("database-activity-newer-schema-test.db");
+        for candidate in [
+            path.clone(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            if candidate.exists() {
+                std::fs::remove_file(candidate).unwrap();
+            }
+        }
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path.clone()).await.unwrap();
+            sqlx::query("UPDATE settings SET value='999' WHERE key='schema_version'")
+                .execute(&database.pool)
+                .await
+                .unwrap();
+            database.pool.close().await;
+            drop(database);
+
+            let newer = TimeDatabase::open(path).await.unwrap();
+            let request = ActivityDeleteRequest {
+                mode: "sessions".into(),
+                session_ids: vec![1],
+                entity_kind: None,
+                entity_key: None,
+                start_sec: None,
+                end_sec: None,
+                browser_processes: vec![],
+                snapshot_max_id: Some(1),
+                preview_protected_session_id: None,
+            };
+            assert!(newer.delete_activity(&request).await.is_err());
+            assert!(newer.delete_history_before(100.0).await.is_err());
+        });
+    }
+
+    #[test]
+    fn activity_delete_protects_the_recent_live_edge() {
+        let path = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("database-activity-live-edge-test.db");
+        for candidate in [
+            path.clone(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            if candidate.exists() {
+                std::fs::remove_file(candidate).unwrap();
+            }
+        }
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process,source) \
+                 VALUES (1,?,?, 'code.exe','live')",
+            )
+            .bind(now - 20)
+            .bind(now)
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            sqlx::query("UPDATE settings SET value='1' WHERE key='recording_consent'")
+                .execute(&database.pool)
+                .await
+                .unwrap();
+            let mut request = ActivityDeleteRequest {
+                mode: "sessions".into(),
+                session_ids: vec![1],
+                entity_kind: None,
+                entity_key: None,
+                start_sec: None,
+                end_sec: None,
+                browser_processes: vec![],
+                snapshot_max_id: None,
+                preview_protected_session_id: None,
+            };
+            let protected = database.preview_activity_delete(&request).await.unwrap();
+            assert_eq!((protected.count, protected.protected_count), (0, 1));
+
+            sqlx::query("UPDATE settings SET value='1' WHERE key='tracking_paused'")
+                .execute(&database.pool)
+                .await
+                .unwrap();
+            request.snapshot_max_id = Some(protected.snapshot_max_id);
+            request.preview_protected_session_id = protected.protected_session_id;
+            let unchanged = database.delete_activity(&request).await.unwrap();
+            assert_eq!((unchanged.deleted_count, unchanged.protected_count), (0, 1));
+            let still_present: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id=1")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+            assert_eq!(still_present, 1);
+
+            request.snapshot_max_id = None;
+            request.preview_protected_session_id = None;
+            let paused = database.preview_activity_delete(&request).await.unwrap();
+            assert_eq!((paused.count, paused.protected_count), (1, 0));
+            request.snapshot_max_id = Some(paused.snapshot_max_id);
+            request.preview_protected_session_id = paused.protected_session_id;
+            let deleted = database.delete_activity(&request).await.unwrap();
+            assert_eq!(deleted.deleted_count, 1);
         });
     }
 }

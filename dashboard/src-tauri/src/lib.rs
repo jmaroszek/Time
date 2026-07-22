@@ -6,7 +6,10 @@ use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 mod database;
 
-use database::{database_path, ExecuteResult, SessionColumns, TimeDatabase};
+use database::{
+    database_path, ActivityDeletePreview, ActivityDeleteRequest, ActivityDeleteResult,
+    ExecuteResult, SessionColumns, TimeDatabase,
+};
 
 /// Resolve the shared SQLite path (%LOCALAPPDATA%\Time\time_log.db) and ensure
 /// the directory exists. The tracker derives the same location in
@@ -61,8 +64,27 @@ async fn erase_history(database: tauri::State<'_, TimeDatabase>) -> Result<u64, 
 }
 
 #[tauri::command]
-async fn compact_database(database: tauri::State<'_, TimeDatabase>) -> Result<(), String> {
-    database.compact().await
+async fn preview_activity_delete(
+    database: tauri::State<'_, TimeDatabase>,
+    request: ActivityDeleteRequest,
+) -> Result<ActivityDeletePreview, String> {
+    database.preview_activity_delete(&request).await
+}
+
+#[tauri::command]
+async fn delete_activity(
+    database: tauri::State<'_, TimeDatabase>,
+    request: ActivityDeleteRequest,
+) -> Result<ActivityDeleteResult, String> {
+    database.delete_activity(&request).await
+}
+
+#[tauri::command]
+async fn delete_history_before(
+    database: tauri::State<'_, TimeDatabase>,
+    cutoff_sec: f64,
+) -> Result<u64, String> {
+    database.delete_history_before(cutoff_sec).await
 }
 
 fn tracker_path() -> Result<PathBuf, String> {
@@ -161,7 +183,9 @@ pub fn run() {
             fetch_sessions,
             backup_database,
             erase_history,
-            compact_database,
+            preview_activity_delete,
+            delete_activity,
+            delete_history_before,
             start_tracker,
             stop_tracker,
             set_launch_at_login

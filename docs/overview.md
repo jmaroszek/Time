@@ -29,6 +29,11 @@ of one unusual day — and the color is category-aware: *more* time in a
 productive app is green, more time in a non-productive one is red, and vice
 versa for declines.
 
+Double-click an app name to give it a friendly name; Enter or focus-out saves,
+Escape cancels, and a blank name restores the recorded default. The minimum-app
+setting applies to this list only. Search, session review, and exact deletion
+live in [Activity](apps.md), while Insights stays focused on analysis.
+
 ## Daily Hours
 
 Stacked productive vs non-productive hours per day, with a trailing 7-day

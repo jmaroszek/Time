@@ -1,5 +1,5 @@
 // Shared app state: categories, rules, settings, and the derived classifier.
-// Loaded once at startup; refresh() re-reads after any Apps/Settings tab write.
+// Loaded once at startup; refresh() re-reads after any Activity/Settings tab write.
 
 import {
   createContext,
@@ -31,7 +31,7 @@ export interface Meta {
   weekStart: WeekStart;
   weeklyGoalHours: number;
   defaultTopN: number;
-  /** Apps with less than this many seconds in range are hidden from app lists. */
+  /** Apps with less than this many seconds in range are hidden from Insights' Top Apps. */
   minAppSeconds: number;
   /** Max gap (s) between productive sessions that still counts as one focus streak. */
   focusChainMaxGapSeconds: number;

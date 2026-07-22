@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildClassifier,
+  buildClassificationExplainer,
   categoryKind,
   categoryState,
   categoryStateFlags,
@@ -89,6 +90,28 @@ describe("buildClassifier", () => {
       BROWSERS,
     );
     expect(tied(session({ domain: "music.youtube.com" }))?.name).toBe("Browsing");
+  });
+});
+
+describe("buildClassificationExplainer", () => {
+  const explain = buildClassificationExplainer(CATS, RULES, BROWSERS);
+
+  it("returns the category and winning rule", () => {
+    const result = explain(session({ domain: "music.youtube.com", title: "Netflix" }));
+    expect(result.category?.name).toBe("Media");
+    expect(result.winningRule?.matchType).toBe("domain");
+    expect(result.winningRule?.pattern).toBe("youtube.com");
+  });
+
+  it("returns an empty explanation for uncategorized and AFK sessions", () => {
+    expect(explain(session({ process: "unknown.exe" }))).toEqual({
+      category: null,
+      winningRule: null,
+    });
+    expect(explain(session({ isAfk: true }))).toEqual({
+      category: null,
+      winningRule: null,
+    });
   });
 });
 
