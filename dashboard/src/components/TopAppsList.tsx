@@ -109,6 +109,11 @@ export default function TopAppsList({
   );
 }
 
+/** Where a percentage stops reading as a quantity and becomes a wall of digits. */
+const MULTIPLE_THRESHOLD = 10;
+
+const period = (days: number) => `the previous ${days} ${days === 1 ? "day" : "days"}`;
+
 function DeltaBadge({
   app,
   comparisonDays,
@@ -121,19 +126,42 @@ function DeltaBadge({
   forceNeutral: boolean;
 }) {
   if (!comparisonAvailable) return null;
-  if (app.deltaFraction === null) {
-    return <span className="w-14 shrink-0 text-right text-[11px] text-ink-3">new</span>;
+  // Every badge in this column is scoped to the comparison window, "new"
+  // included: it means new to this period, not never seen before. Nothing here
+  // reaches past the previous period, so a long-idle app reads the same as a
+  // first-time one — the tooltip is where the two part ways.
+  const span = `${fmtDuration(app.previousSeconds)} → ${fmtDuration(app.seconds)}`;
+  // A baseline of nothing has no ratio, and one of near-nothing has no ratio
+  // worth quoting: dividing 26h by three stray minutes yields +51698%.
+  if (app.deltaFraction === null || app.baselineNegligible) {
+    const tooltip =
+      app.previousSeconds === 0
+        ? `No time in ${period(comparisonDays)}`
+        : `Barely used in ${period(comparisonDays)} (${span})`;
+    return (
+      <FloatingTooltip
+        text={tooltip}
+        className="w-14 shrink-0 text-right text-[11px] font-normal tracking-tight text-ink-3 outline-none"
+      >
+        <span aria-hidden="true">new</span>
+      </FloatingTooltip>
+    );
   }
+  // Past ten-fold a percentage stops reading as a quantity, so the unit changes
+  // and the tooltip carries the two durations the badge no longer spells out.
+  const ratio = app.seconds / app.previousSeconds;
   const pct = Math.round(app.deltaFraction * 100);
-  const text = `${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct)}%`;
+  const asMultiple = ratio >= MULTIPLE_THRESHOLD;
+  const text = asMultiple
+    ? `${Math.round(ratio)}×`
+    : `${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct)}%`;
   const cls =
     !forceNeutral && app.direction === "good"
       ? "text-good"
       : !forceNeutral && app.direction === "bad"
         ? "text-bad"
         : "text-ink-2";
-  const period = `the previous ${comparisonDays} ${comparisonDays === 1 ? "day" : "days"}`;
-  const tooltip = `${text} vs ${period}${app.direction === "neutral" ? ", driven mostly by a single day" : ""}`;
+  const tooltip = `${text} vs ${period(comparisonDays)}${asMultiple ? ` (${span})` : ""}${app.direction === "neutral" ? ", driven mostly by a single day" : ""}`;
   return (
     <FloatingTooltip
       text={tooltip}

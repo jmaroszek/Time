@@ -193,6 +193,13 @@ export type DeltaDirection = "good" | "bad" | "neutral";
 export interface AppDelta extends AppUsage {
   /** Fractional change vs previous period; null when no previous data. */
   deltaFraction: number | null;
+  /** Seconds in the previous period, for phrasing the change. */
+  previousSeconds: number;
+  /**
+   * True when the previous period holds too little time to divide by, so
+   * `deltaFraction` is arithmetically correct but not worth quoting.
+   */
+  baselineNegligible: boolean;
   /**
    * Fractional change recomputed with the single most-influential day removed;
    * null when no previous data or the range is too short to leave one out.
@@ -245,6 +252,13 @@ const MIN_DELTA_SECONDS_PER_DAY = 4 * 60;
 const MIN_ROBUST_FRACTION = 0.15;
 /** Leaving a day out is only meaningful once a few days remain. */
 const MIN_DAYS_FOR_ROBUSTNESS = 3;
+/**
+ * Below this previous-period average the baseline is noise, and a ratio built
+ * on it says more about the divisor than about the change: a few stray minutes
+ * last week against a full week of use reads as "+51698%". Callers show these
+ * as resumed rather than quoting the number.
+ */
+const MIN_BASELINE_SECONDS_PER_DAY = 60;
 
 export interface DeltaOptions {
   /** Per-app daily seconds for the current/previous periods. */
@@ -299,10 +313,11 @@ export function withDeltas(
     const cur = opts.currentDaily?.get(app.process);
     const prv = opts.previousDaily?.get(app.process);
     const robustFraction = deltaFraction === null ? null : robustDeltaFraction(cur, prv);
+    const days = cur?.length ?? prv?.length ?? 1;
+    const baselineNegligible = prev > 0 && prev < MIN_BASELINE_SECONDS_PER_DAY * days;
     let direction: DeltaDirection = "neutral";
     if (deltaFraction !== null && app.category !== null && deltaFraction !== 0) {
       const deltaSeconds = app.seconds - prev;
-      const days = cur?.length ?? prv?.length ?? 1;
       const meaningful =
         Math.abs(deltaFraction) >= MIN_DELTA_FRACTION &&
         Math.abs(deltaSeconds) >= MIN_DELTA_SECONDS_PER_DAY * days &&
@@ -317,7 +332,7 @@ export function withDeltas(
         direction = increased === app.category.isProductive ? "good" : "bad";
       }
     }
-    return { ...app, deltaFraction, robustFraction, direction };
+    return { ...app, deltaFraction, previousSeconds: prev, baselineNegligible, robustFraction, direction };
   });
 }
 
