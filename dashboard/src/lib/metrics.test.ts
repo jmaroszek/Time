@@ -261,6 +261,36 @@ describe("topApps / withDeltas", () => {
     expect(deltas[0].direction).toBe("neutral");
   });
 
+  it("a near-zero baseline is flagged rather than divided by", () => {
+    // 3 minutes across last week against 26 hours this week: arithmetically
+    // +51698%, but the previous period is too thin to quote a ratio from.
+    const deltas = withDeltas(
+      [{ process: "code.exe", seconds: 26 * 3600, category: CATS[0] }],
+      [{ process: "code.exe", seconds: 181, category: CATS[0] }],
+      {
+        currentDaily: new Map([["code.exe", Array(7).fill(13371)]]),
+        previousDaily: new Map([["code.exe", [181, 0, 0, 0, 0, 0, 0]]]),
+      },
+    );
+    expect(deltas[0].baselineNegligible).toBe(true);
+    expect(deltas[0].previousSeconds).toBe(181);
+    expect(deltas[0].direction).toBe("good"); // the change itself is still real
+  });
+
+  it("a real if small baseline is still worth a ratio", () => {
+    // 30 min/day up to 2 h/day: a baseline this size divides honestly.
+    const deltas = withDeltas(
+      [{ process: "code.exe", seconds: 7 * 7200, category: CATS[0] }],
+      [{ process: "code.exe", seconds: 7 * 1800, category: CATS[0] }],
+      {
+        currentDaily: new Map([["code.exe", Array(7).fill(7200)]]),
+        previousDaily: new Map([["code.exe", Array(7).fill(1800)]]),
+      },
+    );
+    expect(deltas[0].baselineNegligible).toBe(false);
+    expect(deltas[0].deltaFraction).toBeCloseTo(3.0);
+  });
+
   it("neutral categories are never judged, even on a meaningful change", () => {
     const neutral = { ...CATS[1], isProductive: false, isNeutral: true }; // e.g. games
     const daily = (v: number) => new Map([["apex.exe", Array(7).fill(v)]]);

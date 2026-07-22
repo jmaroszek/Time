@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePicker";
@@ -111,20 +111,7 @@ function Shell() {
   return (
     <div className="mx-auto flex min-h-full max-w-6xl flex-col gap-4 px-6 py-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 rounded-xl border border-edge bg-surface p-1">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors ${
-                tab === t.id ? "bg-surface-2 text-ink" : "text-ink-2 hover:text-ink"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <TabBar tab={tab} onTab={setTab} />
         {showRange && (
           <DateRangePicker
             preset={preset}
@@ -157,6 +144,60 @@ function Shell() {
         )}
         {tab === "settings" && <SettingsTab />}
       </main>
+    </div>
+  );
+}
+
+/** Tab switcher whose selected pill slides between tabs instead of jumping. The
+ *  pill is one absolutely positioned element measured off the button rects, so it
+ *  tracks label widths and font/zoom changes rather than assuming equal tabs. */
+function TabBar({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const buttonRefs = useRef(new Map<Tab, HTMLButtonElement>());
+  const [pill, setPill] = useState<{ left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const list = listRef.current;
+      const button = buttonRefs.current.get(tab);
+      if (!list || !button) return;
+      setPill({ left: button.offsetLeft, width: button.offsetWidth });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (listRef.current) observer.observe(listRef.current);
+    for (const button of buttonRefs.current.values()) observer.observe(button);
+    return () => observer.disconnect();
+  }, [tab]);
+
+  return (
+    <div
+      ref={listRef}
+      className="relative flex items-center gap-1 rounded-xl border border-edge bg-surface p-1"
+    >
+      {pill && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1 bottom-1 rounded-lg bg-surface-2 transition-[transform,width] duration-200 ease-out motion-reduce:transition-none"
+          style={{ width: pill.width, transform: `translateX(${pill.left}px)`, left: 0 }}
+        />
+      )}
+      {TABS.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          ref={(node) => {
+            if (node) buttonRefs.current.set(t.id, node);
+            else buttonRefs.current.delete(t.id);
+          }}
+          onClick={() => onTab(t.id)}
+          className={`relative rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors ${
+            tab === t.id ? "text-ink" : "text-ink-2 hover:text-ink"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
     </div>
   );
 }
