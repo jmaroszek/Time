@@ -7,7 +7,15 @@ import {
   type ReactNode,
 } from "react";
 
-import { Button, Card, CategoryDot, RemoveButton, Spinner } from "../components/ui";
+import {
+  Button,
+  Card,
+  CategoryDot,
+  MenuSelect,
+  RemoveButton,
+  Spinner,
+  type MenuOption,
+} from "../components/ui";
 import { withAlias } from "../lib/aliases";
 import {
   type ActivityClassificationFilter,
@@ -549,6 +557,30 @@ function TableRegion({ children }: { children: ReactNode }) {
   return <div className="scroll-well max-h-[62vh] overflow-auto pr-4">{children}</div>;
 }
 
+/**
+ * Three kinds of filter share one menu, and the rules mark the seams: how an
+ * entity is classified, which category it landed in, and last the two ways an
+ * entity sits outside the count — ignored, which is recorded but excluded from
+ * Insights, and excluded, which is never recorded at all. The category rule
+ * moves to whichever category comes first and disappears with them when none
+ * are defined.
+ */
+function classificationOptions(categories: Category[]): MenuOption[] {
+  const named = categories.filter((category) => !category.isIgnored);
+  return [
+    { value: "all", label: "All classifications" },
+    { value: "uncategorized", label: "Uncategorized" },
+    { value: "mixed", label: "Mixed" },
+    ...named.map((category, i) => ({
+      value: `category:${category.id}`,
+      label: category.name,
+      divider: i === 0,
+    })),
+    { value: "ignored", label: "Ignored", divider: true },
+    { value: "excluded", label: "Excluded from tracking" },
+  ];
+}
+
 function LibraryControls({
   search,
   onSearch,
@@ -585,37 +617,30 @@ function LibraryControls({
               className="w-full rounded-[9px] border border-edge bg-surface-2 py-2 pl-9 pr-3 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
             />
           </label>
-          <select
-            aria-label="Activity type"
+          <MenuSelect
+            size="field"
+            label="Activity type"
             value={typeFilter}
-            onChange={(event) => onTypeFilter(event.target.value as ActivityTypeFilter)}
-            className="rounded-[9px] border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none focus:border-accent/60"
-          >
-            <option value="all">All types</option>
-            <option value="app">Apps</option>
-            <option value="website">Websites</option>
-          </select>
+            onChange={(value) => onTypeFilter(value as ActivityTypeFilter)}
+            options={[
+              { value: "all", label: "All types" },
+              { value: "app", label: "Apps" },
+              { value: "website", label: "Websites" },
+            ]}
+          />
         </>
       ) : (
         <span className="min-w-[240px] flex-1 text-[11.5px] text-ink-3">
           Apps and websites Time is not allowed to record.
         </span>
       )}
-      <select
-        aria-label="Classification filter"
+      <MenuSelect
+        size="field"
+        label="Classification filter"
         value={classificationFilter}
-        onChange={(event) => onClassificationFilter(event.target.value as LibraryFilter)}
-        className="rounded-[9px] border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none focus:border-accent/60"
-      >
-        <option value="all">All classifications</option>
-        <option value="uncategorized">Uncategorized</option>
-        <option value="mixed">Mixed</option>
-        <option value="ignored">Ignored</option>
-        {categories.filter((category) => !category.isIgnored).map((category) => (
-          <option key={category.id} value={`category:${category.id}`}>{category.name}</option>
-        ))}
-        <option value="excluded">Excluded from tracking</option>
-      </select>
+        onChange={(value) => onClassificationFilter(value as LibraryFilter)}
+        options={classificationOptions(categories)}
+      />
     </div>
   );
 }
@@ -1138,10 +1163,20 @@ function EntityDrawer({
           <section className="mt-5">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-semibold">Classification</h3>
-              <select defaultValue="" aria-label={entity.kind === "website" ? "Set website category" : "Set app default"} onChange={(event) => { if (event.target.value) void onAssign(Number(event.target.value)); event.currentTarget.value = ""; }} className="rounded-lg border border-edge bg-surface-2 px-2 py-1.5 text-[11px] outline-none focus:border-accent/60">
-                <option value="">{entity.kind === "website" ? "Set website category…" : "Set app default…"}</option>
-                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-              </select>
+              {/* An action menu, not a selection: assigning fires a command
+                  and the trigger falls back to its prompt, because an entity
+                  can hold several categories at once and no single one of
+                  them is "the" current value. */}
+              <MenuSelect
+                value=""
+                placeholder={entity.kind === "website" ? "Set website category…" : "Set app default…"}
+                label={entity.kind === "website" ? "Set website category" : "Set app default"}
+                onChange={(value) => void onAssign(Number(value))}
+                options={categories.map((category) => ({
+                  value: String(category.id),
+                  label: category.name,
+                }))}
+              />
             </div>
             {entity.status === "mixed" && <p className="mt-2 text-[11px] text-ink-3">This item is categorized differently across its sessions. Website and Window rules can override an App default.</p>}
             <div className="mt-3 flex flex-col gap-2">
@@ -1386,7 +1421,26 @@ function SessionCorrectionDialog({
               <label className="text-[11px] text-ink-3">Start<input type="datetime-local" step="1" value={start} onChange={(event) => setStart(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
               <label className="text-[11px] text-ink-3">End<input type="datetime-local" step="1" value={end} onChange={(event) => setEnd(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
             </div>
-            <label className="mt-3 block text-[11px] text-ink-3">Category<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60"><option value="">Use automatic classification</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            <div className="mt-3 text-[11px] text-ink-3">
+              <span>Category</span>
+              <MenuSelect
+                size="field"
+                className="mt-1 w-full"
+                value={categoryId}
+                onChange={setCategoryId}
+                label="Category"
+                options={[
+                  // Falling back to the rules is a different kind of answer
+                  // from naming one category, so the rule marks the seam.
+                  { value: "", label: "Use automatic classification" },
+                  ...categories.map((category, i) => ({
+                    value: String(category.id),
+                    label: category.name,
+                    divider: i === 0,
+                  })),
+                ]}
+              />
+            </div>
             <p className="mt-3 text-[10.5px] leading-snug text-ink-3">Times use your local timezone. Corrections cannot overlap another recorded session or end in the future.</p>
             <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="danger" disabled={saving} onClick={() => void reset()}>Reset corrections</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save correction"}</Button></span></div>
           </>
@@ -1478,7 +1532,6 @@ function CategoriesAndRules({
   const meta = useMeta();
   const banner = useBanner();
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set<number>());
-  const [stateMenu, setStateMenu] = useState<number | null>(null);
   const [colorMenu, setColorMenu] = useState<number | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -1549,7 +1602,7 @@ function CategoriesAndRules({
 
   return (
     <>
-      {(stateMenu !== null || colorMenu !== null) && <button type="button" aria-label="Close menu" className="fixed inset-0 z-40 cursor-default" onClick={() => { setStateMenu(null); setColorMenu(null); }} />}
+      {colorMenu !== null && <button type="button" aria-label="Close menu" className="fixed inset-0 z-40 cursor-default" onClick={() => setColorMenu(null)} />}
       <p className="mb-1 text-[11px] text-ink-3">Rules classify all matching historical and future activity.</p>
       <p className="mb-4 text-[11px] text-ink-3">When several rules match, Website wins, then Window, then App.</p>
       <div className="flex flex-col gap-2">
@@ -1560,12 +1613,14 @@ function CategoriesAndRules({
           const rules = meta.rules.filter((rule) => rule.categoryId === category.id);
           const draft = draftFor(category.id);
           const beginRename = () => { setRenaming(category.id); setRenameDraft(category.name); };
+          // The colour grid is positioned in flow, so its row has to open its
+          // overflow to let that menu escape.
           return (
-            <div key={category.id} className={`rounded-[11px] border border-edge bg-surface-2 ${stateMenu === category.id || colorMenu === category.id ? "overflow-visible" : "overflow-hidden"}`}>
+            <div key={category.id} className={`rounded-[11px] border border-edge bg-surface-2 ${colorMenu === category.id ? "overflow-visible" : "overflow-hidden"}`}>
               <div className="flex items-center gap-2.5 px-3 py-3 text-xs">
                 <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-[10px] text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span></button>
                 <span className="relative">
-                  <button type="button" title="Change color" aria-label={`Change color of ${category.name}`} className="block h-3 w-3 rounded hover:shadow-[0_0_0_2px_var(--color-edge-2)]" style={{ backgroundColor: category.color }} onClick={() => { setColorMenu(colorMenu === category.id ? null : category.id); setStateMenu(null); }} />
+                  <button type="button" title="Change color" aria-label={`Change color of ${category.name}`} className="block h-3 w-3 rounded hover:shadow-[0_0_0_2px_var(--color-edge-2)]" style={{ backgroundColor: category.color }} onClick={() => setColorMenu(colorMenu === category.id ? null : category.id)} />
                   {colorMenu === category.id && <span className="menu-pop absolute left-0 top-[calc(100%+6px)] z-50 grid w-[136px] grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-[0_12px_34px_rgba(0,0,0,.5)]">{CATEGORY_SWATCHES.map((swatch) => <button key={swatch} type="button" aria-label={`Use color ${swatch}`} className={`h-4 w-4 rounded hover:shadow-[0_0_0_2px_var(--color-ink-3)] ${swatch === category.color.toLowerCase() ? "shadow-[0_0_0_2px_var(--color-ink-2)]" : ""}`} style={{ backgroundColor: swatch }} onClick={() => { setColorMenu(null); void setCategoryColor(category, swatch); }} />)}</span>}
                 </span>
                 {/* Double-click renames; the expanded footer keeps a labeled
@@ -1583,16 +1638,28 @@ function CategoriesAndRules({
                   </span>
                 )}
                 <span className="flex-1" />
-                <span className="relative w-[112px] shrink-0">
-                  <button type="button" disabled={locked} title={locked ? "The built-in Ignored category is the one ignore mechanism" : `Set how ${category.name} counts`} className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10.5px] capitalize text-ink-3 hover:bg-surface-3 disabled:cursor-not-allowed disabled:hover:bg-transparent" onClick={() => { setStateMenu(stateMenu === category.id ? null : category.id); setColorMenu(null); }}><CategoryDot color={STATE_COLORS[state]} />{state}</button>
-                  {stateMenu === category.id && (
-                    <span className="menu-pop absolute right-0 top-[calc(100%+5px)] z-50 min-w-[172px] rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-[0_12px_34px_rgba(0,0,0,.5)]">
-                      {/* A category left over from when "ignored" was a state
-                          here shows it until one of the three is chosen. */}
-                      {state === "ignored" && <span className="block px-2.5 py-1.5 text-[10px] leading-snug text-ink-3">Ignored is no longer a category state. Pick one to bring this category back into Insights.</span>}
-                      {ASSIGNABLE_STATES.map((option) => <button type="button" key={option} className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] capitalize hover:bg-surface-3 ${option === state ? "bg-surface-3" : ""}`} onClick={() => { setStateMenu(null); void setCategoryState(category, option); }}><CategoryDot color={STATE_COLORS[option]} /><span className="flex-1">{option}</span>{option === state && <span className="text-accent">✓</span>}</button>)}
-                    </span>
-                  )}
+                <span className="w-[112px] shrink-0">
+                  <MenuSelect
+                    variant="bare"
+                    size="compact"
+                    align="end"
+                    className="w-full capitalize"
+                    value={state}
+                    onChange={(option) => void setCategoryState(category, option as Productivity)}
+                    disabled={locked}
+                    title={locked ? "The built-in Ignored category is the one ignore mechanism" : `Set how ${category.name} counts`}
+                    label={`How ${category.name} counts`}
+                    // A category left over from when "ignored" was a state here
+                    // keeps showing it, via the placeholder, until one of the
+                    // three assignable states is chosen.
+                    placeholder={<><CategoryDot color={STATE_COLORS[state]} />{state}</>}
+                    header={state === "ignored" ? "Ignored is no longer a category state. Pick one to bring this category back into Insights." : undefined}
+                    options={ASSIGNABLE_STATES.map((option) => ({
+                      value: option,
+                      label: option,
+                      dot: STATE_COLORS[option],
+                    }))}
+                  />
                 </span>
                 <span className="w-[64px] text-right text-[10.5px] text-ink-3">{rules.length} {rules.length === 1 ? "rule" : "rules"}</span>
               </div>

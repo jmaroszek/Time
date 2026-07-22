@@ -7,7 +7,7 @@ import RhythmChart from "../components/RhythmChart";
 import TimelineChart, { type TimelineSegment } from "../components/TimelineChart";
 import TopAppsList from "../components/TopAppsList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
-import { Card, MetricCard, Select, Spinner } from "../components/ui";
+import { Card, MenuSelect, MetricCard, Spinner } from "../components/ui";
 import {
   cleanProcessName,
   fmtClock,
@@ -265,17 +265,19 @@ export default function OverviewTab({
                 </span>
               )}
         right={middleView === "timeline" ? (
-          <Select
-            className="chart-select"
-            blurOnChange
+          <MenuSelect
+            variant="quiet"
+            label="Timeline resolution"
             value={String(blockMinutes)}
             onChange={(v) => {
               setBlockMinutes(Number(v));
               setSelected(null);
             }}
             options={[
+              // Everything below the rule is a bucket width; exact sessions
+              // are the ungrouped truth the buckets approximate.
               { value: "0", label: "Exact sessions" },
-              { value: "5", label: "5 min blocks" },
+              { value: "5", label: "5 min blocks", divider: true },
               { value: "10", label: "10 min blocks" },
               { value: "15", label: "15 min blocks" },
               { value: "30", label: "30 min blocks" },
@@ -283,9 +285,9 @@ export default function OverviewTab({
           />
         ) : (
           <span className="flex items-center gap-2">
-            <Select
-              className="chart-select"
-              blurOnChange
+            <MenuSelect
+              variant="quiet"
+              label="Metric"
               value={metric}
               onChange={(v) => setMetric(v as ActivityMetric)}
               options={ACTIVITY_METRICS.map((m) => ({
@@ -293,9 +295,9 @@ export default function OverviewTab({
                 label: ACTIVITY_METRIC_LABELS[m],
               }))}
             />
-            <Select
-              className="chart-select"
-              blurOnChange
+            <MenuSelect
+              variant="quiet"
+              label="Aggregate view"
               value={middleView}
               onChange={(v) => setAggregateView(v as "rhythm" | "calendar")}
               options={[
@@ -379,9 +381,9 @@ export default function OverviewTab({
           title="Top Apps"
           className="h-[345px]"
           right={
-            <Select
-              className="chart-select"
-              blurOnChange
+            <MenuSelect
+              variant="quiet"
+              label="How many apps to list"
               value={String(topN)}
               onChange={(v) => setTopN(Number(v))}
               options={TOP_APPS_OPTIONS.map((x) => ({ value: String(x), label: `Top ${x}` }))}
@@ -401,9 +403,9 @@ export default function OverviewTab({
           title={isSingleDay ? "Hourly Activity" : HOURS_CARD_TITLES[granularity]}
           className="h-[345px]"
           right={isSingleDay ? undefined : (
-            <Select
-              className="chart-select"
-              blurOnChange
+            <MenuSelect
+              variant="quiet"
+              label="Stack bars by"
               value={stackBy}
               onChange={(v) => setStackBy(v as ActivityStack)}
               options={[
