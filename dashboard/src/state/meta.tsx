@@ -18,6 +18,7 @@ import {
   type Classifier,
   type Rule,
 } from "../lib/classify";
+import { noisePolicyFromSettings, type NoisePolicy } from "../lib/noise";
 import { checkSchemaVersion, fetchCategories, fetchRules, fetchSettings } from "../lib/queries";
 import type { WeekStart } from "../lib/time";
 
@@ -35,6 +36,8 @@ export interface Meta {
   minAppSeconds: number;
   /** Max gap (s) between productive sessions that still counts as one focus streak. */
   focusChainMaxGapSeconds: number;
+  /** Which one-off and system-utility rows the Activity Library folds away. */
+  noisePolicy: NoisePolicy;
   /** Hour-of-day window shown on the Timeline and Hour-of-Day plots (0–24). */
   dayStartHour: number;
   dayEndHour: number;
@@ -97,6 +100,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       defaultTopN: Number(settings.default_top_n_apps) || 5,
       minAppSeconds: Math.max(0, Number(settings.min_app_seconds) || 0),
       focusChainMaxGapSeconds: Math.max(0, Number(settings.focus_chain_max_gap_seconds) || 120),
+      noisePolicy: noisePolicyFromSettings(settings),
       ...parseDayWindow(settings.day_start_hour, settings.day_end_hour),
       loaded,
       error,

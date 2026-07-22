@@ -13,6 +13,8 @@ Every knob lives in the database and is edited here. You do not need to edit con
 | **AFK idle threshold** | How long without input counts as away. The AFK boundary is back-dated to the last real input, so the threshold doesn't leak into the stats. Note this means passively watching video without touching the mouse or keyboard counts as away. |
 | **Focus chain max gap** | The longest break between productive sessions that still counts as one focus chain. |
 | **Minimum app time** | Apps below this in the range are hidden only from Insights' Top Apps. Activity always shows the complete catalog. |
+| **Fold noisy items** | Which throwaway rows the Activity Library hides: nothing, one-offs, or one-offs plus installers, drivers, and local files. Totals and Insights are untouched, categorized items are never folded, and the Library header can reveal what was folded. |
+| **One-off time limit** / **One-off session limit** | An item counts as a one-off only when it is under the time limit *and* at or under the session limit. |
 | **Heartbeat interval** | How often the open session's end time is flushed to disk; this is the upper bound on data lost in a crash. |
 | **Week starts on** | Affects weekly presets, weekly bucketing, and goal pacing. |
 | **Browser processes** | Which apps can be split into Websites and use Website or Window rules. |
