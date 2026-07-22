@@ -1,16 +1,18 @@
-import { Select, TextInput } from "./ui";
+import { MenuSelect, TextInput, type MenuOption } from "./ui";
 import { addDays, isRollingPreset, parseDateInput, type Preset, type Range } from "../lib/time";
 
 export type PresetOrCustom = Preset | "custom" | "alltime";
 
-const PRESETS: { value: PresetOrCustom; label: string }[] = [
+// Every entry above the rule completes the selection on its own; Custom
+// instead hands off to the two date fields beside it.
+const PRESETS: (MenuOption & { value: PresetOrCustom })[] = [
   { value: "today", label: "Today" },
   { value: "last7", label: "Week" },
   { value: "last30", label: "Month" },
   { value: "last90", label: "Quarter" },
   { value: "last365", label: "Year" },
   { value: "alltime", label: "All time" },
-  { value: "custom", label: "Custom" },
+  { value: "custom", label: "Custom", divider: true },
 ];
 
 function toInputValue(d: Date): string {
@@ -70,10 +72,11 @@ export default function DateRangePicker({
           </label>
         )}
       </div>
-      <Select
+      <MenuSelect
         value={preset}
         onChange={(v) => onPreset(v as PresetOrCustom)}
         options={PRESETS}
+        label="Date range preset"
         className="w-32"
       />
       {/* min/max keep start <= end selectable in the native picker; typed

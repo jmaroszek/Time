@@ -36,16 +36,17 @@
 .live-pulse { animation: live-pulse 2s ease-out infinite; }
 
 /* Chart selectors stay legible without competing with the visualization.
-   Their full control contrast returns once the user interacts with them. */
-.chart-select {
+   Their full control contrast returns once the user interacts with them.
+   MenuSelect applies this only while closed — an open menu always takes the
+   accent state, and these rules would otherwise win on stylesheet order. */
+.menu-quiet {
   color: color-mix(in srgb, var(--color-ink-3) 84%, var(--color-ink));
   background-color: color-mix(in srgb, var(--color-surface-2) 62%, transparent);
   border-color: color-mix(in srgb, var(--color-edge) 72%, transparent);
-  padding-block: 0.3125rem;
 }
 
-.chart-select:hover,
-.chart-select:focus {
+.menu-quiet:hover,
+.menu-quiet:focus-visible {
   color: var(--color-ink);
   background-color: var(--color-surface-2);
   border-color: var(--color-edge);
