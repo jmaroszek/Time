@@ -6,6 +6,7 @@ import {
 } from "./classify";
 import { cleanDomainName, cleanProcessName } from "./format";
 import type { Session } from "./metrics";
+import { classifyNoise, type NoisePolicy, type NoiseReason } from "./noise";
 
 export type ActivityEntityKind = "app" | "website";
 export type ActivityStatus = "uncategorized" | "partial" | "mixed" | "single" | "ignored";
@@ -69,6 +70,8 @@ export interface ActivityEntitySummary {
   rules: ActivityEntityRuleSlice[];
   status: ActivityStatus;
   exactRuleId: number | null;
+  /** Set by queryActivityIndex when the noise policy folds this entity away. */
+  noise: NoiseReason | null;
 }
 
 export interface ActivitySessionRow {
@@ -111,6 +114,10 @@ export interface ActivityQuery {
   entityLimit: number;
   windowOffset: number;
   windowLimit: number;
+  /** Omitted means no folding — the library function thresholds nothing on its own. */
+  noise?: NoisePolicy;
+  /** Show folded rows anyway, tagged, without changing what counts as noise. */
+  includeNoise?: boolean;
   selectedEntityId?: string | null;
   detailSearch?: string;
   detailOffset?: number;
@@ -136,6 +143,9 @@ export interface ActivityAttentionSummary {
 
 export interface ActivityQueryResult {
   catalog: ActivityEntityPage;
+  /** Entities the noise policy folds out of the catalog, whether or not
+   *  includeNoise is currently showing them. Zero while searching. */
+  noiseHidden: number;
   searchResults: ActivitySearchResults | null;
   needsAttention: ActivityEntitySummary[];
   needsAttentionTotal: number;
@@ -393,6 +403,7 @@ function aggregateEntities(index: ActivityIndex, startSec: number, endSec: numbe
       rules,
       status,
       exactRuleId: index.exactRuleByEntity.get(entity.id) ?? null,
+      noise: null,
     };
   });
 }
@@ -445,7 +456,13 @@ function page<T>(rows: T[], offset: number, limit: number): T[] {
 }
 
 export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): ActivityQueryResult {
-  const allEntities = aggregateEntities(index, query.startSec, query.endSec);
+  const policy = query.noise;
+  const allEntities = policy
+    ? aggregateEntities(index, query.startSec, query.endSec).map((entity) => ({
+        ...entity,
+        noise: classifyNoise(entity, policy),
+      }))
+    : aggregateEntities(index, query.startSec, query.endSec);
   const entitiesById = new Map(allEntities.map((entity) => [entity.id, entity]));
   const classificationFiltered = allEntities.filter((entity) =>
     matchesClassification(entity, query.classificationFilter),
@@ -453,8 +470,15 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
   const typeFiltered = classificationFiltered.filter(
     (entity) => query.typeFilter === "all" || entity.kind === query.typeFilter,
   );
-  const sorted = [...typeFiltered].sort(compareEntities(query.sort, query.direction));
   const search = query.search.trim().toLowerCase();
+  // Search deliberately reaches past the fold: someone typing "setup" is
+  // looking for exactly the thing the fold hides, and finding nothing would
+  // read as missing data.
+  const noiseHidden = search ? 0 : typeFiltered.filter((entity) => entity.noise !== null).length;
+  const unfolded = noiseHidden > 0 && !query.includeNoise
+    ? typeFiltered.filter((entity) => entity.noise === null)
+    : typeFiltered;
+  const sorted = [...unfolded].sort(compareEntities(query.sort, query.direction));
   const identityMatches = search
     ? sorted.filter((entity) =>
         entity.displayName.toLowerCase().includes(search) ||
@@ -510,6 +534,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
 
   return {
     catalog,
+    noiseHidden,
     searchResults,
     needsAttention: attention.slice(0, 6),
     needsAttentionTotal: attention.length,

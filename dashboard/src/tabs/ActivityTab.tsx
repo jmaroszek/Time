@@ -126,6 +126,7 @@ export default function ActivityTab({
     useState<ActivityClassificationFilter>("all");
   const [sort, setSort] = useState<ActivitySort>("seconds");
   const [direction, setDirection] = useState<ActivitySortDirection>("desc");
+  const [includeNoise, setIncludeNoise] = useState(false);
   const [entityLimit, setEntityLimit] = useState(100);
   const [windowLimit, setWindowLimit] = useState(50);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
@@ -160,6 +161,8 @@ export default function ActivityTab({
     classificationFilter,
     sort,
     direction,
+    noise: meta.noisePolicy,
+    includeNoise,
     entityOffset: 0,
     entityLimit,
     windowOffset: 0,
@@ -176,6 +179,8 @@ export default function ActivityTab({
     classificationFilter,
     sort,
     direction,
+    meta.noisePolicy,
+    includeNoise,
     entityLimit,
     windowLimit,
     selectedEntityId,
@@ -330,7 +335,23 @@ export default function ActivityTab({
           )}
           <Card
             title="Activity Library"
-            right={result ? <span className="text-[11px] text-ink-3">{result.catalog.total} items in range</span> : undefined}
+            right={result ? (
+              <span className="flex items-center gap-2 text-[11px] text-ink-3">
+                <span>{result.catalog.total} items in range</span>
+                {result.noiseHidden > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setIncludeNoise((shown) => !shown)}
+                    className="text-accent hover:text-accent/80"
+                    title="One-off and system-utility rows are folded out of this list. They still count in every total."
+                  >
+                    {includeNoise
+                      ? `Hide ${result.noiseHidden} filtered`
+                      : `${result.noiseHidden} filtered · Show`}
+                  </button>
+                )}
+              </span>
+            ) : undefined}
           >
             <LibraryControls
               search={search}
@@ -743,7 +764,19 @@ function EntityTable({
               <td className="py-2.5 pr-4">
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span className="truncate" title={entity.key}>{entity.displayName}</span>
-                  <span className="text-[10px] capitalize leading-none text-ink-3">{entity.kind}</span>
+                  <span className="flex items-center gap-1.5 text-[10px] leading-none text-ink-3">
+                    <span className="capitalize">{entity.kind}</span>
+                    {entity.noise && (
+                      <span
+                        className="rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px]"
+                        title={entity.noise === "utility"
+                          ? "Looks like an installer, driver, or local file — normally folded out of this list."
+                          : "Seen briefly and rarely — normally folded out of this list."}
+                      >
+                        {entity.noise === "utility" ? "Utility" : "One-off"}
+                      </span>
+                    )}
+                  </span>
                 </span>
               </td>
               <td className="py-2.5 pr-4"><ClassificationLabel entity={entity} /></td>

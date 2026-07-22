@@ -210,3 +210,49 @@ describe("Activity index", () => {
     expect(unpackActivitySource(packActivitySource(source))).toEqual(source);
   });
 });
+
+describe("Activity noise folding", () => {
+  const policy = { mode: "utilities", maxSeconds: 120, maxSessions: 3 } as const;
+  const index = buildActivityIndex(source);
+
+  it("folds one-offs out of the catalog while counting them for the header", () => {
+    const plain = queryActivityIndex(index, baseQuery);
+    expect(plain.noiseHidden).toBe(0);
+    expect(plain.catalog.rows.map((row) => row.id)).toContain("app:unknown.exe");
+
+    const folded = queryActivityIndex(index, { ...baseQuery, noise: policy });
+    expect(folded.noiseHidden).toBe(1);
+    expect(folded.catalog.rows.map((row) => row.id)).not.toContain("app:unknown.exe");
+    expect(folded.catalog.total).toBe(plain.catalog.total - 1);
+  });
+
+  it("shows folded rows tagged when includeNoise is set", () => {
+    const shown = queryActivityIndex(index, { ...baseQuery, noise: policy, includeNoise: true });
+    expect(shown.noiseHidden).toBe(1);
+    expect(shown.catalog.rows.find((row) => row.id === "app:unknown.exe")?.noise).toBe("one_off");
+    expect(shown.catalog.rows.find((row) => row.id === "app:code.exe")?.noise).toBeNull();
+  });
+
+  it("lets search reach past the fold", () => {
+    const found = queryActivityIndex(index, { ...baseQuery, noise: policy, search: "unknown" });
+    expect(found.noiseHidden).toBe(0);
+    expect(found.searchResults?.apps.rows.map((row) => row.id)).toEqual(["app:unknown.exe"]);
+  });
+
+  it("folds installers by name no matter how long they ran", () => {
+    const utilityIndex = buildActivityIndex({
+      ...source,
+      sessions: [
+        { id: 40, start: 0, end: 1800, process: "AmdSoftwareInstaller.exe", title: "", domain: null, isAfk: false },
+        { id: 41, start: 1800, end: 3600, process: "code.exe", title: "Project", domain: null, isAfk: false },
+      ],
+    });
+    const query = { ...baseQuery, endSec: 4000, noise: policy };
+    expect(queryActivityIndex(utilityIndex, query).catalog.rows.map((row) => row.id)).toEqual([
+      "app:code.exe",
+    ]);
+    expect(
+      queryActivityIndex(utilityIndex, { ...query, noise: { ...policy, mode: "one_off" } }).catalog.rows,
+    ).toHaveLength(2);
+  });
+});

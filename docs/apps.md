@@ -15,10 +15,31 @@ nothing in a narrower range.
 ## Activity Library
 
 With no search text, the Library is a complete catalog of Apps and Websites in
-the visible range. It includes ignored and short activity, excludes AFK
-identities, and never uses Insights' minimum-app threshold. Name, classification,
-time, last seen, and session count can be sorted; large catalogs load 100 items
-at a time.
+the visible range. It includes ignored activity, excludes AFK identities, and
+never uses Insights' minimum-app threshold. Name, classification, time, last
+seen, and session count can be sorted; large catalogs load 100 items at a time.
+
+### Folded rows
+
+A tracker records every foreground window, so the raw catalog carries rows
+nobody wants to track. Two tests fold those out of the list:
+
+- **One-off** — the item is under the time limit **and** at or under the session
+  limit. Both halves are required, so a 15-second app opened twenty times stays
+  in the list, and so does a single forty-minute sitting.
+- **Utility** — the name marks it as a machine chore rather than an
+  application: installers, updaters, driver and firmware bundles, extracted
+  `.tmp` payloads, Windows plumbing, and local files rendered in a browser.
+  These fold regardless of duration, because an install can run for twenty
+  minutes.
+
+Folding is a view filter over this one list. It never changes a total, an
+Insights figure, or what an entity contributes to its category, and anything
+already carrying a category or rule is never folded — an explicit decision
+outranks the heuristic. The Library header reports how many rows are folded and
+shows them on demand, tagged **One-off** or **Utility**; searching reaches past
+the fold, so a search for `setup` still finds the installers. Settings ▸
+Activity Library sets the mode and both limits, or turns folding off.
 
 One search field covers friendly names, cleaned and recorded app names,
 websites, and stored window titles. Search results are separated into:

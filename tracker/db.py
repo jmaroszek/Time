@@ -86,6 +86,11 @@ DEFAULT_SETTINGS = {
     "default_top_n_apps": "5",
     "browser_processes": "chrome.exe,msedge.exe,firefox.exe,brave.exe",
     "min_app_seconds": "0",
+    # Activity Library noise folding (dashboard-only; the tracker records
+    # everything regardless). off | one_off | utilities.
+    "activity_noise_filter": "utilities",
+    "activity_noise_max_seconds": "120",
+    "activity_noise_max_sessions": "3",
     "focus_chain_max_gap_seconds": "120",
     "day_start_hour": "0",
     "day_end_hour": "24",

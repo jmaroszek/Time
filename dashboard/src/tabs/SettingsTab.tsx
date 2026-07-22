@@ -36,7 +36,15 @@ const SPECS = {
   idle: { key: "idle_threshold_seconds", min: 1, max: 60, scale: 60 },
   focus: { key: "focus_chain_max_gap_seconds", min: 0, max: 30, scale: 60 },
   heartbeat: { key: "heartbeat_seconds", min: 5, max: 300, scale: 1, step: 5 },
+  noiseTime: { key: "activity_noise_max_seconds", min: 0, max: 30, scale: 60, step: 0.5 },
+  noiseSessions: { key: "activity_noise_max_sessions", min: 1, max: 20, scale: 1 },
 } satisfies Record<string, NumericSpec>;
+
+const NOISE_MODE_LABELS: Record<string, string> = {
+  off: "Off",
+  one_off: "One-offs",
+  utilities: "One-offs + utilities",
+};
 
 function displayValue(spec: NumericSpec, raw: string | undefined): string {
   const value = Number(raw);
@@ -196,6 +204,31 @@ export default function SettingsTab() {
             label="Minimum app time"
             help="Hides apps below this much time in the Insights Top Apps list. Activity always shows the complete catalog."
             control={numberControl(SPECS.minimum, "min")}
+          />
+        </Section>
+
+        <Section title="Activity Library">
+          <Row
+            label="Fold noisy items"
+            help="Hides throwaway rows from the Activity list — never from your totals. One-offs are items that are both brief and rarely seen; utilities are installers, driver bundles, and local files opened in a browser. Anything you have categorized always stays visible, and the list header says how many rows are folded."
+            control={
+              <Segmented
+                options={["off", "one_off", "utilities"]}
+                labels={NOISE_MODE_LABELS}
+                value={drafts.activity_noise_filter ?? "utilities"}
+                onChange={(value) => selectSetting("activity_noise_filter", value)}
+              />
+            }
+          />
+          <Row
+            label="One-off time limit"
+            help="An item is a one-off only when it is under this much time AND at or under the session limit below. Both conditions must hold, so a short app you open constantly stays in the list."
+            control={numberControl(SPECS.noiseTime, "min")}
+          />
+          <Row
+            label="One-off session limit"
+            help="How many times you can have seen an item and still have it count as a one-off."
+            control={numberControl(SPECS.noiseSessions, "sessions")}
           />
         </Section>
 
@@ -541,7 +574,7 @@ function NumberStepper({
   );
 }
 
-function Segmented({ options, value, onChange }: { options: string[]; value: string; onChange: (value: string) => void }) {
+function Segmented({ options, value, onChange, labels }: { options: string[]; value: string; onChange: (value: string) => void; labels?: Record<string, string> }) {
   return (
     <div className="flex rounded-[10px] border border-edge bg-surface-2 p-[3px]">
       {options.map((option) => (
@@ -551,7 +584,7 @@ function Segmented({ options, value, onChange }: { options: string[]; value: str
           className={`rounded-[7px] px-[13px] py-1.5 text-[11.5px] transition-colors ${value === option ? "bg-accent/15 font-semibold text-accent" : "text-ink-3 hover:text-ink-2"}`}
           onClick={() => onChange(option)}
         >
-          {option === "auto" ? "Auto" : option}
+          {labels?.[option] ?? (option === "auto" ? "Auto" : option)}
         </button>
       ))}
     </div>
