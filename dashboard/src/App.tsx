@@ -11,6 +11,7 @@ import { isNewerSchemaError } from "./lib/schema";
 import { allTimeRange, isRollingPreset, rangeForCalendarPreset, rangeForPreset, type Range } from "./lib/time";
 import { BannerProvider } from "./state/banner";
 import { MetaProvider, useMeta } from "./state/meta";
+import { useInsightsView } from "./state/useInsightsView";
 import ActivityTab from "./tabs/ActivityTab";
 import OverviewTab from "./tabs/OverviewTab";
 import SettingsTab from "./tabs/SettingsTab";
@@ -42,6 +43,9 @@ function Shell() {
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [firstSessionSec, setFirstSessionSec] = useState<number | null>(null);
   const [historyRevision, setHistoryRevision] = useState(currentHistoryRevision);
+  // Insights view controls live here, above the tab switch, so a change made on
+  // the Insights tab survives leaving for another tab and coming back.
+  const insightsView = useInsightsView();
 
   const range = useMemo<Range>(() => {
     if (preset === "custom") return customRange ?? rangeForPreset("last7");
@@ -131,7 +135,7 @@ function Shell() {
 
       <main className="flex-1">
         {tab === "insights" && (
-          <OverviewTab range={range} preset={preset} firstSessionSec={firstSessionSec} />
+          <OverviewTab range={range} preset={preset} firstSessionSec={firstSessionSec} view={insightsView} />
         )}
         {tab === "activity" && (
           <ActivityTab
