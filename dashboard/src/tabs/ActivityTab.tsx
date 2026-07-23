@@ -835,7 +835,7 @@ function EntityTable({
         <StickyHead>
           <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
             <SortHeading label="Name" field="name" active={sort === "name"} direction={direction} onSort={onSort} className="w-[32%] text-left" />
-            <th className="w-[28%] pb-2 font-medium">Classification</th>
+            <th className="w-[28%] pb-2 font-medium normal-case">Classification</th>
             <SortHeading label="Time" field="seconds" active={sort === "seconds"} direction={direction} onSort={onSort} className="w-[13%] text-right" />
             <SortHeading label="Last seen" field="lastSeen" active={sort === "lastSeen"} direction={direction} onSort={onSort} className="w-[17%] text-right" />
             <SortHeading label="Sessions" field="sessions" active={sort === "sessions"} direction={direction} onSort={onSort} className="w-[10%] text-right" />
