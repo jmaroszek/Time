@@ -28,13 +28,17 @@ export const TOOLTIP_STYLE = {
  *  that merely annotates (delta text, state dots) uses --color-good instead. */
 export const GOOD_DATA = "#16b981";
 
-/** Three-way productivity fills used when the chart exposes the taxonomy
- *  instead of collapsing everything outside productive into one stack. */
-export const PRODUCTIVE_BAR = "#1d9e75";
-export const NEUTRAL_BAR = "#4b5059";
-/** Category-palette red-orange, balanced against PRODUCTIVE_BAR rather than
- *  the quieter --color-bad annotation red. */
-export const UNPRODUCTIVE_BAR = "#d85a30";
+/** The one productivity palette. These fill the taxonomy bars when a chart
+ *  exposes the three-way split, and they are the single source of truth for the
+ *  Categories & Rules classification chips (ActivityTab's STATE_COLORS points
+ *  here). Tuned deep and saturated to hold their own beside the category
+ *  swatches rather than reading faint next to them. Top Apps deltas are a
+ *  separate system (--color-good/--color-bad) and intentionally not touched. */
+export const PRODUCTIVE_BAR = "#0fc186";
+export const NEUTRAL_BAR = "#6a717c";
+/** Saturated red, balanced against PRODUCTIVE_BAR rather than the quieter
+ *  --color-bad annotation red. */
+export const UNPRODUCTIVE_BAR = "#ee5439";
 export const UNCATEGORIZED_BAR = "#30343b";
 
 /** Annotation lines (e.g. the 7-day average): the interactive accent, not a
@@ -43,20 +47,20 @@ export const ANNOTATION = "#6ba0da"; // --color-accent
 
 /** Sequential heatmap ramp: green like the productive fill, with stops kept
  *  off every seed/live category color, for the same reason. */
-export const HEATMAP_RAMP = ["#16181d", "#0e3a2c", "#17836a", "#4fd0a4"];
+export const HEATMAP_RAMP = ["#16181d", "#0b3b2b", "#0f8c68", "#38d29e"];
 
 /** Neutral activity intensity for tracked-time views. Blue communicates
  *  amount without making the productive/non-productive judgment of green. */
 export const ACTIVITY_HEATMAP_RAMP = ["#16181d", "#123b5d", "#206fae", "#59a9ef"];
 
-/** Red-orange like UNPRODUCTIVE_BAR, shifted off it at every stop so intensity
+/** Red like UNPRODUCTIVE_BAR, shifted off it at every stop so intensity
  *  never reads as a category identity. */
-export const UNPRODUCTIVE_HEATMAP_RAMP = ["#16181d", "#4a2013", "#a2451f", "#e87c4d"];
+export const UNPRODUCTIVE_HEATMAP_RAMP = ["#16181d", "#4a1c14", "#a83a26", "#ef7358"];
 
 /** Gray like NEUTRAL_BAR. The top stop stays below CHROME.axisLabel so a hot
  *  cell never reads as chrome or text; that ceiling makes this the lowest
  *  contrast of the ramps, which is the cost of gray on a dark surface. */
-export const NEUTRAL_HEATMAP_RAMP = ["#16181d", "#2b2f37", "#474d57", "#6b727e"];
+export const NEUTRAL_HEATMAP_RAMP = ["#16181d", "#2b2f37", "#474d57", "#6a717c"];
 
 /** Ramp per shaded metric. Type-only import: this module stays free of
  *  runtime dependencies on the data layer. */
@@ -75,7 +79,7 @@ export const UNCATEGORIZED = "#5b616b";
  *  unproductive — one pixel color, two meanings depending on the chart. */
 export const PROTECTED_HUE_ZONES: ReadonlyArray<readonly [number, number]> = [
   [150, 165], // productive green: GOOD_DATA, PRODUCTIVE_BAR, --color-good
-  [10, 25], // unproductive red-orange: UNPRODUCTIVE_BAR
+  [8, 25], // unproductive red: UNPRODUCTIVE_BAR
 ];
 
 /** Colors offered when a category is created or recolored, assigned in order.

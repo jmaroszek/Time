@@ -37,7 +37,13 @@ import {
   type MatchType,
   type Productivity,
 } from "../lib/classify";
-import { CATEGORY_SWATCHES, UNCATEGORIZED } from "../lib/chartTheme";
+import {
+  CATEGORY_SWATCHES,
+  NEUTRAL_BAR,
+  PRODUCTIVE_BAR,
+  UNCATEGORIZED,
+  UNPRODUCTIVE_BAR,
+} from "../lib/chartTheme";
 import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
 import { fmtDuration } from "../lib/format";
 import { clipSessions } from "../lib/metrics";
@@ -77,10 +83,13 @@ type ActivityView = "library" | "rules";
  *  recorded entity — the classification dropdown is only its entry point. */
 type LibraryFilter = ActivityClassificationFilter | "excluded";
 
+/** One palette for productivity everywhere it names a state: the chart bars and
+ *  these classification chips share chartTheme's fills. Ignored keeps its own
+ *  gray — it is an absence of judgment, not one of the three states. */
 const STATE_COLORS: Record<CategoryState, string> = {
-  productive: "#4fb389",
-  neutral: "#9aa0a8",
-  unproductive: "#d07d7d",
+  productive: PRODUCTIVE_BAR,
+  neutral: NEUTRAL_BAR,
+  unproductive: UNPRODUCTIVE_BAR,
   ignored: "#5b616b",
 };
 
