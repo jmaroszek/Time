@@ -1,19 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
 import ActivityCalendar from "../components/ActivityCalendar";
 import HourlyActivityChart from "../components/HourlyActivityChart";
 import MonthCalendarChart from "../components/MonthCalendarChart";
 import RhythmChart from "../components/RhythmChart";
-import TimelineChart, { type TimelineSegment } from "../components/TimelineChart";
+import TimelineChart from "../components/TimelineChart";
 import TopAppsList from "../components/TopAppsList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
 import { Card, MenuSelect, MetricCard, Spinner } from "../components/ui";
-import {
-  cleanProcessName,
-  fmtClock,
-  fmtDuration,
-  fmtPct,
-} from "../lib/format";
+import { fmtDuration, fmtPct } from "../lib/format";
 import type { InsightsRequest } from "../lib/insights";
 import { warmInsightsModel } from "../lib/insightsClient";
 import { fetchSessions } from "../lib/queries";
@@ -37,10 +32,8 @@ import {
 import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
 import { useInsightsModel } from "../state/useInsightsModel";
+import { TOP_APPS_OPTIONS, type InsightsViewState } from "../state/useInsightsView";
 import { useSessions } from "../state/useSessions";
-
-const TOP_APPS_OPTIONS = [5, 10, 15, 20];
-const DEFAULT_TOP_APPS = TOP_APPS_OPTIONS[0];
 
 const HOURS_CARD_TITLES = {
   daily: "Daily Hours",
@@ -61,21 +54,20 @@ export default function OverviewTab({
   range,
   preset,
   firstSessionSec,
+  view,
 }: {
   range: Range;
   preset: PresetOrCustom;
   firstSessionSec: number | null;
+  view: InsightsViewState;
 }) {
   const meta = useMeta();
-  // The card's own selector is the only place this is set: a Settings knob for
-  // the starting value would configure one control's default and nothing else.
-  const [topN, setTopN] = useState(DEFAULT_TOP_APPS);
-  const [selected, setSelected] = useState<TimelineSegment | null>(null);
-  const [blockMinutes, setBlockMinutes] = useState(15);
-  // null = follow the range-length default; an explicit pick sticks until changed.
-  const [aggregateView, setAggregateView] = useState<"rhythm" | "calendar" | null>(null);
-  const [metric, setMetric] = useState<ActivityMetric>("tracked");
-  const [stackBy, setStackBy] = useState<ActivityStack>("state");
+  // The view controls (top-app count, timeline resolution, aggregate view,
+  // calendar metric, hours stacking) live in App so an in-session change to any
+  // of them survives switching to another tab and back — this component unmounts
+  // on a tab switch, App does not. `aggregateView` starts null so its default is
+  // pinned the first time a long-enough range appears (see the effect below).
+  const { topN, setTopN, blockMinutes, setBlockMinutes, aggregateView, setAggregateView, metric, setMetric, stackBy, setStackBy } = view;
 
   const { startSec: fetchStart, endSec: fetchEnd } = insightsFetchWindow(range);
   const sessionData = useSessions(fetchStart, fetchEnd);
@@ -164,18 +156,14 @@ export default function OverviewTab({
     };
   }, [request, analyzed.current, firstSessionSec]);
 
-  const displayedStartMs = model?.range.start.getTime() ?? null;
-  const displayedEndMs = model?.range.end.getTime() ?? null;
-  useEffect(() => setSelected(null), [displayedStartMs, displayedEndMs]);
-
   // Pin the aggregate view the first time the range is long enough to show one.
-  // The range-length default is a starting point, not a rule: without this, any
+  // The calendar default is a starting point, not a rule: without this, any
   // change to the range's length (toggling Rolling on the same preset, say)
   // would silently move the picker off the view that's already on screen.
   const aggregateRangeDays = model && model.rangeDays > 14 ? model.rangeDays : null;
   useEffect(() => {
     if (aggregateRangeDays === null) return;
-    setAggregateView((current) => current ?? (aggregateRangeDays <= 30 ? "rhythm" : "calendar"));
+    setAggregateView((current) => current ?? "calendar");
   }, [aggregateRangeDays]);
 
   if (!model) {
@@ -191,10 +179,10 @@ export default function OverviewTab({
   const isSingleDay = rangeDays === 1;
   // The timeline stops being readable past ~two weeks of rows. Beyond that the
   // rhythm grid (collapsed into a typical week) and the calendar (every date
-  // laid out) are both useful, so the range length picks the first default
-  // (pinned above) and the card header lets you override it from then on.
+  // laid out) are both useful; the calendar is the pinned default (set above)
+  // and the card header lets you override it from then on.
   const middleView =
-    rangeDays <= 14 ? "timeline" : (aggregateView ?? (rangeDays <= 30 ? "rhythm" : "calendar"));
+    rangeDays <= 14 ? "timeline" : (aggregateView ?? "calendar");
   // Past ~14 months, day cells slice too thin; the calendar shows month cells
   // (years as rows) instead. Rhythm needs no such switch — it is always 7×24.
   const calendarByMonth = rangeDays >= MONTH_CALENDAR_MIN_DAYS;
@@ -269,10 +257,7 @@ export default function OverviewTab({
             variant="quiet"
             label="Timeline resolution"
             value={String(blockMinutes)}
-            onChange={(v) => {
-              setBlockMinutes(Number(v));
-              setSelected(null);
-            }}
+            onChange={(v) => setBlockMinutes(Number(v))}
             options={[
               // Everything below the rule is a bucket width; exact sessions
               // are the ungrouped truth the buckets approximate.
@@ -314,7 +299,6 @@ export default function OverviewTab({
             range={displayRange}
             classifier={meta.classifier}
             blockMinutes={blockMinutes}
-            onSelect={setSelected}
           />
         ) : middleView === "rhythm" ? (
           <RhythmChart
@@ -332,47 +316,6 @@ export default function OverviewTab({
             range={displayRange}
             metric={metric}
           />
-        )}
-        {middleView === "timeline" && selected && (
-          <div className="mt-2 flex items-center gap-4 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs">
-            <span className="font-semibold">
-              {selected.isAfk
-                ? "AFK"
-                : selected.breakdown
-                  ? selected.categoryName
-                  : cleanProcessName(selected.process, meta.aliases)}
-            </span>
-            {!selected.breakdown && <span className="text-ink-2">{selected.categoryName}</span>}
-            <span className="text-ink-2">
-              {fmtClock(selected.startSec)}–{fmtClock(selected.endSec)} ·{" "}
-              {fmtDuration(
-                selected.breakdown
-                  ? (selected.activeSec ?? 0)
-                  : selected.endSec - selected.startSec,
-              )}
-              {selected.breakdown ? " active" : ""}
-            </span>
-            {selected.breakdown && !selected.isAfk && (
-              <span className="flex-1 truncate text-ink-3">
-                {selected.breakdown
-                  .slice(0, 4)
-                  .map((a) => `${cleanProcessName(a.process, meta.aliases)} ${fmtDuration(a.seconds)}`)
-                  .join(" · ")}
-              </span>
-            )}
-            {!selected.breakdown && selected.title && (
-              <span className="flex-1 truncate text-ink-3" title={selected.title}>
-                {selected.title}
-              </span>
-            )}
-            <button
-              type="button"
-              className="text-ink-3 hover:text-ink"
-              onClick={() => setSelected(null)}
-            >
-              ✕
-            </button>
-          </div>
         )}
       </Card>
 

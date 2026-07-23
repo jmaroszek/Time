@@ -13,9 +13,12 @@ export const CHROME = {
   text: "#e8eaed", // --color-ink
 } as const;
 
-/** The one tooltip look, spread into any ECharts `tooltip` option. */
+/** The one tooltip look, spread into any ECharts `tooltip` option. In-chart
+ *  tooltips fire immediately: the pointer is already over a data mark the reader
+ *  chose to inspect, so the dwell delay that keeps incidental UI hints (tile
+ *  titles, the delta column) from flickering only gets in the way here. */
 export const TOOLTIP_STYLE = {
-  showDelay: 500,
+  showDelay: 0,
   backgroundColor: "#1d2026", // --color-surface-2
   borderColor: "#2a2e36", // --color-edge
   textStyle: { color: CHROME.text, fontSize: 12 },

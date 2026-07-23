@@ -2,10 +2,9 @@
 //   blockMinutes > 0  — fixed blocks colored by dominant category (default;
 //                       smooths fragmented data and multi-app workflows)
 //   blockMinutes == 0 — exact session segments
-// ECharts custom series; click a segment for the drill-down panel.
+// ECharts custom series; hover a segment for its breakdown tooltip.
 
-import { useCallback, useMemo } from "react";
-import type { ECElementEvent } from "echarts";
+import { useMemo } from "react";
 
 import type { Classifier } from "../lib/classify";
 import { aggregateBlocks } from "../lib/blocks";
@@ -42,13 +41,11 @@ export default function TimelineChart({
   range,
   classifier,
   blockMinutes,
-  onSelect,
 }: {
   sessions: Session[];
   range: Range;
   classifier: Classifier;
   blockMinutes: number; // 0 = exact sessions
-  onSelect?: (seg: TimelineSegment) => void;
 }) {
   const { aliases, dayStartHour, dayEndHour } = useMeta();
   const days = useMemo(() => listDays(range), [range]); // oldest on top, reads top-to-bottom
@@ -180,16 +177,8 @@ export default function TimelineChart({
     [segments, days, aliases, dayStartHour, dayEndHour],
   );
 
-  const handleClick = useCallback(
-    (params: ECElementEvent) => {
-      const data = params.data as { seg?: TimelineSegment } | undefined;
-      if (data?.seg && onSelect) onSelect(data.seg);
-    },
-    [onSelect],
-  );
-
   const chart = (
-    <EChart option={option} height={Math.max(days.length * 34 + 40, 110)} onClick={handleClick} />
+    <EChart option={option} height={Math.max(days.length * 34 + 40, 110)} />
   );
   return days.length > 14
     ? <div className="scroll-well max-h-[516px] overflow-y-auto pr-1">{chart}</div>
