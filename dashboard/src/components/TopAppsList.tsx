@@ -53,7 +53,10 @@ export default function TopAppsList({
         {apps.map((app) => (
           <div key={app.process} className="flex items-center gap-3 text-xs">
             <span className="flex w-36 shrink-0 items-center gap-2 truncate">
-              <CategoryDot color={app.category?.color ?? "#5b616b"} />
+              <CategoryDot
+                color={app.category?.color ?? "#5b616b"}
+                label={app.category?.name ?? "Uncategorized"}
+              />
               {editingProcess === app.process ? (
                 <input
                   autoFocus
