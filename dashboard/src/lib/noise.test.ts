@@ -23,8 +23,8 @@ function entity(overrides: Partial<NoiseCandidate>): NoiseCandidate {
 
 const policy: NoisePolicy = { mode: "utilities", maxSeconds: 120, maxSessions: 3 };
 
-describe("noise folding", () => {
-  it("needs both halves of the one-off test", () => {
+describe("noise filtering", () => {
+  it("needs both halves of the rare-item test", () => {
     // Brief and rare: noise.
     expect(classifyNoise(entity({ seconds: 25, sessionCount: 1 }), policy)).toBe("one_off");
     expect(classifyNoise(entity({ seconds: 110, sessionCount: 3 }), policy)).toBe("one_off");
@@ -40,7 +40,7 @@ describe("noise folding", () => {
     }
   });
 
-  it("folds installers and drivers regardless of how long they ran", () => {
+  it("hides installers and drivers regardless of how long they ran", () => {
     const long = { seconds: 3600, sessionCount: 5 };
     for (const key of [
       "googledrivesetup.exe",
@@ -69,7 +69,7 @@ describe("noise folding", () => {
     expect(classifyNoise(entity({ ...website, key: "en.wikipedia.org" }), policy)).toBeNull();
   });
 
-  it("drops the utility test in one_off mode and folds nothing when off", () => {
+  it("drops the utility test in one_off mode and hides nothing when off", () => {
     const installer = entity({ key: "googledrivesetup.exe", seconds: 3600, sessionCount: 5 });
     expect(classifyNoise(installer, { ...policy, mode: "one_off" })).toBeNull();
     expect(classifyNoise(entity({ seconds: 3, sessionCount: 1 }), { ...policy, mode: "off" })).toBeNull();

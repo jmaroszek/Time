@@ -12,9 +12,9 @@ column longer and never rearranges it.
 
 | Setting | What it controls |
 | --- | --- |
-| **Record activity** | Explicit consent switch for all foreground-app recording. |
-| **Store window titles** | Separate sensitive-data opt-in; off by default. Browser URLs are sanitized even when enabled. |
-| **Start at Windows sign-in** | Per-user startup registration; available only after recording is enabled. |
+| **Record activity** | Allows the tracker to record foreground app names and timing. |
+| **Store window titles** | Makes titles searchable and available to Window rules for future activity. Existing titles remain after capture is disabled; App and Website rules still work. Titles may contain sensitive text, so capture is off by default. |
+| **Start at Windows sign-in** | Starts the tracker when this Windows account signs in; available only after recording is enabled. |
 
 A summary line reports how many apps and websites are excluded from tracking
 outright. The list itself is managed in the [Activity tab](apps.md), under the
@@ -29,19 +29,29 @@ outright. The list itself is managed in the [Activity tab](apps.md), under the
 | **Week starts on** | Affects weekly presets, weekly bucketing, and goal pacing. |
 | **AFK idle threshold** | How long without input counts as away. The AFK boundary is back-dated to the last real input, so the threshold doesn't leak into the stats. Note this means passively watching video without touching the mouse or keyboard counts as away. |
 | **Focus chain max gap** | The longest break between productive sessions that still counts as one focus chain. |
-| **Fold noisy items** | Which throwaway rows the Activity Library hides: nothing, one-offs, or one-offs plus installers, drivers, and local files. Totals and Insights are untouched, categorized items are never folded, and the Library header can reveal what was folded. |
-| **One-off time limit** / **One-off session limit** | An item counts as a one-off only when it is under the time limit *and* at or under the session limit. |
+| **Hide list clutter** | Whether the Activity Library hides nothing, rare items, or rare items plus installers, drivers, and local files. Totals and Insights are untouched, categorized items always remain visible, and the Library header can reveal hidden rows. |
+| **Rare-item time limit** / **Rare-item session limit** | An item counts as rare only when its all-history time is under the time limit *and* its all-history session count is at or under the session limit. The result does not change with the visible date range. |
 | **Minimum app time** | A rate: apps averaging less than this per tracked day are hidden only from Insights' Top Apps. Because it scales with the days that recorded activity, the same apps clear the bar on Today and on Year. Activity always shows the complete catalog. |
 | **Heartbeat interval** | How often the open session's end time is flushed to disk; this is the upper bound on data lost in a crash. |
-| **Browser processes** | Which apps can be split into Websites and use Website or Window rules. The common browsers ship in the list, and entries are normalized on save — `Chrome` and a pasted install path both become `chrome.exe`. |
+| **Browser processes** | Which apps can be split into Websites and use Website or Window rules. Common browsers ship in the list without `.exe` suffixes. Names with or without the suffix, and pasted install paths, are normalized internally. |
 
 Settings save on Enter or focus-out; the tracker re-reads them within one
-heartbeat.
+second.
 
 ## Tracker status
 
-Live health check: whether a tracker heartbeat has been seen recently, with a
-distinct paused state when tracking is paused from the tray.
+The tracker publishes a dedicated health signal every five seconds, independent
+of recorded sessions, exclusions, and the session-flush interval. Settings
+reports a missing tracker after the first missed signal plus a short scheduling
+allowance, with a distinct paused state when tracking is paused from the tray.
+
+## Restore defaults
+
+**Restore default settings** resets every user-facing setting on this page in
+one operation. Recording, title capture, and Windows startup return to off;
+goals, timeline, behavior, Activity-list filtering, and Advanced settings return
+to their fresh-install values. History, categories, rules, aliases, exclusions,
+corrections, backups, and onboarding completion are preserved.
 
 ## Data
 

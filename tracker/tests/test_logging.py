@@ -98,6 +98,19 @@ def test_database_milestone_does_not_dump_raw_settings(info_log, tmp_path):
     assert "secretbrowser.exe" not in _info_text(info_log)
 
 
+def test_health_heartbeat_is_activity_independent(tmp_path):
+    conn = db.open_db(tmp_path / "t.db")
+    try:
+        tracker.stamp_tracker_health(conn, 1_234.9)
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key=?",
+            (tracker.HEALTH_HEARTBEAT_KEY,),
+        ).fetchone()
+        assert row["value"] == "1234"
+    finally:
+        conn.close()
+
+
 # --- Fatal startup evidence -----------------------------------------------
 
 

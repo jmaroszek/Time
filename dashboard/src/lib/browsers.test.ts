@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeBrowserProcesses } from "./browsers";
+import { displayBrowserProcesses, normalizeBrowserProcesses } from "./browsers";
 
 describe("normalizeBrowserProcesses", () => {
   it("supplies the extension the process list is matched on", () => {
@@ -23,5 +23,11 @@ describe("normalizeBrowserProcesses", () => {
 
   it("drops blanks and duplicates that differ only in shape", () => {
     expect(normalizeBrowserProcesses(" chrome.exe , ,CHROME, ")).toEqual(["chrome.exe"]);
+  });
+
+  it("presents executable names without leaking the internal suffix", () => {
+    expect(displayBrowserProcesses("chrome.exe, Firefox, Safari.app")).toBe(
+      "chrome, firefox, safari.app",
+    );
   });
 });

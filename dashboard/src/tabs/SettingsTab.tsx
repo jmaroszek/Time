@@ -1,8 +1,16 @@
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ChangeEventHandler,
+  type FocusEventHandler,
+  type ReactNode,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { Spinner, TrashButton } from "../components/ui";
-import { normalizeBrowserProcesses } from "../lib/browsers";
+import { displayBrowserProcesses, normalizeBrowserProcesses } from "../lib/browsers";
 import { getDbPath } from "../lib/db";
 import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
@@ -14,6 +22,7 @@ import {
   fetchSettings,
   listTrackingExclusions,
   fetchTrackerStatus,
+  restoreDefaultSettings,
   updateSetting,
   type TrackerStatus,
 } from "../lib/queries";
@@ -44,9 +53,12 @@ const SPECS = {
 
 const NOISE_MODE_LABELS: Record<string, string> = {
   off: "Off",
-  one_off: "One-offs",
-  utilities: "One-offs + utilities",
+  one_off: "Rare items",
+  utilities: "Rare items + utilities",
 };
+
+const TRACKER_HEALTH_STALE_SECONDS = 8;
+const TRACKER_STATUS_POLL_MS = 2_000;
 
 function displayValue(spec: NumericSpec, raw: string | undefined): string {
   const value = Number(raw);
@@ -67,13 +79,21 @@ export default function SettingsTab() {
   useEffect(() => {
     const next = { ...meta.settings };
     for (const spec of Object.values(SPECS)) next[spec.key] = displayValue(spec, meta.settings[spec.key]);
+    next.browser_processes = displayBrowserProcesses(meta.settings.browser_processes ?? "");
     setDrafts(next);
   }, [meta.settings]);
 
   const [pause, setPause] = useState<{ paused: boolean; until: number }>({ paused: false, until: 0 });
   useEffect(() => {
-    const load = () => {
+    const loadStatus = () => {
       void fetchTrackerStatus().then(setStatus).catch(() => setStatus(null));
+    };
+    loadStatus();
+    const id = setInterval(loadStatus, TRACKER_STATUS_POLL_MS);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    const loadPause = () => {
       // Pause is flipped from the tray, outside meta.refresh — poll it here.
       void fetchSettings()
         .then((s) => {
@@ -85,8 +105,8 @@ export default function SettingsTab() {
         })
         .catch(() => {});
     };
-    load();
-    const id = setInterval(load, 15_000);
+    loadPause();
+    const id = setInterval(loadPause, 15_000);
     return () => clearInterval(id);
   }, []);
 
@@ -113,7 +133,10 @@ export default function SettingsTab() {
   const saveText = async (key: string, normalize?: (raw: string) => string) => {
     const value = normalize ? normalize(drafts[key] ?? "") : (drafts[key] ?? "").trim();
     if (!value) {
-      setDrafts((current) => ({ ...current, [key]: meta.settings[key] ?? "" }));
+      const fallback = key === "browser_processes"
+        ? displayBrowserProcesses(meta.settings[key] ?? "")
+        : (meta.settings[key] ?? "");
+      setDrafts((current) => ({ ...current, [key]: fallback }));
       return;
     }
     try {
@@ -130,8 +153,10 @@ export default function SettingsTab() {
       .catch((e: unknown) => banner.report(e, "setting"));
   };
 
-  const heartbeatAge = status?.lastHeartbeat == null ? null : Date.now() / 1000 - status.lastHeartbeat;
-  const trackerLive = heartbeatAge !== null && heartbeatAge < 120;
+  const heartbeatAge = status?.lastHeartbeat == null || status.lastHeartbeat <= 0
+    ? null
+    : Date.now() / 1000 - status.lastHeartbeat;
+  const trackerLive = heartbeatAge !== null && heartbeatAge < TRACKER_HEALTH_STALE_SECONDS;
   const trackingEnabled = meta.settings.recording_consent === "1";
 
   const setTrackingEnabled = async (enabled: boolean) => {
@@ -175,11 +200,11 @@ export default function SettingsTab() {
     // One column, not two. Any masonry layout re-balances whenever a section
     // changes height, so a second column would make the page look uneven again
     // the next time a setting is added. Length is the only thing that grows here.
-    <div className="mx-auto flex w-full max-w-[600px] flex-col gap-[26px]">
+    <div className="mr-auto flex w-full max-w-[600px] flex-col gap-[26px] pt-2">
       <section>
         <SectionLabel>Tracker Status</SectionLabel>
         <div className="flex items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-[18px] py-4">
-          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-good-data" : "bg-bad"}`} />
+          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-good-data" : "alert-pulse bg-bad"}`} />
           <div>
             <p className="text-[13px] font-semibold text-ink">
               {!trackingEnabled ? "Tracking disabled" : pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
@@ -193,7 +218,9 @@ export default function SettingsTab() {
                   : "Resume from the tray icon"
                 : trackerLive
                   ? "Collecting activity in real time"
-                  : "No heartbeat in the last two minutes"}
+                  : heartbeatAge === null
+                    ? "Waiting for a tracker health signal"
+                    : `No tracker heartbeat for ${fmtDuration(Math.max(heartbeatAge, 0))}`}
             </p>
           </div>
           {heartbeatAge !== null && <span className="ml-auto text-[11.5px] tabular-nums text-ink-3">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
@@ -203,12 +230,12 @@ export default function SettingsTab() {
       <Section title="Recording & startup">
         <Row
           label="Record activity"
-          help="Stores foreground app names and timing only after you enable it."
+          help="Allows the tracker to record foreground app names and timing."
           control={<PrivacyToggle enabled={trackingEnabled} onChange={(enabled) => void setTrackingEnabled(enabled)} />}
         />
         <Row
           label="Store window titles"
-          help="Optional and off by default. Browser URLs are stripped even when enabled."
+          help="Stores searchable window titles and enables Window rules for future activity. Turning it off leaves future titles blank; existing titles and App or Website rules still work. Titles may contain sensitive text. Off by default."
           control={
             <PrivacyToggle
               enabled={meta.settings.record_window_titles === "1"}
@@ -218,7 +245,7 @@ export default function SettingsTab() {
         />
         <Row
           label="Start at Windows sign-in"
-          help="Registers only the tracker for this Windows account."
+          help="Starts the tracker when you sign in to Windows. Applies only to this account."
           control={
             <PrivacyToggle
               enabled={meta.settings.launch_at_login === "1"}
@@ -231,31 +258,31 @@ export default function SettingsTab() {
       </Section>
 
       <Section title="Goals">
-        <Row label="Weekly productive goal" help="Optional. Set 0 to leave goal pace unset." control={numberControl(SPECS.goal, "h")} />
+        <Row label="Weekly productive goal" help="Set 0 to leave goal pace unset." control={numberControl(SPECS.goal, "h")} />
       </Section>
 
       <Section title="Timeline Window">
-        <Row label="Day starts at" help="First hour drawn on Timeline & Hour-of-Day plots. Activity outside the window still counts in all totals." control={numberControl(SPECS.start, undefined, true)} />
-        <Row label="Day ends at" help="Last hour drawn on Timeline & Hour-of-Day plots. Activity outside the window still counts in all totals." control={numberControl(SPECS.end, undefined, true)} />
+        <Row label="Day starts at" help="First hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.start, undefined, true)} />
+        <Row label="Day ends at" help="Last hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.end, undefined, true)} />
         <Row
           label="Week starts on"
           help="Affects weekly presets, weekly bucketing, and goal pacing."
-          control={<Segmented options={["Monday", "Sunday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
+          control={<Segmented options={["Sunday", "Monday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
         />
       </Section>
 
       <Section title="Focus & Idle">
         <Row label="AFK idle threshold" help="No input for this long marks you AFK — watching video without touching the mouse or keyboard counts as away." control={numberControl(SPECS.idle, "min")} />
-        <Row label="Focus chain max gap" help="Short gaps won't break a productive focus chain." control={numberControl(SPECS.focus, "min")} />
+        <Row label="Focus chain max gap" help="Productive sessions separated by no more than this much untracked time count as one focus chain." control={numberControl(SPECS.focus, "min")} />
       </Section>
 
       <Section
-        title="Activity Library"
-        intro="Folding hides throwaway rows from the Activity list only — totals, Insights, and anything you have categorized are untouched, and the list header says how many rows are folded. One-offs are items that are both brief and rarely seen; utilities are installers, driver bundles, and local files opened in a browser."
+        title="Activity list"
+        intro="Hide brief, rarely seen items and system utilities from the Activity list. This never changes totals or Insights, and categorized items always remain visible."
       >
         <Row
-          label="Fold noisy items"
-          help="Hides throwaway rows from the list — never from totals."
+          label="Hide list clutter"
+          help="Choose whether to hide rare items, utilities, or neither."
           control={
             <Segmented
               options={["off", "one_off", "utilities"]}
@@ -266,13 +293,13 @@ export default function SettingsTab() {
           }
         />
         <Row
-          label="One-off time limit"
-          help="One-offs must be under this much total time."
+          label="Rare-item time limit"
+          help="Rare items must have less than this much recorded time across all history."
           control={numberControl(SPECS.noiseTime, "min")}
         />
         <Row
-          label="One-off session limit"
-          help="…and seen at most this many times."
+          label="Rare-item session limit"
+          help="…and appear in no more than this many sessions across all history."
           control={numberControl(SPECS.noiseSessions, "sessions")}
         />
       </Section>
@@ -283,23 +310,21 @@ export default function SettingsTab() {
           help="Hides apps averaging less than this per tracked day from Insights' Top Apps."
           control={numberControl(SPECS.minimum, "min/day")}
         />
-        <Row label="Heartbeat interval" help="How often the active session is flushed." control={numberControl(SPECS.heartbeat, "s")} />
+        <Row label="Heartbeat interval" help="How often the current session is saved; a crash can lose up to this much recent activity." control={numberControl(SPECS.heartbeat, "s")} />
         <Row
           label="Browser processes"
-          help="Comma-separated process names. Common browsers are already included."
+          help="Comma-separated processes treated as browsers for Website detection and Website or Window rules."
           control={
-            <textarea
-              rows={4}
-              aria-label="Browser processes"
+            <AutoGrowTextarea
               value={drafts.browser_processes ?? ""}
               onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
               onBlur={() => void saveText("browser_processes", (raw) => normalizeBrowserProcesses(raw).join(","))}
-              className="w-[172px] resize-none rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs leading-relaxed text-ink outline-none focus:border-accent/60"
             />
           }
         />
       </Section>
 
+      <RestoreDefaultsSection onRestored={() => setPause({ paused: false, until: 0 })} />
       <DataSection />
     </div>
   );
@@ -347,6 +372,56 @@ function VersionsLine({ trackerVersion }: { trackerVersion: string | undefined }
     <p className="mt-2 text-[11px] text-ink-3">
       Dashboard {appVersion ?? "—"} · Tracker {trackerVersion ?? "not stamped yet"}
     </p>
+  );
+}
+
+function RestoreDefaultsSection({ onRestored }: { onRestored: () => void }) {
+  const meta = useMeta();
+  const banner = useBanner();
+  const [restoring, setRestoring] = useState(false);
+  const [restored, setRestored] = useState(false);
+
+  const restore = async () => {
+    const ok = window.confirm(
+      "Restore every setting on this page to its default?\n\n" +
+        "Recording and Windows startup will be turned off. Recorded history, categories, rules, aliases, exclusions, corrections, and backups will not change.",
+    );
+    if (!ok) return;
+    setRestoring(true);
+    setRestored(false);
+    try {
+      // Remove the external startup registration before the matching database
+      // preference is reset, so a partial failure errs toward not launching.
+      await invoke("set_launch_at_login", { enabled: false });
+      await restoreDefaultSettings();
+      await meta.refresh();
+      onRestored();
+      setRestored(true);
+      setTimeout(() => setRestored(false), 2_000);
+    } catch (error) {
+      banner.report(error, "default settings");
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  return (
+    <Section title="Defaults">
+      <Row
+        label="Restore default settings"
+        help="Resets every setting on this page without changing recorded history or organization."
+        control={
+          <button
+            type="button"
+            disabled={restoring}
+            onClick={() => void restore()}
+            className="rounded-[8px] border border-edge px-3 py-1.5 text-[11.5px] font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:text-ink disabled:cursor-wait disabled:opacity-50"
+          >
+            {restoring ? "Restoring…" : restored ? "Defaults restored" : "Restore defaults…"}
+          </button>
+        }
+      />
+    </Section>
   );
 }
 
@@ -473,9 +548,7 @@ function DataSection() {
             </p>
           )}
           <p className="mt-3 text-[11px] leading-snug text-ink-3">
-            Everything Time records stays in this file on your machine — nothing is ever
-            uploaded. To restore a backup: quit the tracker and dashboard, replace the
-            database file with the backup copy, then restart (full steps in docs/restore.md).
+            Everything Time records stays in this file on your machine — nothing is ever uploaded.
           </p>
           <VersionsLine trackerVersion={meta.settings.tracker_version} />
         </div>
@@ -498,7 +571,7 @@ function DataSection() {
           }
         />
         <div className="flex items-center justify-between gap-4 border-t border-surface-2 bg-bad/[.03] px-4 py-[13px]">
-          <p className="text-xs text-ink-3">Erase all recorded history & compact the database</p>
+          <p className="text-xs text-ink-3">Securely erase all recorded history</p>
           <button
             type="button"
             className="shrink-0 text-xs font-semibold text-bad transition-colors hover:text-bad/80"
@@ -565,6 +638,40 @@ function Row({ label, help, control }: { label: string; help: string; control: R
       </div>
       <div className="shrink-0">{control}</div>
     </div>
+  );
+}
+
+function AutoGrowTextarea({
+  value,
+  onChange,
+  onBlur,
+}: {
+  value: string;
+  onChange: ChangeEventHandler<HTMLTextAreaElement>;
+  onBlur: FocusEventHandler<HTMLTextAreaElement>;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const field = ref.current;
+    if (!field) return;
+    const minHeight = 36;
+    const maxHeight = 94;
+    field.style.height = "auto";
+    field.style.height = `${Math.min(Math.max(field.scrollHeight, minHeight), maxHeight)}px`;
+    field.style.overflowY = field.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      aria-label="Browser processes"
+      spellCheck={false}
+      value={value}
+      onChange={onChange}
+      onBlur={onBlur}
+      className="w-[172px] resize-none rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs leading-relaxed text-ink outline-none focus:border-accent/60"
+    />
   );
 }
 

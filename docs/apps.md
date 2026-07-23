@@ -26,30 +26,32 @@ deepens that region instead of stretching the page.
 
 The card header counts how many items are in range, and — when there are any —
 how many carry uncategorized time. Clicking that count applies the
-**Uncategorized** filter, and clicking it again clears it. Rows the noise fold
+**Uncategorized** filter, and clicking it again clears it. Rows the noise filter
 hides are left out of the count as well as the list, so the two always agree.
 
-### Folded rows
+### Hidden rows
 
 A tracker records every foreground window, so the raw catalog carries rows
-nobody wants to track. Two tests fold those out of the list:
+nobody wants to track. Two tests can hide those from the list:
 
-- **One-off** — the item is under the time limit **and** at or under the session
-  limit. Both halves are required, so a 15-second app opened twenty times stays
-  in the list, and so does a single forty-minute sitting.
+- **Rare** — across all recorded history, the item is under the time limit
+  **and** at or under the session limit. Both halves are required, so a
+  15-second app opened twenty times stays in the list, and so does a single
+  forty-minute sitting. Because the test uses all history, changing the visible
+  date range cannot make a recurring item look rare.
 - **Utility** — the name marks it as a machine chore rather than an
   application: installers, updaters, driver and firmware bundles, extracted
   `.tmp` payloads, Windows plumbing, and local files rendered in a browser.
-  These fold regardless of duration, because an install can run for twenty
+  These are hidden regardless of duration, because an install can run for twenty
   minutes.
 
-Folding is a view filter over this one list. It never changes a total, an
+This is a view filter over the Activity Library only. It never changes a total, an
 Insights figure, or what an entity contributes to its category, and anything
-already carrying a category or rule is never folded — an explicit decision
-outranks the heuristic. The Library header reports how many rows are folded and
-shows them on demand, tagged **One-off** or **Utility**; searching reaches past
-the fold, so a search for `setup` still finds the installers. Settings ▸
-Activity Library sets the mode and both limits, or turns folding off.
+already carrying a category or rule is never hidden — an explicit decision
+outranks the heuristic. The Library header reports how many rows are hidden and
+shows them on demand, tagged **Rare** or **Utility**; searching reaches past
+the filter, so a search for `setup` still finds the installers. Settings ▸
+Activity list sets the mode and both limits, or turns filtering off.
 
 One search field covers friendly names, cleaned and recorded app names,
 websites, and stored window titles. Search results are separated into:

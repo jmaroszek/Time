@@ -241,49 +241,49 @@ describe("Activity index", () => {
   });
 });
 
-describe("Activity noise folding", () => {
+describe("Activity noise filtering", () => {
   const policy = { mode: "utilities", maxSeconds: 120, maxSessions: 3 } as const;
   const index = buildActivityIndex(source);
 
-  it("folds one-offs out of the catalog while counting them for the header", () => {
+  it("hides rare items from the catalog while counting them for the header", () => {
     const plain = queryActivityIndex(index, baseQuery);
     expect(plain.noiseHidden).toBe(0);
     expect(plain.catalog.rows.map((row) => row.id)).toContain("app:unknown.exe");
 
-    const folded = queryActivityIndex(index, { ...baseQuery, noise: policy });
-    expect(folded.noiseHidden).toBe(1);
-    expect(folded.catalog.rows.map((row) => row.id)).not.toContain("app:unknown.exe");
-    expect(folded.catalog.total).toBe(plain.catalog.total - 1);
+    const filtered = queryActivityIndex(index, { ...baseQuery, noise: policy });
+    expect(filtered.noiseHidden).toBe(1);
+    expect(filtered.catalog.rows.map((row) => row.id)).not.toContain("app:unknown.exe");
+    expect(filtered.catalog.total).toBe(plain.catalog.total - 1);
   });
 
-  it("leaves folded rows out of the uncategorized count the header shows", () => {
+  it("leaves hidden rows out of the uncategorized count the header shows", () => {
     // Counting what the catalog does not list makes the number and the list
-    // disagree, and folded-away garbage is never worth triaging.
+    // disagree, and filtered clutter is never worth triaging.
     expect(queryActivityIndex(index, baseQuery).uncategorized).toEqual({ entities: 2, seconds: 60 });
 
-    const folded = queryActivityIndex(index, { ...baseQuery, noise: policy });
-    expect(folded.catalog.rows.map((row) => row.id)).not.toContain("app:unknown.exe");
-    expect(folded.uncategorized).toEqual({ entities: 1, seconds: 30 });
+    const filtered = queryActivityIndex(index, { ...baseQuery, noise: policy });
+    expect(filtered.catalog.rows.map((row) => row.id)).not.toContain("app:unknown.exe");
+    expect(filtered.uncategorized).toEqual({ entities: 1, seconds: 30 });
 
-    // Revealing folded rows is a view toggle, not a change to what counts.
+    // Revealing hidden rows is a view toggle, not a change to what counts.
     const shown = queryActivityIndex(index, { ...baseQuery, noise: policy, includeNoise: true });
-    expect(shown.uncategorized).toEqual(folded.uncategorized);
+    expect(shown.uncategorized).toEqual(filtered.uncategorized);
   });
 
-  it("shows folded rows tagged when includeNoise is set", () => {
+  it("shows hidden rows tagged when includeNoise is set", () => {
     const shown = queryActivityIndex(index, { ...baseQuery, noise: policy, includeNoise: true });
     expect(shown.noiseHidden).toBe(1);
     expect(shown.catalog.rows.find((row) => row.id === "app:unknown.exe")?.noise).toBe("one_off");
     expect(shown.catalog.rows.find((row) => row.id === "app:code.exe")?.noise).toBeNull();
   });
 
-  it("lets search reach past the fold", () => {
+  it("lets search reach past the filter", () => {
     const found = queryActivityIndex(index, { ...baseQuery, noise: policy, search: "unknown" });
     expect(found.noiseHidden).toBe(0);
     expect(found.searchResults?.apps.rows.map((row) => row.id)).toEqual(["app:unknown.exe"]);
   });
 
-  it("folds installers by name no matter how long they ran", () => {
+  it("hides installers by name no matter how long they ran", () => {
     const utilityIndex = buildActivityIndex({
       ...source,
       sessions: [
@@ -298,5 +298,28 @@ describe("Activity noise folding", () => {
     expect(
       queryActivityIndex(utilityIndex, { ...query, noise: { ...policy, mode: "one_off" } }).catalog.rows,
     ).toHaveLength(2);
+  });
+
+  it("uses all-history totals so the selected range cannot make a recurring item rare", () => {
+    const recurring = buildActivityIndex({
+      ...source,
+      rules: [],
+      sessions: [
+        { id: 50, start: 10, end: 20, process: "timer.exe", title: "", domain: null, isAfk: false },
+        { id: 51, start: 40, end: 50, process: "timer.exe", title: "", domain: null, isAfk: false },
+        { id: 52, start: 70, end: 80, process: "timer.exe", title: "", domain: null, isAfk: false },
+        { id: 53, start: 100, end: 110, process: "timer.exe", title: "", domain: null, isAfk: false },
+      ],
+    });
+    const narrow = queryActivityIndex(recurring, {
+      ...baseQuery,
+      startSec: 95,
+      endSec: 120,
+      noise: policy,
+    });
+
+    expect(narrow.catalog.rows.map((row) => row.id)).toEqual(["app:timer.exe"]);
+    expect(narrow.catalog.rows[0].sessionCount).toBe(1);
+    expect(narrow.catalog.rows[0].noise).toBeNull();
   });
 });

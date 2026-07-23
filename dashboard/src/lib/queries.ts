@@ -129,6 +129,44 @@ export async function updateSetting(key: string, value: string): Promise<void> {
   );
 }
 
+// Mirrors fresh-install values in tracker/db.py DEFAULT_SETTINGS and the Rust
+// BOOTSTRAP_SQL. This intentionally selects only settings the global restore
+// action owns; runtime and onboarding metadata must survive it.
+export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
+  weekly_goal_hours: "0",
+  idle_threshold_seconds: "180",
+  heartbeat_seconds: "15",
+  week_start: "auto",
+  browser_processes:
+    "chrome.exe,msedge.exe,firefox.exe,brave.exe,opera.exe,vivaldi.exe,arc.exe,chromium.exe",
+  min_app_seconds_per_day: "0",
+  activity_noise_filter: "utilities",
+  activity_noise_max_seconds: "120",
+  activity_noise_max_sessions: "3",
+  focus_chain_max_gap_seconds: "120",
+  day_start_hour: "0",
+  day_end_hour: "24",
+  tracking_paused: "0",
+  tracking_paused_until: "0",
+  recording_consent: "0",
+  record_window_titles: "0",
+  launch_at_login: "0",
+};
+
+/** Restore only settings represented on the Settings tab. Runtime metadata,
+ *  onboarding completion, aliases, exclusions, categories, rules, and history
+ *  are intentionally outside this single atomic upsert. */
+export async function restoreDefaultSettings(): Promise<void> {
+  const db = await getDb();
+  const entries = Object.entries(DEFAULT_USER_SETTINGS);
+  const placeholders = entries.map((_, index) => `($${index * 2 + 1},$${index * 2 + 2})`);
+  await db.execute(
+    `INSERT INTO settings (key,value) VALUES ${placeholders.join(",")}` +
+      " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    entries.flat(),
+  );
+}
+
 /** Persist the full process-alias map (lowercased process name -> display name). */
 export async function saveProcessAliases(aliases: Record<string, string>): Promise<void> {
   await updateSetting("process_aliases", JSON.stringify(aliases));
@@ -398,7 +436,7 @@ export async function deleteHistoryBefore(cutoffSec: number): Promise<number> {
 // ---------------- status / maintenance ----------------
 
 export interface TrackerStatus {
-  lastHeartbeat: number | null; // unix seconds of newest live session end
+  lastHeartbeat: number | null; // unix seconds from the tracker's health signal
   liveSessionCount: number;
   totalSessionCount: number;
 }
@@ -406,7 +444,7 @@ export interface TrackerStatus {
 export async function fetchTrackerStatus(): Promise<TrackerStatus> {
   const db = await getDb();
   const rows = await db.select<{ last_hb: number | null; live_n: number; total_n: number }[]>(
-    "SELECT (SELECT MAX(end_ts) FROM sessions WHERE source='live') AS last_hb," +
+    "SELECT CAST((SELECT value FROM settings WHERE key='tracker_health_heartbeat') AS REAL) AS last_hb," +
       " (SELECT COUNT(*) FROM sessions WHERE source='live') AS live_n," +
       " (SELECT COUNT(*) FROM sessions) AS total_n",
   );

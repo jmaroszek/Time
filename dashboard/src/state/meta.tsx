@@ -38,7 +38,7 @@ export interface Meta {
   minAppSecondsPerDay: number;
   /** Max gap (s) between productive sessions that still counts as one focus streak. */
   focusChainMaxGapSeconds: number;
-  /** Which one-off and system-utility rows the Activity Library folds away. */
+  /** Which rare-item and utility rows the Activity Library hides. */
   noisePolicy: NoisePolicy;
   /** Hour-of-day window shown on the Timeline and Hour-of-Day plots (0–24). */
   dayStartHour: number;
