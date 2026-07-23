@@ -121,7 +121,7 @@ DEFAULT_SETTINGS = {
         "opera.exe,vivaldi.exe,arc.exe,chromium.exe"
     ),
     "min_app_seconds_per_day": "0",
-    # Activity Library noise folding (dashboard-only; the tracker records
+    # Activity Library noise filtering (dashboard-only; the tracker records
     # everything regardless). off | one_off | utilities.
     "activity_noise_filter": "utilities",
     "activity_noise_max_seconds": "120",

@@ -33,6 +33,11 @@ LOG_RETENTION_DAYS = 7
 # A fault in the 1 Hz loop repeats 86,400 times a day. Collapse identical
 # repeats to one line per interval so a single bad day cannot grow without limit.
 FAILURE_SUMMARY_SECONDS = 60.0
+# Tracker health is deliberately independent of session flushing. Exclusions,
+# privacy choices, or an idle database must never make a healthy process look
+# absent in Settings.
+HEALTH_HEARTBEAT_SECONDS = 5.0
+HEALTH_HEARTBEAT_KEY = "tracker_health_heartbeat"
 
 
 def acquire_single_instance() -> bool:
@@ -104,6 +109,15 @@ def log_database_state(raw_settings: dict[str, str]) -> None:
     )
 
 
+def stamp_tracker_health(conn, now: float) -> None:
+    """Publish process health without exposing or depending on recorded activity."""
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?)"
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (HEALTH_HEARTBEAT_KEY, str(int(now))),
+    )
+
+
 class FailureThrottle:
     """Bounds the daily log when the same failure repeats every tick.
 
@@ -162,6 +176,7 @@ def run() -> None:
     def _shutdown(*_args) -> bool:
         try:
             manager.shutdown(time.time())
+            stamp_tracker_health(conn, 0)
             conn.close()
             logging.info("Tracker stopped cleanly.")
         except Exception:
@@ -183,6 +198,7 @@ def run() -> None:
     poll = config.POLL_SECONDS
     next_tick = time.monotonic()
     last_settings_refresh = 0.0
+    last_health_publish = 0.0
     failures = FailureThrottle()
 
     while not stop_event.is_set():
@@ -193,6 +209,10 @@ def run() -> None:
             if now - last_settings_refresh >= poll:
                 manager.settings = db.get_settings(conn)
                 last_settings_refresh = now
+            monotonic_now = time.monotonic()
+            if monotonic_now - last_health_publish >= HEALTH_HEARTBEAT_SECONDS:
+                stamp_tracker_health(conn, now)
+                last_health_publish = monotonic_now
             snap = win32_probe.snapshot(now)
             manager.tick(snap)
         except Exception as exc:

@@ -1,18 +1,18 @@
-// Activity Library noise folding.
+// Activity Library noise filtering.
 //
 // A tracker records every foreground window, so the catalog fills up with
 // things nobody wants to track: a site opened once for four seconds, an AMD
 // driver bundle, a `.tmp` payload an installer extracted and then deleted.
-// Two independent tests fold those away.
+// Two independent tests hide those from the list.
 //
-//   one-off   — low total time AND few sessions. Both halves matter: a 15s app
+//   rare item — low lifetime time AND few lifetime sessions. Both halves matter: a 15s app
 //               opened twenty times is a habit, and a single 40-minute session
 //               is real work. Only the intersection is noise.
 //   utility   — the name says it is a machine chore, not an application.
 //               Installers can run for twenty minutes, so duration cannot
 //               catch these and a name pattern has to.
 //
-// Folding is a view filter over the catalog list. It never changes totals,
+// Filtering is a view treatment over the catalog list. It never changes totals,
 // Insights, or anything an entity contributes to a category.
 
 import type { ActivityEntityKind, ActivityStatus } from "./activity";
@@ -22,9 +22,9 @@ export type NoiseReason = "one_off" | "utility";
 
 export interface NoisePolicy {
   mode: NoiseMode;
-  /** Upper bound (exclusive) on total time for the one-off test. */
+  /** Upper bound (exclusive) on lifetime time for the rare-item test. */
   maxSeconds: number;
-  /** Upper bound (inclusive) on session count for the one-off test. */
+  /** Upper bound (inclusive) on lifetime session count for the rare-item test. */
   maxSessions: number;
 }
 
@@ -34,7 +34,7 @@ export const DEFAULT_NOISE_POLICY: NoisePolicy = {
   maxSessions: 3,
 };
 
-/** The fields folding looks at — a structural subset of ActivityEntitySummary. */
+/** The fields the filter looks at — a structural subset of ActivityEntitySummary. */
 export interface NoiseCandidate {
   kind: ActivityEntityKind;
   key: string;

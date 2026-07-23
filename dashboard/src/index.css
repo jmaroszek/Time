@@ -32,8 +32,32 @@
   50% { box-shadow: 0 0 0 5px rgba(22, 185, 129, 0); }
 }
 
+@keyframes alert-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(208, 125, 125, .58);
+    filter: brightness(1);
+    transform: scale(1);
+  }
+  48% {
+    box-shadow: 0 0 0 7px rgba(208, 125, 125, 0);
+    filter: brightness(1.22);
+    transform: scale(1.12);
+  }
+}
+
 .menu-pop { animation: menu-pop 140ms ease-out; }
 .live-pulse { animation: live-pulse 2s ease-out infinite; }
+.alert-pulse { animation: alert-pulse 1.35s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-pulse,
+  .alert-pulse {
+    animation: none;
+  }
+  .alert-pulse {
+    box-shadow: 0 0 0 2px rgba(208, 125, 125, .28);
+  }
+}
 
 /* Chart selectors stay legible without competing with the visualization.
    Their full control contrast returns once the user interacts with them.

@@ -56,7 +56,7 @@ export interface ActivityEntitySummary {
   rules: ActivityEntityRuleSlice[];
   status: ActivityStatus;
   exactRuleId: number | null;
-  /** Set by queryActivityIndex when the noise policy folds this entity away. */
+  /** Set by queryActivityIndex when the noise policy hides this entity. */
   noise: NoiseReason | null;
 }
 
@@ -102,9 +102,9 @@ export interface ActivityQuery {
   entityLimit: number;
   windowOffset: number;
   windowLimit: number;
-  /** Omitted means no folding — the library function thresholds nothing on its own. */
+  /** Omitted means no hiding — the library function thresholds nothing on its own. */
   noise?: NoisePolicy;
-  /** Show folded rows anyway, tagged, without changing what counts as noise. */
+  /** Show hidden rows anyway, tagged, without changing what counts as noise. */
   includeNoise?: boolean;
   selectedEntityId?: string | null;
   detailSearch?: string;
@@ -124,8 +124,8 @@ export interface ActivitySearchResults {
   windowTotal: number;
 }
 
-/** Triage counter for the library header. Folded rows are left out on purpose:
- *  uncategorized *and* noise-folded is garbage, and counting what the list
+/** Triage counter for the library header. Hidden rows are left out on purpose:
+ *  uncategorized *and* noise-filtered is clutter, and counting what the list
  *  below does not show makes the number and the list disagree. */
 export interface ActivityUncategorizedSummary {
   entities: number;
@@ -134,11 +134,11 @@ export interface ActivityUncategorizedSummary {
 
 export interface ActivityQueryResult {
   catalog: ActivityEntityPage;
-  /** Entities the noise policy folds out of the catalog, whether or not
+  /** Entities the noise policy hides from the catalog, whether or not
    *  includeNoise is currently showing them. Zero while searching. */
   noiseHidden: number;
   searchResults: ActivitySearchResults | null;
-  /** Entities with uncategorized time in range, after the noise fold. */
+  /** Entities with uncategorized time in range, after the noise filter. */
   uncategorized: ActivityUncategorizedSummary;
   selectedEntity: ActivityEntitySummary | null;
   detailSessions: ActivitySessionRow[];
@@ -156,6 +156,8 @@ export interface ActivityIndex {
   categories: Category[];
   rules: Rule[];
   exactRuleByEntity: Map<string, number>;
+  /** Stable all-history summaries used only to decide whether an item is rare. */
+  lifetimeEntities: Map<string, ActivityEntitySummary>;
   hasStoredTitles: boolean;
   /** Rules that won at least one session in all of history. A rule missing here
    *  is the one actionable usage signal left: nothing matches it, so it is a
@@ -246,14 +248,20 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
         : null;
     if (entityId !== null && !exactRuleByEntity.has(entityId)) exactRuleByEntity.set(entityId, rule.id);
   }
-  return {
+  const index: ActivityIndex = {
     sessions: indexed,
     categories: source.categories,
     rules: source.rules,
     exactRuleByEntity,
+    lifetimeEntities: new Map(),
     hasStoredTitles,
     appliedRuleIds: [...appliedRuleIds],
   };
+  index.lifetimeEntities = new Map(
+    aggregateEntities(index, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY)
+      .map((entity) => [entity.id, entity] as const),
+  );
+  return index;
 }
 
 function aggregateEntities(index: ActivityIndex, startSec: number, endSec: number): ActivityEntitySummary[] {
@@ -413,12 +421,15 @@ function page<T>(rows: T[], offset: number, limit: number): T[] {
 
 export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): ActivityQueryResult {
   const policy = query.noise;
+  const visibleEntities = aggregateEntities(index, query.startSec, query.endSec);
   const allEntities = policy
-    ? aggregateEntities(index, query.startSec, query.endSec).map((entity) => ({
+    ? visibleEntities.map((entity) => ({
         ...entity,
-        noise: classifyNoise(entity, policy),
+        // Rarity is a property of the full history, not of whichever date
+        // range happens to be visible. The row's displayed totals stay scoped.
+        noise: classifyNoise(index.lifetimeEntities.get(entity.id) ?? entity, policy),
       }))
-    : aggregateEntities(index, query.startSec, query.endSec);
+    : visibleEntities;
   const entitiesById = new Map(allEntities.map((entity) => [entity.id, entity]));
   const classificationFiltered = allEntities.filter((entity) =>
     matchesClassification(entity, query.classificationFilter),
@@ -427,8 +438,8 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     (entity) => query.typeFilter === "all" || entity.kind === query.typeFilter,
   );
   const search = query.search.trim().toLowerCase();
-  // Search deliberately reaches past the fold: someone typing "setup" is
-  // looking for exactly the thing the fold hides, and finding nothing would
+  // Search deliberately reaches past the filter: someone typing "setup" is
+  // looking for exactly the thing the list hides, and finding nothing would
   // read as missing data.
   const noiseHidden = search ? 0 : typeFiltered.filter((entity) => entity.noise !== null).length;
   const unfolded = noiseHidden > 0 && !query.includeNoise

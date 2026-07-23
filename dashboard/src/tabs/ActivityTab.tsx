@@ -392,7 +392,7 @@ export default function ActivityTab({
                     type="button"
                     onClick={() => setIncludeNoise((shown) => !shown)}
                     className="text-accent hover:text-accent/80"
-                    title="One-off and system-utility rows are folded out of this list. They still count in every total."
+                    title="Rare-item and utility rows are hidden from this list. They still count in every total."
                   >
                     {includeNoise
                       ? `Hide ${result.noiseHidden} filtered`
@@ -864,10 +864,10 @@ function EntityTable({
                       <span
                         className="rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px]"
                         title={entity.noise === "utility"
-                          ? "Looks like an installer, driver, or local file — normally folded out of this list."
-                          : "Seen briefly and rarely — normally folded out of this list."}
+                          ? "Looks like an installer, driver, or local file — normally hidden from this list."
+                          : "Seen briefly and rarely across all history — normally hidden from this list."}
                       >
-                        {entity.noise === "utility" ? "Utility" : "One-off"}
+                        {entity.noise === "utility" ? "Utility" : "Rare"}
                       </span>
                     )}
                   </span>

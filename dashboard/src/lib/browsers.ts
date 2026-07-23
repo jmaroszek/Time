@@ -10,6 +10,14 @@
 export const DEFAULT_BROWSER_PROCESSES =
   "chrome.exe,msedge.exe,firefox.exe,brave.exe,opera.exe,vivaldi.exe,arc.exe,chromium.exe";
 
+/** The settings field uses the names people recognize; matching keeps the
+ *  canonical executable suffix internally. Non-exe extensions stay visible. */
+export function displayBrowserProcesses(raw: string): string {
+  return normalizeBrowserProcesses(raw)
+    .map((process) => process.replace(/\.exe$/i, ""))
+    .join(", ");
+}
+
 export function normalizeBrowserProcess(raw: string): string {
   const base = raw.trim().toLowerCase().split(/[\\/]/).pop() ?? "";
   if (!base) return "";
