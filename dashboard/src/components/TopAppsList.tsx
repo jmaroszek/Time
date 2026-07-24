@@ -1,4 +1,5 @@
-// Top apps with quiet, category-aware deltas vs the previous period.
+// Top apps with quiet, direction-aware deltas vs the previous period. Category
+// shows up once per row, in the dot beside the name.
 
 import { useState } from "react";
 
@@ -82,12 +83,12 @@ export default function TopAppsList({
               )}
             </span>
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
+              {/* One accent fill for every bar: the dot already carries the
+                  category, and hues of unequal visual weight made equal-length
+                  bars read unequal — length is the only thing the bar encodes. */}
               <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${Math.max((app.seconds / max) * 100, 1.5)}%`,
-                  backgroundColor: app.category?.color ?? "#5b616b",
-                }}
+                className="h-full rounded-full bg-accent"
+                style={{ width: `${Math.max((app.seconds / max) * 100, 1.5)}%` }}
               />
             </div>
             <span className="w-14 shrink-0 text-right text-ink-2">{fmtDuration(app.seconds)}</span>
