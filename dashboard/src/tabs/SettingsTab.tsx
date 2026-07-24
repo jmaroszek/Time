@@ -14,6 +14,7 @@ import { displayBrowserProcesses, normalizeBrowserProcesses } from "../lib/brows
 import { getDbPath } from "../lib/db";
 import { explainDbError } from "../lib/dbErrors";
 import { fmtDuration } from "../lib/format";
+import { PALETTES, PRODUCTIVITY_OPTIONS } from "../lib/palettes";
 import {
   backupDatabase,
   countSessionsOlderThan,
@@ -53,8 +54,8 @@ const SPECS = {
 
 const NOISE_MODE_LABELS: Record<string, string> = {
   off: "Off",
-  one_off: "Rare items",
-  utilities: "Rare items + utilities",
+  one_off: "Rare",
+  utilities: "Rare + utilities",
 };
 
 const TRACKER_HEALTH_STALE_SECONDS = 8;
@@ -274,6 +275,66 @@ export default function SettingsTab() {
       <Section title="Focus & Idle">
         <Row label="AFK idle threshold" help="No input for this long marks you AFK — watching video without touching the mouse or keyboard counts as away." control={numberControl(SPECS.idle, "min")} />
         <Row label="Focus chain max gap" help="Productive sessions separated by no more than this much untracked time count as one focus chain." control={numberControl(SPECS.focus, "min")} />
+      </Section>
+
+      <Section
+        title="Appearance"
+        intro="Category and productivity colours across every chart. Switching palettes recolours the productivity bars and the swatches offered for new categories — but your existing categories keep the colours you gave them. To move an existing category onto the new palette, recolour it from its colour swatch in Categories & Rules."
+      >
+        <div className="flex flex-col gap-2" role="radiogroup" aria-label="Colour palette">
+          {PALETTES.map((option) => {
+            const selected = meta.palette.id === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => selectSetting("color_palette", option.id)}
+                className={`flex items-center gap-3 rounded-[11px] border px-3 py-2.5 text-left transition-colors ${selected ? "border-accent/70 bg-surface-3" : "border-edge bg-surface-2 hover:bg-surface-3"}`}
+              >
+                <span className="flex shrink-0 gap-1" aria-hidden="true">
+                  {option.swatches.map((swatch) => (
+                    <span key={swatch} className="h-4 w-4 rounded" style={{ backgroundColor: swatch }} />
+                  ))}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-semibold text-ink">{option.label}</span>
+                  <span className="block truncate text-[11px] text-ink-3">{option.description}</span>
+                </span>
+                <span className={`ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${selected ? "border-accent" : "border-edge-2"}`}>
+                  {selected && <span className="h-2 w-2 rounded-full bg-accent" />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+            Productivity bars
+          </div>
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Productivity bar colours">
+            {PRODUCTIVITY_OPTIONS.map((choice) => {
+              const selected = (meta.settings.productivity_style ?? "vivid") === choice.id;
+              return (
+                <button
+                  key={choice.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => selectSetting("productivity_style", choice.id)}
+                  className={`flex items-center gap-2 rounded-[10px] border px-2.5 py-1.5 transition-colors ${selected ? "border-accent/70 bg-surface-3" : "border-edge bg-surface-2 hover:bg-surface-3"}`}
+                >
+                  <span className="flex gap-1" aria-hidden="true">
+                    <span className="h-4 w-4 rounded" style={{ backgroundColor: choice.productive }} />
+                    <span className="h-4 w-4 rounded" style={{ backgroundColor: choice.unproductive }} />
+                  </span>
+                  <span className="text-[12px] font-medium text-ink">{choice.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </Section>
 
       <Section
@@ -634,7 +695,7 @@ function Row({ label, help, control }: { label: string; help: string; control: R
     <div className="flex items-center justify-between gap-4 border-t border-surface-2 px-4 py-[15px] first:border-t-0">
       <div className="min-w-0">
         <p className="text-[13px] font-medium text-ink">{label}</p>
-        <p className="mt-[5px] max-w-[280px] text-xs leading-snug text-ink-3">{help}</p>
+        <p className="mt-[5px] max-w-[400px] text-xs leading-snug text-ink-3">{help}</p>
       </div>
       <div className="shrink-0">{control}</div>
     </div>

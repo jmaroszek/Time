@@ -2,14 +2,8 @@ import { useMemo } from "react";
 
 import { fmtDuration } from "../lib/format";
 import type { HourlyActivitySummary } from "../lib/overview";
-import {
-  CHROME,
-  NEUTRAL_BAR,
-  PRODUCTIVE_BAR,
-  TOOLTIP_STYLE,
-  UNCATEGORIZED_BAR,
-  UNPRODUCTIVE_BAR,
-} from "../lib/chartTheme";
+import { CHROME, TOOLTIP_STYLE, UNCATEGORIZED_BAR } from "../lib/chartTheme";
+import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
 import { shouldShowUncategorized } from "./ProductiveHoursChart";
 
@@ -18,6 +12,7 @@ export default function HourlyActivityChart({
 }: {
   hours: HourlyActivitySummary[];
 }) {
+  const { palette } = useMeta();
   const option = useMemo<EChartsOption>(() => {
     const toMinutes = (seconds: number) => Math.round(seconds / 6) / 10;
     const productive = hours.map((hour) => toMinutes(hour.productiveSeconds));
@@ -86,7 +81,7 @@ export default function HourlyActivityChart({
           type: "bar",
           stack: "hour",
           data: productive,
-          itemStyle: { color: PRODUCTIVE_BAR },
+          itemStyle: { color: palette.productive },
           barMaxWidth: 24,
         },
         {
@@ -94,7 +89,7 @@ export default function HourlyActivityChart({
           type: "bar",
           stack: "hour",
           data: neutral,
-          itemStyle: { color: NEUTRAL_BAR },
+          itemStyle: { color: palette.neutral },
           barMaxWidth: 24,
         },
         {
@@ -103,7 +98,7 @@ export default function HourlyActivityChart({
           stack: "hour",
           data: unproductive,
           itemStyle: {
-            color: UNPRODUCTIVE_BAR,
+            color: palette.unproductive,
             borderRadius: hasUncategorized ? 0 : [3, 3, 0, 0],
           },
           barMaxWidth: 24,
@@ -120,7 +115,7 @@ export default function HourlyActivityChart({
           : []),
       ],
     };
-  }, [hours]);
+  }, [hours, palette]);
 
   return <EChart option={option} height={254} />;
 }

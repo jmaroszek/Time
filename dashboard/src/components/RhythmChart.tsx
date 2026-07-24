@@ -18,7 +18,8 @@ import {
   type WeekdayRhythmSummary,
 } from "../lib/overview";
 import { useMeta } from "../state/meta";
-import { ACTIVITY_METRIC_RAMPS, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { metricRamps } from "../lib/palettes";
+import { CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -31,7 +32,7 @@ export default function RhythmChart({
   summary: WeekdayRhythmSummary;
   metric?: ActivityMetric;
 }) {
-  const { aliases, weekStart, dayStartHour, dayEndHour } = useMeta();
+  const { aliases, weekStart, dayStartHour, dayEndHour, palette } = useMeta();
   const option = useMemo<EChartsOption>(() => {
     const { cells, weekdayCounts } = summary;
     const weekdayRows = weekStart === "Monday" ? [1, 2, 3, 4, 5, 6, 0] : [0, 1, 2, 3, 4, 5, 6];
@@ -85,7 +86,7 @@ export default function RhythmChart({
         // Rescaled per metric — every state is a subset of tracked, so a shared
         // scale would render the narrower fields uniformly dim.
         max: Math.max(maxMinutes, 1),
-        inRange: { color: ACTIVITY_METRIC_RAMPS[metric] },
+        inRange: { color: metricRamps(palette)[metric] },
       },
       series: [
         {
@@ -95,7 +96,7 @@ export default function RhythmChart({
         },
       ],
     };
-  }, [summary, metric, aliases, weekStart, dayStartHour, dayEndHour]);
+  }, [summary, metric, aliases, weekStart, dayStartHour, dayEndHour, palette]);
 
   return <EChart option={option} height={260} />;
 }

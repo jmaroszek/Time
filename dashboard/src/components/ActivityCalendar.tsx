@@ -17,7 +17,8 @@ import {
   type WeekStart,
 } from "../lib/time";
 import { useMeta } from "../state/meta";
-import { ACTIVITY_METRIC_RAMPS, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { metricRamps } from "../lib/palettes";
+import { CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 /** Above this many week columns, "auto" cell sizing lands near square by
@@ -53,14 +54,14 @@ export default function ActivityCalendar({
   range: Range;
   metric?: ActivityMetric;
 }) {
-  const { aliases, weekStart } = useMeta();
+  const { aliases, weekStart, palette } = useMeta();
   const option = useMemo<EChartsOption>(() => {
     const byKey = new Map(summaries.map((day) => [day.key, day]));
     const shaded = (day: DailyActivitySummary) => metricSeconds(day, metric);
     // Rescaled per metric: every state is a subset of tracked, so reusing the
     // tracked scale would wash the narrower fields out.
     const maxHours = Math.max(...summaries.map((day) => shaded(day) / 3600), 1);
-    const ramp = ACTIVITY_METRIC_RAMPS[metric];
+    const ramp = metricRamps(palette)[metric];
     const lastDay = addDays(range.end, -1);
     // A week-column count low enough that "auto" would stretch each cell into a
     // wide bar instead of a day. Below it, size the cells squarely and center
@@ -126,7 +127,7 @@ export default function ActivityCalendar({
         },
       ],
     };
-  }, [summaries, metric, aliases, weekStart, range]);
+  }, [summaries, metric, aliases, weekStart, range, palette]);
 
   const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart);
   const rows = orientation === "vertical" ? weekColumns : 7;
