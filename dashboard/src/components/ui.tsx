@@ -19,7 +19,7 @@ export function Card({
   return (
     <div className={`rounded-[14px] border border-edge bg-surface p-5 ${className}`}>
       {(title || right) && (
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex shrink-0 items-center justify-between">
           <h2
             className={`text-sm font-semibold text-ink ${titleAlign === "center" ? "w-full text-center" : ""}`}
           >
@@ -277,6 +277,8 @@ const VARIANTS = {
   default: "border-edge bg-surface-2 text-ink hover:border-edge-2 focus-visible:border-accent/60",
   quiet: "menu-quiet",
   bare: "border-transparent text-ink-3 hover:bg-surface-3 disabled:hover:bg-transparent",
+  resting: "border-edge bg-surface-2 text-ink-3 hover:border-edge-2 hover:text-ink-2 focus-visible:border-accent/60",
+  engaged: "border-accent/45 bg-accent/[.06] text-ink hover:border-accent/65 focus-visible:border-accent/60",
 } as const;
 /** Windows list views forget a typeahead buffer after roughly a second. */
 const TYPEAHEAD_RESET_MS = 900;
@@ -318,8 +320,14 @@ export function MenuSelect({
   label?: string;
   /** "quiet" dims the resting trigger so a selector sitting on a chart card
    *  does not compete with the chart it annotates. "bare" drops the border
-   *  for triggers that read as a row value rather than a form control. */
-  variant?: "default" | "quiet" | "bare";
+   *  for triggers that read as a row value rather than a form control.
+   *
+   *  "resting" and "engaged" are the two halves of a filter: a filter set to
+   *  "all" is a label for an absence and must not outshout the data it is not
+   *  narrowing, while one that *is* narrowing is state the reader has to be
+   *  able to see. Pick between them at the call site, which is the only place
+   *  that knows which of its values means "no filter". */
+  variant?: "default" | "quiet" | "bare" | "resting" | "engaged";
   /** "field" matches the taller text inputs, for menus that sit in a row
    *  beside one. Passing the padding through className instead would leave
    *  which utility wins up to Tailwind's ordering rather than the call site. */
@@ -556,6 +564,61 @@ export function CategoryDot({ color, label }: { color: string; label?: string })
       style={{ backgroundColor: color }}
       title={label}
     />
+  );
+}
+
+/**
+ * The app's checkbox. Native controls are drawn by the OS — a blue square with
+ * system corners in the middle of a dark rounded app — so the real input is
+ * kept for behaviour and hidden, and a peer-styled span is what gets seen.
+ */
+export function Checkbox({
+  checked,
+  onChange,
+  children,
+  label,
+  size = "sm",
+  align = "center",
+  className = "",
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  /** Visible text beside the box, styled by the caller through className. */
+  children?: ReactNode;
+  /** Accessible name where there is no visible text — a selection cell, say. */
+  label?: string;
+  /** "md" is for standalone hit targets like a row selector, where a 12px box
+   *  is a small thing to ask someone to hit repeatedly. */
+  size?: "sm" | "md";
+  /** "start" keeps the box on the first line of a wrapping label. */
+  align?: "center" | "start";
+  className?: string;
+}) {
+  const box = size === "md" ? "h-4 w-4" : "h-3 w-3";
+  const tick = size === "md" ? "h-3 w-3" : "h-2.5 w-2.5";
+  return (
+    <label
+      className={`group flex cursor-pointer gap-2 ${align === "start" ? "items-start" : "items-center"} ${className}`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        aria-label={children === undefined ? label : undefined}
+        onChange={(event) => onChange(event.target.checked)}
+        className="peer sr-only"
+      />
+      <span
+        aria-hidden="true"
+        className={`flex shrink-0 items-center justify-center rounded-[3px] border border-edge bg-surface text-ink-3 transition-colors group-hover:border-edge-2 peer-focus-visible:outline peer-focus-visible:outline-1 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-edge-2 ${box} ${align === "start" ? "mt-px" : ""}`}
+      >
+        {checked && (
+          <svg viewBox="0 0 12 12" className={tick} fill="none">
+            <path d="m2.5 6 2.1 2.1 4.9-4.9" stroke="currentColor" strokeWidth="1.4" />
+          </svg>
+        )}
+      </span>
+      {children}
+    </label>
   );
 }
 
