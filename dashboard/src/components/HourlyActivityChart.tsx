@@ -33,7 +33,7 @@ export default function HourlyActivityChart({
 
     return {
       animation: false,
-      grid: { left: 40, right: 12, top: 12, bottom: hasUncategorized ? 76 : 58 },
+      grid: { left: 40, right: 12, top: 12, bottom: hasUncategorized ? 84 : 62 },
       tooltip: {
         trigger: "axis",
         ...TOOLTIP_STYLE,
@@ -48,13 +48,14 @@ export default function HourlyActivityChart({
       },
       legend: {
         show: true,
-        bottom: 0,
+        bottom: 4,
         left: "center",
         width: "92%",
         data: stackNames,
         textStyle: { color: CHROME.axisLabel, fontSize: 11 },
         itemWidth: 14,
         itemHeight: 8,
+        itemGap: 14,
       },
       xAxis: {
         type: "category",
