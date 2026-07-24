@@ -87,7 +87,10 @@ body {
   color: var(--color-ink);
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow-y: scroll;
+  /* Reserves the scrollbar's width so switching tabs never shifts the layout
+     sideways, without the always-on track `overflow-y: scroll` paints — a tab
+     that fits its window should show nothing to drag. */
+  scrollbar-gutter: stable;
 }
 
 input[type="date"]::-webkit-calendar-picker-indicator {

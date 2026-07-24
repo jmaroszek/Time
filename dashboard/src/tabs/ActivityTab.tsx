@@ -6,11 +6,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 
 import {
   Button,
   Card,
   CategoryDot,
+  Checkbox,
   MenuSelect,
   RemoveButton,
   Spinner,
@@ -131,6 +133,10 @@ function isBuiltInIgnored(category: Category): boolean {
  *  little, not add a screen of rows at a time. */
 const ENTITY_PAGE = 50;
 
+/** Five swatches to a row, so the grid's width is fixed and can be used to keep
+ *  the menu on screen when a category sits near the right edge. */
+const SWATCH_MENU_WIDTH = 136;
+
 function formatDateTime(seconds: number): string {
   return new Date(seconds * 1000).toLocaleString([], {
     month: "short",
@@ -147,6 +153,27 @@ function formatShortDate(seconds: number): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+/** Whole days between two instants by local calendar date, so "yesterday"
+ *  means the previous date rather than 24 hours ago. */
+function calendarDaysAgo(then: Date, now: Date): number {
+  const thenMidnight = new Date(then.getFullYear(), then.getMonth(), then.getDate());
+  const nowMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((nowMidnight.getTime() - thenMidnight.getTime()) / 86_400_000);
+}
+
+/** A date is the least useful rendering of the most recent activity: for
+ *  anything touched today the time of day is the answer, and for yesterday
+ *  the word beats working the date out. Older than that, the date wins again. */
+export function formatLastSeen(seconds: number, now = new Date()): string {
+  const seen = new Date(seconds * 1000);
+  const days = calendarDaysAgo(seen, now);
+  if (days <= 0) {
+    return `Today, ${seen.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  }
+  if (days === 1) return "Yesterday";
+  return formatShortDate(seconds);
 }
 
 export default function ActivityTab({
@@ -352,9 +379,12 @@ export default function ActivityTab({
 
   const showingExclusions = classificationFilter === "excluded";
   return (
-    <div className="relative flex flex-col gap-4" aria-busy={analyzed.refreshing || sessionData.refreshing}>
+    <div
+      className="relative flex min-h-0 flex-1 flex-col gap-4"
+      aria-busy={analyzed.refreshing || sessionData.refreshing}
+    >
       {view === "library" && showDomainHint && (
-        <section className="rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-[11.5px] text-ink-2">
+        <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-[11.5px] text-ink-2">
           Browser time is not being split by website. Install the third-party &quot;URL in title&quot;
           extension so Time can read websites from browser window titles.
         </section>
@@ -363,40 +393,32 @@ export default function ActivityTab({
       {/* One card, whose title is the switcher: a floating control row above it
           left the page reading as two stacked chromes instead of "date picker
           up top, one card below". */}
+      {/* Only the Library fills the window. Categories & Rules is a short,
+          mostly-folded list, and stretching it to the viewport bought a screen
+          of empty card for nothing. It still takes min-h-0, so it sizes to its
+          content while staying able to shrink — enough categories opened at
+          once then scrolls the card instead of the page. */}
       <Card
+        className={`flex min-h-0 flex-col ${view === "library" ? "flex-1" : ""}`}
         title={<ViewSwitcher view={view} onView={setView} />}
         right={view === "library" ? (
           <span className="flex items-center gap-3 text-[11px] text-ink-3">
-            {result && !showingExclusions && (
-              <>
-                {result.uncategorized.entities > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setClassificationFilter(
-                      classificationFilter === "uncategorized" ? "all" : "uncategorized",
-                    )}
-                    className={`hover:text-ink-2 ${classificationFilter === "uncategorized" ? "text-ink-2" : ""}`}
-                    title={classificationFilter === "uncategorized"
-                      ? "Show every classification again"
-                      : "Show only items with uncategorized time"}
-                  >
-                    {result.uncategorized.entities} uncategorized · {fmtDuration(result.uncategorized.seconds)}
-                  </button>
-                )}
-                <span>{result.catalog.total} items in range</span>
-                {result.noiseHidden > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setIncludeNoise((shown) => !shown)}
-                    className="text-accent hover:text-accent/80"
-                    title="Rare-item and utility rows are hidden from this list. They still count in every total."
-                  >
-                    {includeNoise
-                      ? `Hide ${result.noiseHidden} filtered`
-                      : `${result.noiseHidden} filtered · Show`}
-                  </button>
-                )}
-              </>
+            {/* Muted, not accent: this is about rows nobody asked to see, and
+                it was the loudest thing in the header while being the least
+                consequential. The row count it used to sit beside is gone —
+                the load-more footer already reports it, and only to someone
+                who has scrolled far enough to be asking. */}
+            {result && !showingExclusions && result.noiseHidden > 0 && (
+              <button
+                type="button"
+                onClick={() => setIncludeNoise((shown) => !shown)}
+                className="underline-offset-2 hover:text-ink-2 hover:underline"
+                title="Rare-item and utility rows are hidden from this list. They still count in every total."
+              >
+                {includeNoise
+                  ? `Hide ${result.noiseHidden} filtered`
+                  : `${result.noiseHidden} filtered · Show`}
+              </button>
             )}
             {source && result && (
               <ActivityExportMenu
@@ -420,6 +442,7 @@ export default function ActivityTab({
               classificationFilter={classificationFilter}
               onClassificationFilter={setClassificationFilter}
               categories={meta.categories}
+              uncategorizedCount={result?.uncategorized.entities ?? 0}
             />
             {showingExclusions ? (
               <ExcludedPanel />
@@ -429,6 +452,7 @@ export default function ActivityTab({
                   {deferredSearch.trim() && result.searchResults ? (
                     <GroupedSearchResults
                       result={result}
+                      scale={result}
                       sort={sort}
                       direction={direction}
                       onSort={(next) => updateSort(next, sort, direction, setSort, setDirection)}
@@ -451,6 +475,7 @@ export default function ActivityTab({
                   ) : (
                     <EntityCatalog
                       page={result.catalog}
+                      scale={result}
                       sort={sort}
                       direction={direction}
                       onSort={(next) => updateSort(next, sort, direction, setSort, setDirection)}
@@ -554,13 +579,22 @@ function ViewButton({ active, onClick, children }: { active: boolean; onClick: (
   );
 }
 
-/** One bounded well for whatever the Library is showing. Without the bound the
- *  card stretches the page every time "load more" is pressed; with it, the
- *  footprint is stable and only the well gets deeper. */
+/**
+ * One bounded well for whatever the Library is showing. Without the bound the
+ * card stretches the page every time "load more" is pressed; with it, the
+ * footprint is stable and only the well gets deeper.
+ *
+ * The bound is the leftover viewport height rather than a fraction of it: the
+ * well does not start at the top of the screen, so any fixed vh can only be
+ * right at one window size — it left a tall monitor with several rows of dead
+ * space below the card and squeezed a short one.
+ */
 function TableRegion({ children }: { children: ReactNode }) {
   // pr-4 is the scrollbar's gutter: the last column is right-aligned, so
-  // without it the session counts sit against the scrollbar.
-  return <div className="scroll-well max-h-[62vh] overflow-auto pr-4">{children}</div>;
+  // without it the dates sit against the scrollbar.
+  return (
+    <div className="scroll-well min-h-[240px] flex-1 overflow-auto pr-4">{children}</div>
+  );
 }
 
 /**
@@ -571,11 +605,17 @@ function TableRegion({ children }: { children: ReactNode }) {
  * moves to whichever category comes first and disappears with them when none
  * are defined.
  */
-function classificationOptions(categories: Category[]): MenuOption[] {
+function classificationOptions(categories: Category[], uncategorizedCount: number): MenuOption[] {
   const named = categories.filter((category) => !category.isIgnored);
   return [
     { value: "all", label: "All classifications" },
-    { value: "uncategorized", label: "Uncategorized" },
+    // The count rides the option that applies the filter rather than sitting
+    // in the card header as a second entry point to it: one control, and one
+    // that can show whether it is engaged.
+    {
+      value: "uncategorized",
+      label: uncategorizedCount > 0 ? `Uncategorized (${uncategorizedCount})` : "Uncategorized",
+    },
     { value: "mixed", label: "Mixed" },
     ...named.map((category, i) => ({
       value: `category:${category.id}`,
@@ -595,6 +635,7 @@ function LibraryControls({
   classificationFilter,
   onClassificationFilter,
   categories,
+  uncategorizedCount,
 }: {
   search: string;
   onSearch: (value: string) => void;
@@ -603,12 +644,13 @@ function LibraryControls({
   classificationFilter: LibraryFilter;
   onClassificationFilter: (value: LibraryFilter) => void;
   categories: Category[];
+  uncategorizedCount: number;
 }) {
   // Search and type narrow recorded activity; the excluded list is not
   // recorded activity, so leaving them enabled there would be a lie.
   const searching = classificationFilter !== "excluded";
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-edge/50 pb-4">
+    <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 border-b border-edge/50 pb-4">
       {searching ? (
         <>
           <label className="relative min-w-[240px] flex-1">
@@ -625,6 +667,7 @@ function LibraryControls({
           </label>
           <MenuSelect
             size="field"
+            variant={typeFilter === "all" ? "resting" : "engaged"}
             label="Activity type"
             value={typeFilter}
             onChange={(value) => onTypeFilter(value as ActivityTypeFilter)}
@@ -642,10 +685,11 @@ function LibraryControls({
       )}
       <MenuSelect
         size="field"
+        variant={classificationFilter === "all" ? "resting" : "engaged"}
         label="Classification filter"
         value={classificationFilter}
         onChange={(value) => onClassificationFilter(value as LibraryFilter)}
-        options={classificationOptions(categories)}
+        options={classificationOptions(categories, uncategorizedCount)}
       />
     </div>
   );
@@ -699,6 +743,7 @@ function SortHeading({
 
 function EntityCatalog({
   page,
+  scale,
   sort,
   direction,
   onSort,
@@ -709,6 +754,7 @@ function EntityCatalog({
   onTryAllTime,
 }: {
   page: { rows: ActivityEntitySummary[]; total: number };
+  scale: BarScale;
   sort: ActivitySort;
   direction: ActivitySortDirection;
   onSort: (field: ActivitySort) => void;
@@ -723,6 +769,7 @@ function EntityCatalog({
     <>
       <EntityTable
         rows={page.rows}
+        scale={scale}
         sort={sort}
         direction={direction}
         onSort={onSort}
@@ -736,6 +783,7 @@ function EntityCatalog({
 
 function GroupedSearchResults({
   result,
+  scale,
   sort,
   direction,
   onSort,
@@ -753,6 +801,7 @@ function GroupedSearchResults({
   onTryAllTime,
 }: {
   result: ActivityQueryResult;
+  scale: BarScale;
   sort: ActivitySort;
   direction: ActivitySortDirection;
   onSort: (field: ActivitySort) => void;
@@ -776,12 +825,12 @@ function GroupedSearchResults({
     <div className="flex flex-col gap-5">
       {groups.apps.total > 0 && (
         <ResultGroup title="Apps" count={groups.apps.total}>
-          <EntityTable rows={groups.apps.rows} sort={sort} direction={direction} onSort={onSort} selectedEntityId={selectedEntityId} onSelect={onSelectEntity} />
+          <EntityTable rows={groups.apps.rows} scale={scale} sort={sort} direction={direction} onSort={onSort} selectedEntityId={selectedEntityId} onSelect={onSelectEntity} />
         </ResultGroup>
       )}
       {groups.websites.total > 0 && (
         <ResultGroup title="Websites" count={groups.websites.total}>
-          <EntityTable rows={groups.websites.rows} sort={sort} direction={direction} onSort={onSort} selectedEntityId={selectedEntityId} onSelect={onSelectEntity} />
+          <EntityTable rows={groups.websites.rows} scale={scale} sort={sort} direction={direction} onSort={onSort} selectedEntityId={selectedEntityId} onSelect={onSelectEntity} />
         </ResultGroup>
       )}
       {canLoadEntities && <LoadMore shown={groups.apps.rows.length + groups.websites.rows.length} total={groups.apps.total + groups.websites.total} onClick={onLoadEntities} />}
@@ -811,6 +860,7 @@ function ResultGroup({ title, count, children }: { title: string; count: number;
 
 function EntityTable({
   rows,
+  scale,
   sort,
   direction,
   onSort,
@@ -818,6 +868,7 @@ function EntityTable({
   onSelect,
 }: {
   rows: ActivityEntitySummary[];
+  scale: BarScale;
   sort: ActivitySort;
   direction: ActivitySortDirection;
   onSort: (field: ActivitySort) => void;
@@ -826,54 +877,89 @@ function EntityTable({
 }) {
   return (
     <div>
-      <table className="w-full min-w-[760px] table-fixed text-xs">
+      <table className="w-full min-w-[680px] table-fixed text-xs">
         {/* Sticky via a shadow, not a border: a collapsed table's borders do not
             travel with a stuck header row. */}
         <StickyHead>
           <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
-            <SortHeading label="Name" field="name" active={sort === "name"} direction={direction} onSort={onSort} className="w-[32%] text-left" />
-            <th className="w-[28%] pb-2 font-medium normal-case">Classification</th>
-            <SortHeading label="Time" field="seconds" active={sort === "seconds"} direction={direction} onSort={onSort} className="w-[13%] text-right" />
-            <SortHeading label="Last seen" field="lastSeen" active={sort === "lastSeen"} direction={direction} onSort={onSort} className="w-[17%] text-right" />
-            <SortHeading label="Sessions" field="sessions" active={sort === "sessions"} direction={direction} onSort={onSort} className="w-[10%] text-right" />
+            <SortHeading label="Name" field="name" active={sort === "name"} direction={direction} onSort={onSort} className="w-[27%] text-left" />
+            {/* Bar then duration, as in Top Apps. The column is kept barely
+                wider than the longest duration it can hold, because a
+                right-aligned number leaves a ragged left edge — the wider the
+                column, the further a short duration drifts from its own bar.
+                No heading: the bar draws what Time already sorts, so a second
+                one would name a dimension it cannot order independently. */}
+            <th className="w-[37%] pb-2"><span className="sr-only">Time relative to the busiest item</span></th>
+            <SortHeading label="Time" field="seconds" active={sort === "seconds"} direction={direction} onSort={onSort} className="w-[9%] text-right" />
+            {/* Centered, unlike the other numbers: a count that is nearly
+                always one or two digits, right-aligned, strands the digit at
+                the column edge with a hole beside it. Nothing here is read
+                down the column digit by digit, which is what right alignment
+                would buy. Centring only pays off if the column is wide enough
+                that its middle falls between its neighbours — a narrow one
+                parks the digit against Time and leaves the whole gap on the
+                other side. That width is why Last seen gives up four points it
+                does not need, and the left padding is the last 16px of it:
+                Last seen is right-aligned, so its text starts further in than
+                its column does, and matching the two gaps means offsetting the
+                centre by half that difference. */}
+            <SortHeading label="Days seen" field="days" active={sort === "days"} direction={direction} onSort={onSort} className="w-[15%] pl-8 text-center" />
+            <SortHeading label="Last seen" field="lastSeen" active={sort === "lastSeen"} direction={direction} onSort={onSort} className="w-[12%] text-right" />
           </tr>
         </StickyHead>
         <tbody>
           {rows.map((entity) => (
             <tr
               key={entity.id}
-              className={`cursor-pointer border-b border-edge/40 transition-colors hover:bg-white/[.018] ${selectedEntityId === entity.id ? "bg-white/[.025]" : ""}`}
-              tabIndex={0}
+              className={`cursor-pointer border-b border-edge/40 transition-colors hover:bg-white/[.035] ${selectedEntityId === entity.id ? "bg-white/[.05]" : ""}`}
               onClick={() => onSelect(entity.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onSelect(entity.id);
-                }
-              }}
             >
               <td className="py-2.5 pr-4">
                 <span className="flex min-w-0 flex-col gap-0.5">
-                  <span className="truncate" title={entity.key}>{entity.displayName}</span>
-                  <span className="flex items-center gap-1.5 text-[10px] leading-none text-ink-3">
-                    <span className="capitalize">{entity.kind}</span>
+                  {/* Every tag rides with the name, because each is a fact
+                      about the item: this one is new, that one is barely used.
+                      The line below is only how the row has been filed. Split
+                      across the two, a row that was both new and rare wore one
+                      badge on each line for no reason a reader could see. */}
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {/* The row is clickable for the mouse, but the keyboard
+                        needs a real control to land on — a focusable <tr>
+                        announces a row, not something that opens anything. */}
+                    <button
+                      type="button"
+                      title={entity.key}
+                      onClick={(event) => { event.stopPropagation(); onSelect(entity.id); }}
+                      className="truncate rounded-sm text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
+                    >
+                      {entity.displayName}
+                      <span className="sr-only"> — open details</span>
+                    </button>
+                    {entity.isNew && (
+                      <RowTag tone="accent" title="First seen in all of your history inside this date range.">New</RowTag>
+                    )}
                     {entity.noise && (
-                      <span
-                        className="rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px]"
+                      <RowTag
                         title={entity.noise === "utility"
                           ? "Looks like an installer, driver, or local file — normally hidden from this list."
                           : "Seen briefly and rarely across all history — normally hidden from this list."}
                       >
                         {entity.noise === "utility" ? "Utility" : "Rare"}
-                      </span>
+                      </RowTag>
                     )}
+                  </span>
+                  <span className="flex min-w-0 items-center gap-1.5 text-[10px] leading-none text-ink-3">
+                    <ClassificationLabel entity={entity} />
+                    <span aria-hidden="true" className="shrink-0">·</span>
+                    <span className="shrink-0 capitalize">{entity.kind}</span>
                   </span>
                 </span>
               </td>
-              <td className="py-2.5 pr-4"><ClassificationLabel entity={entity} /></td>
+              <td className="py-2.5 pr-4">
+                <ShareBar seconds={entity.seconds} maxSeconds={scale.maxSeconds} totalSeconds={scale.totalSeconds} />
+              </td>
               <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(entity.seconds)}</td>
-              <td className="py-2.5 text-right tabular-nums text-ink-3">{formatShortDate(entity.lastSeen)}</td>
-              <td className="py-2.5 text-right tabular-nums text-ink-3">{entity.sessionCount}</td>
+              <td className="py-2.5 pl-8 text-center tabular-nums text-ink-3">{entity.daysSeen}</td>
+              <td className="py-2.5 text-right tabular-nums text-ink-3">{formatLastSeen(entity.lastSeen)}</td>
             </tr>
           ))}
         </tbody>
@@ -882,41 +968,115 @@ function EntityTable({
   );
 }
 
+/** What every bar in one table is measured against: the heaviest row sets the
+ *  length, the range total sets the share reported on hover. Kept together so
+ *  the two can never be threaded through from different result sets. */
+type BarScale = Pick<ActivityQueryResult, "maxSeconds" | "totalSeconds">;
+
+/**
+ * A filled pill and nothing else. The fill alone is what holds a tag apart
+ * from the name beside it, which is why the border and the capitals both went:
+ * each was a third and fourth way of saying "this is a badge", and together
+ * they built a block twice the height of the word they annotated. Sentence
+ * case also keeps them in the app's voice, and the shape matches the drawer's
+ * Corrected mark, the one tag that already existed.
+ *
+ * Colour and size are set here rather than inherited, since these sit on the
+ * name's line and a tag taking its brightness would outshout it.
+ *
+ * Only two tones, and never one per tag: the label is already the distinction,
+ * so hue would restate it — the same reason the category dot left this table.
+ * "accent" marks a fact about the item worth noticing, "muted" a reason the
+ * row is normally hidden. Accent is safe here because it is the interface's
+ * own colour rather than any category's.
+ */
+function RowTag({
+  title,
+  tone = "muted",
+  children,
+}: {
+  title: string;
+  tone?: "muted" | "accent";
+  children: ReactNode;
+}) {
+  const styles = tone === "accent" ? "bg-accent/10 text-accent/85" : "bg-surface-3 text-ink-3";
+  return (
+    <span
+      className={`shrink-0 rounded-full px-1.5 py-[1px] text-[9.5px] font-medium leading-[1.4] ${styles}`}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Length relative to the heaviest row the filters admit, as in Top Apps: a
+ * full bar is "the most of anything here". Drawing the absolute share of all
+ * recorded time is the more literal reading, but no single app is a large
+ * fraction of a whole month — every row collapsed into the same short stub,
+ * which is the one thing a bar exists to prevent. The absolute share is still
+ * exact on hover, where a number can be read properly anyway.
+ *
+ * One accent fill: length is all the bar encodes, and the row's category is
+ * already spelled out under its name.
+ */
+function ShareBar({
+  seconds,
+  maxSeconds,
+  totalSeconds,
+}: {
+  seconds: number;
+  maxSeconds: number;
+  totalSeconds: number;
+}) {
+  if (maxSeconds <= 0) return null;
+  const share = totalSeconds > 0 ? seconds / totalSeconds : 0;
+  return (
+    <span
+      aria-hidden="true"
+      title={`${(share * 100).toFixed(share < 0.1 ? 1 : 0)}% of recorded time in range`}
+      className="block h-1.5 w-full overflow-hidden rounded-full bg-surface-2"
+    >
+      <span
+        className="block h-full rounded-full bg-accent"
+        style={{ width: `${Math.max((seconds / maxSeconds) * 100, 1.5)}%` }}
+      />
+    </span>
+  );
+}
+
+/**
+ * Classification as the first thing on the row's metadata line. The word alone
+ * carries it: a dot here would be a second encoding of what the label already
+ * says, and the states that most need telling apart — uncategorized, partly
+ * uncategorized, ignored — all share one gray, so it distinguished nothing
+ * where it mattered most.
+ */
 function ClassificationLabel({ entity }: { entity: ActivityEntitySummary }) {
-  if (entity.status === "uncategorized") {
-    return <span className="flex items-center gap-2 text-ink-3"><CategoryDot color={UNCATEGORIZED} />Uncategorized</span>;
-  }
+  if (entity.status === "uncategorized") return <span>Uncategorized</span>;
   if (entity.status === "partial") {
     return (
-      <span className="flex items-center gap-2 text-ink-2" title={`${fmtDuration(entity.uncategorizedSeconds)} remains uncategorized`}>
-        <CategoryDot color={UNCATEGORIZED} />Partially categorized
+      <span title={`${fmtDuration(entity.uncategorizedSeconds)} remains uncategorized`}>
+        Partly uncategorized
       </span>
     );
   }
-  if (entity.status === "mixed") {
-    return (
-      <span className="flex flex-col gap-1 text-ink-2">
-        <span className="flex items-center gap-2">
-          <span className="flex h-1.5 w-14 overflow-hidden rounded-full bg-surface-3" aria-label="Category distribution">
-            {entity.categories.map((category) => (
-              <span
-                key={category.categoryId}
-                title={`${category.name}: ${fmtDuration(category.seconds)}`}
-                style={{ width: `${(category.seconds / entity.seconds) * 100}%`, backgroundColor: category.color }}
-              />
-            ))}
-          </span>
-          Mixed
-        </span>
-        <span className="text-[9.5px] leading-tight text-ink-3">This item is categorized differently across its sessions.</span>
-      </span>
-    );
+  if (entity.status === "ignored") {
+    return <span title="Recorded, but left out of every Insights total.">Ignored</span>;
   }
   const category = entity.categories[0];
+  const label = entity.status === "mixed"
+    ? `${category.name} +${entity.categories.length - 1}`
+    : (category?.name ?? "Uncategorized");
   return (
-    <span className="flex items-center gap-2 text-ink-2">
-      <CategoryDot color={category?.color ?? UNCATEGORIZED} />
-      {entity.status === "ignored" ? "Ignored · Excluded from Insights" : (category?.name ?? "Uncategorized")}
+    <span
+      className="truncate"
+      title={entity.status === "mixed"
+        ? `Categorized differently across its sessions — ${entity.categories.map((slice) => `${slice.name} ${fmtDuration(slice.seconds)}`).join(", ")}`
+        : undefined}
+    >
+      {label}
     </span>
   );
 }
@@ -939,7 +1099,7 @@ function SessionTable({ rows, selected, onToggle, onEdit }: { rows: ActivitySess
         <tbody>
           {rows.map((session) => (
             <tr key={session.id} className="border-b border-edge/40">
-              <td className="py-2.5"><input type="checkbox" checked={selected.has(session.id)} onChange={() => onToggle(session.id)} aria-label={`Select session ${formatDateTime(session.start)}`} /></td>
+              <td className="py-2.5"><Checkbox size="md" checked={selected.has(session.id)} onChange={() => onToggle(session.id)} label={`Select session ${formatDateTime(session.start)}`} /></td>
               <td className="py-2.5 pr-3 tabular-nums text-ink-3">{formatDateTime(session.start)}</td>
               <td className="truncate py-2.5 pr-3" title={session.entityKey}>{session.displayName}</td>
               <td className="truncate py-2.5 pr-3 text-ink-2" title={session.title}>{session.title || "—"}</td>
@@ -1011,13 +1171,13 @@ function ExcludedPanel() {
 
   if (items === null) return <Spinner />;
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-[11px] leading-snug text-ink-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <p className="shrink-0 text-[11px] leading-snug text-ink-3">
         Exact exclusions stop matching apps or detected websites from ever being stored, whenever
         recording is enabled. Lifting one resumes tracking from now on; history deleted with the
         exclusion is not restored.
       </p>
-      <div className="scroll-well flex max-h-[46vh] flex-col gap-1.5 overflow-auto pr-4">
+      <div className="scroll-well flex min-h-[160px] flex-1 flex-col gap-1.5 overflow-auto pr-4">
         {items.map((item) => (
           <div key={`${item.kind}:${item.pattern}`} className="flex items-center gap-2.5 rounded-lg border border-edge/60 bg-surface-2 px-3 py-2">
             <RuleKindGlyph matchType={item.kind === "app" ? "process" : "domain"} />
@@ -1033,7 +1193,7 @@ function ExcludedPanel() {
           </p>
         )}
       </div>
-      <div className="border-t border-edge/50 pt-4">
+      <div className="shrink-0 border-t border-edge/50 pt-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className="flex rounded-lg border border-edge bg-surface-2 p-0.5">
             {(["app", "website"] as TrackingExclusionKind[]).map((option) => (
@@ -1057,10 +1217,9 @@ function ExcludedPanel() {
           />
           <Button variant="primary" disabled={saving || !draft.trim()} onClick={() => void add()}>Do not track</Button>
         </div>
-        <label className="mt-2 flex items-center gap-2 text-[10.5px] text-ink-3">
-          <input type="checkbox" checked={deleteHistory} onChange={(event) => setDeleteHistory(event.target.checked)} />
+        <Checkbox checked={deleteHistory} onChange={setDeleteHistory} className="mt-2 text-[10.5px] text-ink-3">
           Also delete matching history, after a count preview
-        </label>
+        </Checkbox>
         {kind === "website" && (
           <p className="mt-1 text-[10px] text-ink-3">
             Website exclusions need a detected browser domain; otherwise exclude the whole browser as an App.
@@ -1221,7 +1380,7 @@ function EntityDrawer({
             <div className="mt-3 flex flex-col gap-1.5">
               {sessions.map((session) => (
                 <div key={session.id} className="flex items-start gap-2 rounded-lg border border-edge/60 px-2.5 py-2 text-[11px] hover:bg-white/[.018]">
-                  <input type="checkbox" checked={selectedSessionIds.has(session.id)} onChange={() => onToggleSession(session.id)} className="mt-0.5" />
+                  <Checkbox size="md" align="start" checked={selectedSessionIds.has(session.id)} onChange={() => onToggleSession(session.id)} label={`Select session ${formatDateTime(session.start)}`} />
                   <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="text-ink-2">{formatDateTime(session.start)}</span><span className="text-ink-3">{fmtDuration(session.seconds)}</span>{session.isCorrected && <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] text-accent">Corrected</span>}</span>{session.title && <span className="mt-0.5 block truncate text-ink-3" title={session.title}>{session.title}</span>}<span className="mt-0.5 flex items-center gap-1.5 text-ink-3"><CategoryDot color={session.categoryColor ?? UNCATEGORIZED} />{session.categoryName ?? "Uncategorized"}{session.classificationSource === "session_override" ? " · Session override" : session.winningRuleType ? ` · ${RULE_LABELS[session.winningRuleType]} rule` : ""}</span></span>
                   <button type="button" onClick={() => onEditSession(session.id)} className="rounded px-1.5 py-1 text-[10.5px] text-accent hover:bg-accent/10">Edit</button>
                 </div>
@@ -1277,8 +1436,26 @@ function ActivityExportMenu({
       setExporting(null);
     }
   };
+  // A <details> keeps the disclosure free, but not the dismissal every other
+  // menu in the app gives: without these it stays open until clicked again.
+  const panel = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const dismiss = (event: Event) => {
+      const node = panel.current;
+      if (node?.open && !node.contains(event.target as Node)) node.open = false;
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && panel.current?.open) panel.current.open = false;
+    };
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
   return (
-    <details className="relative">
+    <details ref={panel} className="relative">
       <summary className="cursor-pointer list-none rounded-lg border border-edge px-3 py-1.5 text-xs text-ink-2 hover:bg-white/[.035]">Export</summary>
       <div className="absolute right-0 top-9 z-30 w-64 rounded-xl border border-edge bg-surface p-3 shadow-xl">
         <p className="text-[10.5px] leading-snug text-ink-3">Uses the selected date range. Search and library filters do not remove rows.</p>
@@ -1287,10 +1464,14 @@ function ActivityExportMenu({
           <Button disabled={exporting !== null} onClick={() => void run("sessions")}>{exporting === "sessions" ? "Preparing…" : "Session details CSV"}</Button>
         </div>
         {hasStoredTitles && (
-          <label className="mt-3 flex items-start gap-2 text-[10.5px] leading-snug text-ink-3">
-            <input type="checkbox" checked={includeTitles} onChange={(event) => setIncludeTitles(event.target.checked)} className="mt-0.5" />
-            Include stored window titles in session details. Titles may contain private document or message text.
-          </label>
+          <Checkbox
+            checked={includeTitles}
+            onChange={setIncludeTitles}
+            align="start"
+            className="mt-3 text-[10.5px] leading-snug text-ink-3"
+          >
+            Include stored window titles. They may contain private data.
+          </Checkbox>
         )}
       </div>
     </details>
@@ -1340,10 +1521,14 @@ function TrackingExclusionDialog({
         <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">This exact {scope.kind === "website" ? "website" : "app"} identity will be excluded whenever recording is enabled.</p>
         <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 font-mono text-[11px] text-ink-2">{preview?.normalizedPattern ?? scope.pattern}</p>
         {scope.kind === "website" && <p className="mt-2 text-[10.5px] text-ink-3">Website exclusions work only when Time can detect the browser domain.</p>}
-        <label className="mt-4 flex items-start gap-2 rounded-lg border border-bad/20 bg-bad/[.035] p-3 text-[11px] leading-snug text-ink-2">
-          <input type="checkbox" checked={deleteHistory} onChange={(event) => setDeleteHistory(event.target.checked)} className="mt-0.5" />
+        <Checkbox
+          checked={deleteHistory}
+          onChange={setDeleteHistory}
+          align="start"
+          className="mt-4 rounded-lg border border-bad/20 bg-bad/[.035] p-3 text-[11px] leading-snug text-ink-2"
+        >
           <span><span className="block font-medium">Also delete existing history</span>{preview ? `${preview.count} session${preview.count === 1 ? "" : "s"} · ${fmtDuration(preview.seconds)}. This cannot be undone without a backup.` : "Checking matching history…"}</span>
-        </label>
+        </Checkbox>
         <div className="mt-5 flex justify-end gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || !preview} onClick={() => void save()}>{saving ? "Saving…" : "Add exclusion"}</Button></div>
       </div>
     </div>
@@ -1538,7 +1723,10 @@ function CategoriesAndRules({
   const meta = useMeta();
   const banner = useBanner();
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set<number>());
-  const [colorMenu, setColorMenu] = useState<number | null>(null);
+  // Anchored to the swatch's measured position and rendered through a portal:
+  // the category list scrolls now, and a menu positioned inside it would be
+  // clipped by that scroll container the moment a row neared the bottom.
+  const [colorMenu, setColorMenu] = useState<{ id: number; left: number; top: number } | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [newName, setNewName] = useState("");
@@ -1608,10 +1796,15 @@ function CategoriesAndRules({
   };
 
   return (
-    <>
+    // Scrolls itself rather than the page once enough categories are open. The
+    // -mr-2/pr-2 pair keeps the scrollbar off the rows without indenting them
+    // when there is nothing to scroll.
+    <div className="scroll-well -mr-2 flex min-h-0 flex-col overflow-y-auto pr-2">
       {colorMenu !== null && <button type="button" aria-label="Close menu" className="fixed inset-0 z-40 cursor-default" onClick={() => setColorMenu(null)} />}
-      <p className="mb-1 text-[11px] text-ink-3">Rules classify all matching historical and future activity.</p>
-      <p className="mb-4 text-[11px] text-ink-3">When several rules match, Website wins, then Window, then App.</p>
+      <p className="mb-4 text-[11px] leading-relaxed text-ink-3">
+        Rules classify all matching historical and future activity. When several rules match,
+        Website wins, then Window, then App.
+      </p>
       <div className="flex flex-col gap-2">
         {meta.categories.map((category) => {
           const open = expanded.has(category.id);
@@ -1621,16 +1814,26 @@ function CategoriesAndRules({
           const rules = meta.rules.filter((rule) => rule.categoryId === category.id);
           const draft = draftFor(category.id);
           const beginRename = () => { setRenaming(category.id); setRenameDraft(category.name); };
-          // The colour grid is positioned in flow, so its row has to open its
-          // overflow to let that menu escape.
           return (
-            <div key={category.id} className={`rounded-[11px] border border-edge bg-surface-2 ${colorMenu === category.id ? "overflow-visible" : "overflow-hidden"}`}>
+            <div key={category.id} className="overflow-hidden rounded-[11px] border border-edge bg-surface-2">
               <div className="flex items-center gap-2.5 px-3 py-3 text-xs">
                 <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-[10px] text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span></button>
-                <span className="relative">
-                  <button type="button" title="Change color" aria-label={`Change color of ${category.name}`} className="block h-3 w-3 rounded hover:shadow-[0_0_0_2px_var(--color-edge-2)]" style={{ backgroundColor: category.color }} onClick={() => setColorMenu(colorMenu === category.id ? null : category.id)} />
-                  {colorMenu === category.id && <span className="menu-pop absolute left-0 top-[calc(100%+6px)] z-50 grid w-[136px] grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-[0_12px_34px_rgba(0,0,0,.5)]">{meta.palette.swatches.map((swatch) => <button key={swatch} type="button" aria-label={`Use color ${swatch}`} className={`h-4 w-4 rounded hover:shadow-[0_0_0_2px_var(--color-ink-3)] ${swatch === category.color.toLowerCase() ? "shadow-[0_0_0_2px_var(--color-ink-2)]" : ""}`} style={{ backgroundColor: swatch }} onClick={() => { setColorMenu(null); void setCategoryColor(category, swatch); }} />)}</span>}
-                </span>
+                <button
+                  type="button"
+                  title="Change color"
+                  aria-label={`Change color of ${category.name}`}
+                  className="block h-3 w-3 shrink-0 rounded hover:shadow-[0_0_0_2px_var(--color-edge-2)]"
+                  style={{ backgroundColor: category.color }}
+                  onClick={(event) => {
+                    if (colorMenu?.id === category.id) return setColorMenu(null);
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setColorMenu({
+                      id: category.id,
+                      left: Math.min(rect.left, window.innerWidth - SWATCH_MENU_WIDTH - 8),
+                      top: rect.bottom + 6,
+                    });
+                  }}
+                />
                 {/* Double-click renames; the expanded footer keeps a labeled
                     Rename button, because a double-click is invisible to anyone
                     working from the keyboard. */}
@@ -1673,7 +1876,10 @@ function CategoriesAndRules({
               </div>
               {open && (
                 <div id={`category-rules-${category.id}`} className="ml-[46px] border-t border-edge/50 px-3 py-3">
-                  <div className="flex flex-col gap-1.5">
+                  {/* A category with thirty rules should not push the ones
+                      below it off the screen: past a few rows the list becomes
+                      its own quiet scroll well. */}
+                  <div className="scroll-well flex max-h-[220px] flex-col gap-1.5 overflow-y-auto pr-2">
                     {rules.map((rule) => (
                       <div key={rule.id} className="-mx-2 flex items-center gap-2 rounded-lg px-2 py-1 text-[11.5px] hover:bg-white/[.028]">
                         <span className="flex w-[74px] shrink-0 items-center gap-1.5 text-[9.5px] uppercase tracking-[.04em] text-ink-3">
@@ -1728,6 +1934,30 @@ function CategoriesAndRules({
         })}
       </div>
       <div className="mt-4 flex items-center gap-2 border-t border-edge/50 pt-4"><input value={newName} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submitCategory(); }} placeholder="New category name" className="w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" /><Button variant="primary" disabled={!newName.trim()} onClick={() => void submitCategory()}>+ Add category</Button></div>
-    </>
+      {colorMenu !== null && createPortal(
+        <span
+          style={{ left: colorMenu.left, top: colorMenu.top, width: SWATCH_MENU_WIDTH }}
+          className="menu-pop fixed z-50 grid grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-[0_12px_34px_rgba(0,0,0,.5)]"
+        >
+          {meta.palette.swatches.map((swatch) => {
+            const category = meta.categories.find((item) => item.id === colorMenu.id);
+            return (
+              <button
+                key={swatch}
+                type="button"
+                aria-label={`Use color ${swatch}`}
+                className={`h-4 w-4 rounded hover:shadow-[0_0_0_2px_var(--color-ink-3)] ${swatch === category?.color.toLowerCase() ? "shadow-[0_0_0_2px_var(--color-ink-2)]" : ""}`}
+                style={{ backgroundColor: swatch }}
+                onClick={() => {
+                  setColorMenu(null);
+                  if (category) void setCategoryColor(category, swatch);
+                }}
+              />
+            );
+          })}
+        </span>,
+        document.body,
+      )}
+    </div>
   );
 }

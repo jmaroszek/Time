@@ -11,7 +11,7 @@ import { classifyNoise, type NoisePolicy, type NoiseReason } from "./noise";
 export type ActivityEntityKind = "app" | "website";
 export type ActivityStatus = "uncategorized" | "partial" | "mixed" | "single" | "ignored";
 export type ActivityTypeFilter = "all" | ActivityEntityKind;
-export type ActivitySort = "name" | "seconds" | "lastSeen" | "sessions";
+export type ActivitySort = "name" | "seconds" | "lastSeen" | "days";
 export type ActivitySortDirection = "asc" | "desc";
 
 export interface ActivitySource {
@@ -49,6 +49,9 @@ export interface ActivityEntitySummary {
   sourceProcesses: string[];
   seconds: number;
   sessionCount: number;
+  /** Distinct local days the entity was seen on. Separates a habit from a
+   *  binge, which equal totals and session counts cannot. */
+  daysSeen: number;
   firstSeen: number;
   lastSeen: number;
   uncategorizedSeconds: number;
@@ -58,6 +61,9 @@ export interface ActivityEntitySummary {
   exactRuleId: number | null;
   /** Set by queryActivityIndex when the noise policy hides this entity. */
   noise: NoiseReason | null;
+  /** Set by queryActivityIndex: first seen in all of history inside this range,
+   *  so it is genuinely new rather than merely new to what is on screen. */
+  isNew: boolean;
 }
 
 export interface ActivitySessionRow {
@@ -124,9 +130,9 @@ export interface ActivitySearchResults {
   windowTotal: number;
 }
 
-/** Triage counter for the library header. Hidden rows are left out on purpose:
- *  uncategorized *and* noise-filtered is clutter, and counting what the list
- *  below does not show makes the number and the list disagree. */
+/** Triage counter carried by the classification menu's Uncategorized option.
+ *  Hidden rows are left out on purpose: uncategorized *and* noise-filtered is
+ *  clutter, and a count on a filter must promise what picking it delivers. */
 export interface ActivityUncategorizedSummary {
   entities: number;
   seconds: number;
@@ -138,7 +144,17 @@ export interface ActivityQueryResult {
    *  includeNoise is currently showing them. Zero while searching. */
   noiseHidden: number;
   searchResults: ActivitySearchResults | null;
-  /** Entities with uncategorized time in range, after the noise filter. */
+  /** All recorded time in range, hidden and filtered rows included. Every
+   *  session maps to exactly one entity, so summing them double-counts
+   *  nothing. Backs the share each row reports, not the length it draws. */
+  totalSeconds: number;
+  /** The largest single row the current filters admit — what a full-length bar
+   *  represents. Absolute share sets that length honestly but compresses every
+   *  row into the same short stub, which is the one thing a bar exists to
+   *  avoid; the true share moves to the row's tooltip instead. */
+  maxSeconds: number;
+  /** Entities with uncategorized time in range, after the noise and type
+   *  filters — the same rows picking "Uncategorized" would land on. */
   uncategorized: ActivityUncategorizedSummary;
   selectedEntity: ActivityEntitySummary | null;
   detailSessions: ActivitySessionRow[];
@@ -173,11 +189,29 @@ interface MutableEntity {
   sourceProcesses: Set<string>;
   seconds: number;
   sessionCount: number;
+  days: Set<number>;
   firstSeen: number;
   lastSeen: number;
   uncategorizedSeconds: number;
   categorySeconds: Map<number, number>;
   ruleUsage: Map<number, { sessions: number; seconds: number }>;
+}
+
+/**
+ * Records every local calendar day a session covers, not just the one it
+ * started on: a session running past midnight was real activity on both days.
+ * Stepping with setDate keeps the walk correct across DST, where a day is not
+ * 86400 seconds long.
+ */
+function addDayKeys(target: Set<number>, startSec: number, endSec: number): void {
+  const cursor = new Date(startSec * 1000);
+  cursor.setHours(0, 0, 0, 0);
+  // Strictly less than: a session ending exactly at midnight touched the next
+  // day for no time at all.
+  while (cursor.getTime() / 1000 < endSec) {
+    target.add(cursor.getFullYear() * 10000 + (cursor.getMonth() + 1) * 100 + cursor.getDate());
+    cursor.setDate(cursor.getDate() + 1);
+  }
 }
 
 function entityIdentity(
@@ -281,6 +315,7 @@ function aggregateEntities(index: ActivityIndex, startSec: number, endSec: numbe
         sourceProcesses: new Set<string>(),
         seconds: 0,
         sessionCount: 0,
+        days: new Set<number>(),
         firstSeen: start,
         lastSeen: end,
         uncategorizedSeconds: 0,
@@ -292,6 +327,7 @@ function aggregateEntities(index: ActivityIndex, startSec: number, endSec: numbe
     entity.sourceProcesses.add(session.process);
     entity.seconds += seconds;
     entity.sessionCount += 1;
+    addDayKeys(entity.days, start, end);
     entity.firstSeen = Math.min(entity.firstSeen, start);
     entity.lastSeen = Math.max(entity.lastSeen, end);
     if (session.categoryId === null) entity.uncategorizedSeconds += seconds;
@@ -358,6 +394,7 @@ function aggregateEntities(index: ActivityIndex, startSec: number, endSec: numbe
       sourceProcesses: [...entity.sourceProcesses].sort(),
       seconds: entity.seconds,
       sessionCount: entity.sessionCount,
+      daysSeen: entity.days.size,
       firstSeen: entity.firstSeen,
       lastSeen: entity.lastSeen,
       uncategorizedSeconds: entity.uncategorizedSeconds,
@@ -366,6 +403,7 @@ function aggregateEntities(index: ActivityIndex, startSec: number, endSec: numbe
       status,
       exactRuleId: index.exactRuleByEntity.get(entity.id) ?? null,
       noise: null,
+      isNew: false,
     };
   });
 }
@@ -392,7 +430,7 @@ function compareEntities(
     if (sort === "name") comparison = left.displayName.localeCompare(right.displayName);
     else if (sort === "seconds") comparison = left.seconds - right.seconds;
     else if (sort === "lastSeen") comparison = left.lastSeen - right.lastSeen;
-    else comparison = left.sessionCount - right.sessionCount;
+    else comparison = left.daysSeen - right.daysSeen;
     return comparison * sign || left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id);
   };
 }
@@ -422,21 +460,32 @@ function page<T>(rows: T[], offset: number, limit: number): T[] {
 export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): ActivityQueryResult {
   const policy = query.noise;
   const visibleEntities = aggregateEntities(index, query.startSec, query.endSec);
-  const allEntities = policy
-    ? visibleEntities.map((entity) => ({
-        ...entity,
-        // Rarity is a property of the full history, not of whichever date
-        // range happens to be visible. The row's displayed totals stay scoped.
-        noise: classifyNoise(index.lifetimeEntities.get(entity.id) ?? entity, policy),
-      }))
-    : visibleEntities;
+  // "New" means new to your history, not new to what the range happens to show.
+  // A range reaching back to the very first session therefore has no new items
+  // at all, which is the honest answer rather than every row wearing the tag.
+  let earliestEver = Number.POSITIVE_INFINITY;
+  for (const lifetime of index.lifetimeEntities.values()) {
+    earliestEver = Math.min(earliestEver, lifetime.firstSeen);
+  }
+  const canBeNew = query.startSec > earliestEver;
+  const allEntities = visibleEntities.map((entity) => {
+    const lifetime = index.lifetimeEntities.get(entity.id) ?? entity;
+    return {
+      ...entity,
+      // Rarity is a property of the full history, not of whichever date
+      // range happens to be visible. The row's displayed totals stay scoped.
+      noise: policy ? classifyNoise(lifetime, policy) : null,
+      isNew: canBeNew && lifetime.firstSeen >= query.startSec,
+    };
+  });
+  const totalSeconds = allEntities.reduce((total, entity) => total + entity.seconds, 0);
   const entitiesById = new Map(allEntities.map((entity) => [entity.id, entity]));
+  const inType = (entity: ActivityEntitySummary) =>
+    query.typeFilter === "all" || entity.kind === query.typeFilter;
   const classificationFiltered = allEntities.filter((entity) =>
     matchesClassification(entity, query.classificationFilter),
   );
-  const typeFiltered = classificationFiltered.filter(
-    (entity) => query.typeFilter === "all" || entity.kind === query.typeFilter,
-  );
+  const typeFiltered = classificationFiltered.filter(inType);
   const search = query.search.trim().toLowerCase();
   // Search deliberately reaches past the filter: someone typing "setup" is
   // looking for exactly the thing the list hides, and finding nothing would
@@ -453,6 +502,12 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
         entity.sourceProcesses.some((process) => process.toLowerCase().includes(search)),
       )
     : sorted;
+
+  // Measured over every row the filters admit, not the loaded page, so the bar
+  // scale is fixed the moment the filters are: pressing Load more must never
+  // rescale the rows already on screen. Search groups share it too, which is
+  // what keeps an app's bar comparable with a website's.
+  const maxSeconds = identityMatches.reduce((most, entity) => Math.max(most, entity.seconds), 0);
 
   const catalog = {
     rows: page(identityMatches, query.entityOffset, query.entityLimit),
@@ -500,7 +555,12 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     catalog,
     noiseHidden,
     searchResults,
-    uncategorized: uncategorizedSummary(allEntities),
+    totalSeconds,
+    maxSeconds,
+    // Deliberately not classification-filtered: the count labels the option
+    // that applies that filter, so reading it from an already-filtered set
+    // would zero it the moment any other classification was chosen.
+    uncategorized: uncategorizedSummary(allEntities.filter(inType)),
     selectedEntity,
     detailSessions: page(detailRows, query.detailOffset ?? 0, query.detailLimit ?? 50).map(
       (session) => exposeDetailTitles ? session : { ...session, title: "" },

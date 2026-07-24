@@ -19,15 +19,40 @@ and **Categories & Rules**.
 
 With no search text, the Library is a complete catalog of Apps and Websites in
 the visible range. It includes ignored activity, excludes AFK identities, and
-never uses Insights' minimum-app threshold. Name, classification, time, last
-seen, and session count can be sorted. The table sits in a fixed-height region
-with its header row pinned, and loads 50 items at a time, so **Load more**
-deepens that region instead of stretching the page.
+never uses Insights' minimum-app threshold. Four columns, all sortable:
 
-The card header counts how many items are in range, and — when there are any —
-how many carry uncategorized time. Clicking that count applies the
-**Uncategorized** filter, and clicking it again clears it. Rows the noise filter
-hides are left out of the count as well as the list, so the two always agree.
+- **Name** — the friendly name, over a quieter line carrying the item's
+  classification, whether it is an App or a Website, and any tags.
+- **Time** — recorded time in range, drawn as a bar against the busiest row and
+  then stated exactly, the same way Insights lists top apps. The heaviest item
+  fills the track and everything else is measured against it; hovering a bar
+  reports that item's exact share of all recorded time in the range. The scale
+  follows the filters, not the loaded page, so **Load more** never redraws the
+  bars above it.
+- **Days seen** — how many distinct days the item was used on, which separates
+  a daily habit from a single long sitting. A session running past midnight
+  counts for both days.
+- **Last seen** — the time of day for anything seen today, **Yesterday** for
+  the day before, and the date beyond that.
+
+Tags sit beside the name, since each describes the item rather than how it has
+been classified. Items first recorded anywhere in your history inside the
+visible range are tagged **New**; a range reaching back to your first-ever
+session tags nothing, because everything would qualify. **Rare** and
+**Utility** mark rows the list normally hides, and appear only while those
+rows are being shown.
+
+The table fills the window's remaining height, ending just short of the bottom
+of the screen, with its header row pinned and 50 items loaded at a time — so
+**Load more** deepens the table's own scroll region instead of stretching the
+page, and a taller window simply shows more rows. The count of loaded and total
+items sits with **Load more** at the foot of the list, where someone scrolling
+is asking for it.
+
+The **Uncategorized** filter carries a count of the items it would show.
+Rows the noise filter hides are left out of that count as well as the list, so
+the two always agree, and the count follows the Apps/Websites filter for the
+same reason.
 
 ### Hidden rows
 
@@ -66,13 +91,15 @@ remain searchable if future title capture is later disabled. The type filter
 narrows Apps and Websites; Window matches stay separately labeled. Date and
 classification filters apply throughout.
 
-Classification status describes the activity represented by the current range:
+Classification status describes the activity represented by the current range,
+and leads each row's second line:
 
 - **Uncategorized** has no categorized time.
-- **Partially categorized** has categorized and uncategorized time, so it still
+- **Partly uncategorized** has categorized and uncategorized time, so it still
   needs attention.
-- **Mixed** has more than one category across its sessions.
 - A category name means all represented time resolves to that one category.
+  A trailing count, as in *Dev +2*, means the item is categorized differently
+  across its sessions; the full split is in its details.
 - **Ignored** means all represented activity is excluded from Insights.
 
 Selecting an App or Website opens its details: friendly and recorded identity,
@@ -129,7 +156,9 @@ Rules are removed with a quiet ✕ on their row. Each rule's kind is marked by a
 small glyph — a square for App, a titled frame for Window, a globe for Website —
 because color in this app means category identity. A rule nothing has ever
 matched is tagged **unused**, which is the one case worth acting on; per-rule
-usage in context lives in each item's details, under **Rules in use**.
+usage in context lives in each item's details, under **Rules in use**. A long
+rule list scrolls inside its own category rather than pushing the categories
+below it off the screen.
 
 The interface uses plain rule names while keeping the same matching behavior:
 

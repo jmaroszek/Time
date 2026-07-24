@@ -323,3 +323,133 @@ describe("Activity noise filtering", () => {
     expect(narrow.catalog.rows[0].noise).toBeNull();
   });
 });
+
+/** A local wall-clock instant, so sessions built from it fall on the intended
+ *  date in every timezone the suite runs under. */
+function localSec(year: number, month: number, day: number, hour = 12): number {
+  return new Date(year, month - 1, day, hour).getTime() / 1000;
+}
+
+describe("Days seen", () => {
+  const spanning: ActivitySource = {
+    ...source,
+    rules: [],
+    sessions: [
+      // Two visits on one day, then one the next: three sessions, two days.
+      { id: 60, start: localSec(2026, 3, 10, 9), end: localSec(2026, 3, 10, 10), process: "app.exe", title: "", domain: null, isAfk: false },
+      { id: 61, start: localSec(2026, 3, 10, 14), end: localSec(2026, 3, 10, 15), process: "app.exe", title: "", domain: null, isAfk: false },
+      { id: 62, start: localSec(2026, 3, 11, 9), end: localSec(2026, 3, 11, 10), process: "app.exe", title: "", domain: null, isAfk: false },
+      // One session across midnight is activity on both dates.
+      { id: 63, start: localSec(2026, 3, 12, 23), end: localSec(2026, 3, 13, 1), process: "night.exe", title: "", domain: null, isAfk: false },
+    ],
+  };
+  const wideQuery: ActivityQuery = {
+    ...baseQuery,
+    startSec: localSec(2026, 3, 1),
+    endSec: localSec(2026, 3, 20),
+  };
+
+  it("counts distinct local days rather than sessions", () => {
+    const result = queryActivityIndex(buildActivityIndex(spanning), wideQuery);
+    const app = result.catalog.rows.find((row) => row.id === "app:app.exe");
+    expect(app?.sessionCount).toBe(3);
+    expect(app?.daysSeen).toBe(2);
+  });
+
+  it("credits both dates a session spans across midnight", () => {
+    const result = queryActivityIndex(buildActivityIndex(spanning), wideQuery);
+    expect(result.catalog.rows.find((row) => row.id === "app:night.exe")?.daysSeen).toBe(2);
+  });
+
+  it("counts only days inside the range, and sorts by them", () => {
+    const result = queryActivityIndex(buildActivityIndex(spanning), {
+      ...wideQuery,
+      startSec: localSec(2026, 3, 11, 0),
+      sort: "days",
+      direction: "desc",
+    });
+    expect(result.catalog.rows.map((row) => [row.id, row.daysSeen])).toEqual([
+      ["app:night.exe", 2],
+      ["app:app.exe", 1],
+    ]);
+  });
+});
+
+describe("New items", () => {
+  const history: ActivitySource = {
+    ...source,
+    rules: [],
+    sessions: [
+      { id: 70, start: 100, end: 200, process: "old.exe", title: "", domain: null, isAfk: false },
+      { id: 71, start: 1000, end: 1100, process: "old.exe", title: "", domain: null, isAfk: false },
+      { id: 72, start: 1000, end: 1100, process: "fresh.exe", title: "", domain: null, isAfk: false },
+    ],
+  };
+
+  it("marks only what first appeared inside the range", () => {
+    const result = queryActivityIndex(buildActivityIndex(history), {
+      ...baseQuery,
+      startSec: 900,
+      endSec: 2000,
+    });
+    expect(result.catalog.rows.find((row) => row.id === "app:fresh.exe")?.isNew).toBe(true);
+    expect(result.catalog.rows.find((row) => row.id === "app:old.exe")?.isNew).toBe(false);
+  });
+
+  it("marks nothing when the range reaches back to the first session ever", () => {
+    const result = queryActivityIndex(buildActivityIndex(history), {
+      ...baseQuery,
+      startSec: 0,
+      endSec: 2000,
+    });
+    expect(result.catalog.rows.every((row) => !row.isNew)).toBe(true);
+  });
+});
+
+describe("Range totals", () => {
+  it("sums every recorded second in range, filters and hidden rows included", () => {
+    const result = queryActivityIndex(buildActivityIndex(source), {
+      ...baseQuery,
+      typeFilter: "app",
+      classificationFilter: "uncategorized",
+    });
+    const shown = result.catalog.rows.reduce((total, row) => total + row.seconds, 0);
+    // Four non-AFK app sessions plus two website ones, 30s each.
+    expect(result.totalSeconds).toBe(180);
+    expect(shown).toBeLessThan(result.totalSeconds);
+  });
+
+  it("scales bars to the heaviest admitted row, not to the loaded page", () => {
+    const index = buildActivityIndex(source);
+    const full = queryActivityIndex(index, baseQuery);
+    // One row on screen or all of them, the bar scale has to be identical —
+    // otherwise Load more silently redraws every bar above it.
+    const firstPage = queryActivityIndex(index, { ...baseQuery, entityLimit: 1 });
+    expect(firstPage.catalog.rows).toHaveLength(1);
+    expect(firstPage.maxSeconds).toBe(full.maxSeconds);
+    expect(full.maxSeconds).toBe(
+      Math.max(...full.catalog.rows.map((row) => row.seconds)),
+    );
+  });
+
+  it("rescales when a filter changes which rows are admitted", () => {
+    const index = buildActivityIndex(source);
+    const websites = queryActivityIndex(index, { ...baseQuery, typeFilter: "website" });
+    expect(websites.maxSeconds).toBe(
+      Math.max(...websites.catalog.rows.map((row) => row.seconds)),
+    );
+    // The range total is a property of the range, so it does not move with the
+    // filter the way the bar scale does.
+    expect(websites.totalSeconds).toBe(queryActivityIndex(index, baseQuery).totalSeconds);
+  });
+
+  it("scopes the uncategorized count to the type filter but not the classification", () => {
+    const index = buildActivityIndex(source);
+    const all = queryActivityIndex(index, { ...baseQuery, classificationFilter: "mixed" });
+    // Surviving a different classification filter is the point: the count
+    // labels the option that would apply its own.
+    expect(all.uncategorized.entities).toBe(2);
+    const websitesOnly = queryActivityIndex(index, { ...baseQuery, typeFilter: "website" });
+    expect(websitesOnly.uncategorized.entities).toBe(1);
+  });
+});

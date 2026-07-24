@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { invoke } from "@tauri-apps/api/core";
 
 import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePicker";
-import { Spinner } from "./components/ui";
+import { Checkbox, Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
 import { currentHistoryRevision, subscribeHistoryInvalidation } from "./lib/historyInvalidation";
@@ -112,8 +112,19 @@ function Shell() {
 
   const showRange = tab === "insights" || tab === "activity";
 
+  // Activity bounds its own scroll wells, and a percentage of an auto height
+  // resolves to auto: without a definite height here, its "fill the leftover
+  // space" simply grew the page instead. Both of its views scroll internally,
+  // so the page itself is held shut — there is nothing below the fold to reach
+  // and a drag that moved the header off screen would only ever be a bug.
+  // The other tabs keep min-height, which lets them run past the viewport and
+  // scroll with their padding intact.
+  const bounded = tab === "activity";
+
   return (
-    <div className="mx-auto flex min-h-full max-w-6xl flex-col gap-4 px-6 py-5">
+    <div
+      className={`mx-auto flex max-w-6xl flex-col gap-4 px-6 py-5 ${bounded ? "h-full overflow-hidden" : "min-h-full"}`}
+    >
       <header className="flex flex-wrap items-center justify-between gap-3">
         <TabBar tab={tab} onTab={setTab} />
         {showRange && (
@@ -133,7 +144,10 @@ function Shell() {
 
       {firstRun && <FirstRunPanel status={status} />}
 
-      <main className="flex-1">
+      {/* A flex column so a tab can opt into filling the leftover viewport
+          height — Activity does, to bound its own scroll wells. Tabs that do
+          not simply size to their content, as they did before. */}
+      <main className="flex min-h-0 flex-1 flex-col">
         {tab === "insights" && (
           <OverviewTab range={range} preset={preset} firstSessionSec={firstSessionSec} view={insightsView} />
         )}
@@ -331,18 +345,18 @@ function ConsentCheck({
   detail: string;
 }) {
   return (
-    <label className="flex cursor-pointer gap-3 rounded-xl border border-edge bg-surface-dim p-4">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
-      />
+    <Checkbox
+      checked={checked}
+      onChange={onChange}
+      size="md"
+      align="start"
+      className="gap-3 rounded-xl border border-edge bg-surface-dim p-4"
+    >
       <span>
         <span className="block font-medium text-ink">{title}</span>
         <span className="mt-1 block text-xs leading-relaxed text-ink-3">{detail}</span>
       </span>
-    </label>
+    </Checkbox>
   );
 }
 
