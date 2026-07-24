@@ -20,15 +20,13 @@ import { addDays, type Range } from "../lib/time";
 import type { WeekStart } from "../lib/time";
 import { fmtShortDate } from "../lib/format";
 import EChart, { type EChartsOption } from "./EChart";
+import { useMeta } from "../state/meta";
 import {
   ANNOTATION,
   CHROME,
-  NEUTRAL_BAR,
-  PRODUCTIVE_BAR,
   TOOLTIP_STYLE,
   UNCATEGORIZED,
   UNCATEGORIZED_BAR,
-  UNPRODUCTIVE_BAR,
 } from "../lib/chartTheme";
 
 export interface CategorySeries {
@@ -178,6 +176,7 @@ export default function ProductiveHoursChart({
   stackBy?: ActivityStack;
   categories?: Category[];
 }) {
+  const { palette } = useMeta();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [chartWidth, setChartWidth] = useState(0);
   useEffect(() => {
@@ -262,15 +261,15 @@ export default function ProductiveHoursChart({
 
     const hasUncategorized = shouldShowUncategorized(uncategorizedBars);
     const stateStacks: CategorySeries[] = [
-      { name: "Productive", color: PRODUCTIVE_BAR, hours: prodBars },
-      { name: "Neutral", color: NEUTRAL_BAR, hours: neutralBars },
-      { name: "Unproductive", color: UNPRODUCTIVE_BAR, hours: unproductiveBars },
+      { name: "Productive", color: palette.productive, hours: prodBars },
+      { name: "Neutral", color: palette.neutral, hours: neutralBars },
+      { name: "Unproductive", color: palette.unproductive, hours: unproductiveBars },
       ...(hasUncategorized
         ? [{ name: "Uncategorized", color: UNCATEGORIZED_BAR, hours: uncategorizedBars }]
         : []),
     ];
     return { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks };
-  }, [historyDays, range, labelMode, granularity, weekStart]);
+  }, [historyDays, range, labelMode, granularity, weekStart, palette]);
 
   const option = useMemo<EChartsOption>(() => {
     const { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks } = agg;

@@ -15,7 +15,8 @@ import {
   type MonthlyActivitySummary,
 } from "../lib/overview";
 import { useMeta } from "../state/meta";
-import { ACTIVITY_METRIC_RAMPS, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { metricRamps } from "../lib/palettes";
+import { CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -44,7 +45,7 @@ export default function MonthCalendarChart({
   summaries: MonthlyActivitySummary[];
   metric?: ActivityMetric;
 }) {
-  const { aliases } = useMeta();
+  const { aliases, palette } = useMeta();
   const years = useMemo(
     () => [...new Set(summaries.map((month) => month.year))].sort((a, b) => a - b),
     [summaries],
@@ -102,7 +103,7 @@ export default function MonthCalendarChart({
         show: false,
         min: 0,
         max: Math.max(maxHours, 1),
-        inRange: { color: ACTIVITY_METRIC_RAMPS[metric] },
+        inRange: { color: metricRamps(palette)[metric] },
       },
       series: [
         {
@@ -112,7 +113,7 @@ export default function MonthCalendarChart({
         },
       ],
     };
-  }, [summaries, years, metric, aliases]);
+  }, [summaries, years, metric, aliases, palette]);
 
   const height = CELL_HEIGHT * years.length + CHART_TOP + CHART_BOTTOM;
   // Cap the width so 12 columns stay near-square in a full-width card, and

@@ -37,13 +37,8 @@ import {
   type MatchType,
   type Productivity,
 } from "../lib/classify";
-import {
-  CATEGORY_SWATCHES,
-  NEUTRAL_BAR,
-  PRODUCTIVE_BAR,
-  UNCATEGORIZED,
-  UNPRODUCTIVE_BAR,
-} from "../lib/chartTheme";
+import { UNCATEGORIZED } from "../lib/chartTheme";
+import type { Palette } from "../lib/palettes";
 import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
 import { fmtDuration } from "../lib/format";
 import { clipSessions } from "../lib/metrics";
@@ -84,14 +79,16 @@ type ActivityView = "library" | "rules";
 type LibraryFilter = ActivityClassificationFilter | "excluded";
 
 /** One palette for productivity everywhere it names a state: the chart bars and
- *  these classification chips share chartTheme's fills. Ignored keeps its own
- *  gray — it is an absence of judgment, not one of the three states. */
-const STATE_COLORS: Record<CategoryState, string> = {
-  productive: PRODUCTIVE_BAR,
-  neutral: NEUTRAL_BAR,
-  unproductive: UNPRODUCTIVE_BAR,
-  ignored: "#5b616b",
-};
+ *  these classification chips share the selected palette's fills. Ignored keeps
+ *  its own gray — it is an absence of judgment, not one of the three states. */
+function stateColors(palette: Palette): Record<CategoryState, string> {
+  return {
+    productive: palette.productive,
+    neutral: palette.neutral,
+    unproductive: palette.unproductive,
+    ignored: "#5b616b",
+  };
+}
 
 /** The three productivity states a category can be given. Ignoring is not among
  *  them: the built-in Ignored category is the one ignore mechanism, so the flag
@@ -1570,7 +1567,8 @@ function CategoriesAndRules({
   const submitCategory = async () => {
     if (!newName.trim()) return;
     const used = new Set(meta.categories.map((category) => category.color.toLowerCase()));
-    const color = CATEGORY_SWATCHES.find((swatch) => !used.has(swatch)) ?? CATEGORY_SWATCHES[meta.categories.length % CATEGORY_SWATCHES.length];
+    const swatches = meta.palette.swatches;
+    const color = swatches.find((swatch) => !used.has(swatch)) ?? swatches[meta.categories.length % swatches.length];
     try {
       const id = await addCategory(newName, color, "unproductive");
       setNewName("");
@@ -1618,6 +1616,7 @@ function CategoriesAndRules({
         {meta.categories.map((category) => {
           const open = expanded.has(category.id);
           const state = categoryState(category);
+          const stateColorMap = stateColors(meta.palette);
           const locked = isBuiltInIgnored(category);
           const rules = meta.rules.filter((rule) => rule.categoryId === category.id);
           const draft = draftFor(category.id);
@@ -1630,7 +1629,7 @@ function CategoriesAndRules({
                 <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-[10px] text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span></button>
                 <span className="relative">
                   <button type="button" title="Change color" aria-label={`Change color of ${category.name}`} className="block h-3 w-3 rounded hover:shadow-[0_0_0_2px_var(--color-edge-2)]" style={{ backgroundColor: category.color }} onClick={() => setColorMenu(colorMenu === category.id ? null : category.id)} />
-                  {colorMenu === category.id && <span className="menu-pop absolute left-0 top-[calc(100%+6px)] z-50 grid w-[136px] grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-[0_12px_34px_rgba(0,0,0,.5)]">{CATEGORY_SWATCHES.map((swatch) => <button key={swatch} type="button" aria-label={`Use color ${swatch}`} className={`h-4 w-4 rounded hover:shadow-[0_0_0_2px_var(--color-ink-3)] ${swatch === category.color.toLowerCase() ? "shadow-[0_0_0_2px_var(--color-ink-2)]" : ""}`} style={{ backgroundColor: swatch }} onClick={() => { setColorMenu(null); void setCategoryColor(category, swatch); }} />)}</span>}
+                  {colorMenu === category.id && <span className="menu-pop absolute left-0 top-[calc(100%+6px)] z-50 grid w-[136px] grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-[0_12px_34px_rgba(0,0,0,.5)]">{meta.palette.swatches.map((swatch) => <button key={swatch} type="button" aria-label={`Use color ${swatch}`} className={`h-4 w-4 rounded hover:shadow-[0_0_0_2px_var(--color-ink-3)] ${swatch === category.color.toLowerCase() ? "shadow-[0_0_0_2px_var(--color-ink-2)]" : ""}`} style={{ backgroundColor: swatch }} onClick={() => { setColorMenu(null); void setCategoryColor(category, swatch); }} />)}</span>}
                 </span>
                 {/* Double-click renames; the expanded footer keeps a labeled
                     Rename button, because a double-click is invisible to anyone
@@ -1661,12 +1660,12 @@ function CategoriesAndRules({
                     // A category left over from when "ignored" was a state here
                     // keeps showing it, via the placeholder, until one of the
                     // three assignable states is chosen.
-                    placeholder={<><CategoryDot color={STATE_COLORS[state]} />{state}</>}
+                    placeholder={<><CategoryDot color={stateColorMap[state]} />{state}</>}
                     header={state === "ignored" ? "Ignored is no longer a category state. Pick one to bring this category back into Insights." : undefined}
                     options={ASSIGNABLE_STATES.map((option) => ({
                       value: option,
                       label: option,
-                      dot: STATE_COLORS[option],
+                      dot: stateColorMap[option],
                     }))}
                   />
                 </span>

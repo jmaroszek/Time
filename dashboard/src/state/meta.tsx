@@ -20,6 +20,7 @@ import {
   type Rule,
 } from "../lib/classify";
 import { noisePolicyFromSettings, type NoisePolicy } from "../lib/noise";
+import { applyProductivity, resolvePalette, type Palette } from "../lib/palettes";
 import { checkSchemaVersion, fetchCategories, fetchRules, fetchSettings } from "../lib/queries";
 import type { WeekStart } from "../lib/time";
 
@@ -27,6 +28,9 @@ export interface Meta {
   categories: Category[];
   rules: Rule[];
   settings: Record<string, string>;
+  /** The selected colour palette (category swatches + productivity colours),
+   *  resolved from the `color_palette` setting; defaults to Slate. */
+  palette: Palette;
   browserSet: Set<string>;
   aliases: Record<string, string>;
   classifier: Classifier;
@@ -91,6 +95,10 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       categories,
       rules,
       settings,
+      palette: applyProductivity(
+        resolvePalette(settings.color_palette),
+        settings.productivity_style,
+      ),
       browserSet,
       aliases: parseAliases(settings.process_aliases),
       classifier: memoizeClassifierById(buildClassifier(categories, rules, browserSet)),
