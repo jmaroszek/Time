@@ -22,7 +22,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const MAX_SESSION_SPAN_SEC: i64 = 7 * 86_400;
 const BOOTSTRAP_SQL: &str = r#"
 BEGIN IMMEDIATE;
@@ -53,12 +53,40 @@ CREATE TABLE IF NOT EXISTS rules (
     pattern TEXT NOT NULL,
     category_id INTEGER NOT NULL REFERENCES categories(id),
     priority INTEGER NOT NULL DEFAULT 0,
-    -- Which foreground programs a title rule may match: '' any app,
-    -- '@browsers' any process in the browser_processes setting, or an exact
-    -- executable name. Empty string rather than NULL so the UNIQUE below
-    -- actually constrains unscoped rules; only title rules carry a scope.
-    scope TEXT NOT NULL DEFAULT '' CHECK(scope = '' OR match_type = 'title'),
-    UNIQUE(match_type, pattern, scope)
+    -- Window-only matching and scope fields. Empty strings on App/Website
+    -- rules keep the contract explicit and make the composite UNIQUE stable.
+    scope_kind TEXT NOT NULL DEFAULT ''
+        CHECK(scope_kind IN ('','any','browsers','process','domain')),
+    scope_value TEXT NOT NULL DEFAULT '',
+    title_match_mode TEXT NOT NULL DEFAULT ''
+        CHECK(title_match_mode IN ('','segment','phrase','contains')),
+    title_anchor TEXT NOT NULL DEFAULT ''
+        CHECK(title_anchor IN ('','any','first','interior','last')),
+    CHECK (
+        (
+            match_type = 'title'
+            AND scope_kind IN ('any','browsers','process','domain')
+            AND title_match_mode IN ('segment','phrase','contains')
+            AND title_anchor IN ('any','first','interior','last')
+            AND (title_match_mode = 'segment' OR title_anchor = 'any')
+            AND (
+                (scope_kind IN ('any','browsers') AND scope_value = '')
+                OR (scope_kind IN ('process','domain') AND length(scope_value) > 0)
+            )
+        )
+        OR
+        (
+            match_type <> 'title'
+            AND scope_kind = ''
+            AND scope_value = ''
+            AND title_match_mode = ''
+            AND title_anchor = ''
+        )
+    ),
+    UNIQUE(
+        match_type, pattern, scope_kind, scope_value,
+        title_match_mode, title_anchor
+    )
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TRIGGER IF NOT EXISTS delete_category_rules
@@ -111,7 +139,7 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     -- Must track SCHEMA_VERSION above: this is what a database created by the
     -- dashboard rather than the tracker is stamped with, and open() refuses
     -- anything older than the constant.
-    ('schema_version','3'),
+    ('schema_version','4'),
     ('rule_priority_scheme','low-wins-v1'),
     ('weekly_goal_hours','0'),
     ('idle_threshold_seconds','300'),

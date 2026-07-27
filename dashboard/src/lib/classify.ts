@@ -1,9 +1,27 @@
-// Rule-based session classification. Priority decides between matching rules
-// (domain 1 < title 2 < process 3). Lower numbers win. Domain rules only apply
-// to browser sessions; process rules apply to everything; a title rule applies
-// wherever its own scope allows, which is how one program's windows can be
-// told apart from another's. Between two title rules of equal priority the
-// narrower scope wins. AFK sessions are never classified.
+// Rule-based session classification. Website rules beat general Window rules,
+// Window rules beat App rules, and a Window rule scoped to one website may
+// refine that Website rule. AFK sessions are never classified.
+
+import {
+  ANY_APP,
+  normalizeTitleRuleSpec,
+  normalizeWindowTitle,
+  titleMatchSpecificity,
+  titleRuleMatches,
+  titleScopeSpecificity,
+  type TitleRuleAnchor,
+  type TitleRuleMatchMode,
+  type TitleRuleScopeKind,
+  type TitleRuleSpec,
+} from "./titleRules";
+
+export { ANY_APP, BROWSER_SCOPE } from "./titleRules";
+export type {
+  TitleRuleAnchor,
+  TitleRuleMatchMode,
+  TitleRuleScopeKind,
+  TitleRuleSpec,
+} from "./titleRules";
 
 /** Three-way productivity state. Neutral time (e.g. games) is tracked but is
  *  never colored good/bad — it counts toward totals without being judged. */
@@ -56,57 +74,20 @@ export function categoryStateFlags(
 
 export type MatchType = "process" | "domain" | "title";
 
-/** A title rule with no scope: it may match whatever program is in front. */
-export const ANY_APP = "";
-/** A title rule limited to the configured browser processes. Not a process
- *  name, because the browser set is a user setting — a rule written when Edge
- *  was the only browser should still apply after Firefox is added. */
-export const BROWSER_SCOPE = "@browsers";
-
 export interface Rule {
   id: number;
   matchType: MatchType;
   pattern: string;
   categoryId: number;
   priority: number;
-  /**
-   * Which foreground programs a title rule may match: ANY_APP, BROWSER_SCOPE,
-   * or an exact executable name. Absent means ANY_APP.
-   *
-   * Optional because process and domain rules have exactly one legal value —
-   * they already name what they match, and the schema's CHECK refuses anything
-   * else — so requiring it would only make every such rule state the obvious.
-   * The database column is NOT NULL and the explainer normalizes on the way in,
-   * so nothing downstream sees undefined.
-   */
-  scope?: string;
-}
-
-/** Lowercase and trim an executable name; ANY_APP and BROWSER_SCOPE pass
- *  through unchanged. Whitespace-only input means "no scope". */
-export function normalizeRuleScope(raw: string): string {
-  const scope = raw.trim().toLowerCase();
-  return scope === BROWSER_SCOPE ? BROWSER_SCOPE : scope;
-}
-
-/**
- * How narrowly a title rule is aimed, for breaking ties between rules that
- * would otherwise sit at the same priority. An exact process is the most
- * specific claim someone can make, "any browser" is narrower than "anywhere",
- * and without this the winner is whichever rule happens to come first in the
- * array — an ordering nobody can see or control.
- */
-function scopeSpecificity(scope: string): number {
-  if (scope === ANY_APP) return 0;
-  if (scope === BROWSER_SCOPE) return 1;
-  return 2;
-}
-
-/** Whether a title rule's scope admits the process in front. */
-function scopeAdmits(scope: string, process: string, browserProcesses: Set<string>): boolean {
-  if (scope === ANY_APP) return true;
-  if (scope === BROWSER_SCOPE) return browserProcesses.has(process);
-  return scope === process;
+  /** Window-only fields. The schema requires all four together for title
+   * rules and empty values for App/Website rules. They stay optional here so
+   * test fixtures and callers constructing non-title rules need not repeat
+   * fields that cannot affect them. */
+  scopeKind?: TitleRuleScopeKind;
+  scopeValue?: string;
+  titleMatchMode?: TitleRuleMatchMode;
+  titleAnchor?: TitleRuleAnchor;
 }
 
 /** Normalize a user-entered rule pattern into a matchable one, or null when
@@ -114,7 +95,9 @@ function scopeAdmits(scope: string, process: string, browserProcesses: Set<strin
  *  it to the bare host — mirrors tracker/domains.py `_clean_host`, which is
  *  what produces the `domain` values these rules compare against. */
 export function normalizeRulePattern(matchType: MatchType, raw: string): string | null {
-  let pat = raw.toLowerCase().trim();
+  let pat = matchType === "title"
+    ? normalizeWindowTitle(raw)
+    : raw.toLowerCase().trim();
   if (matchType !== "domain") return pat || null;
   pat = pat.replace(/^[a-z][a-z0-9+.-]*:\/\//, ""); // scheme
   pat = pat.split(/[/?#]/)[0]; // path / query / fragment
@@ -185,21 +168,32 @@ export function buildClassificationExplainer(
   browserProcesses: Set<string>,
 ): ClassificationExplainer {
   const catById = new Map(categories.map((c) => [c.id, c]));
-  // Scope is definite inside the explainer: every candidate below is built
-  // through normalizeRuleScope, so the matching code never re-decides what an
-  // absent scope means.
-  type Candidate = { rule: Rule & { scope: string }; order: number };
+  type NormalizedRule = Rule & TitleRuleSpec;
+  type Candidate = { rule: NormalizedRule; order: number };
   const processRules = new Map<string, Candidate>();
   const domainRules = new Map<string, Candidate>();
   const titleRules: Candidate[] = [];
+  const effectivePriority = (candidate: Candidate): number =>
+    candidate.rule.matchType === "title" && candidate.rule.scopeKind === "domain"
+      ? 0
+      : candidate.rule.priority;
   const prefer = (left: Candidate | undefined, right: Candidate): Candidate =>
-    !left || right.rule.priority < left.rule.priority ? right : left;
+    !left || effectivePriority(right) < effectivePriority(left) ? right : left;
   for (const [order, r] of rules.entries()) {
+    const titleSpec = normalizeTitleRuleSpec({
+      pattern: r.pattern,
+      scopeKind: r.scopeKind ?? ANY_APP,
+      scopeValue: r.scopeValue ?? "",
+      titleMatchMode: r.titleMatchMode ?? "phrase",
+      titleAnchor: r.titleAnchor ?? "any",
+    });
     const candidate = {
       rule: {
         ...r,
-        pattern: r.pattern.toLowerCase(),
-        scope: r.matchType === "title" ? normalizeRuleScope(r.scope ?? ANY_APP) : ANY_APP,
+        ...titleSpec,
+        pattern: r.matchType === "title"
+          ? titleSpec.pattern
+          : r.pattern.toLowerCase(),
       },
       order,
     };
@@ -223,7 +217,9 @@ export function buildClassificationExplainer(
     }
     let best: Candidate | null = null;
     const consider = (candidate: Candidate | undefined) => {
-      if (candidate && (!best || candidate.rule.priority < best.rule.priority)) best = candidate;
+      if (candidate && (!best || effectivePriority(candidate) < effectivePriority(best))) {
+        best = candidate;
+      }
     };
 
     const proc = s.process.toLowerCase();
@@ -239,8 +235,11 @@ export function buildClassificationExplainer(
           if (
             candidate &&
             (!domainBest ||
-              candidate.rule.priority < domainBest.rule.priority ||
-              (candidate.rule.priority === domainBest.rule.priority &&
+              effectivePriority(candidate) < effectivePriority(domainBest) ||
+              (effectivePriority(candidate) === effectivePriority(domainBest) &&
+                candidate.rule.pattern.length > domainBest.rule.pattern.length) ||
+              (effectivePriority(candidate) === effectivePriority(domainBest) &&
+                candidate.rule.pattern.length === domainBest.rule.pattern.length &&
                 candidate.order < domainBest.order))
           ) {
             domainBest = candidate;
@@ -257,16 +256,26 @@ export function buildClassificationExplainer(
     // editor or note window says as much about what is being worked on as a
     // browser tab does. Each rule's own scope decides how far it reaches.
     if (titleRules.length > 0 && s.title) {
-      const title = s.title.toLowerCase();
       let titleBest: Candidate | undefined;
       for (const candidate of titleRules) {
-        if (!scopeAdmits(candidate.rule.scope, proc, browserProcesses)) continue;
-        if (!title.includes(candidate.rule.pattern)) continue;
+        if (!titleRuleMatches(candidate.rule, s, browserProcesses)) continue;
+        const candidatePriority = effectivePriority(candidate);
+        const bestPriority = titleBest ? effectivePriority(titleBest) : Number.POSITIVE_INFINITY;
         if (
           !titleBest ||
-          candidate.rule.priority < titleBest.rule.priority ||
-          (candidate.rule.priority === titleBest.rule.priority &&
-            scopeSpecificity(candidate.rule.scope) > scopeSpecificity(titleBest.rule.scope))
+          candidatePriority < bestPriority ||
+          (candidatePriority === bestPriority &&
+            titleScopeSpecificity(candidate.rule.scopeKind) >
+              titleScopeSpecificity(titleBest.rule.scopeKind)) ||
+          (candidatePriority === bestPriority &&
+            candidate.rule.scopeKind === titleBest.rule.scopeKind &&
+            titleMatchSpecificity(candidate.rule.titleMatchMode, candidate.rule.titleAnchor) >
+              titleMatchSpecificity(titleBest.rule.titleMatchMode, titleBest.rule.titleAnchor)) ||
+          (candidatePriority === bestPriority &&
+            candidate.rule.scopeKind === titleBest.rule.scopeKind &&
+            titleMatchSpecificity(candidate.rule.titleMatchMode, candidate.rule.titleAnchor) ===
+              titleMatchSpecificity(titleBest.rule.titleMatchMode, titleBest.rule.titleAnchor) &&
+            candidate.rule.pattern.length > titleBest.rule.pattern.length)
         ) {
           titleBest = candidate;
         }
