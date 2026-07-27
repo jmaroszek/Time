@@ -121,6 +121,11 @@ function Shell() {
   // scroll with their padding intact.
   const bounded = tab === "activity";
 
+  // One width for every tab, deliberately: the date range picker sits at the
+  // top right of both Insights and Activity, and a tab that measured itself
+  // differently moved that control when the reader switched between them.
+  // Activity's detail panel docks in the margin beside this container instead
+  // of taking width from it — see the panel's own note.
   return (
     <div
       className={`mx-auto flex max-w-6xl flex-col gap-4 px-6 py-5 ${bounded ? "h-full overflow-hidden" : "min-h-full"}`}

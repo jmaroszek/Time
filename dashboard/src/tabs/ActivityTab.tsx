@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -13,6 +14,7 @@ import {
   Card,
   CategoryDot,
   Checkbox,
+  FloatingTooltip,
   MenuSelect,
   RemoveButton,
   Spinner,
@@ -21,7 +23,9 @@ import {
 import { withAlias } from "../lib/aliases";
 import {
   type ActivityClassificationFilter,
+  type ActivityDayBucket,
   type ActivityEntityPage,
+  type ActivityEntityRuleSlice,
   type ActivityEntitySummary,
   type ActivityQuery,
   type ActivityQueryResult,
@@ -158,9 +162,79 @@ const WINDOW_PAGE = 50;
 
 type Setter<T> = (update: (current: T) => T) => void;
 
+/**
+ * A deletion waiting to be confirmed.
+ *
+ * `allHistory` is the same deletion widened past the visible range. It is
+ * offered inside the dialog rather than as a second button in the panel,
+ * because a scope is only worth choosing next to a preview of what it would
+ * remove — and two destructive buttons side by side, differing only in blast
+ * radius, is a misclick waiting to happen. Null for a visit selection, which
+ * is an explicit list of rows with no range to widen.
+ */
+type DeleteScope = {
+  request: ActivityDeleteRequest;
+  label: string;
+  allHistory: { request: ActivityDeleteRequest; label: string } | null;
+};
+
 /** Five swatches to a row, so the grid's width is fixed and can be used to keep
  *  the menu on screen when a category sits near the right edge. */
 const SWATCH_MENU_WIDTH = 136;
+
+/** Lets the tab scroll a row into view after the keyboard moved the selection.
+ *  Entity ids carry `:` and `.`, which getElementById takes literally. */
+function entityRowDomId(entityId: string): string {
+  return `activity-row-${entityId}`;
+}
+
+/**
+ * Where the detail panel goes.
+ *
+ * The page is a fixed-width column centred in the window, which leaves an equal
+ * empty margin down each side. The panel takes the right one. Nothing else on
+ * the page moves for it — the table keeps the width it has on every other tab,
+ * and the date picker above stays where Insights puts it, which is the whole
+ * reason the container is not simply widened.
+ *
+ * It gives ground in that order as the window narrows: below 1864px the gap
+ * between panel and table closes, and below 1832px the panel begins covering
+ * the table's right-hand columns rather than squeezing them. That is the
+ * deliberate trade — a covered column can be read by closing the panel, while a
+ * permanently narrowed table cannot be widened. Laptop-class windows are all in
+ * the overlapping band; 1080p and larger desktops are not.
+ *
+ * `MIN` is the width below which the panel's own content starts wrapping badly;
+ * `MAX` is where a line of window title gets too long to scan comfortably.
+ */
+const PANEL_MIN_WIDTH = 340;
+const PANEL_MAX_WIDTH = 620;
+/** Between the table and the panel, and between the panel and the window edge. */
+const PANEL_GAP = 16;
+const PANEL_EDGE = 24;
+
+/**
+ * Position and width together, so the two cannot disagree about whether the
+ * panel is clear of the table. `overlap` is the measured result of the other
+ * two rather than a second calculation of it, and is what decides the shadow —
+ * a panel that casts one while floating over nothing reads as a stray sheet.
+ */
+export function detailPanelBox(viewportWidth: number, cardRight: number): {
+  left: number;
+  width: number;
+  overlap: number;
+} {
+  const margin = viewportWidth - (cardRight + PANEL_GAP) - PANEL_EDGE;
+  const width = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, margin));
+  // Pinned to the window edge as soon as the margin stops being wide enough,
+  // so a panel that no longer fits grows back over the table instead of off
+  // the side of the screen.
+  const left = Math.min(cardRight + PANEL_GAP, viewportWidth - width - PANEL_EDGE);
+  return { left, width, overlap: Math.max(0, cardRight - left) };
+}
+
+/** The panel stacks under the table below this, as it always has. */
+const PANEL_DOCK_MIN_VIEWPORT = 768;
 
 function formatDateTime(seconds: number): string {
   return new Date(seconds * 1000).toLocaleString([], {
@@ -231,13 +305,14 @@ export default function ActivityTab({
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
   const [detailLimit, setDetailLimit] = useState(50);
+  const [detailSort, setDetailSort] = useState<ActivityWindowSort>("seconds");
+  const [detailDirection, setDetailDirection] = useState<ActivitySortDirection>("desc");
   const [selectedWindow, setSelectedWindow] = useState<ActivityTitleGroup | null>(null);
-  const [selectedWindowTitleVisible, setSelectedWindowTitleVisible] = useState(true);
   // Visit selection belongs to a detail surface. The compact search table only
   // discovers a Window; it never silently turns one row into hundreds of
   // selected sessions.
-  const [drawerSessionIds, setDrawerSessionIds] = useState<Set<number>>(() => new Set());
-  const [deleteScope, setDeleteScope] = useState<{ request: ActivityDeleteRequest; label: string } | null>(null);
+  const [panelSessionIds, setPanelSessionIds] = useState<Set<number>>(() => new Set());
+  const [deleteScope, setDeleteScope] = useState<DeleteScope | null>(null);
   const [excludeScope, setExcludeScope] = useState<{
     kind: TrackingExclusionKind;
     pattern: string;
@@ -245,10 +320,6 @@ export default function ActivityTab({
   } | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [ruleDraft, setRuleDraft] = useState<ActivityTitleGroup | null>(null);
-  // Off means the drawer lists windows without naming them, for anyone sharing
-  // a screen. Titles are opt-in and off by default at capture, which is where
-  // the real consent lives; this is only about what is on screen right now.
-  const [showTitles, setShowTitles] = useState(true);
 
   const allRange = useMemo(() => allTimeRange(firstSessionSec), [firstSessionSec, historyRevision]);
   const sessionData = useSessions(
@@ -288,6 +359,8 @@ export default function ActivityTab({
     detailSearch,
     detailOffset: 0,
     detailLimit,
+    detailSort,
+    detailDirection,
   }), [
     range.start,
     range.end,
@@ -305,6 +378,8 @@ export default function ActivityTab({
     selectedEntityId,
     detailSearch,
     detailLimit,
+    detailSort,
+    detailDirection,
   ]);
   const analyzed = useActivityModel(source, query);
   const result = analyzed.result;
@@ -330,23 +405,123 @@ export default function ActivityTab({
     }
   }, [classificationFilter, meta.categories]);
 
-  // Only the drawer's own ticks are cleared here. A selection is about rows a
+  // Only the panel's own ticks are cleared here. A selection is about rows a
   // reader can see, and opening a different entity replaces every row in the
-  // drawer — but none of the ones in the list behind it.
+  // panel — but none of the ones in the list beside it.
   useEffect(() => {
     setDetailSearch("");
     setDetailLimit(50);
-    setDrawerSessionIds(new Set());
+    setPanelSessionIds(new Set());
   }, [selectedEntityId]);
 
   useEffect(() => {
-    setDrawerSessionIds(new Set());
+    setPanelSessionIds(new Set());
   }, [selectedWindow?.key]);
 
   useEffect(() => {
     setDetailLimit(50);
-    setDrawerSessionIds(new Set());
-  }, [detailSearch]);
+    setPanelSessionIds(new Set());
+  }, [detailSearch, detailSort, detailDirection]);
+
+  const dialogOpen = deleteScope !== null
+    || excludeScope !== null
+    || ruleDraft !== null
+    || editingSessionId !== null;
+  const catalogRows = result?.catalog.rows;
+
+  /**
+   * The detail panel is an inspector, not a dialog, so the list behind it stays
+   * live — and the arrows that would have scrolled that list are worth more
+   * spent walking it, which is what triaging a library actually is. Anything
+   * with its own arrow behaviour (a field, an open menu) keeps it.
+   *
+   * Escape dismisses one layer at a time: a Window returns to the app it
+   * belongs to, and only then does the panel close. A dialog on top owns
+   * Escape outright, or closing it would take the panel underneath with it.
+   */
+  useEffect(() => {
+    if (!selectedEntityId || dialogOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      const from = event.target as HTMLElement | null;
+      if (event.key === "Escape") {
+        // An open menu closes itself first; taking the panel with it would
+        // punish opening a menu by mistake. Fields stop their own Escape at
+        // the source, so anything still arriving here means the panel.
+        if (from?.closest("[role='combobox'][aria-expanded='true']")) return;
+        event.preventDefault();
+        setPanelSessionIds(new Set());
+        if (selectedWindow) setSelectedWindow(null);
+        else setSelectedEntityId(null);
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      // Only the identity list has an order to walk; a Window panel is opened
+      // from two different lists and belongs to neither.
+      if (selectedWindow) return;
+      if (from?.closest("input, textarea, [role='combobox'], [role='listbox']")) return;
+      const rows = catalogRows ?? [];
+      const at = rows.findIndex((row) => row.id === selectedEntityId);
+      const next = rows[at + (event.key === "ArrowDown" ? 1 : -1)];
+      if (at < 0 || !next) return;
+      event.preventDefault();
+      openEntity(next.id);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selectedEntityId, selectedWindow, dialogOpen, catalogRows]);
+
+  // Whichever way the selection moved, the row it landed on has to be visible:
+  // walking the list with the arrows is useless if the highlight is offscreen.
+  useEffect(() => {
+    if (!selectedEntityId) return;
+    document.getElementById(entityRowDomId(selectedEntityId))?.scrollIntoView({ block: "nearest" });
+  }, [selectedEntityId]);
+
+  // The panel is positioned against the table rather than laid out beside it,
+  // so that opening one cannot change the table's width. The page container
+  // clips its overflow, which is why this is `fixed` and measured rather than
+  // absolutely positioned inside it.
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [dock, setDock] = useState<{ style: CSSProperties; overlap: number } | null>(null);
+  const panelOpen = view === "library"
+    && (currentWindow !== null || (result?.selectedEntity ?? null) !== null);
+  useEffect(() => {
+    const node = cardRef.current;
+    if (!node || !panelOpen) {
+      setDock(null);
+      return;
+    }
+    const measure = () => {
+      if (window.innerWidth < PANEL_DOCK_MIN_VIEWPORT) {
+        setDock(null);
+        return;
+      }
+      const card = node.getBoundingClientRect();
+      const box = detailPanelBox(window.innerWidth, card.right);
+      setDock({
+        style: {
+          position: "fixed",
+          top: card.top,
+          height: card.height,
+          left: box.left,
+          width: box.width,
+        },
+        overlap: box.overlap,
+      });
+    };
+    measure();
+    // The card's height moves with the window and with the banner above it,
+    // neither of which a resize listener alone would catch.
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [panelOpen]);
+  const panelStyle = dock?.style ?? null;
+  const overlapping = (dock?.overlap ?? 0) > 0;
 
   const showDomainHint = useMemo(() => {
     if (!sessionData.ready) return false;
@@ -373,6 +548,13 @@ export default function ActivityTab({
       }
       if (!retained) await addRule(matchType, entity.key, categoryId);
       await refreshMeta();
+      // A rule is retroactive and global, and the panel it was set from only
+      // shows one date range. Saying so once, on the change itself, beats the
+      // standing paragraph that used to warn about it before anything happened.
+      const category = meta.categories.find((option) => option.id === categoryId);
+      if (category) {
+        banner.show(`${entity.displayName} is now ${category.name}, in all history and from now on.`);
+      }
     } catch (error) {
       banner.report(error, "classification");
     }
@@ -394,6 +576,7 @@ export default function ActivityTab({
       );
       for (const rule of exactRules) await deleteRule(rule.id);
       await refreshMeta();
+      banner.show(`Removed the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}.`);
     } catch (error) {
       banner.report(error, "rule");
     }
@@ -403,7 +586,7 @@ export default function ActivityTab({
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const toggleDrawerSession = toggle(setDrawerSessionIds);
+  const togglePanelSession = toggle(setPanelSessionIds);
   /** A Window detail action names the complete group explicitly, so selecting
    *  all includes every represented visit even though only a recent sample is
    *  carried for individual inspection. */
@@ -413,44 +596,59 @@ export default function ActivityTab({
     else for (const id of ids) next.add(id);
     return next;
   });
-  const toggleAllDrawerSessions = toggleAll(setDrawerSessionIds);
+  const toggleAllPanelSessions = toggleAll(setPanelSessionIds);
   const requestSessionDeletion = (ids: Set<number>) => {
     if (ids.size === 0) return;
     setDeleteScope({
       request: { mode: "sessions", sessionIds: [...ids] },
-      label: `${ids.size} selected session${ids.size === 1 ? "" : "s"}`,
+      label: `${ids.size} selected visit${ids.size === 1 ? "" : "s"}`,
+      // Already an explicit list of rows, so there is no range to widen.
+      allHistory: null,
     });
   };
   const requestEntityDeletion = (entity: ActivityEntitySummary) => {
+    const forRange = (startSec: number, endSec: number): ActivityDeleteRequest => ({
+      mode: "entity",
+      entityKind: entity.kind,
+      entityKey: entity.key,
+      startSec,
+      endSec,
+      browserProcesses,
+    });
+    const named = `${entity.kind === "website" ? "Website" : "App"} “${entity.displayName}” (${entity.key})`;
     setDeleteScope({
-      request: {
-        mode: "entity",
-        entityKind: entity.kind,
-        entityKey: entity.key,
-        startSec: range.start.getTime() / 1000,
-        endSec: range.end.getTime() / 1000,
-        browserProcesses,
+      request: forRange(range.start.getTime() / 1000, range.end.getTime() / 1000),
+      label: `${named} from ${formatShortDate(range.start.getTime() / 1000)} through ${formatShortDate((range.end.getTime() - 1) / 1000)}`,
+      allHistory: {
+        request: forRange(allRange.start.getTime() / 1000, allRange.end.getTime() / 1000),
+        label: `${named}, everywhere it appears in your recorded history`,
       },
-      label: `${entity.kind === "website" ? "Website" : "App"} “${entity.displayName}” (${entity.key}) from ${formatShortDate(range.start.getTime() / 1000)} through ${formatShortDate((range.end.getTime() - 1) / 1000)}`,
     });
   };
   const historyDeleted = (closeEntity: boolean) => {
-    setDrawerSessionIds(new Set());
+    setPanelSessionIds(new Set());
     if (closeEntity) {
       setSelectedWindow(null);
       setSelectedEntityId(null);
     }
   };
   const openEntity = (entityId: string) => {
-    setDrawerSessionIds(new Set());
+    setPanelSessionIds(new Set());
     setSelectedWindow(null);
     setSelectedEntityId(entityId);
   };
-  const openWindow = (group: ActivityTitleGroup, showTitle = true) => {
-    setDrawerSessionIds(new Set());
+  const openWindow = (group: ActivityTitleGroup) => {
+    setPanelSessionIds(new Set());
     setSelectedEntityId(group.entityId);
-    setSelectedWindowTitleVisible(showTitle);
     setSelectedWindow(group);
+  };
+  // The panel describes a row in the Library. Carrying it across to Categories
+  // & Rules left it beside a list that could not have opened it.
+  const switchView = (next: ActivityView) => {
+    setView(next);
+    setPanelSessionIds(new Set());
+    setSelectedWindow(null);
+    setSelectedEntityId(null);
   };
 
   if (!meta.loaded || (!result && (sessionData.loading || analyzed.refreshing))) return <Spinner />;
@@ -475,6 +673,10 @@ export default function ActivityTab({
         </section>
       )}
 
+      {/* The card is measured, not shrunk. The panel docks against its right
+          edge from outside the page container, so opening one leaves the table
+          exactly the width it has on every other tab. */}
+      <div ref={cardRef} className={`flex min-h-0 ${view === "library" ? "flex-1" : ""}`}>
       {/* One card, whose title is the switcher: a floating control row above it
           left the page reading as two stacked chromes instead of "date picker
           up top, one card below". */}
@@ -484,8 +686,8 @@ export default function ActivityTab({
           content while staying able to shrink — enough categories opened at
           once then scrolls the card instead of the page. */}
       <Card
-        className={`flex min-h-0 flex-col ${view === "library" ? "flex-1" : ""}`}
-        title={<ViewSwitcher view={view} onView={setView} />}
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+        title={<ViewSwitcher view={view} onView={switchView} />}
         right={view === "library" ? (
           <span className="flex items-center gap-3 text-[11px] text-ink-3">
             {/* Muted, not accent: this is about rows nobody asked to see, and
@@ -587,39 +789,50 @@ export default function ActivityTab({
           <CategoriesAndRules appliedRuleIds={result?.appliedRuleIds ?? null} onChanged={refreshMeta} />
         )}
       </Card>
+      </div>
 
       {currentWindow ? (
-        <WindowDrawer
+        <WindowPanel
+          dock={panelStyle}
+          overlapping={overlapping}
           group={currentWindow}
-          showTitle={selectedWindowTitleVisible}
-          selectedSessionIds={drawerSessionIds}
-          onToggleSession={toggleDrawerSession}
-          onToggleAllSessions={toggleAllDrawerSessions}
-          onDeleteSelected={() => requestSessionDeletion(drawerSessionIds)}
+          selectedSessionIds={panelSessionIds}
+          onToggleSession={togglePanelSession}
+          onToggleAllSessions={toggleAllPanelSessions}
+          onDeleteSelected={() => requestSessionDeletion(panelSessionIds)}
           onEditSession={setEditingSessionId}
           onMakeRule={setRuleDraft}
           onBack={() => {
-            setDrawerSessionIds(new Set());
+            setPanelSessionIds(new Set());
             setSelectedWindow(null);
           }}
           onClose={() => {
-            setDrawerSessionIds(new Set());
+            setPanelSessionIds(new Set());
             setSelectedWindow(null);
             setSelectedEntityId(null);
           }}
         />
       ) : result?.selectedEntity ? (
-        <EntityDrawer
+        <EntityPanel
+          dock={panelStyle}
+          overlapping={overlapping}
           entity={result.selectedEntity}
           groups={result.detailGroups}
+          usage={result.selectedEntityUsage}
+          rangeSeconds={result.totalSeconds}
           hasStoredTitles={result.hasStoredTitles}
           detailSearch={detailSearch}
           onDetailSearch={setDetailSearch}
-          showTitles={showTitles}
-          onShowTitles={setShowTitles}
+          detailSort={detailSort}
+          detailDirection={detailDirection}
+          onDetailSort={(nextSort, nextDirection) => {
+            setDetailSort(nextSort);
+            setDetailDirection(nextDirection);
+          }}
           onLoadMore={() => setDetailLimit((limit) => limit + 50)}
           onClose={() => setSelectedEntityId(null)}
           categories={meta.categories}
+          rules={meta.rules}
           aliases={meta.aliases}
           onDeleteEntity={() => requestEntityDeletion(result.selectedEntity!)}
           onExclude={() => setExcludeScope({
@@ -627,7 +840,7 @@ export default function ActivityTab({
             pattern: result.selectedEntity!.key,
             label: result.selectedEntity!.displayName,
           })}
-          onOpenWindow={(group) => openWindow(group, showTitles)}
+          onOpenWindow={openWindow}
           onAssign={(categoryId) => assignEntity(result.selectedEntity!, categoryId)}
           onSaveAlias={(alias) => saveAlias(result.selectedEntity!.key, alias)}
           onRemoveExactRule={() => removeExactRules(result.selectedEntity!)}
@@ -754,6 +967,70 @@ function classificationOptions(categories: Category[], uncategorizedCount: numbe
   ];
 }
 
+/**
+ * A text filter that can be emptied without selecting its contents.
+ *
+ * Both of this tab's filters swap out the list beneath them, so both need a way
+ * back that is not "select the text and delete it" — Escape, and a trailing ✕
+ * for the mouse. They were not sharing one, and only the wider of the two had
+ * either. The visible label is optional; the accessible one is not, because a
+ * placeholder disappears the moment anything is typed into it.
+ */
+function ClearableInput({
+  value,
+  onChange,
+  label,
+  placeholder,
+  leadingIcon = false,
+  className = "",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  placeholder: string;
+  leadingIcon?: boolean;
+  className?: string;
+}) {
+  return (
+    <label className={`relative block ${className}`}>
+      <span className="sr-only">{label}</span>
+      {leadingIcon && (
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="absolute left-3 top-2.5 h-3.5 w-3.5 text-ink-3">
+          <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
+        </svg>
+      )}
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && value) {
+            // Stopped here, or the panel's own Escape closes the whole thing
+            // out from under someone who only meant to clear a filter.
+            event.preventDefault();
+            event.stopPropagation();
+            onChange("");
+          }
+        }}
+        placeholder={placeholder}
+        className={`w-full rounded-[9px] border border-edge bg-surface-2 py-2 pr-8 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60 ${leadingIcon ? "pl-9" : "pl-2.5"}`}
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          title={`Clear ${label.toLowerCase()}`}
+          className="absolute right-2 top-1.5 rounded p-1 text-ink-3 hover:bg-white/[.06] hover:text-ink-2"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+          <span className="sr-only">Clear {label.toLowerCase()}</span>
+        </button>
+      )}
+    </label>
+  );
+}
+
 function LibraryControls({
   search,
   onSearch,
@@ -780,37 +1057,14 @@ function LibraryControls({
     <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 border-b border-edge/50 pb-4">
       {searching ? (
         <>
-          <label className="relative min-w-[240px] flex-1">
-            <span className="sr-only">Search activity</span>
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="absolute left-3 top-2.5 h-3.5 w-3.5 text-ink-3">
-              <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
-            </svg>
-            <input
-              value={search}
-              onChange={(event) => onSearch(event.target.value)}
-              // Escape clears without reaching for the mouse, the same way it
-              // backs out of every menu and dialog in the app.
-              onKeyDown={(event) => { if (event.key === "Escape" && search) { event.preventDefault(); onSearch(""); } }}
-              placeholder="Search apps, websites, and windows…"
-              className="w-full rounded-[9px] border border-edge bg-surface-2 py-2 pl-9 pr-8 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
-            />
-            {/* Searching swaps the whole list out for something else, so there
-                has to be a way back that is not "select the text and delete
-                it" — every other state in this tab has one. */}
-            {search && (
-              <button
-                type="button"
-                onClick={() => onSearch("")}
-                title="Clear search"
-                className="absolute right-2 top-1.5 rounded p-1 text-ink-3 hover:bg-white/[.06] hover:text-ink-2"
-              >
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3">
-                  <path d="M6 6l12 12M18 6 6 18" />
-                </svg>
-                <span className="sr-only">Clear search</span>
-              </button>
-            )}
-          </label>
+          <ClearableInput
+            value={search}
+            onChange={onSearch}
+            label="Search activity"
+            placeholder="Search apps, websites, and windows…"
+            leadingIcon
+            className="min-w-[240px] flex-1"
+          />
           <MenuSelect
             size="field"
             variant={typeFilter === "all" ? "resting" : "engaged"}
@@ -892,6 +1146,10 @@ interface SummaryTableBadge {
 
 interface SummaryTableRow {
   key: string;
+  /** DOM id, for callers that need to scroll a row into view from outside the
+   *  table — the identity list does, once the arrow keys can move its
+   *  selection while the reader's hands are nowhere near it. */
+  anchorId?: string;
   primary: ReactNode;
   primaryLabel: string;
   primaryTitle?: string;
@@ -1008,7 +1266,12 @@ function SummaryTable({
         {rows.map((row) => (
           <tr
             key={row.key}
-            className={`cursor-pointer border-b border-edge/40 transition-colors hover:bg-white/[.035] ${row.selected ? "bg-white/[.05]" : ""}`}
+            id={row.anchorId}
+            // The panel no longer covers the list, so the open row is on screen
+            // beside it and has to be told apart from the one under the cursor.
+            // A second gray could not; the interface's own colour can.
+            aria-current={row.selected ? "true" : undefined}
+            className={`cursor-pointer border-b border-edge/40 transition-colors hover:bg-white/[.035] ${row.selected ? "bg-accent/[.09]" : ""}`}
             onClick={row.onOpen}
           >
             <td className="py-2.5 pr-4">
@@ -1299,6 +1562,7 @@ function EntityTable({
     }
     return {
       key: entity.id,
+      anchorId: entityRowDomId(entity.id),
       primary: entity.displayName,
       primaryLabel: entity.displayName,
       primaryTitle: entity.key,
@@ -1344,7 +1608,7 @@ type BarScale = Pick<ActivityQueryResult, "maxSeconds" | "totalSeconds">;
  * from the name beside it, which is why the border and the capitals both went:
  * each was a third and fourth way of saying "this is a badge", and together
  * they built a block twice the height of the word they annotated. Sentence
- * case also keeps them in the app's voice, and the shape matches the drawer's
+ * case also keeps them in the app's voice, and the shape matches the panel's
  * Corrected mark, the one tag that already existed.
  *
  * Colour and size are set here rather than inherited, since these sit on the
@@ -1368,7 +1632,9 @@ function RowTag({
   const styles = tone === "accent" ? "bg-accent/10 text-accent/85" : "bg-surface-3 text-ink-3";
   return (
     <span
-      className={`shrink-0 rounded-full px-1.5 py-[1px] text-[9.5px] font-medium leading-[1.4] ${styles}`}
+      // normal-case is defended, not decorative: the panel's eyebrow row is
+      // uppercase, and a tag inheriting that loses the sentence case above.
+      className={`shrink-0 rounded-full px-1.5 py-[1px] text-[9.5px] font-medium normal-case leading-[1.4] ${styles}`}
       title={title}
     >
       {children}
@@ -1459,7 +1725,7 @@ function ClassificationLabel({ entity }: { entity: ActivityEntitySummary }) {
  * half of a real database's rows last under ten seconds and carry a few percent
  * of its time, so a search answered row by row buries what was asked for under
  * hundreds of fragments of the same window. The table stays a discovery list;
- * selecting a row moves interval-level work into the Window drawer.
+ * selecting a row moves interval-level work into the Window panel.
  */
 function windowGroupClassification(group: ActivityTitleGroup): { label: string; detail: string } {
   if (group.allIgnored) {
@@ -1832,44 +2098,177 @@ function LoadMore({ shown, total, onClick }: { shown: number; total: number; onC
   );
 }
 
-/** One Window in an entity's discovery list. Visit-level actions live in the
- * Window drawer, so this row has one verb and cannot expand the list in place. */
-function DrawerWindowRow({
+/**
+ * The shell both Activity panels sit in.
+ *
+ * It is an inspector, not a dialog: no scrim, no focus trap, and the list it
+ * was opened from stays live behind — which is the whole point, because working
+ * through a library means moving down it. Escape and the arrows are wired at
+ * the tab, the only level that knows the row order.
+ *
+ * The two panels were duplicating this markup character for character, down to
+ * the shadow. That is exactly the drift the shared SummaryTable exists to stop
+ * one table over, so it is stopped the same way here.
+ */
+function DetailPanel({
+  label,
+  dock,
+  overlapping,
+  eyebrow,
+  heading,
+  subtitle,
+  onBack,
+  backLabel,
+  onClose,
+  closeLabel,
+  children,
+}: {
+  /** Names the landmark. A string rather than a reference to the heading,
+   *  because the heading is an editable field while a rename is in progress
+   *  and would name the panel by a half-typed draft. */
+  label: string;
+  /** Measured position in the page's right margin. Null on a window too narrow
+   *  to dock into, where the panel falls back to stacking under the table. */
+  dock: CSSProperties | null;
+  /** True when the margin could not hold the panel and it is floating over the
+   *  table's right-hand columns. Only then does it need to cast a shadow. */
+  overlapping: boolean;
+  eyebrow: ReactNode;
+  heading: ReactNode;
+  subtitle?: ReactNode;
+  onBack?: () => void;
+  backLabel?: string;
+  onClose: () => void;
+  closeLabel: string;
+  children: ReactNode;
+}) {
+  return (
+    <aside
+      aria-label={label}
+      style={dock ?? undefined}
+      className={`panel-in flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-edge bg-surface ${
+        dock
+          ? `z-30 ${overlapping ? "shadow-[0_18px_48px_rgba(0,0,0,.5)]" : ""}`
+          : "max-h-[60vh] w-full shrink-0"
+      }`}
+    >
+      <div className="flex shrink-0 items-start gap-3 border-b border-edge px-5 py-4">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            title={backLabel}
+            aria-label={backLabel}
+            className="mt-0.5 rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink"
+          >
+            ←
+          </button>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5 text-[10.5px] uppercase tracking-[.05em] text-ink-3">
+            {eyebrow}
+          </div>
+          {heading}
+          {subtitle}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          title={`${closeLabel} (Esc)`}
+          aria-label={closeLabel}
+          className="rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="scroll-well min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
+    </aside>
+  );
+}
+
+/** A panel section. The heading level is fixed here so the two panels cannot
+ *  drift apart on the one thing a screen reader navigates them by. */
+function PanelSection({
+  title,
+  right,
+  children,
+  className = "",
+}: {
+  title: string;
+  right?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`mt-5 ${className}`}>
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-xs font-semibold">{title}</h3>
+        {right}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** One Window in an entity's list. Visit-level actions live in the Window
+ * panel, so this row has one verb and cannot expand the list in place. */
+function PanelWindowRow({
   group,
-  showTitle,
   search,
+  maxSeconds,
+  totalSeconds,
   onOpen,
 }: {
   group: ActivityTitleGroup;
-  showTitle: boolean;
   search: string;
+  maxSeconds: number;
+  totalSeconds: number;
   onOpen: (group: ActivityTitleGroup) => void;
 }) {
   return (
     <button
       type="button"
       onClick={() => onOpen(group)}
-      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-[11px] outline-none hover:bg-white/[.025] focus-visible:border-accent/60"
+      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-[11px] outline-none transition-colors hover:border-edge-2 hover:bg-white/[.025] focus-visible:border-accent/60"
     >
-      <span className="block truncate text-ink-2">
-        {showTitle
-          ? <MatchedTitle title={group.title} search={search} />
-          : <span className="italic text-ink-3">Window title hidden</span>}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate text-ink-2">
+          {/* Title capture can be switched on part way through a history, so
+              one app can hold both kinds of row. A bare em dash left the
+              untitled one looking like a rendering fault rather than a fact. */}
+          {group.title
+            ? <MatchedTitle title={group.title} search={search} />
+            : <span className="italic text-ink-3">No title recorded</span>}
+        </span>
+        {group.isNew && (
+          <RowTag tone="accent" title="First seen in all of your history inside this date range.">New</RowTag>
+        )}
+        {/* The row opens something. Without this it read as a static summary,
+            and the only hint otherwise was the cursor. */}
+        <Chevron open={false} />
       </span>
-      <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-ink-3">
-        <span className="tabular-nums">{group.sessionCount} visit{group.sessionCount === 1 ? "" : "s"}</span>
-        <span aria-hidden="true">·</span>
+      {/* The same bar the library table draws, against the heaviest window this
+          app has rather than the heaviest row on screen — so it does not
+          rescale when the list is re-sorted or extended. */}
+      <span className="mt-1.5 block">
+        <ShareBar seconds={group.seconds} maxSeconds={maxSeconds} totalSeconds={totalSeconds} />
+      </span>
+      <span className="mt-1 flex flex-wrap items-center gap-x-1.5 text-ink-3">
         <span className="tabular-nums">{fmtDuration(group.seconds)}</span>
         <span aria-hidden="true">·</span>
-        <span>{group.mixed ? "Mixed" : group.categoryName ?? "Uncategorized"}</span>
+        <span className="tabular-nums">{countNoun(group.sessionCount, "visit")}</span>
+        <span aria-hidden="true">·</span>
+        <span className="min-w-0 truncate">{group.mixed ? "Mixed" : group.categoryName ?? "Uncategorized"}</span>
+        <span className="ml-auto shrink-0 tabular-nums">{formatLastSeen(group.lastSeen)}</span>
       </span>
     </button>
   );
 }
 
-function WindowDrawer({
+function WindowPanel({
+  dock,
+  overlapping,
   group,
-  showTitle,
   selectedSessionIds,
   onToggleSession,
   onToggleAllSessions,
@@ -1879,8 +2278,9 @@ function WindowDrawer({
   onBack,
   onClose,
 }: {
+  dock: CSSProperties | null;
+  overlapping: boolean;
   group: ActivityTitleGroup;
-  showTitle: boolean;
   selectedSessionIds: Set<number>;
   onToggleSession: (id: number) => void;
   onToggleAllSessions: (ids: number[]) => void;
@@ -1897,79 +2297,281 @@ function WindowDrawer({
     || group.classificationSource === "session_override"
     || group.winningRuleType === "title";
   return (
+    <DetailPanel
+      dock={dock}
+      overlapping={overlapping}
+      label={`Window details: ${group.title || "no title recorded"}`}
+      eyebrow={
+        <>
+          <span>Window</span>
+          {group.isNew && (
+            <RowTag tone="accent" title="First seen in all of your history inside this date range.">New</RowTag>
+          )}
+        </>
+      }
+      heading={
+        <h2 className="break-words text-lg font-semibold">
+          {group.title || <span className="italic text-ink-3">No title recorded</span>}
+        </h2>
+      }
+      subtitle={
+        <p className="truncate text-[11px] text-ink-3" title={group.entityKey}>
+          {group.displayName} · {group.entityKind === "website" ? "Website" : "App"} · <span className="font-mono">{group.entityKey}</span>
+        </p>
+      }
+      onBack={onBack}
+      backLabel={`Back to ${group.displayName} details`}
+      onClose={onClose}
+      closeLabel="Close Window details"
+    >
+      {/* Two across, not four. In a panel this narrow a quarter is about 100px,
+          which "Today, 4:46 PM" does not fit into — the tile that most wanted
+          the friendlier wording was the one being truncated by it. */}
+      <div className="grid grid-cols-2 gap-3">
+        <DetailMetric
+          label="Time in range"
+          value={fmtDuration(group.seconds)}
+          hint="Foreground time in this window, inside the selected date range."
+        />
+        <DetailMetric
+          label="Visits"
+          value={String(group.sessionCount)}
+          hint="Separate spells with this window in front. Switching away and back starts another."
+        />
+        <DetailMetric
+          label="Days seen"
+          value={String(group.daysSeen)}
+          hint="Distinct days it was open on. A habit and a binge can share a total."
+        />
+        <DetailMetric
+          label="Last seen"
+          value={formatLastSeen(group.lastSeen)}
+          hint={`First seen ${formatShortDate(group.firstSeen)}.`}
+        />
+      </div>
+      <PanelSection
+        title="Classification"
+        right={<span className="shrink-0"><Button onClick={() => onMakeRule(group)}>Create Window rule…</Button></span>}
+      >
+        <p className="mt-2 text-[11.5px] text-ink-2">{classification.label}</p>
+        {exceptionalProvenance && (
+          <p className="mt-1 truncate text-[10.5px] text-ink-3" title={classification.detail}>
+            {classification.detail}
+          </p>
+        )}
+      </PanelSection>
+      <section className="mt-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="mr-auto text-xs font-semibold">Visits</h3>
+          <Button onClick={() => onToggleAllSessions(group.sessionIds)}>
+            {allSelected ? "Clear selection" : `Select all ${group.sessionCount} visits`}
+          </Button>
+          {selectedSessionIds.size > 0 && (
+            <Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button>
+          )}
+        </div>
+        <div className="mt-3 rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-2.5">
+          <GroupSessions
+            group={group}
+            selected={selectedSessionIds}
+            onToggle={onToggleSession}
+            onEdit={onEditSession}
+          />
+        </div>
+      </section>
+    </DetailPanel>
+  );
+}
+
+/**
+ * What decided this entity's classification, in one line.
+ *
+ * The Window panel has said this since it was built — a label and where it came
+ * from — while the identity panel listed a category breakdown and a separate
+ * box of rules and left the reader to work out which rule was actually doing
+ * the deciding. That is the question the panel is opened to answer.
+ *
+ * Rule coverage is checked rather than assumed: a rule can decide most of an
+ * entity's time while manual corrections carry the rest, and claiming the rule
+ * explains all of it would send someone editing the wrong thing.
+ */
+export function entityClassification(entity: ActivityEntitySummary): {
+  label: string;
+  detail: string;
+} {
+  const kind = entity.kind === "website" ? "website" : "app";
+  if (entity.status === "uncategorized") {
+    return { label: "Uncategorized", detail: `No rule matches this ${kind}.` };
+  }
+  if (entity.status === "ignored") {
+    return { label: "Ignored", detail: "Recorded, but left out of every Insights total." };
+  }
+  if (entity.status === "partial") {
+    return {
+      label: "Mixed",
+      detail: `${fmtDuration(entity.uncategorizedSeconds)} of this is still uncategorized.`,
+    };
+  }
+  if (entity.status === "mixed") {
+    return {
+      label: `Mixed · ${entity.categories.length} categories`,
+      detail: entity.rules.length > 1
+        ? `${entity.rules.length} rules decide it across its visits.`
+        : "Its visits resolve to different categories.",
+    };
+  }
+  const label = entity.categories[0]?.name ?? "Uncategorized";
+  const ruleSeconds = entity.rules.reduce((total, rule) => total + rule.seconds, 0);
+  // A second of slack: clipping a session to the range's edge is rounded the
+  // same way on both sides, and a one-second remainder is not a correction.
+  const corrected = entity.seconds - ruleSeconds > 1;
+  if (entity.rules.length === 0) {
+    return { label, detail: "Set by manual corrections — no rule matches." };
+  }
+  const source = entity.rules.length === 1
+    ? describeRuleSource(entity.rules[0], entity.key)
+    : `${entity.rules.length} rules, led by ${entity.rules[0].pattern}`;
+  return { label, detail: corrected ? `${source}, plus manual corrections` : source };
+}
+
+/** A rule's pattern is worth printing only when it says something the panel's
+ *  header has not. An App rule on `code.exe`, described inside a panel whose
+ *  third line is already `code.exe`, is three words that add nothing — but a
+ *  Window rule's pattern is never shown anywhere else. */
+function describeRuleSource(rule: ActivityEntityRuleSlice, entityKey: string): string {
+  const kind = `${RULE_LABELS[rule.matchType]} rule`;
+  return rule.pattern.toLowerCase() === entityKey.toLowerCase() ? kind : `${kind} · ${rule.pattern}`;
+}
+
+/**
+ * How an entity's time divides, drawn as well as listed.
+ *
+ * The list alone gave four durations and no sense of their proportions, in a
+ * tab where every other list of times draws a bar. Colour here is the category's
+ * own — unlike the table's single-accent bar, telling the slices apart *is* the
+ * job, and category colour is what this app already means by it.
+ */
+function CategorySplit({ entity }: { entity: ActivityEntitySummary }) {
+  const slices = [
+    ...entity.categories.map((category) => ({
+      key: `category:${category.categoryId}`,
+      name: category.name,
+      color: category.color,
+      seconds: category.seconds,
+    })),
+    ...(entity.uncategorizedSeconds > 0
+      ? [{
+          key: "uncategorized",
+          name: "Uncategorized",
+          color: UNCATEGORIZED,
+          seconds: entity.uncategorizedSeconds,
+        }]
+      : []),
+  ];
+  const total = slices.reduce((sum, slice) => sum + slice.seconds, 0);
+  // One slice is not a division. Drawing a full-width bar and a row reading
+  // "100%" only restates the label directly above it.
+  if (total <= 0 || slices.length < 2) return null;
+  const share = (seconds: number) => {
+    const percent = (seconds / total) * 100;
+    return percent < 1 ? "<1%" : `${Math.round(percent)}%`;
+  };
+  return (
     <>
-      <button type="button" aria-label="Close Window details" className="fixed inset-0 z-40 bg-black/25 max-md:hidden" onClick={onClose} />
-      <aside className="fixed bottom-0 right-0 top-0 z-50 flex w-[min(620px,92vw)] flex-col border-l border-edge bg-surface shadow-[-18px_0_48px_rgba(0,0,0,.4)] max-md:static max-md:z-auto max-md:w-full max-md:border-l-0 max-md:border-t max-md:shadow-none">
-        <div className="flex items-start gap-3 border-b border-edge px-5 py-4">
-          <button type="button" onClick={onBack} title={`Back to ${group.displayName} details`} className="mt-0.5 rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink">←</button>
-          <div className="min-w-0 flex-1">
-            <p className="text-[10.5px] uppercase tracking-[.05em] text-ink-3">Window</p>
-            <h2 className="break-words text-lg font-semibold">
-              {showTitle ? group.title : <span className="italic text-ink-3">Window title hidden</span>}
-            </h2>
-            <p className="truncate text-[11px] text-ink-3" title={group.entityKey}>
-              {group.displayName} · {group.entityKind === "website" ? "Website" : "App"} · <span className="font-mono">{group.entityKey}</span>
-            </p>
+      <span aria-hidden="true" className="mt-3 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+        {slices.map((slice) => (
+          <span
+            key={slice.key}
+            style={{ width: `${(slice.seconds / total) * 100}%`, backgroundColor: slice.color }}
+          />
+        ))}
+      </span>
+      <div className="mt-3 flex flex-col gap-2">
+        {slices.map((slice) => (
+          <div key={slice.key} className="flex items-center gap-2 text-[11.5px]">
+            <CategoryDot color={slice.color} />
+            <span className="min-w-0 flex-1 truncate">{slice.name}</span>
+            <span className="tabular-nums text-ink-3">{fmtDuration(slice.seconds)}</span>
+            <span className="w-9 shrink-0 text-right tabular-nums text-ink-3">{share(slice.seconds)}</span>
           </div>
-          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink">✕</button>
-        </div>
-        <div className="scroll-well flex-1 overflow-y-auto p-5">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <DetailMetric label="Time in range" value={fmtDuration(group.seconds)} />
-            <DetailMetric label="Days seen" value={String(group.daysSeen)} />
-            <DetailMetric label="First seen" value={formatShortDate(group.firstSeen)} />
-            <DetailMetric label="Last seen" value={formatShortDate(group.lastSeen)} />
-          </div>
-          <section className="mt-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="text-xs font-semibold">Classification</h3>
-                <p className="mt-2 text-[11.5px] text-ink-2">{classification.label}</p>
-                {exceptionalProvenance && (
-                  <p className="mt-1 truncate text-[10.5px] text-ink-3" title={classification.detail}>
-                    {classification.detail}
-                  </p>
-                )}
-              </div>
-              <Button onClick={() => onMakeRule(group)}>Create Window rule…</Button>
-            </div>
-          </section>
-          <section className="mt-5">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="mr-auto text-xs font-semibold">Visits</h3>
-              <Button onClick={() => onToggleAllSessions(group.sessionIds)}>
-                {allSelected ? "Clear selection" : `Select all ${group.sessionCount} visits`}
-              </Button>
-              {selectedSessionIds.size > 0 && (
-                <Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button>
-              )}
-            </div>
-            <div className="mt-3 rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-2.5">
-              <GroupSessions
-                group={group}
-                selected={selectedSessionIds}
-                onToggle={onToggleSession}
-                onEdit={onEditSession}
-              />
-            </div>
-          </section>
-        </div>
-      </aside>
+        ))}
+      </div>
     </>
   );
 }
 
-function EntityDrawer({
+/**
+ * When the entity was used across the range.
+ *
+ * No other view answers this for one app: Insights draws every app at once, and
+ * a total plus a "days seen" count cannot tell a daily habit from one long
+ * week. Columns are the range's calendar days — empty ones included, because a
+ * gap is most of what there is to see.
+ */
+function UsageStrip({ buckets }: { buckets: ActivityDayBucket[] }) {
+  const peak = buckets.reduce((most, bucket) => Math.max(most, bucket.seconds), 0);
+  if (buckets.length < 2 || peak <= 0) return null;
+  const spanLabel = (bucket: ActivityDayBucket) => (bucket.days === 1
+    ? formatShortDate(bucket.startSec)
+    : `${formatShortDate(bucket.startSec)} – ${formatShortDate(bucket.endSec - 1)}`);
+  return (
+    <section className="mt-5">
+      <h3 className="text-xs font-semibold">When it was used</h3>
+      <div className="mt-2.5 flex h-10 items-end gap-px border-b border-edge/70">
+        {buckets.map((bucket) => (
+          <span
+            key={bucket.startSec}
+            title={`${spanLabel(bucket)} · ${fmtDuration(bucket.seconds)}`}
+            className="flex h-full flex-1 items-end"
+          >
+            <span
+              className="w-full rounded-t-[2px] bg-accent/75"
+              // A day with a minute on it still gets a visible mark: the strip
+              // is read for whether something happened at all, not for how
+              // much. The floor is in pixels because a percentage of a 40px
+              // strip drew a hairline that read as a rule, not a bar.
+              style={bucket.seconds > 0
+                ? { height: `${(bucket.seconds / peak) * 100}%`, minHeight: 4 }
+                : { height: 0 }}
+            />
+          </span>
+        ))}
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] tabular-nums text-ink-3">
+        <span>{formatShortDate(buckets[0].startSec)}</span>
+        <span>{fmtDuration(peak)} on the busiest {buckets[0].days === 1 ? "day" : "column"}</span>
+        <span>{formatShortDate(buckets[buckets.length - 1].endSec - 1)}</span>
+      </div>
+    </section>
+  );
+}
+
+/** The four orders the window list can take, as one control. Each is a whole
+ *  answer ("most time"), not a column plus a direction to work out. */
+const WINDOW_ORDERS: { value: string; label: string; sort: ActivityWindowSort; direction: ActivitySortDirection }[] = [
+  { value: "seconds:desc", label: "Most time", sort: "seconds", direction: "desc" },
+  { value: "lastSeen:desc", label: "Most recent", sort: "lastSeen", direction: "desc" },
+  { value: "days:desc", label: "Most days", sort: "days", direction: "desc" },
+  { value: "title:asc", label: "Title A–Z", sort: "title", direction: "asc" },
+];
+
+function EntityPanel({
+  dock,
+  overlapping,
   entity,
   groups,
+  usage,
+  rangeSeconds,
   hasStoredTitles,
   detailSearch,
   onDetailSearch,
-  showTitles,
-  onShowTitles,
+  detailSort,
+  detailDirection,
+  onDetailSort,
   onLoadMore,
   onClose,
   categories,
+  rules,
   aliases,
   onDeleteEntity,
   onExclude,
@@ -1978,16 +2580,23 @@ function EntityDrawer({
   onSaveAlias,
   onRemoveExactRule,
 }: {
+  dock: CSSProperties | null;
+  overlapping: boolean;
   entity: ActivityEntitySummary;
   groups: ActivityTitleGroupPage;
+  usage: ActivityDayBucket[];
+  /** All recorded time in the range, for the share this entity holds of it. */
+  rangeSeconds: number;
   hasStoredTitles: boolean;
   detailSearch: string;
   onDetailSearch: (value: string) => void;
-  showTitles: boolean;
-  onShowTitles: (show: boolean) => void;
+  detailSort: ActivityWindowSort;
+  detailDirection: ActivitySortDirection;
+  onDetailSort: (sort: ActivityWindowSort, direction: ActivitySortDirection) => void;
   onLoadMore: () => void;
   onClose: () => void;
   categories: Category[];
+  rules: Rule[];
   aliases: Record<string, string>;
   onDeleteEntity: () => void;
   onExclude: () => void;
@@ -1996,11 +2605,21 @@ function EntityDrawer({
   onSaveAlias: (alias: string) => Promise<void>;
   onRemoveExactRule: () => Promise<void>;
 }) {
+  const kindLabel = entity.kind === "website" ? "website" : "app";
   const savedAlias = aliases[entity.key.toLowerCase()] ?? "";
   const [aliasDraft, setAliasDraft] = useState(savedAlias);
+  const [renaming, setRenaming] = useState(false);
+  const [confirmingRuleRemoval, setConfirmingRuleRemoval] = useState(false);
   const cancelAlias = useRef(false);
   useEffect(() => setAliasDraft(savedAlias), [savedAlias, entity.key]);
+  // Both are about the entity in front of the reader, and the arrow keys can
+  // change that without anything being clicked.
+  useEffect(() => {
+    setRenaming(false);
+    setConfirmingRuleRemoval(false);
+  }, [entity.id]);
   const commitAlias = () => {
+    setRenaming(false);
     if (cancelAlias.current) {
       cancelAlias.current = false;
       setAliasDraft(savedAlias);
@@ -2008,130 +2627,369 @@ function EntityDrawer({
       void onSaveAlias(aliasDraft);
     }
   };
+
+  // The standing rule for this exact app or domain, when there is one. It is
+  // the panel's one real "current value", so the menu can show it instead of
+  // forever offering to set something it may already have set.
+  const exactRule = entity.exactRuleId !== null
+    ? rules.find((rule) => rule.id === entity.exactRuleId) ?? null
+    : null;
+  const summary = entityClassification(entity);
+  const order = WINDOW_ORDERS.find(
+    (option) => option.sort === detailSort && option.direction === detailDirection,
+  );
+  // Titles are off by default at capture, and can be turned on part way
+  // through a history — so an entity can have windows and still have nothing to
+  // name them with, whatever the database holds overall.
+  const untitled = groups.rows.length > 0 && groups.rows.every((group) => !group.title);
+  const titlesReadable = hasStoredTitles && !untitled;
+
   return (
-    <>
-      <button type="button" aria-label="Close activity details" className="fixed inset-0 z-40 bg-black/25 max-md:hidden" onClick={onClose} />
-      <aside className="fixed bottom-0 right-0 top-0 z-50 flex w-[min(620px,92vw)] flex-col border-l border-edge bg-surface shadow-[-18px_0_48px_rgba(0,0,0,.4)] max-md:static max-md:z-auto max-md:w-full max-md:border-l-0 max-md:border-t max-md:shadow-none">
-        <div className="flex items-start gap-3 border-b border-edge px-5 py-4">
-          <div className="min-w-0 flex-1">
-            <p className="text-[10.5px] uppercase tracking-[.05em] text-ink-3">{entity.kind}</p>
-            <h2 className="truncate text-lg font-semibold">{entity.displayName}</h2>
-            <p className="truncate font-mono text-[11px] text-ink-3" title={entity.key}>{entity.key}</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink">✕</button>
-        </div>
-        <div className="scroll-well flex-1 overflow-y-auto p-5">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <DetailMetric label="Time in range" value={fmtDuration(entity.seconds)} />
-            <DetailMetric label="Sessions" value={String(entity.sessionCount)} />
-            <DetailMetric label="First seen" value={formatShortDate(entity.firstSeen)} />
-            <DetailMetric label="Last seen" value={formatShortDate(entity.lastSeen)} />
-          </div>
-          <section className="mt-5">
-            <h3 className="text-xs font-semibold">Display name</h3>
-            <input value={aliasDraft} placeholder={entity.displayName} onFocus={() => { cancelAlias.current = false; }} onChange={(event) => setAliasDraft(event.target.value)} onBlur={commitAlias} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); else if (event.key === "Escape") { cancelAlias.current = true; event.currentTarget.blur(); } }} className="mt-2 w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none focus:border-accent/60" />
-            <p className="mt-1.5 text-[10.5px] text-ink-3">Enter or click away to save. Leave blank to use the recorded name.</p>
-          </section>
-          <section className="mt-5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold">Classification</h3>
-              {/* An action menu, not a selection: assigning fires a command
-                  and the trigger falls back to its prompt, because an entity
-                  can hold several categories at once and no single one of
-                  them is "the" current value. */}
-              <MenuSelect
-                value=""
-                placeholder={entity.kind === "website" ? "Set website category…" : "Set app default…"}
-                label={entity.kind === "website" ? "Set website category" : "Set app default"}
-                onChange={(value) => void onAssign(Number(value))}
-                options={categories.map((category) => ({
-                  value: String(category.id),
-                  label: category.name,
-                }))}
-              />
-            </div>
-            {entity.status === "mixed" && <p className="mt-2 text-[11px] text-ink-3">This item is categorized differently across its sessions. Website and Window rules can override an App default.</p>}
-            <div className="mt-3 flex flex-col gap-2">
-              {entity.categories.map((category) => (
-                <div key={category.categoryId} className="flex items-center gap-2 text-[11.5px]"><CategoryDot color={category.color} /><span className="flex-1">{category.name}</span><span className="tabular-nums text-ink-3">{fmtDuration(category.seconds)}</span></div>
+    <DetailPanel
+      dock={dock}
+      overlapping={overlapping}
+      label={`Activity details: ${entity.displayName}`}
+      eyebrow={
+        <>
+          <span>{entity.kind}</span>
+          {entity.isNew && (
+            <RowTag tone="accent" title="First seen in all of your history inside this date range.">New</RowTag>
+          )}
+          {entity.noise && (
+            <RowTag
+              title={entity.noise === "utility"
+                ? "Looks like an installer, driver, or local file — normally hidden from the list."
+                : "Seen briefly and rarely across all history — normally hidden from the list."}
+            >
+              {entity.noise === "utility" ? "Utility" : "Rare"}
+            </RowTag>
+          )}
+        </>
+      }
+      heading={renaming ? (
+        <input
+          autoFocus
+          value={aliasDraft}
+          placeholder={entity.displayName}
+          aria-label={`Rename ${entity.displayName}`}
+          onChange={(event) => setAliasDraft(event.target.value)}
+          onBlur={commitAlias}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            else if (event.key === "Escape") {
+              // Kept from the panel's own Escape, which would otherwise close
+              // the thing being renamed rather than cancel the rename.
+              event.stopPropagation();
+              cancelAlias.current = true;
+              event.currentTarget.blur();
+            }
+          }}
+          className="mt-0.5 w-full rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-lg font-semibold outline-none focus:border-accent/60"
+        />
+      ) : (
+        // Edited where it is shown. The rename field used to be its own section
+        // a third of the way down the panel, away from the name it renamed and
+        // ahead of everything anyone actually opens this for.
+        <h2 className="group flex min-w-0 items-center gap-1">
+          <span className="min-w-0 truncate text-lg font-semibold">{entity.displayName}</span>
+          <button
+            type="button"
+            onClick={() => { cancelAlias.current = false; setAliasDraft(savedAlias); setRenaming(true); }}
+            title="Rename"
+            aria-label={`Rename ${entity.displayName}`}
+            className="shrink-0 rounded p-1 text-ink-3 opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+          </button>
+        </h2>
+      )}
+      // Three lines and no more: kind, name, identity. Which browsers a site
+      // was seen in used to sit here, and it bought a fourth line and a broken
+      // symmetry for a fact that is the same one browser for almost everybody.
+      subtitle={
+        <>
+          <p className="truncate font-mono text-[11px] text-ink-3" title={entity.key}>{entity.key}</p>
+          {renaming && (
+            <p className="mt-1 text-[10.5px] text-ink-3">Enter or click away to save. Leave blank to use the recorded name.</p>
+          )}
+        </>
+      }
+      onClose={onClose}
+      closeLabel="Close activity details"
+    >
+      {/* Two across, not four. In a panel this narrow a quarter is about 100px,
+          which "Today, 4:46 PM" does not fit into — the tile that most wanted
+          the friendlier wording was the one being truncated by it. */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* The share moved into the hint. As a second line under the value it
+            made this one tile taller than the three beside it, which is a loud
+            way to present the least-consulted number of the four. */}
+        <DetailMetric
+          label="Time in range"
+          value={fmtDuration(entity.seconds)}
+          hint={rangeSeconds > 0
+            ? `Foreground time inside the selected date range — ${((entity.seconds / rangeSeconds) * 100).toFixed(entity.seconds / rangeSeconds < 0.1 ? 1 : 0)}% of everything recorded in it.`
+            : "Foreground time inside the selected date range."}
+        />
+        {/* "Visits", not "sessions". The tab stopped handing anyone the
+            tracker's storage unit everywhere else; this tile was the holdout. */}
+        <DetailMetric
+          label="Visits"
+          value={String(entity.sessionCount)}
+          hint="Separate spells in the foreground. Switching away and coming back starts another."
+        />
+        <DetailMetric
+          label="Days seen"
+          value={String(entity.daysSeen)}
+          hint="Distinct days it appeared on. A daily habit and one long binge can share a total."
+        />
+        <DetailMetric
+          label="Last seen"
+          value={formatLastSeen(entity.lastSeen)}
+          hint={`First seen ${formatShortDate(entity.firstSeen)}.`}
+        />
+      </div>
+
+      <UsageStrip buckets={usage} />
+
+      <PanelSection
+        title="Classification"
+        right={
+          <span className="shrink-0">
+            <MenuSelect
+              align="end"
+              // A standing exact rule is a real current value, so the trigger
+              // names it; without one this stays an action menu whose trigger
+              // falls back to a prompt, because several categories can be in
+              // play at once and none of them is "the" answer.
+              value={exactRule ? String(exactRule.categoryId) : ""}
+              placeholder={entity.kind === "website" ? "Set website category…" : "Set app default…"}
+              label={entity.kind === "website" ? "Set website category" : "Set app default"}
+              // No explanatory header. The menu sizes itself to its widest
+              // line, so a sentence in here stretched a list of one-word
+              // categories to twice the width it needed — and the banner
+              // raised on assignment already states the scope, at the one
+              // moment it is about to matter.
+              onChange={(value) => void onAssign(Number(value))}
+              options={categories.map((category) => ({
+                value: String(category.id),
+                label: category.name,
+                dot: category.color,
+              }))}
+            />
+          </span>
+        }
+      >
+        {/* What decided it, not what it is. The trigger beside this heading
+            already names the category whenever there is a standing rule to
+            name, so repeating it here spent the section's first and most
+            emphasised line restating the control next to it. The category
+            returns as the lead only when the trigger is showing a prompt
+            instead — mixed, uncategorized, or decided by some other rule. */}
+        {!exactRule && <p className="mt-2 text-[11.5px] text-ink-2">{summary.label}</p>}
+        <p className={exactRule
+          ? "mt-2 text-[11.5px] leading-snug text-ink-2"
+          : "mt-0.5 text-[11px] leading-snug text-ink-3"}
+        >
+          {summary.detail}
+        </p>
+        {entity.status === "mixed" && (
+          <p className="mt-2 text-[11px] text-ink-3">Website and Window rules can override an App default.</p>
+        )}
+        <CategorySplit entity={entity} />
+        {/* Only when there is something to compare. A single rule is already
+            named in the line above, and repeating it in a bordered box read as
+            two different facts about the same thing. */}
+        {entity.rules.length > 1 && (
+          <div className="mt-4 rounded-lg border border-edge/70 bg-surface-2 px-3 py-2.5">
+            <p className="mb-2 text-[10.5px] font-medium text-ink-2">Rules in use</p>
+            <div className="flex flex-col gap-2">
+              {entity.rules.map((rule) => (
+                <div key={rule.ruleId} className="flex items-center gap-2 text-[10.5px]">
+                  <span className="w-14 shrink-0 text-ink-3">{RULE_LABELS[rule.matchType]}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
+                  <CategoryDot color={rule.categoryColor} />
+                  <span className="truncate text-ink-2">{rule.categoryName}</span>
+                  <span className="shrink-0 tabular-nums text-ink-3">{rule.sessions} · {fmtDuration(rule.seconds)}</span>
+                </div>
               ))}
-              {entity.uncategorizedSeconds > 0 && <div className="flex items-center gap-2 text-[11.5px]"><CategoryDot color={UNCATEGORIZED} /><span className="flex-1">Uncategorized</span><span className="tabular-nums text-ink-3">{fmtDuration(entity.uncategorizedSeconds)}</span></div>}
             </div>
-            {entity.rules.length > 0 && (
-              <div className="mt-4 rounded-lg border border-edge/70 bg-surface-2 px-3 py-2.5">
-                <p className="mb-2 text-[10.5px] font-medium text-ink-2">Rules in use</p>
-                <div className="flex flex-col gap-2">
-                  {entity.rules.map((rule) => (
-                    <div key={rule.ruleId} className="flex items-center gap-2 text-[10.5px]">
-                      <span className="w-14 shrink-0 text-ink-3">{RULE_LABELS[rule.matchType]}</span>
-                      <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
-                      <CategoryDot color={rule.categoryColor} />
-                      <span className="truncate text-ink-2">{rule.categoryName}</span>
-                      <span className="shrink-0 tabular-nums text-ink-3">{rule.sessions} · {fmtDuration(rule.seconds)}</span>
-                    </div>
-                  ))}
+          </div>
+        )}
+        {exactRule && (
+          // Deleting a standing rule used to be one click on a red word at the
+          // end of a dense section, with nothing to confirm and nothing saying
+          // what it would cost.
+          <div className="mt-3">
+            {confirmingRuleRemoval ? (
+              <div className="rounded-lg border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-[11px] leading-snug text-ink-2">
+                <p>
+                  Remove the {entity.kind === "website" ? "Website" : "App"} rule
+                  {" "}<span className="font-mono">{exactRule.pattern}</span>? Time it decided becomes
+                  uncategorized unless another rule matches. Manual corrections are kept.
+                </p>
+                <div className="mt-2.5 flex justify-end gap-2">
+                  <Button onClick={() => setConfirmingRuleRemoval(false)}>Cancel</Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => { setConfirmingRuleRemoval(false); void onRemoveExactRule(); }}
+                  >
+                    Remove rule
+                  </Button>
                 </div>
               </div>
+            ) : (
+              <Button variant="quiet-danger" onClick={() => setConfirmingRuleRemoval(true)}>
+                Remove {entity.kind === "website" ? "Website" : "App"} rule…
+              </Button>
             )}
-            <p className="mt-3 text-[10.5px] leading-snug text-ink-3">Classification changes apply to all matching historical and future activity, not only this date range.</p>
-            {entity.exactRuleId !== null && <button type="button" onClick={() => void onRemoveExactRule()} className="mt-2 text-[11px] text-bad hover:text-bad/80">Remove exact {entity.kind === "website" ? "Website" : "App"} rule</button>}
-          </section>
-          {/* Windows rather than raw sessions, for the same reason search
-              results changed: this entity's list is one app's worth of the
-              same fragmentation, and "45 windows" is a thing to read where
-              "1269 sessions" is not. */}
-          <section className="mt-5">
-            <div className="flex items-center gap-2">
-              <h3 className="text-xs font-semibold">Windows</h3>
-              <span className="text-[10.5px] tabular-nums text-ink-3">
-                {groups.total}
-                {groups.sessionTotal > groups.total && ` · ${groups.sessionTotal} visits`}
-              </span>
+          </div>
+        )}
+      </PanelSection>
+
+      {/* Windows rather than raw sessions, for the same reason search
+          results changed: this entity's list is one app's worth of the
+          same fragmentation, and "45 windows" is a thing to read where
+          "1269 sessions" is not. */}
+      <section className="mt-5">
+        {/* Stuck to the top of the panel's scroll, because this is the long
+            list: the filter and the order are useless once they have scrolled
+            away. The negative margins carry the background across the scroll
+            well's padding so rows pass underneath rather than beside. */}
+        <div className="sticky top-0 z-10 -mx-5 -mt-2 bg-surface px-5 pb-2.5 pt-2">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-semibold">Windows</h3>
+            {/* Labelled counts, phrased so the heading is not repeated back at
+                the reader — "Windows · 2 windows · 309 visits" was three
+                sayings of two facts. */}
+            <span className="min-w-0 truncate text-[10.5px] tabular-nums text-ink-3">
+              {groups.sessionTotal > groups.total
+                ? `${countNoun(groups.sessionTotal, "visit")} in ${countNoun(groups.total, "window")}`
+                : countNoun(groups.total, "window")}
+            </span>
+          </div>
+          {/* Narrowing and ordering sit together, because they are the same
+              kind of act on the same list. The privacy toggle that used to
+              take this row is gone: consent to seeing titles is given once, by
+              turning capture on, and re-asking it here every session bought a
+              control that mostly sat checked. */}
+          {titlesReadable && (
+            <div className="mt-2.5 flex items-center gap-2">
+              <ClearableInput
+                value={detailSearch}
+                onChange={onDetailSearch}
+                label="Filter windows"
+                placeholder="Filter windows…"
+                className="min-w-0 flex-1"
+              />
+              {groups.total > 1 && (
+                <span className="shrink-0">
+                  <MenuSelect
+                    size="field"
+                    variant="quiet"
+                    align="end"
+                    label="Order windows by"
+                    value={order?.value ?? "seconds:desc"}
+                    onChange={(value) => {
+                      const picked = WINDOW_ORDERS.find((option) => option.value === value);
+                      if (picked) onDetailSort(picked.sort, picked.direction);
+                    }}
+                    options={WINDOW_ORDERS.map(({ value, label }) => ({ value, label }))}
+                  />
+                </span>
+              )}
             </div>
-            {hasStoredTitles && (
-              <div className="mt-3 flex items-center gap-3">
-                <input value={detailSearch} onChange={(event) => onDetailSearch(event.target.value)} placeholder="Filter windows…" className="min-w-0 flex-1 rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" />
-                {/* Named, and independent of the filter box. Hiding titles
-                    until something was typed tied a privacy decision to an
-                    unrelated control, and one keystroke undid it anyway. */}
-                <Checkbox
-                  checked={showTitles}
-                  onChange={onShowTitles}
-                  className="shrink-0 text-[11px] text-ink-3 hover:text-ink-2"
-                >
-                  Show titles
-                </Checkbox>
-              </div>
-            )}
-            <div className="mt-3 flex flex-col gap-1.5">
+          )}
+        </div>
+        {!titlesReadable ? (
+          // A list of identical "—" rows, one per entity, is what this used to
+          // render when nothing had a title to group by.
+          <p className="rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-4 text-[11px] leading-snug text-ink-3">
+            No window titles were recorded for this {kindLabel}, so its{" "}
+            {countNoun(groups.sessionTotal, "visit")} cannot be broken down. Title capture is off by
+            default; Settings can turn it on for what is recorded from now on.
+          </p>
+        ) : (
+          <>
+            <div className="flex flex-col gap-1.5">
               {groups.rows.map((group) => (
-                <DrawerWindowRow
+                <PanelWindowRow
                   key={group.key}
                   group={group}
-                  showTitle={showTitles}
                   search={detailSearch}
+                  maxSeconds={groups.maxSeconds}
+                  totalSeconds={entity.seconds}
                   onOpen={onOpenWindow}
                 />
               ))}
-              {groups.rows.length === 0 && <p className="py-5 text-center text-[11px] text-ink-3">No windows match this filter.</p>}
+              {groups.rows.length === 0 && (
+                <p className="py-5 text-center text-[11px] text-ink-3">No windows match this filter.</p>
+              )}
             </div>
-            {groups.rows.length < groups.total && <LoadMore shown={groups.rows.length} total={groups.total} onClick={onLoadMore} />}
-          </section>
+            {groups.rows.length < groups.total && (
+              <LoadMore shown={groups.rows.length} total={groups.total} onClick={onLoadMore} />
+            )}
+          </>
+        )}
+      </section>
+
+      {/* Curation last, and one clean row. Each action used to carry its own
+          paragraph, which is four lines of standing prose to explain two
+          buttons that both open a dialog stating the same thing in full. The
+          sentences moved onto the buttons, where they are read by whoever is
+          hesitating and by nobody else. */}
+      <section className="mt-6 border-t border-edge/60 pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="mr-auto text-xs font-semibold text-ink-2">Manage this {kindLabel}</h3>
+          <Button
+            onClick={onExclude}
+            title={`Stops this exact ${kindLabel} from ever being recorded again. Existing history is kept unless you ask for it to go too.`}
+          >
+            Do not track…
+          </Button>
+          <Button
+            variant="quiet-danger"
+            onClick={onDeleteEntity}
+            title="Deletes complete session rows. Categories, rules, and aliases are kept."
+          >
+            Delete activity…
+          </Button>
         </div>
-        <div className="flex items-center justify-between gap-3 border-t border-edge px-5 py-4">
-          <p className="max-w-72 text-[10.5px] leading-snug text-ink-3">Deletes complete session rows overlapping the visible range. Categories, rules, and aliases are kept.</p>
-          <span className="flex shrink-0 items-center gap-2">
-            <Button onClick={onExclude}>Do not track…</Button>
-            <Button variant="danger" onClick={onDeleteEntity}>Delete activity in range…</Button>
-          </span>
-        </div>
-      </aside>
-    </>
+      </section>
+    </DetailPanel>
   );
 }
 
-function DetailMetric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-lg border border-edge bg-surface-2 p-3"><p className="text-[10px] text-ink-3">{label}</p><p className="mt-1 text-sm font-semibold tabular-nums">{value}</p></div>;
+function DetailMetric({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  /** Explains the measure on hover or focus, the way the Insights tiles do.
+   *  Anything that would otherwise become a second line under the value
+   *  belongs here — four tiles in a grid only read as a set while they are
+   *  the same height. */
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-edge bg-surface-2 p-3">
+      <p className="text-[10px] text-ink-3">
+        {hint ? (
+          // The label is repeated into the accessible name because the tooltip
+          // sets one, and a bare hint would announce the explanation of a
+          // measure without ever saying which measure it explains.
+          <FloatingTooltip text={`${label}. ${hint}`} className="cursor-help outline-none">
+            {label}
+          </FloatingTooltip>
+        ) : label}
+      </p>
+      <p className="mt-1 truncate text-sm font-semibold tabular-nums" title={value}>{value}</p>
+    </div>
+  );
 }
 
 function ActivityExportMenu({
@@ -2892,7 +3750,7 @@ function DeleteActivityDialog({
   onClose,
   onDeleted,
 }: {
-  scope: { request: ActivityDeleteRequest; label: string };
+  scope: DeleteScope;
   onClose: () => void;
   onDeleted: (request: ActivityDeleteRequest) => void;
 }) {
@@ -2901,21 +3759,25 @@ function DeleteActivityDialog({
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [backupPath, setBackupPath] = useState<string | null>(null);
+  // Always opens on the narrower of the two. Widening is a decision someone
+  // has to make on purpose, and it is one keystroke away either way.
+  const [wide, setWide] = useState(false);
+  const active = wide && scope.allHistory ? scope.allHistory : scope;
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void previewActivityDelete(scope.request).then(
+    void previewActivityDelete(active.request).then(
       (value) => { if (!cancelled) { setPreview(value); setLoading(false); } },
       (error) => { if (!cancelled) { setLoading(false); banner.report(error, "deletion preview"); onClose(); } },
     );
     return () => { cancelled = true; };
-  }, [scope]);
+  }, [active]);
   const confirm = async () => {
     if (!preview || preview.count === 0) return;
     setDeleting(true);
     try {
       const request = {
-        ...scope.request,
+        ...active.request,
         snapshotMaxId: preview.snapshotMaxId,
         previewProtectedSessionId: preview.protectedSessionId,
       } as ActivityDeleteRequest & { snapshotMaxId: number };
@@ -2923,7 +3785,7 @@ function DeleteActivityDialog({
       if (result.protectedCount > 0) {
         banner.show(`${result.protectedCount} current live session was kept. Pause recording and retry after it closes if you need to remove it.`);
       }
-      onDeleted(scope.request);
+      onDeleted(active.request);
     } catch (error) {
       banner.report(error, "activity deletion");
       setDeleting(false);
@@ -2933,11 +3795,35 @@ function DeleteActivityDialog({
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-5">
       <div role="dialog" aria-modal="true" aria-labelledby="delete-activity-title" className="w-full max-w-md rounded-[14px] border border-edge-2 bg-surface p-5 shadow-2xl">
         <h2 id="delete-activity-title" className="text-sm font-semibold">Delete recorded activity?</h2>
+        {/* The scope sits above the preview because the preview answers for
+            it: every number below this row is the consequence of the choice
+            made in it, and both choices are one Delete button away. */}
+        {scope.allHistory && (
+          <div className="mt-3 flex rounded-lg border border-edge bg-surface-2 p-0.5">
+            {[
+              { wide: false, label: "Visible range" },
+              { wide: true, label: "All history" },
+            ].map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                disabled={deleting}
+                aria-pressed={wide === option.wide}
+                onClick={() => setWide(option.wide)}
+                className={`flex-1 rounded-md px-2.5 py-1 text-[11px] transition-colors disabled:opacity-40 ${
+                  wide === option.wide ? "bg-surface-3 text-ink" : "text-ink-3 hover:text-ink-2"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
         {loading || !preview ? <div className="py-8"><Spinner label="Checking deletion scope…" /></div> : (
           <>
-            <p className="mt-3 text-xs text-ink-2">{scope.label}</p>
+            <p className="mt-3 text-xs text-ink-2">{active.label}</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <DetailMetric label="Sessions" value={String(preview.count)} />
+              <DetailMetric label="Visits" value={String(preview.count)} />
               <DetailMetric label="Recorded time" value={fmtDuration(preview.seconds)} />
             </div>
             {preview.earliestStart !== null && preview.latestEnd !== null && <p className="mt-3 text-[11px] text-ink-3">{formatDateTime(preview.earliestStart)} through {formatDateTime(preview.latestEnd)}</p>}

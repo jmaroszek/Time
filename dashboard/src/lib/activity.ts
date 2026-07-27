@@ -120,6 +120,11 @@ export interface ActivityQuery {
   detailSearch?: string;
   detailOffset?: number;
   detailLimit?: number;
+  /** Order for the selected entity's own window list. Independent of the
+   *  search results' order: one is a reader working through what a single app
+   *  was used for, the other a reader scanning matches across everything. */
+  detailSort?: ActivityWindowSort;
+  detailDirection?: ActivitySortDirection;
 }
 
 export interface ActivityEntityPage {
@@ -205,7 +210,34 @@ export interface ActivityTitleGroupPage {
   /** Sessions behind every group, paged or not — what the old flat list
    *  would have shown, kept so the view can say what it collapsed. */
   sessionTotal: number;
+  /** The heaviest group in the whole list, not merely on this page: a bar
+   *  drawn against the loaded page alone would rescale every time the reader
+   *  pressed "load more", or whenever a sort put a lighter row first. */
+  maxSeconds: number;
 }
+
+/**
+ * One column of the detail panel's usage strip: how much of the selected
+ * entity's time landed in a span of local calendar days.
+ *
+ * Days are kept even when empty, because a gap is most of what the strip is
+ * for. Several days fold into one column once a range holds more of them than
+ * a strip can draw, which is what keeps an all-time range one readable row
+ * instead of a thousand hairlines.
+ */
+export interface ActivityDayBucket {
+  startSec: number;
+  /** Exclusive, and clipped to the query's end so the last column cannot
+   *  claim a span the range never covered. */
+  endSec: number;
+  /** Whole local days this column stands for, so the view can label it. */
+  days: number;
+  seconds: number;
+}
+
+/** Columns the strip draws at most. Beyond this a column is under a pixel
+ *  wide in the panel, so days start folding together instead. */
+export const USAGE_STRIP_COLUMNS = 60;
 
 /**
  * Collapse sessions into one row per conservatively normalized full title,
@@ -360,6 +392,10 @@ export interface ActivityQueryResult {
    *  One entity, so titles alone separate the groups. */
   detailGroups: ActivityTitleGroupPage;
   detailTotal: number;
+  /** When the selected entity was used across the range. Deliberately blind to
+   *  the window filter: typing in it narrows which windows are listed, not
+   *  when the app itself was open. Empty when nothing is selected. */
+  selectedEntityUsage: ActivityDayBucket[];
   hasStoredTitles: boolean;
   appliedRuleIds: number[];
 }
@@ -380,7 +416,7 @@ export interface ActivityIndex {
   hasStoredTitles: boolean;
   /** Rules that won at least one session in all of history. A rule missing here
    *  is the one actionable usage signal left: nothing matches it, so it is a
-   *  deletion candidate. Per-rule detail lives in the entity drawer instead. */
+   *  deletion candidate. Per-rule detail lives in the entity panel instead. */
   appliedRuleIds: number[];
 }
 
@@ -407,14 +443,84 @@ interface MutableEntity {
  * 86400 seconds long.
  */
 function addDayKeys(target: Set<number>, startSec: number, endSec: number): void {
+  forEachLocalDay(startSec, endSec, (day) => target.add(day.key));
+}
+
+/** The local calendar day a date falls on, as a comparable integer. */
+function dayKeyOf(date: Date): number {
+  return date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
+}
+
+/**
+ * Walks the local calendar days a span covers, reporting how much of the span
+ * fell on each. Stepping with setDate keeps the walk correct across DST, where
+ * a day is not 86400 seconds long — which is also why the seconds are measured
+ * from the real day boundaries rather than assumed.
+ */
+function forEachLocalDay(
+  startSec: number,
+  endSec: number,
+  visit: (day: { key: number; startSec: number; seconds: number }) => void,
+): void {
   const cursor = new Date(startSec * 1000);
   cursor.setHours(0, 0, 0, 0);
   // Strictly less than: a session ending exactly at midnight touched the next
   // day for no time at all.
   while (cursor.getTime() / 1000 < endSec) {
-    target.add(cursor.getFullYear() * 10000 + (cursor.getMonth() + 1) * 100 + cursor.getDate());
+    const dayStartSec = cursor.getTime() / 1000;
+    const key = dayKeyOf(cursor);
+    cursor.setDate(cursor.getDate() + 1);
+    const dayEndSec = cursor.getTime() / 1000;
+    const from = Math.max(startSec, dayStartSec);
+    const to = Math.min(endSec, dayEndSec);
+    visit({ key, startSec: dayStartSec, seconds: Math.max(0, to - from) });
+  }
+}
+
+/**
+ * Lays a set of spans out across the query range's calendar days.
+ *
+ * The range decides the columns, not the spans: an entity used twice in a
+ * month should draw two marks in a month-wide strip, not two adjacent bars
+ * that imply constant use. Sessions crossing midnight are split, so an
+ * overnight run is drawn on both days it happened on.
+ */
+export function bucketDailyUsage(
+  spans: { start: number; end: number }[],
+  rangeStartSec: number,
+  rangeEndSec: number,
+  columns = USAGE_STRIP_COLUMNS,
+): ActivityDayBucket[] {
+  if (rangeEndSec <= rangeStartSec || columns < 1) return [];
+  const dayStarts: number[] = [];
+  const columnByDay = new Map<number, number>();
+  const cursor = new Date(rangeStartSec * 1000);
+  cursor.setHours(0, 0, 0, 0);
+  while (cursor.getTime() / 1000 < rangeEndSec) {
+    columnByDay.set(dayKeyOf(cursor), dayStarts.length);
+    dayStarts.push(cursor.getTime() / 1000);
     cursor.setDate(cursor.getDate() + 1);
   }
+  if (dayStarts.length === 0) return [];
+
+  const perColumn = Math.ceil(dayStarts.length / columns);
+  const buckets: ActivityDayBucket[] = [];
+  for (let day = 0; day < dayStarts.length; day += perColumn) {
+    const beyond = Math.min(day + perColumn, dayStarts.length);
+    buckets.push({
+      startSec: dayStarts[day],
+      endSec: beyond < dayStarts.length ? dayStarts[beyond] : rangeEndSec,
+      days: beyond - day,
+      seconds: 0,
+    });
+  }
+  for (const span of spans) {
+    forEachLocalDay(span.start, span.end, (day) => {
+      const at = columnByDay.get(day.key);
+      if (at !== undefined) buckets[Math.floor(at / perColumn)].seconds += day.seconds;
+    });
+  }
+  return buckets;
 }
 
 function entityIdentity(
@@ -778,6 +884,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
       rows: page(grouped, query.windowOffset, query.windowLimit),
       total: grouped.length,
       sessionTotal: grouped.reduce((total, group) => total + group.sessionCount, 0),
+      maxSeconds: grouped.reduce((most, group) => Math.max(most, group.seconds), 0),
     };
   }
 
@@ -785,20 +892,27 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     ? (entitiesById.get(query.selectedEntityId) ?? null)
     : null;
   const detailSearch = query.detailSearch?.trim().toLowerCase() ?? "";
-  const detailRows: ActivitySessionRow[] = [];
+  // Collected before the filter is applied, so the usage strip below can
+  // describe the entity while the list beside it describes the filter.
+  const entityRows: ActivitySessionRow[] = [];
   if (selectedEntity) {
     for (const session of index.sessions) {
       if (session.entityId !== selectedEntity.id) continue;
-      if (detailSearch && !session.title.toLowerCase().includes(detailSearch)) continue;
       const clipped = clippedSession(session, query.startSec, query.endSec);
-      if (clipped) detailRows.push(clipped);
+      if (clipped) entityRows.push(clipped);
     }
-    detailRows.sort((left, right) => right.start - left.start || right.id - left.id);
+    entityRows.sort((left, right) => right.start - left.start || right.id - left.id);
   }
+  const selectedEntityUsage = selectedEntity
+    ? bucketDailyUsage(entityRows, query.startSec, query.endSec)
+    : [];
+  const detailRows = detailSearch
+    ? entityRows.filter((session) => session.title.toLowerCase().includes(detailSearch))
+    : entityRows;
   // Titles are no longer blanked until searched. That rule tied a privacy
   // decision to an unrelated control — one character in the detail search
   // revealed everything anyway — and it cannot coexist with grouping, which
-  // has nothing to name its groups by if the titles are empty. The drawer
+  // has nothing to name its groups by if the titles are empty. The panel
   // offers an explicit toggle instead, and title capture is still opt-in and
   // off by default, which is where the real consent lives.
   const detailGrouped = groupSessionsByTitle(detailRows);
@@ -806,6 +920,10 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     const lifetimeFirstSeen = index.lifetimeWindowFirstSeen.get(group.key) ?? group.firstSeen;
     group.isNew = canBeNew && lifetimeFirstSeen >= query.startSec;
   }
+  detailGrouped.sort(compareTitleGroups(
+    query.detailSort ?? "seconds",
+    query.detailDirection ?? "desc",
+  ));
 
   return {
     catalog,
@@ -822,7 +940,9 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
       rows: page(detailGrouped, query.detailOffset ?? 0, query.detailLimit ?? 50),
       total: detailGrouped.length,
       sessionTotal: detailRows.length,
+      maxSeconds: detailGrouped.reduce((most, group) => Math.max(most, group.seconds), 0),
     },
+    selectedEntityUsage,
     detailTotal: detailRows.length,
     hasStoredTitles: index.hasStoredTitles,
     appliedRuleIds: index.appliedRuleIds,

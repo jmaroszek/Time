@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   GROUP_SESSION_SAMPLE,
+  bucketDailyUsage,
   buildActivityIndex,
   packActivitySource,
   queryActivityIndex,
@@ -419,15 +420,18 @@ describe("Activity index", () => {
         sessionCount: 2,
         seconds: 20,
       },
+      // Equal times break to title, not to recency: the entity's window list
+      // is ordered by the same comparator as the searched one, so the two
+      // cannot answer the same tie differently.
       {
-        title: "Report.docx - Word 1.2",
-        sessionIds: [44],
+        title: "Budget.docx - Word",
+        sessionIds: [42],
         sessionCount: 1,
         seconds: 10,
       },
       {
-        title: "Budget.docx - Word",
-        sessionIds: [42],
+        title: "Report.docx - Word 1.2",
+        sessionIds: [44],
         sessionCount: 1,
         seconds: 10,
       },
@@ -776,5 +780,128 @@ describe("Range totals", () => {
     expect(all.uncategorized.entities).toBe(2);
     const websitesOnly = queryActivityIndex(index, { ...baseQuery, typeFilter: "website" });
     expect(websitesOnly.uncategorized.entities).toBe(1);
+  });
+});
+
+describe("bucketDailyUsage", () => {
+  /** Local wall-clock, because the buckets are local calendar days and CI runs
+   *  the suite under two different timezones. */
+  const at = (year: number, month: number, day: number, hour = 0) =>
+    new Date(year, month - 1, day, hour).getTime() / 1000;
+
+  it("lays spans out over the range's days, keeping the empty ones", () => {
+    const buckets = bucketDailyUsage(
+      [{ start: at(2026, 3, 1, 9), end: at(2026, 3, 1, 10) }],
+      at(2026, 3, 1),
+      at(2026, 3, 5),
+    );
+    // Four columns for four days: a gap is most of what the strip is for, so
+    // the three untouched days survive as zeroes rather than being dropped.
+    expect(buckets.map((bucket) => bucket.seconds)).toEqual([3600, 0, 0, 0]);
+    expect(buckets.every((bucket) => bucket.days === 1)).toBe(true);
+  });
+
+  it("splits a span at midnight onto both days it happened on", () => {
+    const buckets = bucketDailyUsage(
+      [{ start: at(2026, 3, 1, 23), end: at(2026, 3, 2, 1) }],
+      at(2026, 3, 1),
+      at(2026, 3, 3),
+    );
+    expect(buckets.map((bucket) => bucket.seconds)).toEqual([3600, 3600]);
+  });
+
+  it("ignores time outside the range rather than folding it into an edge column", () => {
+    const buckets = bucketDailyUsage(
+      [{ start: at(2026, 2, 27, 9), end: at(2026, 2, 27, 10) }],
+      at(2026, 3, 1),
+      at(2026, 3, 3),
+    );
+    expect(buckets.map((bucket) => bucket.seconds)).toEqual([0, 0]);
+  });
+
+  it("folds days together once a range holds more of them than the strip draws", () => {
+    const buckets = bucketDailyUsage(
+      [
+        { start: at(2026, 3, 1, 9), end: at(2026, 3, 1, 10) },
+        { start: at(2026, 3, 4, 9), end: at(2026, 3, 4, 10) },
+      ],
+      at(2026, 3, 1),
+      at(2026, 3, 7),
+      3,
+    );
+    // Six days into three columns of two, and both hours land in the first —
+    // the 1st and the 4th are two days apart but the fold is not by proximity.
+    expect(buckets.map((bucket) => bucket.days)).toEqual([2, 2, 2]);
+    expect(buckets.map((bucket) => bucket.seconds)).toEqual([3600, 3600, 0]);
+  });
+
+  it("clips the last column to the range, so it cannot claim a day never covered", () => {
+    const buckets = bucketDailyUsage([], at(2026, 3, 1), at(2026, 3, 2, 12));
+    expect(buckets).toHaveLength(2);
+    expect(buckets[1].endSec).toBe(at(2026, 3, 2, 12));
+  });
+
+  it("has nothing to draw for an empty range", () => {
+    expect(bucketDailyUsage([], at(2026, 3, 1), at(2026, 3, 1))).toEqual([]);
+  });
+});
+
+describe("the selected entity's usage strip", () => {
+  it("describes the entity, not the window filter narrowing the list beside it", () => {
+    const index = buildActivityIndex(source);
+    const unfiltered = queryActivityIndex(index, {
+      ...baseQuery,
+      selectedEntityId: "website:example.com",
+    });
+    const filtered = queryActivityIndex(index, {
+      ...baseQuery,
+      selectedEntityId: "website:example.com",
+      detailSearch: "mail",
+    });
+    // The filter removed a window from the list, so the two disagree there…
+    expect(filtered.detailGroups.total).toBeLessThan(unfiltered.detailGroups.total);
+    // …but "when was this site open" is not a question the filter can answer
+    // differently, so the strip must not move.
+    expect(filtered.selectedEntityUsage).toEqual(unfiltered.selectedEntityUsage);
+  });
+
+  it("is empty when nothing is selected", () => {
+    const index = buildActivityIndex(source);
+    expect(queryActivityIndex(index, baseQuery).selectedEntityUsage).toEqual([]);
+  });
+});
+
+describe("window list ordering in the entity panel", () => {
+  it("takes the order the panel asks for", () => {
+    const index = buildActivityIndex(source);
+    const byTitle = queryActivityIndex(index, {
+      ...baseQuery,
+      selectedEntityId: "website:example.com",
+      detailSort: "title",
+      detailDirection: "asc",
+    });
+    const titles = byTitle.detailGroups.rows.map((group) => group.title);
+    expect(titles).toEqual([...titles].sort((left, right) => left.localeCompare(right)));
+  });
+
+  it("scales its bars against the heaviest window, not the heaviest on the page", () => {
+    const index = buildActivityIndex(source);
+    const paged = queryActivityIndex(index, {
+      ...baseQuery,
+      selectedEntityId: "website:example.com",
+      detailLimit: 1,
+      detailSort: "title",
+      detailDirection: "asc",
+    });
+    expect(paged.detailGroups.rows).toHaveLength(1);
+    // Sorted alphabetically, so the first page need not hold the longest
+    // window — a bar drawn against the page alone would rescale on "load more".
+    const everyWindow = queryActivityIndex(index, {
+      ...baseQuery,
+      selectedEntityId: "website:example.com",
+    });
+    expect(paged.detailGroups.maxSeconds).toBe(
+      Math.max(...everyWindow.detailGroups.rows.map((group) => group.seconds)),
+    );
   });
 });
