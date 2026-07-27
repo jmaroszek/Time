@@ -123,11 +123,9 @@ export interface ActivityEntityPage {
   total: number;
 }
 
-export interface ActivitySearchResults {
-  apps: ActivityEntityPage;
-  websites: ActivityEntityPage;
-  windowMatches: ActivitySessionRow[];
-  windowTotal: number;
+export interface ActivitySessionPage {
+  rows: ActivitySessionRow[];
+  total: number;
 }
 
 /** Triage counter carried by the classification menu's Uncategorized option.
@@ -143,7 +141,18 @@ export interface ActivityQueryResult {
   /** Entities the noise policy hides from the catalog, whether or not
    *  includeNoise is currently showing them. Zero while searching. */
   noiseHidden: number;
-  searchResults: ActivitySearchResults | null;
+  /**
+   * Sessions whose stored title contains the search text, newest first. Null
+   * when nothing is being searched, because stored titles are never listed
+   * until someone asks for them.
+   *
+   * Matching identities are not carried alongside: a search narrows `catalog`
+   * in place, and `catalog` mixes apps and websites exactly as the unsearched
+   * list does. Splitting them back into two tables under a search only
+   * duplicated a distinction every row already states on its own metadata line
+   * and the type filter already controls.
+   */
+  windowMatches: ActivitySessionPage | null;
   /** All recorded time in range, hidden and filtered rows included. Every
    *  session maps to exactly one entity, so summing them double-counts
    *  nothing. Backs the share each row reports, not the length it draws. */
@@ -514,24 +523,24 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     total: identityMatches.length,
   };
 
-  let searchResults: ActivitySearchResults | null = null;
+  // Titles are matched regardless of the type filter, since a stored title has
+  // no kind of its own — the browser session that carries one is filed under a
+  // website, and the app filter would throw away the very rows a title search
+  // is for. The view labels that exception rather than hiding it.
+  let windowMatches: ActivitySessionPage | null = null;
   if (search) {
-    const apps = identityMatches.filter((entity) => entity.kind === "app");
-    const websites = identityMatches.filter((entity) => entity.kind === "website");
-    const matchingWindows: ActivitySessionRow[] = [];
+    const matching: ActivitySessionRow[] = [];
     for (const session of index.sessions) {
       if (!session.title.toLowerCase().includes(search)) continue;
       const entity = entitiesById.get(session.entityId);
       if (!entity || !matchesClassification(entity, query.classificationFilter)) continue;
       const clipped = clippedSession(session, query.startSec, query.endSec);
-      if (clipped) matchingWindows.push(clipped);
+      if (clipped) matching.push(clipped);
     }
-    matchingWindows.sort((left, right) => right.start - left.start || right.id - left.id);
-    searchResults = {
-      apps: { rows: page(apps, query.entityOffset, query.entityLimit), total: apps.length },
-      websites: { rows: page(websites, query.entityOffset, query.entityLimit), total: websites.length },
-      windowMatches: page(matchingWindows, query.windowOffset, query.windowLimit),
-      windowTotal: matchingWindows.length,
+    matching.sort((left, right) => right.start - left.start || right.id - left.id);
+    windowMatches = {
+      rows: page(matching, query.windowOffset, query.windowLimit),
+      total: matching.length,
     };
   }
 
@@ -554,7 +563,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
   return {
     catalog,
     noiseHidden,
-    searchResults,
+    windowMatches,
     totalSeconds,
     maxSeconds,
     // Deliberately not classification-filtered: the count labels the option
