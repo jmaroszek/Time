@@ -154,7 +154,7 @@ export function Button({
 }: {
   children: ReactNode;
   onClick?: () => void;
-  variant?: "default" | "danger" | "primary";
+  variant?: "default" | "danger" | "quiet-danger" | "primary";
   disabled?: boolean;
   title?: string;
 }) {
@@ -162,6 +162,12 @@ export function Button({
     default: "border-edge-2 bg-transparent hover:bg-white/[.035] text-ink-2 hover:text-ink",
     primary: "border-accent/30 bg-transparent hover:bg-accent/15 text-accent",
     danger: "border-bad/30 bg-transparent hover:bg-bad/15 text-bad",
+    // For a button that *opens* a destructive flow rather than performing one.
+    // The ellipsis in its label already says a dialog is coming, and that
+    // dialog does the shouting — so at rest this reads as an ordinary control
+    // and only takes the warning colour once the pointer is on it. Reserve the
+    // plain `danger` for the button that actually commits.
+    "quiet-danger": "border-edge-2 bg-transparent text-ink-2 hover:border-bad/40 hover:bg-bad/10 hover:text-bad",
   }[variant];
   return (
     <button

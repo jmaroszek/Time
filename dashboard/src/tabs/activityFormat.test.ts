@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   defaultRulePattern,
   describeCorrectionWindow,
+  detailPanelBox,
+  entityClassification,
   formatLastSeen,
   titleMatchParts,
 } from "./ActivityTab";
 import { previewTitleRule } from "../lib/titleRuleAnalysis";
 import type { Category, Rule, TitleRuleSpec } from "../lib/classify";
-import type { ActivitySource } from "../lib/activity";
+import type { ActivityEntitySummary, ActivitySource } from "../lib/activity";
 
 /** Boundaries are calendar dates, not elapsed hours: 00:30 and 23:30 on the
  *  same date are both "today", and 23:30 last night is "Yesterday" even though
@@ -235,5 +237,190 @@ describe("describeCorrectionWindow", () => {
       const text = describeCorrectionWindow({ ...base, ...bounds });
       expect(text).not.toMatch(/flush|recordings/i);
     }
+  });
+});
+
+describe("entityClassification", () => {
+  const base: ActivityEntitySummary = {
+    id: "app:code.exe",
+    kind: "app",
+    key: "code.exe",
+    displayName: "Editor",
+    sourceProcesses: ["code.exe"],
+    seconds: 3600,
+    sessionCount: 4,
+    daysSeen: 2,
+    firstSeen: 0,
+    lastSeen: 3600,
+    uncategorizedSeconds: 0,
+    categories: [{ categoryId: 1, name: "Focus", color: "#00f", isIgnored: false, seconds: 3600 }],
+    rules: [],
+    status: "single",
+    exactRuleId: null,
+    noise: null,
+    isNew: false,
+  };
+  const rule = (over: Partial<ActivityEntitySummary["rules"][number]> = {}) => ({
+    ruleId: 1,
+    matchType: "process" as const,
+    pattern: "code.exe",
+    categoryId: 1,
+    categoryName: "Focus",
+    categoryColor: "#00f",
+    sessions: 4,
+    seconds: 3600,
+    ...over,
+  });
+
+  it("names the kind of rule that decided it", () => {
+    const summary = entityClassification({ ...base, rules: [rule()] });
+    expect(summary.label).toBe("Focus");
+    // Not "App rule · code.exe": the pattern is this entity's own key, which
+    // the panel prints under the title two lines above.
+    expect(summary.detail).toBe("App rule");
+  });
+
+  it("prints a pattern the header does not already show", () => {
+    const summary = entityClassification({
+      ...base,
+      rules: [rule({ matchType: "title", pattern: "skill tree" })],
+    });
+    expect(summary.detail).toBe("Window rule · skill tree");
+  });
+
+  it("says so when a rule explains only part of the time", () => {
+    // The rule covers half; the rest can only have come from corrections, and
+    // pointing at the rule alone would send someone editing the wrong thing.
+    const summary = entityClassification({ ...base, rules: [rule({ seconds: 1800 })] });
+    expect(summary.detail).toBe("App rule, plus manual corrections");
+  });
+
+  it("attributes a categorized entity with no rule to corrections", () => {
+    expect(entityClassification(base).detail).toMatch(/manual corrections/);
+  });
+
+  it("does not blame a rule for a rounding remainder", () => {
+    const summary = entityClassification({ ...base, rules: [rule({ seconds: 3599 })] });
+    expect(summary.detail).toBe("App rule");
+  });
+
+  it("reports the absence of a rule rather than a category name", () => {
+    const summary = entityClassification({
+      ...base,
+      status: "uncategorized",
+      categories: [],
+      uncategorizedSeconds: 3600,
+      kind: "website",
+      key: "example.com",
+    });
+    expect(summary.label).toBe("Uncategorized");
+    expect(summary.detail).toBe("No rule matches this website.");
+  });
+
+  it("quantifies what is still uncategorized in a partly-classified entity", () => {
+    const summary = entityClassification({
+      ...base,
+      status: "partial",
+      uncategorizedSeconds: 900,
+    });
+    expect(summary.label).toBe("Mixed");
+    expect(summary.detail).toContain("15m");
+  });
+
+  it("counts the categories a mixed entity is split across", () => {
+    const summary = entityClassification({
+      ...base,
+      status: "mixed",
+      categories: [
+        { categoryId: 1, name: "Focus", color: "#00f", isIgnored: false, seconds: 1800 },
+        { categoryId: 2, name: "Media", color: "#f00", isIgnored: false, seconds: 1800 },
+      ],
+      rules: [rule({ seconds: 1800 }), rule({ ruleId: 2, seconds: 1800, matchType: "title", pattern: "mail" })],
+    });
+    expect(summary.label).toBe("Mixed · 2 categories");
+    expect(summary.detail).toBe("2 rules decide it across its visits.");
+  });
+
+  it("explains what ignoring costs rather than merely naming the state", () => {
+    const summary = entityClassification({ ...base, status: "ignored" });
+    expect(summary.label).toBe("Ignored");
+    expect(summary.detail).toMatch(/Insights/);
+  });
+});
+
+describe("detail panel docking", () => {
+  /** Where the page container's right edge lands: a 1152px column centred in
+   *  the window, less its own 24px padding. Mirrors App.tsx's max-w-6xl px-6. */
+  const cardRight = (viewport: number) => {
+    const container = Math.min(viewport, 1152);
+    return (viewport - container) / 2 + container - 24;
+  };
+  const box = (viewport: number) => detailPanelBox(viewport, cardRight(viewport));
+
+  it("fills the margin without touching the table on a large desktop", () => {
+    // The 32" monitor this was designed against, at its usual scaling.
+    expect(box(2208)).toEqual({ left: 1672, width: 512, overlap: 0 });
+  });
+
+  it("still clears the table on an unscaled 1080p screen", () => {
+    expect(box(1920).overlap).toBe(0);
+    expect(box(1920).width).toBe(368);
+  });
+
+  it("stops widening before a window title becomes a long scan", () => {
+    // A 4K desktop has margin to spare; the panel deliberately does not take
+    // all of it, or a line of title runs past what the eye tracks in one go.
+    expect(box(3840).width).toBe(620);
+  });
+
+  it("never leaves the window when the margin runs out", () => {
+    // The bug this replaced: keeping the panel glued to the table's edge on a
+    // laptop pushed its right half past the screen, where it could not be
+    // read or scrolled to.
+    for (const laptop of [1000, 1280, 1366, 1470, 1512, 1728, 1920, 2560]) {
+      const { left, width } = detailPanelBox(laptop, cardRight(laptop));
+      expect(left).toBeGreaterThanOrEqual(0);
+      expect(left + width).toBeLessThanOrEqual(laptop);
+    }
+  });
+
+  it("keeps its own width and covers the table rather than shrinking", () => {
+    // A covered column can be read by closing the panel; a permanently
+    // narrowed table cannot be widened.
+    for (const laptop of [1280, 1366, 1470, 1512, 1728]) {
+      expect(detailPanelBox(laptop, cardRight(laptop)).width).toBe(340);
+    }
+    expect(box(1512).overlap).toBe(160);
+    expect(box(1728).overlap).toBe(52);
+  });
+
+  it("reports overlap as the geometry it actually produced", () => {
+    // Derived from left and width, not calculated a second way alongside
+    // them — the two disagreed by exactly the gap when they were separate.
+    for (const viewport of [1000, 1366, 1512, 1864, 1920, 2208, 3840]) {
+      const { left, width, overlap } = detailPanelBox(viewport, cardRight(viewport));
+      expect(overlap).toBe(Math.max(0, cardRight(viewport) - left));
+      expect(width).toBeGreaterThanOrEqual(340);
+    }
+  });
+
+  it("has two thresholds, and neither is a cliff", () => {
+    const first = (test: (viewport: number) => boolean) => {
+      for (let viewport = 1200; viewport <= 2600; viewport += 1) {
+        if (test(viewport)) return viewport;
+      }
+      return 0;
+    };
+    // Below this the panel starts covering the table's right-hand columns.
+    expect(first((viewport) => box(viewport).overlap === 0)).toBe(1832);
+    // And below this it is clear of the table but pressed against it, having
+    // eaten the gap first. Losing 16px of air is the cheaper concession, so it
+    // is the one made first.
+    expect(first((viewport) => box(viewport).left >= cardRight(viewport) + 16)).toBe(1864);
+    // Just under, and it is one pixel of overlap rather than a jump. An odd
+    // window width centres the container on a half pixel, so the walk down is
+    // subpixel either way.
+    expect(box(1830).overlap).toBe(1);
+    expect(box(1831).overlap).toBeGreaterThan(0);
   });
 });

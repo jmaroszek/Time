@@ -27,6 +27,13 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* The detail panel arrives from the edge it is docked to, so the eye is told
+   where it came from. Short, because it opens on every row click. */
+@keyframes panel-in {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
 @keyframes live-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(22, 185, 129, .34); }
   50% { box-shadow: 0 0 0 5px rgba(22, 185, 129, 0); }
@@ -46,10 +53,12 @@
 }
 
 .menu-pop { animation: menu-pop 140ms ease-out; }
+.panel-in { animation: panel-in 150ms ease-out; }
 .live-pulse { animation: live-pulse 2s ease-out infinite; }
 .alert-pulse { animation: alert-pulse 1.35s ease-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
+  .panel-in,
   .live-pulse,
   .alert-pulse {
     animation: none;

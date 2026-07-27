@@ -207,7 +207,14 @@ export default function OverviewTab({
           Update failed
         </span>
       )}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* Four across at every width the window can actually take. The break to
+          two rows used to sit at 1024px, twenty-four pixels above the 1000px
+          minimum in tauri.conf — so the only way to see it was to drag the
+          window to the very end of its travel, and the reward was a layout
+          nobody had designed for. The stacked fallback is kept below a width
+          the window cannot reach, so that lowering that minimum degrades the
+          page instead of crushing it. Same reasoning on the pair below. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <MetricCard
           label="Daily productive time"
           value={fmtDuration(kpis.prodSec / calendarDays(displayRange))}
@@ -319,7 +326,7 @@ export default function OverviewTab({
         )}
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2">
         <Card
           title="Top Apps"
           className="h-[345px]"
