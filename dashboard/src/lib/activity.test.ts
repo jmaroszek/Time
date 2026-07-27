@@ -48,6 +48,8 @@ const baseQuery: ActivityQuery = {
   classificationFilter: "all",
   sort: "seconds",
   direction: "desc",
+  windowSort: "seconds",
+  windowDirection: "desc",
   entityOffset: 0,
   entityLimit: 100,
   windowOffset: 0,
@@ -66,6 +68,10 @@ describe("Activity index", () => {
     ]);
     expect(result.catalog.rows.find((row) => row.id === "app:code.exe")?.displayName).toBe("Editor");
     expect(result.catalog.rows.find((row) => row.id === "app:shell.exe")?.status).toBe("ignored");
+    expect({ apps: result.catalog.apps, websites: result.catalog.websites }).toEqual({
+      apps: 3,
+      websites: 2,
+    });
   });
 
   it("distinguishes uncategorized, partial, and mixed classifications", () => {
@@ -137,6 +143,10 @@ describe("Activity index", () => {
 
     const editor = queryActivityIndex(index, { ...baseQuery, search: "editor" });
     expect(editor.catalog.rows.map((row) => row.id)).toEqual(["app:code.exe"]);
+    expect({ apps: editor.catalog.apps, websites: editor.catalog.websites }).toEqual({
+      apps: 1,
+      websites: 0,
+    });
     expect(editor.windowMatches?.total).toBe(0);
 
     const title = queryActivityIndex(index, { ...baseQuery, search: "mail" });
@@ -160,13 +170,58 @@ describe("Activity index", () => {
     expect(seconds).toEqual([...seconds].sort((left, right) => right - left));
   });
 
-  it("matches window titles regardless of the type filter", () => {
+  it("filters Window results by their parent identity type", () => {
     const index = buildActivityIndex(source);
-    // Session 3's title lives on a browser session filed under a website, so an
-    // apps-only filter would drop it — the one row the search was for.
     const appsOnly = queryActivityIndex(index, { ...baseQuery, search: "mail", typeFilter: "app" });
     expect(appsOnly.catalog.total).toBe(0);
-    expect(appsOnly.windowMatches?.rows[0].sessionIds).toEqual([3]);
+    expect(appsOnly.windowMatches?.rows).toEqual([]);
+
+    const websitesOnly = queryActivityIndex(index, {
+      ...baseQuery,
+      search: "mail",
+      typeFilter: "website",
+    });
+    expect(websitesOnly.windowMatches?.rows[0].sessionIds).toEqual([3]);
+
+    const allTypes = queryActivityIndex(index, { ...baseQuery, search: "mail" });
+    expect(allTypes.windowMatches?.rows[0].sessionIds).toEqual([3]);
+  });
+
+  it("filters Windows by their own classification rather than their parent identity", () => {
+    const index = buildActivityIndex({
+      categories: [
+        ...categories,
+        { id: 4, name: "Private", color: "#555", isProductive: false, isNeutral: false, isIgnored: true, sortOrder: 4 },
+      ],
+      browserProcesses: [],
+      aliases: {},
+      rules: [
+        { id: 30, matchType: "process", pattern: "workspace.exe", categoryId: 1, priority: 3 },
+        { id: 31, matchType: "title", pattern: "video", categoryId: 2, priority: 2 },
+        { id: 32, matchType: "process", pattern: "shell.exe", categoryId: 3, priority: 3 },
+      ],
+      sessions: [
+        { id: 80, start: 0, end: 10, process: "workspace.exe", title: "Claude project", domain: null, isAfk: false },
+        { id: 81, start: 10, end: 20, process: "workspace.exe", title: "Claude video", domain: null, isAfk: false },
+        { id: 82, start: 20, end: 30, process: "workspace.exe", title: "Claude mixed", domain: null, isAfk: false },
+        { id: 83, start: 30, end: 40, process: "workspace.exe", title: "Claude mixed", domain: null, isAfk: false, categoryOverrideId: 2, isCorrected: true },
+        { id: 84, start: 40, end: 50, process: "loose.exe", title: "Claude loose", domain: null, isAfk: false },
+        { id: 85, start: 50, end: 60, process: "shell.exe", title: "Claude ignored", domain: null, isAfk: false },
+        { id: 86, start: 60, end: 70, process: "shell.exe", title: "Claude ignored", domain: null, isAfk: false, categoryOverrideId: 4, isCorrected: true },
+      ],
+    });
+    const titles = (classificationFilter: ActivityQuery["classificationFilter"]) =>
+      queryActivityIndex(index, {
+        ...baseQuery,
+        search: "claude",
+        classificationFilter,
+      }).windowMatches!.rows.map((group) => group.title).sort();
+
+    expect(titles("category:1")).toEqual(["Claude mixed", "Claude project"]);
+    expect(titles("category:2")).toEqual(["Claude mixed", "Claude video"]);
+    expect(titles("mixed")).toEqual(["Claude mixed"]);
+    expect(titles("uncategorized")).toEqual(["Claude loose"]);
+    expect(titles("ignored")).toEqual(["Claude ignored"]);
   });
 
   it("collapses repeat visits to one window into a single row", () => {
@@ -253,6 +308,23 @@ describe("Activity index", () => {
     expect(group.winningRulePattern).toBeNull();
   });
 
+  it("reports varying provenance when visits share a category but not its source", () => {
+    const index = buildActivityIndex({
+      ...source,
+      sessions: [
+        { id: 1, start: 0, end: 30, process: "code.exe", title: "Project", domain: null, isAfk: false },
+        // Same category as the App rule, but assigned directly on this visit.
+        { id: 2, start: 40, end: 70, process: "code.exe", title: "Project", domain: null, isAfk: false, categoryOverrideId: 1, isCorrected: true },
+      ],
+    });
+    const group = queryActivityIndex(index, { ...baseQuery, search: "project" }).windowMatches!.rows[0];
+    expect(group.mixed).toBe(false);
+    expect(group.categoryName).toBe("Focus");
+    expect(group.provenanceMixed).toBe(true);
+    expect(group.classificationSource).toBeNull();
+    expect(group.winningRulePattern).toBeNull();
+  });
+
   it("returns both forms of Mixed, since they share the word on screen", () => {
     const index = buildActivityIndex(source);
     const mixed = queryActivityIndex(index, { ...baseQuery, classificationFilter: "mixed" });
@@ -312,6 +384,100 @@ describe("Activity index", () => {
     expect(filtered.detailGroups.rows.map((group) => [group.title, group.sessionIds])).toEqual([
       ["Inbox - mail", [3]],
     ]);
+  });
+
+  it("groups cosmetic title variants within an entity while preserving meaningful boundaries", () => {
+    const index = buildActivityIndex({
+      categories,
+      browserProcesses: [],
+      aliases: {},
+      rules: [],
+      sessions: [
+        { id: 40, start: 0, end: 10, process: "editor.exe", title: "Report.docx - Word", domain: null, isAfk: false },
+        { id: 41, start: 10, end: 20, process: "editor.exe", title: "● REPORT.DOCX   -   Word", domain: null, isAfk: false },
+        { id: 42, start: 20, end: 30, process: "editor.exe", title: "Budget.docx - Word", domain: null, isAfk: false },
+        { id: 43, start: 30, end: 40, process: "other.exe", title: "Report.docx - Word", domain: null, isAfk: false },
+        { id: 44, start: 40, end: 50, process: "editor.exe", title: "Report.docx - Word 1.2", domain: null, isAfk: false },
+      ],
+    });
+
+    const editor = queryActivityIndex(index, {
+      ...baseQuery,
+      selectedEntityId: "app:editor.exe",
+    });
+    expect(editor.detailGroups.total).toBe(3);
+    expect(editor.detailGroups.rows.map((group) => ({
+      title: group.title,
+      sessionIds: group.sessionIds,
+      sessionCount: group.sessionCount,
+      seconds: group.seconds,
+    }))).toEqual([
+      {
+        // Sessions are newest-first, so the latest original spelling is shown.
+        title: "● REPORT.DOCX   -   Word",
+        sessionIds: [41, 40],
+        sessionCount: 2,
+        seconds: 20,
+      },
+      {
+        title: "Report.docx - Word 1.2",
+        sessionIds: [44],
+        sessionCount: 1,
+        seconds: 10,
+      },
+      {
+        title: "Budget.docx - Word",
+        sessionIds: [42],
+        sessionCount: 1,
+        seconds: 10,
+      },
+    ]);
+
+    const searched = queryActivityIndex(index, { ...baseQuery, search: "report" });
+    expect(searched.windowMatches?.total).toBe(3);
+    expect(searched.windowMatches?.rows.map((group) => [group.entityId, group.sessionCount])).toEqual([
+      ["app:editor.exe", 2],
+      ["app:other.exe", 1],
+      ["app:editor.exe", 1],
+    ]);
+  });
+
+  it("sorts Window groups independently by every visible column", () => {
+    const index = buildActivityIndex({
+      categories,
+      browserProcesses: [],
+      aliases: {
+        "z.exe": "Zulu",
+        "a.exe": "Alpha source",
+        "c.exe": "Charlie",
+      },
+      rules: [
+        { id: 20, matchType: "process", pattern: "z.exe", categoryId: 1, priority: 3 },
+        { id: 21, matchType: "process", pattern: "a.exe", categoryId: 2, priority: 3 },
+      ],
+      sessions: [
+        { id: 70, start: localSec(2026, 3, 10, 9), end: localSec(2026, 3, 10, 9) + 10, process: "z.exe", title: "Alpha", domain: null, isAfk: false },
+        { id: 71, start: localSec(2026, 3, 10, 10), end: localSec(2026, 3, 10, 10) + 20, process: "a.exe", title: "Beta", domain: null, isAfk: false },
+        { id: 72, start: localSec(2026, 3, 11, 10), end: localSec(2026, 3, 11, 10) + 5, process: "a.exe", title: "Beta", domain: null, isAfk: false },
+        { id: 73, start: localSec(2026, 3, 12, 10), end: localSec(2026, 3, 12, 10) + 15, process: "c.exe", title: "Gamma", domain: null, isAfk: false },
+      ],
+    });
+    const titles = (
+      windowSort: ActivityQuery["windowSort"],
+      windowDirection: ActivityQuery["windowDirection"],
+    ) => queryActivityIndex(index, {
+      ...baseQuery,
+      startSec: localSec(2026, 3, 1),
+      endSec: localSec(2026, 3, 20),
+      search: "a",
+      windowSort,
+      windowDirection,
+    }).windowMatches!.rows.map((group) => group.title);
+
+    expect(titles("title", "asc")).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(titles("seconds", "desc")).toEqual(["Beta", "Gamma", "Alpha"]);
+    expect(titles("days", "desc")).toEqual(["Beta", "Alpha", "Gamma"]);
+    expect(titles("lastSeen", "desc")).toEqual(["Gamma", "Beta", "Alpha"]);
   });
 
   it("keeps a browser app mixed when a Window rule overrides its App default", () => {
@@ -453,11 +619,11 @@ describe("Days seen", () => {
     rules: [],
     sessions: [
       // Two visits on one day, then one the next: three sessions, two days.
-      { id: 60, start: localSec(2026, 3, 10, 9), end: localSec(2026, 3, 10, 10), process: "app.exe", title: "", domain: null, isAfk: false },
-      { id: 61, start: localSec(2026, 3, 10, 14), end: localSec(2026, 3, 10, 15), process: "app.exe", title: "", domain: null, isAfk: false },
-      { id: 62, start: localSec(2026, 3, 11, 9), end: localSec(2026, 3, 11, 10), process: "app.exe", title: "", domain: null, isAfk: false },
+      { id: 60, start: localSec(2026, 3, 10, 9), end: localSec(2026, 3, 10, 10), process: "app.exe", title: "Daily work", domain: null, isAfk: false },
+      { id: 61, start: localSec(2026, 3, 10, 14), end: localSec(2026, 3, 10, 15), process: "app.exe", title: "Daily work", domain: null, isAfk: false },
+      { id: 62, start: localSec(2026, 3, 11, 9), end: localSec(2026, 3, 11, 10), process: "app.exe", title: "Daily work", domain: null, isAfk: false },
       // One session across midnight is activity on both dates.
-      { id: 63, start: localSec(2026, 3, 12, 23), end: localSec(2026, 3, 13, 1), process: "night.exe", title: "", domain: null, isAfk: false },
+      { id: 63, start: localSec(2026, 3, 12, 23), end: localSec(2026, 3, 13, 1), process: "night.exe", title: "Night work", domain: null, isAfk: false },
     ],
   };
   const wideQuery: ActivityQuery = {
@@ -476,6 +642,17 @@ describe("Days seen", () => {
   it("credits both dates a session spans across midnight", () => {
     const result = queryActivityIndex(buildActivityIndex(spanning), wideQuery);
     expect(result.catalog.rows.find((row) => row.id === "app:night.exe")?.daysSeen).toBe(2);
+  });
+
+  it("uses the same distinct-day measure for grouped Windows", () => {
+    const result = queryActivityIndex(buildActivityIndex(spanning), {
+      ...wideQuery,
+      search: "work",
+    });
+    expect(result.windowMatches?.rows.map((row) => [row.entityId, row.daysSeen])).toEqual([
+      ["app:app.exe", 2],
+      ["app:night.exe", 2],
+    ]);
   });
 
   it("counts only days inside the range, and sorts by them", () => {
@@ -497,9 +674,9 @@ describe("New items", () => {
     ...source,
     rules: [],
     sessions: [
-      { id: 70, start: 100, end: 200, process: "old.exe", title: "", domain: null, isAfk: false },
-      { id: 71, start: 1000, end: 1100, process: "old.exe", title: "", domain: null, isAfk: false },
-      { id: 72, start: 1000, end: 1100, process: "fresh.exe", title: "", domain: null, isAfk: false },
+      { id: 70, start: 100, end: 200, process: "old.exe", title: "Old window", domain: null, isAfk: false },
+      { id: 71, start: 1000, end: 1100, process: "old.exe", title: "Old window", domain: null, isAfk: false },
+      { id: 72, start: 1000, end: 1100, process: "fresh.exe", title: "Fresh window", domain: null, isAfk: false },
     ],
   };
 
@@ -511,6 +688,14 @@ describe("New items", () => {
     });
     expect(result.catalog.rows.find((row) => row.id === "app:fresh.exe")?.isNew).toBe(true);
     expect(result.catalog.rows.find((row) => row.id === "app:old.exe")?.isNew).toBe(false);
+    const windows = queryActivityIndex(buildActivityIndex(history), {
+      ...baseQuery,
+      startSec: 900,
+      endSec: 2000,
+      search: "window",
+    }).windowMatches!.rows;
+    expect(windows.find((row) => row.entityId === "app:fresh.exe")?.isNew).toBe(true);
+    expect(windows.find((row) => row.entityId === "app:old.exe")?.isNew).toBe(false);
   });
 
   it("marks nothing when the range reaches back to the first session ever", () => {
@@ -520,6 +705,13 @@ describe("New items", () => {
       endSec: 2000,
     });
     expect(result.catalog.rows.every((row) => !row.isNew)).toBe(true);
+    const windows = queryActivityIndex(buildActivityIndex(history), {
+      ...baseQuery,
+      startSec: 0,
+      endSec: 2000,
+      search: "window",
+    }).windowMatches!.rows;
+    expect(windows.every((row) => !row.isNew)).toBe(true);
   });
 });
 
@@ -547,6 +739,22 @@ describe("Range totals", () => {
     expect(full.maxSeconds).toBe(
       Math.max(...full.catalog.rows.map((row) => row.seconds)),
     );
+  });
+
+  it("uses one scale for identity and Window results in a search", () => {
+    const index = buildActivityIndex({
+      ...source,
+      rules: [],
+      browserProcesses: [],
+      sessions: [
+        { id: 80, start: 0, end: 30, process: "needle.exe", title: "Other", domain: null, isAfk: false },
+        { id: 81, start: 40, end: 140, process: "other.exe", title: "Needle result", domain: null, isAfk: false },
+      ],
+    });
+    const result = queryActivityIndex(index, { ...baseQuery, search: "needle" });
+    expect(result.catalog.rows.map((row) => row.seconds)).toEqual([30]);
+    expect(result.windowMatches?.rows.map((row) => row.seconds)).toEqual([100]);
+    expect(result.maxSeconds).toBe(100);
   });
 
   it("rescales when a filter changes which rows are admitted", () => {
