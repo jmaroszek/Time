@@ -21,9 +21,11 @@ import {
 import { withAlias } from "../lib/aliases";
 import {
   type ActivityClassificationFilter,
+  type ActivityEntityPage,
   type ActivityEntitySummary,
   type ActivityQuery,
   type ActivityQueryResult,
+  type ActivitySessionPage,
   type ActivitySessionRow,
   type ActivitySort,
   type ActivitySortDirection,
@@ -132,6 +134,9 @@ function isBuiltInIgnored(category: Category): boolean {
 /** Small pages keep the scroll well shallow: "load more" should deepen it a
  *  little, not add a screen of rows at a time. */
 const ENTITY_PAGE = 50;
+const WINDOW_PAGE = 50;
+
+type Setter<T> = (update: (current: T) => T) => void;
 
 /** Five swatches to a row, so the grid's width is fixed and can be used to keep
  *  the menu on screen when a category sits near the right edge. */
@@ -200,11 +205,17 @@ export default function ActivityTab({
   const [direction, setDirection] = useState<ActivitySortDirection>("desc");
   const [includeNoise, setIncludeNoise] = useState(false);
   const [entityLimit, setEntityLimit] = useState(ENTITY_PAGE);
-  const [windowLimit, setWindowLimit] = useState(50);
+  const [windowLimit, setWindowLimit] = useState(WINDOW_PAGE);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
   const [detailLimit, setDetailLimit] = useState(50);
+  // Two surfaces tick sessions — the window-match table and the drawer's
+  // session list — and they get a set each. Sharing one meant the drawer's
+  // "clear on a different entity" rule reached across and wiped a search
+  // selection the moment a result row was clicked, which is one stray click
+  // away from a list of fifty ticks.
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<number>>(() => new Set());
+  const [drawerSessionIds, setDrawerSessionIds] = useState<Set<number>>(() => new Set());
   const [deleteScope, setDeleteScope] = useState<{ request: ActivityDeleteRequest; label: string } | null>(null);
   const [excludeScope, setExcludeScope] = useState<{
     kind: TrackingExclusionKind;
@@ -270,7 +281,7 @@ export default function ActivityTab({
 
   useEffect(() => {
     setEntityLimit(ENTITY_PAGE);
-    setWindowLimit(50);
+    setWindowLimit(WINDOW_PAGE);
     setSelectedSessionIds(new Set());
   }, [deferredSearch, typeFilter, classificationFilter, range.start, range.end]);
 
@@ -282,15 +293,18 @@ export default function ActivityTab({
     }
   }, [classificationFilter, meta.categories]);
 
+  // Only the drawer's own ticks are cleared here. A selection is about rows a
+  // reader can see, and opening a different entity replaces every row in the
+  // drawer — but none of the ones in the list behind it.
   useEffect(() => {
     setDetailSearch("");
     setDetailLimit(50);
-    setSelectedSessionIds(new Set());
+    setDrawerSessionIds(new Set());
   }, [selectedEntityId]);
 
   useEffect(() => {
     setDetailLimit(50);
-    setSelectedSessionIds(new Set());
+    setDrawerSessionIds(new Set());
   }, [detailSearch]);
 
   const showDomainHint = useMemo(() => {
@@ -343,16 +357,27 @@ export default function ActivityTab({
       banner.report(error, "rule");
     }
   };
-  const toggleSession = (id: number) => setSelectedSessionIds((current) => {
+  const toggle = (set: Setter<Set<number>>) => (id: number) => set((current) => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const requestSelectedDeletion = () => {
-    if (selectedSessionIds.size === 0) return;
+  const toggleSession = toggle(setSelectedSessionIds);
+  const toggleDrawerSession = toggle(setDrawerSessionIds);
+  /** Scoped to the rows actually on screen, never the unloaded remainder: the
+   *  only honest promise a checkbox can make is about what it can be seen to
+   *  tick, and deletion here is exact by design. */
+  const toggleAllSessions = (ids: number[]) => setSelectedSessionIds((current) => {
+    const next = new Set(current);
+    if (ids.every((id) => next.has(id))) for (const id of ids) next.delete(id);
+    else for (const id of ids) next.add(id);
+    return next;
+  });
+  const requestSessionDeletion = (ids: Set<number>) => {
+    if (ids.size === 0) return;
     setDeleteScope({
-      request: { mode: "sessions", sessionIds: [...selectedSessionIds] },
-      label: `${selectedSessionIds.size} selected session${selectedSessionIds.size === 1 ? "" : "s"}`,
+      request: { mode: "sessions", sessionIds: [...ids] },
+      label: `${ids.size} selected session${ids.size === 1 ? "" : "s"}`,
     });
   };
   const requestEntityDeletion = (entity: ActivityEntitySummary) => {
@@ -369,7 +394,9 @@ export default function ActivityTab({
     });
   };
   const historyDeleted = (closeEntity: boolean) => {
+    // Both sets, whichever surface asked: the rows behind either are gone.
     setSelectedSessionIds(new Set());
+    setDrawerSessionIds(new Set());
     if (closeEntity) setSelectedEntityId(null);
   };
 
@@ -449,9 +476,12 @@ export default function ActivityTab({
             ) : (
               result && (
                 <TableRegion>
-                  {deferredSearch.trim() && result.searchResults ? (
-                    <GroupedSearchResults
-                      result={result}
+                  {result.windowMatches ? (
+                    <SearchResults
+                      identities={result.catalog}
+                      windows={result.windowMatches}
+                      search={deferredSearch.trim()}
+                      typeFilter={typeFilter}
                       scale={result}
                       sort={sort}
                       direction={direction}
@@ -460,15 +490,11 @@ export default function ActivityTab({
                       onSelectEntity={setSelectedEntityId}
                       selectedSessionIds={selectedSessionIds}
                       onToggleSession={toggleSession}
-                      onDeleteSelected={requestSelectedDeletion}
+                      onToggleAllSessions={toggleAllSessions}
+                      onDeleteSelected={() => requestSessionDeletion(selectedSessionIds)}
                       onEditSession={setEditingSessionId}
-                      canLoadEntities={
-                        result.searchResults.apps.total > result.searchResults.apps.rows.length ||
-                        result.searchResults.websites.total > result.searchResults.websites.rows.length
-                      }
-                      onLoadEntities={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
-                      canLoadWindows={result.searchResults.windowTotal > result.searchResults.windowMatches.length}
-                      onLoadWindows={() => setWindowLimit((limit) => limit + 50)}
+                      onLoadIdentities={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
+                      onLoadWindows={() => setWindowLimit((limit) => limit + WINDOW_PAGE)}
                       isAllTime={isAllTime}
                       onTryAllTime={onTryAllTime}
                     />
@@ -507,9 +533,9 @@ export default function ActivityTab({
           onClose={() => setSelectedEntityId(null)}
           categories={meta.categories}
           aliases={meta.aliases}
-          selectedSessionIds={selectedSessionIds}
-          onToggleSession={toggleSession}
-          onDeleteSelected={requestSelectedDeletion}
+          selectedSessionIds={drawerSessionIds}
+          onToggleSession={toggleDrawerSession}
+          onDeleteSelected={() => requestSessionDeletion(drawerSessionIds)}
           onDeleteEntity={() => requestEntityDeletion(result.selectedEntity!)}
           onExclude={() => setExcludeScope({
             kind: result.selectedEntity!.kind === "app" ? "app" : "website",
@@ -661,9 +687,28 @@ function LibraryControls({
             <input
               value={search}
               onChange={(event) => onSearch(event.target.value)}
+              // Escape clears without reaching for the mouse, the same way it
+              // backs out of every menu and dialog in the app.
+              onKeyDown={(event) => { if (event.key === "Escape" && search) { event.preventDefault(); onSearch(""); } }}
               placeholder="Search apps, websites, and windows…"
-              className="w-full rounded-[9px] border border-edge bg-surface-2 py-2 pl-9 pr-3 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
+              className="w-full rounded-[9px] border border-edge bg-surface-2 py-2 pl-9 pr-8 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
             />
+            {/* Searching swaps the whole list out for something else, so there
+                has to be a way back that is not "select the text and delete
+                it" — every other state in this tab has one. */}
+            {search && (
+              <button
+                type="button"
+                onClick={() => onSearch("")}
+                title="Clear search"
+                className="absolute right-2 top-1.5 rounded p-1 text-ink-3 hover:bg-white/[.06] hover:text-ink-2"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3">
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+                <span className="sr-only">Clear search</span>
+              </button>
+            )}
           </label>
           <MenuSelect
             size="field"
@@ -709,9 +754,14 @@ function updateSort(
   }
 }
 
-function StickyHead({ children }: { children: ReactNode }) {
+/**
+ * `offset` is for tables that sit under a sticky group heading: both stick to
+ * the same scroll container, so the header row has to start where the heading
+ * ends or it lands underneath it.
+ */
+function StickyHead({ children, offset = "top-0" }: { children: ReactNode; offset?: string }) {
   return (
-    <thead className="sticky top-0 z-10 bg-surface shadow-[0_1px_0_var(--color-edge)]">
+    <thead className={`sticky z-10 bg-surface shadow-[0_1px_0_var(--color-edge)] ${offset}`}>
       {children}
     </thead>
   );
@@ -781,8 +831,23 @@ function EntityCatalog({
   );
 }
 
-function GroupedSearchResults({
-  result,
+/**
+ * Two groups, not three. Apps and websites are one table because they are one
+ * table everywhere else: the unsearched catalog mixes them, every row already
+ * says which it is on its metadata line, and the type filter above is the
+ * control for narrowing to one. Splitting them cost a duplicated header row, a
+ * second copy of the sort control that silently drove the first, one page limit
+ * feeding two lists, and a **Load more** stranded below the table it grew.
+ *
+ * What remains separate is worth separating: identities are clicked to inspect,
+ * sessions are ticked to delete. Different question, different shape, different
+ * verb.
+ */
+function SearchResults({
+  identities,
+  windows,
+  search,
+  typeFilter,
   scale,
   sort,
   direction,
@@ -791,16 +856,18 @@ function GroupedSearchResults({
   onSelectEntity,
   selectedSessionIds,
   onToggleSession,
+  onToggleAllSessions,
   onDeleteSelected,
   onEditSession,
-  canLoadEntities,
-  onLoadEntities,
-  canLoadWindows,
+  onLoadIdentities,
   onLoadWindows,
   isAllTime,
   onTryAllTime,
 }: {
-  result: ActivityQueryResult;
+  identities: ActivityEntityPage;
+  windows: ActivitySessionPage;
+  search: string;
+  typeFilter: ActivityTypeFilter;
   scale: BarScale;
   sort: ActivitySort;
   direction: ActivitySortDirection;
@@ -809,49 +876,118 @@ function GroupedSearchResults({
   onSelectEntity: (id: string) => void;
   selectedSessionIds: Set<number>;
   onToggleSession: (id: number) => void;
+  onToggleAllSessions: (ids: number[]) => void;
   onDeleteSelected: () => void;
   onEditSession: (id: number) => void;
-  canLoadEntities: boolean;
-  onLoadEntities: () => void;
-  canLoadWindows: boolean;
+  onLoadIdentities: () => void;
   onLoadWindows: () => void;
   isAllTime: boolean;
   onTryAllTime: () => void;
 }) {
-  const groups = result.searchResults!;
-  const total = groups.apps.total + groups.websites.total + groups.windowTotal;
-  if (total === 0) return <NoResults isAllTime={isAllTime} onTryAllTime={onTryAllTime} />;
+  if (identities.total === 0 && windows.total === 0) {
+    return <NoResults search={search} isAllTime={isAllTime} onTryAllTime={onTryAllTime} />;
+  }
+  const loadedWindowIds = windows.rows.map((session) => session.id);
+  const allWindowsSelected = loadedWindowIds.length > 0
+    && loadedWindowIds.every((id) => selectedSessionIds.has(id));
   return (
-    <div className="flex flex-col gap-5">
-      {groups.apps.total > 0 && (
-        <ResultGroup title="Apps" count={groups.apps.total}>
-          <EntityTable rows={groups.apps.rows} scale={scale} sort={sort} direction={direction} onSort={onSort} selectedEntityId={selectedEntityId} onSelect={onSelectEntity} />
-        </ResultGroup>
-      )}
-      {groups.websites.total > 0 && (
-        <ResultGroup title="Websites" count={groups.websites.total}>
-          <EntityTable rows={groups.websites.rows} scale={scale} sort={sort} direction={direction} onSort={onSort} selectedEntityId={selectedEntityId} onSelect={onSelectEntity} />
-        </ResultGroup>
-      )}
-      {canLoadEntities && <LoadMore shown={groups.apps.rows.length + groups.websites.rows.length} total={groups.apps.total + groups.websites.total} onClick={onLoadEntities} />}
-      {groups.windowTotal > 0 && (
-        <ResultGroup title="Window matches" count={groups.windowTotal}>
-          <SessionTable rows={groups.windowMatches} selected={selectedSessionIds} onToggle={onToggleSession} onEdit={onEditSession} />
-          {selectedSessionIds.size > 0 && (
-            <div className="mt-3 flex justify-end"><Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button></div>
+    <div className="flex flex-col gap-6">
+      {identities.total > 0 && (
+        <ResultGroup title="Apps and websites" count={identities.total}>
+          <EntityTable
+            rows={identities.rows}
+            scale={scale}
+            sort={sort}
+            direction={direction}
+            onSort={onSort}
+            selectedEntityId={selectedEntityId}
+            onSelect={onSelectEntity}
+            headOffset="top-8"
+          />
+          {identities.rows.length < identities.total && (
+            <LoadMore shown={identities.rows.length} total={identities.total} onClick={onLoadIdentities} />
           )}
-          {canLoadWindows && <LoadMore shown={groups.windowMatches.length} total={groups.windowTotal} onClick={onLoadWindows} />}
+        </ResultGroup>
+      )}
+      {windows.total > 0 && (
+        <ResultGroup
+          title="Window matches"
+          count={windows.total}
+          // Only worth saying while a type filter is set, which is the only
+          // time the exception can read as a bug. A stored title has no kind
+          // of its own, so narrowing by one would drop the rows searched for.
+          note={typeFilter === "all" ? undefined : {
+            label: "all types",
+            title: "Window titles are matched whatever the type filter is set to — a stored title belongs to the session, not to an app or a website.",
+          }}
+          action={
+            <Checkbox
+              checked={allWindowsSelected}
+              onChange={() => onToggleAllSessions(loadedWindowIds)}
+              className="text-[11px] text-ink-3 hover:text-ink-2"
+            >
+              {allWindowsSelected ? "Clear" : `Select ${loadedWindowIds.length}`}
+            </Checkbox>
+          }
+        >
+          <SessionTable
+            rows={windows.rows}
+            search={search}
+            selected={selectedSessionIds}
+            onToggle={onToggleSession}
+            onEdit={onEditSession}
+          />
+          {/* Paging belongs to the list, so it stays against the table it
+              extends; the destructive action terminates the group. */}
+          {windows.rows.length < windows.total && (
+            <LoadMore shown={windows.rows.length} total={windows.total} onClick={onLoadWindows} />
+          )}
+          {selectedSessionIds.size > 0 && (
+            <div className="mt-3 flex items-center justify-end gap-3">
+              <span className="text-[11px] tabular-nums text-ink-3">{selectedSessionIds.size} selected</span>
+              <Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button>
+            </div>
+          )}
         </ResultGroup>
       )}
     </div>
   );
 }
 
-function ResultGroup({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+/**
+ * The heading sticks along with the table it names. Without it, scrolling deep
+ * into either group left a column header stuck to the top that could have
+ * belonged to either table — and at the handoff the incoming group's label was
+ * the one thing hidden, sliding under the outgoing table's header.
+ *
+ * Sentence case at ink-2 so it outranks the column headings beneath it. The two
+ * were within half a pixel of each other, both uppercase and both ink-3, which
+ * left "this is a section of the results" reading as one more column name.
+ */
+function ResultGroup({
+  title,
+  count,
+  note,
+  action,
+  children,
+}: {
+  title: string;
+  count: number;
+  note?: { label: string; title: string };
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section>
-      <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[.04em] text-ink-3">
-        <span>{title}</span><span>· {count}</span>
+      <div className="sticky top-0 z-20 flex h-8 items-center gap-2 bg-surface">
+        <h3 className="text-[12.5px] font-medium text-ink-2">{title}</h3>
+        <span className="text-[11px] tabular-nums text-ink-3">{count}</span>
+        {note && (
+          <span className="rounded-full bg-surface-3 px-1.5 py-[1px] text-[9.5px] font-medium leading-[1.4] text-ink-3" title={note.title}>
+            {note.label}
+          </span>
+        )}
+        {action && <span className="ml-auto">{action}</span>}
       </div>
       {children}
     </section>
@@ -866,6 +1002,7 @@ function EntityTable({
   onSort,
   selectedEntityId,
   onSelect,
+  headOffset,
 }: {
   rows: ActivityEntitySummary[];
   scale: BarScale;
@@ -874,13 +1011,14 @@ function EntityTable({
   onSort: (field: ActivitySort) => void;
   selectedEntityId: string | null;
   onSelect: (id: string) => void;
+  headOffset?: string;
 }) {
   return (
     <div>
       <table className="w-full min-w-[680px] table-fixed text-xs">
         {/* Sticky via a shadow, not a border: a collapsed table's borders do not
             travel with a stuck header row. */}
-        <StickyHead>
+        <StickyHead offset={headOffset}>
           <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
             <SortHeading label="Name" field="name" active={sort === "name"} direction={direction} onSort={onSort} className="w-[27%] text-left" />
             {/* Bar then duration, as in Top Apps. The column is kept barely
@@ -947,7 +1085,11 @@ function EntityTable({
                       </RowTag>
                     )}
                   </span>
-                  <span className="flex min-w-0 items-center gap-1.5 text-[10px] leading-none text-ink-3">
+                  {/* leading-none clipped descenders (the "g" in "browsing"):
+                      the truncate children below are overflow-hidden, so their
+                      box is exactly the font size and anything under the
+                      baseline is cut. A little line-height gives them room. */}
+                  <span className="flex min-w-0 items-center gap-1.5 text-[10px] leading-[1.4] text-ink-3">
                     <ClassificationLabel entity={entity} />
                     <span aria-hidden="true" className="shrink-0">·</span>
                     <span className="shrink-0 capitalize">{entity.kind}</span>
@@ -1081,41 +1223,119 @@ function ClassificationLabel({ entity }: { entity: ActivityEntitySummary }) {
   );
 }
 
-function SessionTable({ rows, selected, onToggle, onEdit }: { rows: ActivitySessionRow[]; selected: Set<number>; onToggle: (id: number) => void; onEdit: (id: number) => void }) {
+function SessionTable({
+  rows,
+  search,
+  selected,
+  onToggle,
+  onEdit,
+}: {
+  rows: ActivitySessionRow[];
+  search: string;
+  selected: Set<number>;
+  onToggle: (id: number) => void;
+  onEdit: (id: number) => void;
+}) {
   return (
     <div>
       <table className="w-full min-w-[760px] table-fixed text-xs">
-        <StickyHead>
+        <StickyHead offset="top-8">
           <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
             <th className="w-9 pb-2"><span className="sr-only">Select</span></th>
-            <th className="w-[20%] pb-2 font-medium">When</th>
-            <th className="w-[18%] pb-2 font-medium">App / Website</th>
-            <th className="w-[32%] pb-2 font-medium">Window</th>
-            <th className="w-[20%] pb-2 font-medium">Classification</th>
-            <th className="w-[10%] pb-2 text-right font-medium">Time</th>
-            <th className="w-12 pb-2"><span className="sr-only">Actions</span></th>
+            <th className="w-[17%] pb-2 font-medium">When</th>
+            <th className="w-[16%] pb-2 font-medium">App / Website</th>
+            {/* The widest column, because it is the only reason these rows are
+                in the list at all. */}
+            <th className="w-[36%] pb-2 font-medium">Window</th>
+            <th className="w-[17%] pb-2 font-medium">Classification</th>
+            <th className="w-[8%] pb-2 text-right font-medium">Time</th>
+            <th className="w-11 pb-2"><span className="sr-only">Actions</span></th>
           </tr>
         </StickyHead>
         <tbody>
           {rows.map((session) => (
-            <tr key={session.id} className="border-b border-edge/40">
+            <tr key={session.id} className={`border-b border-edge/40 transition-colors ${selected.has(session.id) ? "bg-white/[.05]" : ""}`}>
               <td className="py-2.5"><Checkbox size="md" checked={selected.has(session.id)} onChange={() => onToggle(session.id)} label={`Select session ${formatDateTime(session.start)}`} /></td>
               <td className="py-2.5 pr-3 tabular-nums text-ink-3">{formatDateTime(session.start)}</td>
               <td className="truncate py-2.5 pr-3" title={session.entityKey}>{session.displayName}</td>
-              <td className="truncate py-2.5 pr-3 text-ink-2" title={session.title}>{session.title || "—"}</td>
-              <td className="py-2.5 pr-3 text-ink-2">
-                <span className="flex items-center gap-2">
-                  <CategoryDot color={session.categoryColor ?? UNCATEGORIZED} />
-                  <span className="min-w-0"><span className="block truncate">{session.categoryName ?? "Uncategorized"}</span><span className="block truncate text-[10px] text-ink-3">{session.classificationSource === "session_override" ? "Session override" : session.winningRulePattern ? `${RULE_LABELS[session.winningRuleType!]} · ${session.winningRulePattern}` : "No matching rule"}</span></span>
-                </span>
+              <td className="py-2.5 pr-3 text-ink-2"><MatchedTitle title={session.title} search={search} /></td>
+              {/* No dot: the same argument that took it out of the entity table
+                  applies here, and the two now sit in one scroll well. */}
+              <td className="min-w-0 py-2.5 pr-3 text-ink-2">
+                <span className="block truncate">{session.categoryName ?? "Uncategorized"}</span>
+                <span className="block truncate text-[10px] text-ink-3">{session.classificationSource === "session_override" ? "Session override" : session.winningRulePattern ? `${RULE_LABELS[session.winningRuleType!]} · ${session.winningRulePattern}` : "No matching rule"}</span>
               </td>
               <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(session.seconds)}</td>
-              <td className="py-2.5 text-right"><button type="button" onClick={() => onEdit(session.id)} className="rounded px-1.5 py-1 text-[10.5px] text-accent hover:bg-accent/10">Edit</button></td>
+              {/* Quiet at rest, accent on approach. Fifty rows of accent-blue
+                  Edit put the loudest colour in the table on its least
+                  consequential control — the same reason the noise toggle in
+                  the header is muted. */}
+              <td className="py-2.5 text-right">
+                <button
+                  type="button"
+                  onClick={() => onEdit(session.id)}
+                  className="rounded px-1.5 py-1 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
+                >
+                  Edit
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Characters of the title kept ahead of the match, enough to read it in
+ *  context without pushing the match itself back out of view. */
+const MATCH_LEAD = 16;
+
+/**
+ * Splits a stored title around the search text. Null means there is nothing to
+ * mark, so the caller renders the title plainly.
+ *
+ * `elided` reports that the title was cut in front of the match: plain
+ * truncation clips from the right, so a match deep in a long title left a row
+ * with no visible reason to be in the list. Matching is
+ * case-insensitive but the returned text is the stored casing, since the point
+ * is to show what was actually recorded.
+ */
+export function titleMatchParts(title: string, search: string): {
+  elided: boolean;
+  head: string;
+  hit: string;
+  tail: string;
+} | null {
+  if (!title || !search) return null;
+  const at = title.toLowerCase().indexOf(search.toLowerCase());
+  if (at < 0) return null;
+  const from = Math.max(0, at - MATCH_LEAD);
+  return {
+    elided: from > 0,
+    head: title.slice(from, at),
+    hit: title.slice(at, at + search.length),
+    tail: title.slice(at + search.length),
+  };
+}
+
+/**
+ * A window match is in the list for exactly one reason — its stored title
+ * contains the search text — so the match is windowed into view and marked,
+ * where before it could sit past the column's width and leave the row looking
+ * unjustified.
+ */
+function MatchedTitle({ title, search }: { title: string; search: string }) {
+  if (!title) return <span className="text-ink-3">—</span>;
+  const parts = titleMatchParts(title, search);
+  if (!parts) return <span className="block truncate" title={title}>{title}</span>;
+  return (
+    <span className="block truncate" title={title}>
+      {parts.elided && <span className="text-ink-3">…</span>}
+      {parts.head}
+      <mark className="rounded-[2px] bg-accent/20 px-[1px] text-ink">{parts.hit}</mark>
+      {parts.tail}
+    </span>
   );
 }
 
@@ -1230,10 +1450,25 @@ function ExcludedPanel() {
   );
 }
 
-function NoResults({ isAllTime, onTryAllTime }: { isAllTime: boolean; onTryAllTime: () => void }) {
+/**
+ * Two different dead ends, and they were sharing one sentence: an empty range
+ * and a search that matched nothing are not the same problem, even though
+ * widening the range is worth offering for both.
+ */
+function NoResults({
+  isAllTime,
+  onTryAllTime,
+  search,
+}: {
+  isAllTime: boolean;
+  onTryAllTime: () => void;
+  search?: string;
+}) {
   return (
-    <div className="flex h-36 flex-col items-center justify-center gap-2 text-sm text-ink-3">
-      <span>No activity found in this range</span>
+    <div className="flex h-36 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-ink-3">
+      <span className="max-w-[36ch] truncate">
+        {search ? <>No matches for &ldquo;{search}&rdquo; in this range</> : "No activity found in this range"}
+      </span>
       {!isAllTime && <button type="button" onClick={onTryAllTime} className="text-xs text-accent hover:text-accent/80">Try All time</button>}
     </div>
   );

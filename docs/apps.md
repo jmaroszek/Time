@@ -78,18 +78,37 @@ shows them on demand, tagged **Rare** or **Utility**; searching reaches past
 the filter, so a search for `setup` still finds the installers. Settings ▸
 Activity list sets the mode and both limits, or turns filtering off.
 
-One search field covers friendly names, cleaned and recorded app names,
-websites, and stored window titles. Search results are separated into:
+### Searching
 
-- **Apps** — matching executable identities.
-- **Websites** — matching website identities detected in supported browsers.
+One search field covers friendly names, cleaned and recorded app names,
+websites, and stored window titles. **✕** or Escape clears it and returns the
+full catalog. Results come back in two groups, each with its own **Load more**
+and a heading that stays pinned while that group is scrolled:
+
+- **Apps and websites** — the catalog itself, narrowed to matching identities.
+  It is the same table with the same columns and the same sort, because an
+  app and a website are the same kind of row: each already says which it is,
+  and the type filter is there to show one kind at a time.
 - **Window matches** — individual sessions whose stored title contains the
-  search text, with time, duration, identity, category, and winning rule.
+  search text, newest first, with the matched text marked. A long title is
+  windowed so the match stays visible rather than being cut off past the
+  column's width, and a leading **…** shows where the title was trimmed.
+  Sessions carry their identity, category, winning rule, and duration.
 
 Stored titles are not listed until a search is entered. Historical titles
-remain searchable if future title capture is later disabled. The type filter
-narrows Apps and Websites; Window matches stay separately labeled. Date and
-classification filters apply throughout.
+remain searchable if future title capture is later disabled. Date and
+classification filters apply to both groups. The type filter narrows only the
+identity group — a stored title belongs to the session rather than to an app or
+a website, so narrowing by type would drop the rows a title search is for. The
+Window matches heading says **all types** whenever a type filter is set, so the
+exception is visible where it applies.
+
+Window matches can be checked for deletion, and the heading's checkbox takes
+every row currently loaded — never the unloaded remainder, since a checkbox
+should only promise what it can be seen to tick. This selection is separate
+from the one in an item's details, so opening an item does not discard it.
+
+### Classification status
 
 Classification status describes the activity represented by the current range,
 and leads each row's second line:
@@ -101,6 +120,8 @@ and leads each row's second line:
   A trailing count, as in *Dev +2*, means the item is categorized differently
   across its sessions; the full split is in its details.
 - **Ignored** means all represented activity is excluded from Insights.
+
+### Item details
 
 Selecting an App or Website opens its details: friendly and recorded identity,
 first and last seen, time, session count, category distribution, uncategorized

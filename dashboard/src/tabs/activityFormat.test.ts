@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatLastSeen } from "./ActivityTab";
+import { formatLastSeen, titleMatchParts } from "./ActivityTab";
 
 /** Boundaries are calendar dates, not elapsed hours: 00:30 and 23:30 on the
  *  same date are both "today", and 23:30 last night is "Yesterday" even though
@@ -32,5 +32,39 @@ describe("formatLastSeen", () => {
 
   it("treats a live session's end as today rather than the future", () => {
     expect(formatLastSeen(sec(at(2026, 7, 24, 23, 59)), now)).toMatch(/^Today, /);
+  });
+});
+
+describe("titleMatchParts", () => {
+  it("marks the match and keeps the stored casing", () => {
+    expect(titleMatchParts("Inbox - Mail", "mail")).toEqual({
+      elided: false,
+      head: "Inbox - ",
+      hit: "Mail",
+      tail: "",
+    });
+  });
+
+  it("windows a late match into view rather than letting truncation hide it", () => {
+    const title = "Pull request #4120: rewrite the activity index - myrepo - Chromium";
+    const parts = titleMatchParts(title, "myrepo");
+    expect(parts?.elided).toBe(true);
+    expect(parts?.hit).toBe("myrepo");
+    // Reassembling from the elision point has to give back the tail of the
+    // original: a window that drops or duplicates characters is worse than a
+    // clip, because it reads as recorded text.
+    expect(`${parts?.head}${parts?.hit}${parts?.tail}`).toBe(
+      title.slice(title.indexOf("myrepo") - 16),
+    );
+  });
+
+  it("does not elide when the match is already near the start", () => {
+    expect(titleMatchParts("Docs - Project", "Docs")?.elided).toBe(false);
+  });
+
+  it("returns nothing to mark for an empty title, empty search, or no match", () => {
+    expect(titleMatchParts("", "mail")).toBeNull();
+    expect(titleMatchParts("Inbox", "")).toBeNull();
+    expect(titleMatchParts("Inbox", "spreadsheet")).toBeNull();
   });
 });

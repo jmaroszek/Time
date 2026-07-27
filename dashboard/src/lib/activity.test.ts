@@ -124,30 +124,47 @@ describe("Activity index", () => {
     });
     expect(paged.catalog.total).toBe(5);
     expect(paged.catalog.rows).toHaveLength(2);
-    expect(queryActivityIndex(index, { ...baseQuery, search: "editor" }).searchResults?.apps.total).toBe(1);
-    expect(queryActivityIndex(index, { ...baseQuery, search: "code" }).searchResults?.apps.total).toBe(1);
-    expect(queryActivityIndex(index, { ...baseQuery, search: "code.exe" }).searchResults?.apps.total).toBe(1);
+    expect(queryActivityIndex(index, { ...baseQuery, search: "editor" }).catalog.total).toBe(1);
+    expect(queryActivityIndex(index, { ...baseQuery, search: "code" }).catalog.total).toBe(1);
+    expect(queryActivityIndex(index, { ...baseQuery, search: "code.exe" }).catalog.total).toBe(1);
   });
 
-  it("returns grouped identity and window-title search results without titles at rest", () => {
+  it("narrows the catalog in place and lists window titles beside it", () => {
     const index = buildActivityIndex(source);
     const idle = queryActivityIndex(index, baseQuery);
-    expect(idle.searchResults).toBeNull();
+    expect(idle.windowMatches).toBeNull();
 
     const editor = queryActivityIndex(index, { ...baseQuery, search: "editor" });
-    expect(editor.searchResults?.apps.rows.map((row) => row.id)).toEqual(["app:code.exe"]);
-    expect(editor.searchResults?.windowTotal).toBe(0);
+    expect(editor.catalog.rows.map((row) => row.id)).toEqual(["app:code.exe"]);
+    expect(editor.windowMatches?.total).toBe(0);
 
     const title = queryActivityIndex(index, { ...baseQuery, search: "mail" });
-    expect(title.searchResults?.windowMatches.map((row) => row.id)).toEqual([3]);
-    expect(title.searchResults?.windowMatches[0].winningRuleType).toBe("title");
+    expect(title.windowMatches?.rows.map((row) => row.id)).toEqual([3]);
+    expect(title.windowMatches?.rows[0].winningRuleType).toBe("title");
 
     const website = queryActivityIndex(index, { ...baseQuery, search: "youtube" });
-    expect(website.searchResults?.websites.rows.map((row) => row.id)).toEqual(["website:youtube.com"]);
+    expect(website.catalog.rows.map((row) => row.id)).toEqual(["website:youtube.com"]);
+  });
 
+  it("keeps one identity list for both kinds, ordered by the chosen sort", () => {
+    const index = buildActivityIndex(source);
+    // "e" is in both an app's name and a website's, so a merged list has to
+    // interleave them rather than emit one kind and then the other.
+    const found = queryActivityIndex(index, { ...baseQuery, search: "e", sort: "seconds", direction: "desc" });
+    const kinds = found.catalog.rows.map((row) => row.kind);
+    expect(kinds).toContain("app");
+    expect(kinds).toContain("website");
+    const seconds = found.catalog.rows.map((row) => row.seconds);
+    expect(seconds).toEqual([...seconds].sort((left, right) => right - left));
+  });
+
+  it("matches window titles regardless of the type filter", () => {
+    const index = buildActivityIndex(source);
+    // Session 3's title lives on a browser session filed under a website, so an
+    // apps-only filter would drop it — the one row the search was for.
     const appsOnly = queryActivityIndex(index, { ...baseQuery, search: "mail", typeFilter: "app" });
-    expect(appsOnly.searchResults?.websites.total).toBe(0);
-    expect(appsOnly.searchResults?.windowMatches.map((row) => row.id)).toEqual([3]);
+    expect(appsOnly.catalog.total).toBe(0);
+    expect(appsOnly.windowMatches?.rows.map((row) => row.id)).toEqual([3]);
   });
 
   it("filters Uncategorized without hiding low-duration identities", () => {
@@ -280,7 +297,7 @@ describe("Activity noise filtering", () => {
   it("lets search reach past the filter", () => {
     const found = queryActivityIndex(index, { ...baseQuery, noise: policy, search: "unknown" });
     expect(found.noiseHidden).toBe(0);
-    expect(found.searchResults?.apps.rows.map((row) => row.id)).toEqual(["app:unknown.exe"]);
+    expect(found.catalog.rows.map((row) => row.id)).toEqual(["app:unknown.exe"]);
   });
 
   it("hides installers by name no matter how long they ran", () => {
