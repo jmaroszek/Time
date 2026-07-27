@@ -1,46 +1,89 @@
-// One shared, dismissible error banner for failed writes. Tabs call
-// report(error, subject) from any .catch; the provider renders a single quiet
-// banner rather than a per-call toast system.
+// One shared banner for the results of writes. Tabs call report(error, subject)
+// from any .catch and show(message) on success; the provider renders a single
+// quiet banner rather than a per-call toast system.
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { explainDbError } from "../lib/dbErrors";
+
+/** "good" confirms something that worked; "bad" reports a write that failed. */
+export type BannerTone = "good" | "bad";
+
+/**
+ * How long a banner stays before clearing itself, or null to stay until
+ * dismissed.
+ *
+ * A confirmation has already done its job the moment it is read — leaving it on
+ * screen makes the reader clear away news of their own success. A failure is
+ * the opposite: it is the only record that the write did not happen, and
+ * something needs deciding about it, so it waits.
+ */
+export function bannerDismissMs(tone: BannerTone): number | null {
+  return tone === "good" ? 4500 : null;
+}
 
 interface Banner {
   /** Show a friendly message for a caught write failure. */
   report: (error: unknown, subject?: string) => void;
-  /** Show an already-human message (e.g. validation feedback). */
+  /** Confirm something that succeeded. */
   show: (message: string) => void;
 }
 
 const BannerContext = createContext<Banner | null>(null);
 
 export function BannerProvider({ children }: { children: ReactNode }) {
-  const [message, setMessage] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ message: string; tone: BannerTone } | null>(null);
 
-  const show = useCallback((msg: string) => setMessage(msg), []);
+  const show = useCallback((message: string) => setBanner({ message, tone: "good" }), []);
   const report = useCallback(
-    (error: unknown, subject?: string) => setMessage(explainDbError(error, subject)),
+    (error: unknown, subject?: string) =>
+      setBanner({ message: explainDbError(error, subject), tone: "bad" }),
     [],
   );
   const value = useMemo<Banner>(() => ({ report, show }), [report, show]);
 
+  const tone = banner?.tone;
+  const message = banner?.message;
+  useEffect(() => {
+    if (tone === undefined) return;
+    const after = bannerDismissMs(tone);
+    if (after === null) return;
+    // Keyed on the message too, so a second confirmation restarts the clock
+    // rather than inheriting the remainder of the first one's.
+    const timer = setTimeout(() => setBanner(null), after);
+    return () => clearTimeout(timer);
+  }, [tone, message]);
+
   return (
     <BannerContext.Provider value={value}>
       {children}
-      {message && (
+      {banner && (
         <div className="fixed inset-x-0 bottom-5 z-[60] flex justify-center px-6">
           <div
-            role="alert"
-            className="flex max-w-xl items-center gap-3 rounded-[11px] border border-bad/40 bg-surface-2 px-4 py-2.5 text-xs text-ink shadow-[0_12px_34px_rgba(0,0,0,.5)]"
+            // Polite for a confirmation, assertive for a failure: one is worth
+            // interrupting what a screen reader is saying, the other is not.
+            role={banner.tone === "bad" ? "alert" : "status"}
+            className={`flex max-w-xl items-center gap-3 rounded-[11px] border bg-surface-2 px-4 py-2.5 text-xs text-ink shadow-[0_12px_34px_rgba(0,0,0,.5)] ${
+              banner.tone === "bad" ? "border-bad/40" : "border-good/40"
+            }`}
           >
-            <span className="h-2 w-2 shrink-0 rounded-full bg-bad" />
-            <span className="min-w-0">{message}</span>
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${banner.tone === "bad" ? "bg-bad" : "bg-good"}`}
+            />
+            <span className="min-w-0">{banner.message}</span>
             <button
               type="button"
               aria-label="Dismiss"
               className="ml-1 shrink-0 rounded-md px-1.5 py-1 text-ink-3 transition-colors hover:bg-white/[.05] hover:text-ink"
-              onClick={() => setMessage(null)}
+              onClick={() => setBanner(null)}
             >
               ✕
             </button>

@@ -1,7 +1,9 @@
 // Rule-based session classification. Priority decides between matching rules
-// (domain 1 < title 2 < process 3). Lower numbers win. Domain and title rules only
-// apply to browser sessions; process rules apply to everything. AFK sessions
-// are never classified.
+// (domain 1 < title 2 < process 3). Lower numbers win. Domain rules only apply
+// to browser sessions; process rules apply to everything; a title rule applies
+// wherever its own scope allows, which is how one program's windows can be
+// told apart from another's. Between two title rules of equal priority the
+// narrower scope wins. AFK sessions are never classified.
 
 /** Three-way productivity state. Neutral time (e.g. games) is tracked but is
  *  never colored good/bad — it counts toward totals without being judged. */
@@ -54,12 +56,57 @@ export function categoryStateFlags(
 
 export type MatchType = "process" | "domain" | "title";
 
+/** A title rule with no scope: it may match whatever program is in front. */
+export const ANY_APP = "";
+/** A title rule limited to the configured browser processes. Not a process
+ *  name, because the browser set is a user setting — a rule written when Edge
+ *  was the only browser should still apply after Firefox is added. */
+export const BROWSER_SCOPE = "@browsers";
+
 export interface Rule {
   id: number;
   matchType: MatchType;
   pattern: string;
   categoryId: number;
   priority: number;
+  /**
+   * Which foreground programs a title rule may match: ANY_APP, BROWSER_SCOPE,
+   * or an exact executable name. Absent means ANY_APP.
+   *
+   * Optional because process and domain rules have exactly one legal value —
+   * they already name what they match, and the schema's CHECK refuses anything
+   * else — so requiring it would only make every such rule state the obvious.
+   * The database column is NOT NULL and the explainer normalizes on the way in,
+   * so nothing downstream sees undefined.
+   */
+  scope?: string;
+}
+
+/** Lowercase and trim an executable name; ANY_APP and BROWSER_SCOPE pass
+ *  through unchanged. Whitespace-only input means "no scope". */
+export function normalizeRuleScope(raw: string): string {
+  const scope = raw.trim().toLowerCase();
+  return scope === BROWSER_SCOPE ? BROWSER_SCOPE : scope;
+}
+
+/**
+ * How narrowly a title rule is aimed, for breaking ties between rules that
+ * would otherwise sit at the same priority. An exact process is the most
+ * specific claim someone can make, "any browser" is narrower than "anywhere",
+ * and without this the winner is whichever rule happens to come first in the
+ * array — an ordering nobody can see or control.
+ */
+function scopeSpecificity(scope: string): number {
+  if (scope === ANY_APP) return 0;
+  if (scope === BROWSER_SCOPE) return 1;
+  return 2;
+}
+
+/** Whether a title rule's scope admits the process in front. */
+function scopeAdmits(scope: string, process: string, browserProcesses: Set<string>): boolean {
+  if (scope === ANY_APP) return true;
+  if (scope === BROWSER_SCOPE) return browserProcesses.has(process);
+  return scope === process;
 }
 
 /** Normalize a user-entered rule pattern into a matchable one, or null when
@@ -138,14 +185,24 @@ export function buildClassificationExplainer(
   browserProcesses: Set<string>,
 ): ClassificationExplainer {
   const catById = new Map(categories.map((c) => [c.id, c]));
-  type Candidate = { rule: Rule; order: number };
+  // Scope is definite inside the explainer: every candidate below is built
+  // through normalizeRuleScope, so the matching code never re-decides what an
+  // absent scope means.
+  type Candidate = { rule: Rule & { scope: string }; order: number };
   const processRules = new Map<string, Candidate>();
   const domainRules = new Map<string, Candidate>();
   const titleRules: Candidate[] = [];
   const prefer = (left: Candidate | undefined, right: Candidate): Candidate =>
     !left || right.rule.priority < left.rule.priority ? right : left;
   for (const [order, r] of rules.entries()) {
-    const candidate = { rule: { ...r, pattern: r.pattern.toLowerCase() }, order };
+    const candidate = {
+      rule: {
+        ...r,
+        pattern: r.pattern.toLowerCase(),
+        scope: r.matchType === "title" ? normalizeRuleScope(r.scope ?? ANY_APP) : ANY_APP,
+      },
+      order,
+    };
     if (r.matchType === "process") {
       processRules.set(candidate.rule.pattern, prefer(processRules.get(candidate.rule.pattern), candidate));
     } else if (r.matchType === "domain") {
@@ -194,12 +251,27 @@ export function buildClassificationExplainer(
         }
         consider(domainBest);
       }
-      if (titleRules.length > 0) {
-        const title = s.title.toLowerCase();
-        for (const candidate of titleRules) {
-          if (title.includes(candidate.rule.pattern)) consider(candidate);
+    }
+
+    // Outside the browser block: a stored title belongs to the session, and an
+    // editor or note window says as much about what is being worked on as a
+    // browser tab does. Each rule's own scope decides how far it reaches.
+    if (titleRules.length > 0 && s.title) {
+      const title = s.title.toLowerCase();
+      let titleBest: Candidate | undefined;
+      for (const candidate of titleRules) {
+        if (!scopeAdmits(candidate.rule.scope, proc, browserProcesses)) continue;
+        if (!title.includes(candidate.rule.pattern)) continue;
+        if (
+          !titleBest ||
+          candidate.rule.priority < titleBest.rule.priority ||
+          (candidate.rule.priority === titleBest.rule.priority &&
+            scopeSpecificity(candidate.rule.scope) > scopeSpecificity(titleBest.rule.scope))
+        ) {
+          titleBest = candidate;
         }
       }
+      consider(titleBest);
     }
 
     if (!best) return { category: null, winningRule: null, source: "none" };

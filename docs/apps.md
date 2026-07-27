@@ -89,11 +89,20 @@ and a heading that stays pinned while that group is scrolled:
   It is the same table with the same columns and the same sort, because an
   app and a website are the same kind of row: each already says which it is,
   and the type filter is there to show one kind at a time.
-- **Window matches** — individual sessions whose stored title contains the
-  search text, newest first, with the matched text marked. A long title is
-  windowed so the match stays visible rather than being cut off past the
-  column's width, and a leading **…** shows where the title was trimmed.
-  Sessions carry their identity, category, winning rule, and duration.
+- **Window matches** — one row per distinct window title, with the matched text
+  marked, how many times that window was returned to, and the total time those
+  visits came to. A long title is windowed so the match stays visible rather
+  than being cut off past the column's width, and a leading **…** shows where
+  the title was trimmed.
+
+Window matches are grouped rather than listed one session at a time because a
+session row is the tracker's storage unit, not a thing anyone means. Around half
+of a typical database's rows last under ten seconds and carry a few percent of
+its time, so a title search answered row by row returns hundreds of fragments of
+the same window. The heading reports both numbers — windows, and the visits
+behind them — and expanding a row puts the individual visits back for the cases
+that need them, such as correcting one exact sitting. A window with more visits
+than the expansion shows says so.
 
 Stored titles are not listed until a search is entered. Historical titles
 remain searchable if future title capture is later disabled. Date and
@@ -103,10 +112,14 @@ a website, so narrowing by type would drop the rows a title search is for. The
 Window matches heading says **all types** whenever a type filter is set, so the
 exception is visible where it applies.
 
-Window matches can be checked for deletion, and the heading's checkbox takes
-every row currently loaded — never the unloaded remainder, since a checkbox
-should only promise what it can be seen to tick. This selection is separate
-from the one in an item's details, so opening an item does not discard it.
+Ticking a window selects every visit it stands for, and the heading's checkbox
+takes every window currently loaded — never the unloaded remainder, since a
+checkbox should only promise what it can be seen to tick. This selection is
+separate from the one in an item's details, so opening an item does not
+discard it.
+
+**Rule…** on any window opens a new Window rule built from it, which is covered
+under Categories & Rules below.
 
 ### Classification status
 
@@ -114,22 +127,50 @@ Classification status describes the activity represented by the current range,
 and leads each row's second line:
 
 - **Uncategorized** has no categorized time.
-- **Partly uncategorized** has categorized and uncategorized time, so it still
-  needs attention.
-- A category name means all represented time resolves to that one category.
-  A trailing count, as in *Dev +2*, means the item is categorized differently
-  across its sessions; the full split is in its details.
+- **Mixed** means the item does not resolve to one category — either some of its
+  time is still uncategorized, or it is categorized differently across its
+  sessions. Where a dominant category exists the label names it with a trailing
+  count instead, as in *Dev +2*; the full split is in its details. The
+  **Mixed** classification filter returns both forms, since they are the same
+  word on screen.
+- A category name alone means all represented time resolves to that category.
 - **Ignored** means all represented activity is excluded from Insights.
 
 ### Item details
 
 Selecting an App or Website opens its details: friendly and recorded identity,
 first and last seen, time, session count, category distribution, uncategorized
-time, rules in use, and newest-first sessions. Window filtering reveals stored
-titles only for matching sessions. Set an App default or Website category from
-here; the resulting rule applies to all matching historical and future activity,
-not just the range being inspected. A more-specific Website or Window rule can
-still leave an App with Mixed classification.
+time, rules in use, and its windows.
+
+Windows are grouped there exactly as they are in search results — one row per
+title, with its visit count and total time — because an item's own list is one
+app's worth of the same fragmentation. Each row expands to the individual
+visits, and carries the same **Rule…** action. **Show titles** hides the title
+text without hiding the rows, for anyone working on a shared screen; it is a
+display toggle only, and whether titles are captured at all remains a Settings
+choice that is off by default.
+
+Set an App default or Website category from here; the resulting rule applies to
+all matching historical and future activity, not just the range being inspected.
+A more-specific Website or Window rule can still leave an App with Mixed
+classification.
+
+## Correcting a session
+
+**Edit** on any individual visit opens that one session for correction. Its
+**Category** leads, because overriding one session's classification is the
+routine reason to open it and always succeeds; the override outranks every rule.
+
+**Adjust recorded times** is folded away beneath it, being a repair for the rare
+occasion the clock was wrong rather than a routine edit. A corrected span may
+not overlap another recording, and since the tracker records continuously the
+neighbouring sessions usually sit flush against it — so in practice a session
+can be shortened but not lengthened. The panel states the free gap on each side
+before anything is typed, and the fields are bounded by it. Times use the local
+timezone and cannot end in the future. AFK sessions and the live session cannot
+be edited at all.
+
+**Reset corrections** returns a session to exactly what was captured.
 
 ## Exact deletion
 
@@ -186,10 +227,58 @@ The interface uses plain rule names while keeping the same matching behavior:
 | Rule | What it matches |
 | --- | --- |
 | **Website** | A detected site such as `github.com`; paths and searches are not stored. |
-| **Window** | Words in a stored browser window title. Title capture is optional and off by default. |
+| **Window** | Words in a stored window title. Title capture is optional and off by default. |
 | **App** | The foreground executable, such as `code.exe`. |
 
 When several rules match, Website wins, then Window, then App. Rules are
 evaluated against history instead of baked into session rows, so edits
 reclassify existing and future activity — which is also why **unused** is
 measured against all of history and not the visible range.
+
+### Window rules and where they apply
+
+App and Website rules answer *which program* and *which site*, and the answer is
+the same every time. A Window rule is for the case those cannot reach: one
+program holding several genuinely different activities, told apart only by what
+the window says. One editor covers two unrelated projects, and only its title
+separates them.
+
+Window rules are strongest outside the browser, for exactly that reason. Inside
+one, a Website rule wins wherever both match — so a Window rule cannot carve a
+site up into parts, and words matched on a page you have already classified by
+site will not change its category. What a Window rule does do in a browser is
+catch pages whose site was never detected, which happens whenever the URL is not
+readable from the window title.
+
+That ordering is deliberate. A domain is parsed from a URL; a title is arbitrary
+text matched by substring, and substrings are treacherous — `mail` also occurs in
+"Gmail" and "mailing list". A rule that names a site is the more reliable claim,
+so it is the one that stands.
+
+Because a title says as much about work in an editor as in a browser, every
+Window rule carries a **scope** naming where it may match:
+
+- **Any app** — anywhere a stored title contains the words.
+- **Browsers** — only in the browsers listed in Settings, so adding a browser
+  later keeps the rule correct.
+- **One app** — only in a named executable, such as `obsidian.exe`.
+
+Scope exists because the same words mean different things in different programs:
+*Skill Tree* in an editor is a project, in a browser it could be anything. Two
+rules with the same words and different scopes are two different rules, and when
+both could match, the narrower scope wins. Only Window rules take a scope — an
+App rule already names its executable and a Website rule only fires in browsers.
+
+The quickest way to write one is **Rule…** on any window, in search results or
+in an item's details. It fills in the words from the title, defaults the scope to
+the app that window belongs to, and — before anything is saved — reports how many
+sessions and hours the rule would claim across all of your history, and how many
+of those currently classify differently. Widening the scope is then a deliberate
+choice rather than what happens by not choosing.
+
+Window rules applied only to browsers before Time 0.2. On upgrade, existing ones
+become **Any app**, which can reclassify past activity whose titles happen to
+contain the same words; setting such a rule back to **Browsers** restores its
+former behaviour exactly, since rules are evaluated against history rather than
+written into session rows. The tracker backs the database up beside itself before
+migrating.

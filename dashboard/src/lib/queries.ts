@@ -1,7 +1,15 @@
 // Typed SQL access. The dashboard reads sessions and writes only
 // categories/rules/settings (the tracker owns session writes).
 
-import { normalizeRulePattern, type Category, type CategoryState, type MatchType, type Rule } from "./classify";
+import {
+  ANY_APP,
+  normalizeRulePattern,
+  normalizeRuleScope,
+  type Category,
+  type CategoryState,
+  type MatchType,
+  type Rule,
+} from "./classify";
 import { invoke } from "@tauri-apps/api/core";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
@@ -87,12 +95,13 @@ interface RuleRow {
   pattern: string;
   category_id: number;
   priority: number;
+  scope: string;
 }
 
 export async function fetchRules(): Promise<Rule[]> {
   const db = await getDb();
   const rows = await db.select<RuleRow[]>(
-    "SELECT id, match_type, pattern, category_id, priority FROM rules ORDER BY priority ASC, id",
+    "SELECT id, match_type, pattern, category_id, priority, scope FROM rules ORDER BY priority ASC, id",
   );
   return rows.map((r) => ({
     id: r.id,
@@ -100,6 +109,7 @@ export async function fetchRules(): Promise<Rule[]> {
     pattern: r.pattern,
     categoryId: r.category_id,
     priority: r.priority,
+    scope: r.scope ?? ANY_APP,
   }));
 }
 
@@ -134,7 +144,7 @@ export async function updateSetting(key: string, value: string): Promise<void> {
 // action owns; runtime and onboarding metadata must survive it.
 export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
   weekly_goal_hours: "0",
-  idle_threshold_seconds: "180",
+  idle_threshold_seconds: "300",
   heartbeat_seconds: "15",
   week_start: "auto",
   browser_processes:
@@ -180,6 +190,7 @@ export async function addRule(
   matchType: MatchType,
   pattern: string,
   categoryId: number,
+  scope: string = ANY_APP,
   priority?: number,
 ): Promise<void> {
   const db = await getDb();
@@ -193,11 +204,14 @@ export async function addRule(
     err.name = "ValidationError"; // explainDbError passes the message through untouched
     throw err;
   }
+  // The CHECK constraint refuses a scope on anything but a title rule, so
+  // normalize here rather than letting a stray argument raise a DB error.
+  const ruleScope = matchType === "title" ? normalizeRuleScope(scope) : ANY_APP;
   await db.execute(
-    "INSERT INTO rules (match_type, pattern, category_id, priority) VALUES ($1, $2, $3, $4)" +
-      " ON CONFLICT(match_type, pattern) DO UPDATE SET" +
+    "INSERT INTO rules (match_type, pattern, category_id, priority, scope) VALUES ($1, $2, $3, $4, $5)" +
+      " ON CONFLICT(match_type, pattern, scope) DO UPDATE SET" +
       " category_id=excluded.category_id, priority=excluded.priority",
-    [matchType, pat, categoryId, priority ?? DEFAULT_PRIORITY[matchType]],
+    [matchType, pat, categoryId, priority ?? DEFAULT_PRIORITY[matchType], ruleScope],
   );
 }
 
@@ -376,6 +390,13 @@ export interface SessionCorrection {
   isAfk: boolean;
   isLive: boolean;
   isCorrected: boolean;
+  /** The free gap around this session — the nearest neighbouring session's end
+   *  before it and start after it. Corrected times may not overlap another
+   *  recording, and a continuously-recording tracker leaves little slack, so
+   *  the dialog states the limit instead of discovering it by rejection.
+   *  Null means nothing is recorded on that side. */
+  earliestStart: number | null;
+  latestEnd: number | null;
 }
 
 export interface SessionCorrectionRequest {

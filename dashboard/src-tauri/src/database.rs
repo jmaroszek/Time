@@ -22,7 +22,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const MAX_SESSION_SPAN_SEC: i64 = 7 * 86_400;
 const BOOTSTRAP_SQL: &str = r#"
 BEGIN IMMEDIATE;
@@ -53,7 +53,12 @@ CREATE TABLE IF NOT EXISTS rules (
     pattern TEXT NOT NULL,
     category_id INTEGER NOT NULL REFERENCES categories(id),
     priority INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(match_type, pattern)
+    -- Which foreground programs a title rule may match: '' any app,
+    -- '@browsers' any process in the browser_processes setting, or an exact
+    -- executable name. Empty string rather than NULL so the UNIQUE below
+    -- actually constrains unscoped rules; only title rules carry a scope.
+    scope TEXT NOT NULL DEFAULT '' CHECK(scope = '' OR match_type = 'title'),
+    UNIQUE(match_type, pattern, scope)
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TRIGGER IF NOT EXISTS delete_category_rules
@@ -103,10 +108,13 @@ INSERT OR IGNORE INTO categories
     SELECT * FROM starter
     WHERE (SELECT COUNT(*) FROM categories) = 0;
 INSERT OR IGNORE INTO settings (key,value) VALUES
-    ('schema_version','2'),
+    -- Must track SCHEMA_VERSION above: this is what a database created by the
+    -- dashboard rather than the tracker is stamped with, and open() refuses
+    -- anything older than the constant.
+    ('schema_version','3'),
     ('rule_priority_scheme','low-wins-v1'),
     ('weekly_goal_hours','0'),
-    ('idle_threshold_seconds','180'),
+    ('idle_threshold_seconds','300'),
     ('heartbeat_seconds','15'),
     ('week_start','auto'),
     ('browser_processes','chrome.exe,msedge.exe,firefox.exe,brave.exe,opera.exe,vivaldi.exe,arc.exe,chromium.exe'),
@@ -200,6 +208,14 @@ pub struct SessionCorrection {
     pub is_afk: bool,
     pub is_live: bool,
     pub is_corrected: bool,
+    /// The free gap around this session: the end of the nearest session before
+    /// it, and the start of the nearest one after. Corrected times may not
+    /// overlap another recording, and because the tracker records continuously
+    /// that gap is usually the session's own span — so the interface states the
+    /// limit up front rather than letting every edit be rejected after the
+    /// fact. `None` means nothing is recorded on that side.
+    pub earliest_start: Option<i64>,
+    pub latest_end: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -934,16 +950,36 @@ impl TimeDatabase {
         .map_err(|error| error.to_string())?
         .ok_or("Session no longer exists")?;
         let protected = self.protected_live_session_id().await?;
+        let effective_start: i64 = row
+            .try_get("effective_start")
+            .map_err(|error| error.to_string())?;
+        let effective_end: i64 = row
+            .try_get("effective_end")
+            .map_err(|error| error.to_string())?;
+        // Mirrors the overlap test in correct_session, including that it does
+        // not exclude AFK rows: a neighbour is anything occupying the clock.
+        // Touching endpoints are legal, so these are the exact bounds rather
+        // than one second inside them.
+        let bounds = sqlx::query(
+            "SELECT (SELECT MAX(COALESCE(c.corrected_end_ts,s.end_ts)) \
+               FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
+               WHERE s.id<>?1 AND COALESCE(c.corrected_end_ts,s.end_ts)<=?2) AS earliest_start, \
+             (SELECT MIN(COALESCE(c.corrected_start_ts,s.start_ts)) \
+               FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
+               WHERE s.id<>?1 AND COALESCE(c.corrected_start_ts,s.start_ts)>=?3) AS latest_end",
+        )
+        .bind(session_id)
+        .bind(effective_start)
+        .bind(effective_end)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?;
         Ok(SessionCorrection {
             session_id,
             original_start: row.try_get("start_ts").map_err(|error| error.to_string())?,
             original_end: row.try_get("end_ts").map_err(|error| error.to_string())?,
-            start: row
-                .try_get("effective_start")
-                .map_err(|error| error.to_string())?,
-            end: row
-                .try_get("effective_end")
-                .map_err(|error| error.to_string())?,
+            start: effective_start,
+            end: effective_end,
             process: row.try_get("process").map_err(|error| error.to_string())?,
             title: row.try_get("title").map_err(|error| error.to_string())?,
             domain: row.try_get("domain").map_err(|error| error.to_string())?,
@@ -959,6 +995,12 @@ impl TimeDatabase {
                 .try_get::<i64, _>("is_corrected")
                 .map_err(|error| error.to_string())?
                 != 0,
+            earliest_start: bounds
+                .try_get("earliest_start")
+                .map_err(|error| error.to_string())?,
+            latest_end: bounds
+                .try_get("latest_end")
+                .map_err(|error| error.to_string())?,
         })
     }
 
@@ -1263,7 +1305,10 @@ pub fn database_path(base: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActivityDeleteRequest, SessionCorrectionRequest, TimeDatabase};
+    use super::{
+        ActivityDeleteRequest, SessionCorrectionRequest, TimeDatabase, BOOTSTRAP_SQL,
+        SCHEMA_VERSION,
+    };
 
     #[test]
     fn rejects_dangerous_or_multi_statement_sql() {
@@ -1448,6 +1493,19 @@ mod tests {
                     .is_corrected
             );
         });
+    }
+
+    #[test]
+    fn bootstrap_stamps_the_schema_version_it_creates() {
+        // The version lives twice in this file — once as the constant open()
+        // enforces, once as a literal in the SQL that seeds a fresh database.
+        // Bumping one and not the other makes every new database unopenable by
+        // the code that just created it.
+        let seeded = format!("('schema_version','{SCHEMA_VERSION}')");
+        assert!(
+            BOOTSTRAP_SQL.contains(&seeded),
+            "BOOTSTRAP_SQL must seed schema_version {SCHEMA_VERSION}",
+        );
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  GROUP_SESSION_SAMPLE,
   buildActivityIndex,
   packActivitySource,
   queryActivityIndex,
@@ -139,7 +140,8 @@ describe("Activity index", () => {
     expect(editor.windowMatches?.total).toBe(0);
 
     const title = queryActivityIndex(index, { ...baseQuery, search: "mail" });
-    expect(title.windowMatches?.rows.map((row) => row.id)).toEqual([3]);
+    expect(title.windowMatches?.rows.map((row) => row.title)).toEqual(["Inbox - mail"]);
+    expect(title.windowMatches?.rows[0].sessionIds).toEqual([3]);
     expect(title.windowMatches?.rows[0].winningRuleType).toBe("title");
 
     const website = queryActivityIndex(index, { ...baseQuery, search: "youtube" });
@@ -164,7 +166,101 @@ describe("Activity index", () => {
     // apps-only filter would drop it — the one row the search was for.
     const appsOnly = queryActivityIndex(index, { ...baseQuery, search: "mail", typeFilter: "app" });
     expect(appsOnly.catalog.total).toBe(0);
-    expect(appsOnly.windowMatches?.rows.map((row) => row.id)).toEqual([3]);
+    expect(appsOnly.windowMatches?.rows[0].sessionIds).toEqual([3]);
+  });
+
+  it("collapses repeat visits to one window into a single row", () => {
+    // The shape a real database takes: one window returned to over and over,
+    // each visit its own storage row. Read row by row it is 4 results; read as
+    // a thing it is one window worth 70 seconds.
+    const index = buildActivityIndex({
+      ...source,
+      sessions: [
+        { id: 1, start: 0, end: 30, process: "obsidian.exe", title: "Skill Tree — roadmap", domain: null, isAfk: false },
+        { id: 2, start: 40, end: 50, process: "obsidian.exe", title: "Skill Tree — roadmap", domain: null, isAfk: false },
+        { id: 3, start: 60, end: 65, process: "obsidian.exe", title: "Groceries", domain: null, isAfk: false },
+        { id: 4, start: 70, end: 100, process: "obsidian.exe", title: "Skill Tree — roadmap", domain: null, isAfk: false },
+      ],
+    });
+    const found = queryActivityIndex(index, { ...baseQuery, search: "e" });
+    const groups = found.windowMatches!;
+    expect(groups.total).toBe(2);
+    expect(groups.sessionTotal).toBe(4);
+    const [first, second] = groups.rows;
+    // Heaviest window first, not most recent.
+    expect(first.title).toBe("Skill Tree — roadmap");
+    expect(first.sessionCount).toBe(3);
+    expect(first.seconds).toBe(70);
+    expect(first.sessionIds).toEqual([4, 2, 1]); // newest first, as listed
+    expect(first.firstSeen).toBe(0);
+    expect(first.lastSeen).toBe(100);
+    expect(second.title).toBe("Groceries");
+  });
+
+  it("separates identical titles belonging to different identities", () => {
+    const index = buildActivityIndex({
+      ...source,
+      browserProcesses: ["chrome.exe"],
+      sessions: [
+        { id: 1, start: 0, end: 30, process: "chrome.exe", title: "Inbox", domain: "mail.com", isAfk: false },
+        { id: 2, start: 40, end: 70, process: "outlook.exe", title: "Inbox", domain: null, isAfk: false },
+      ],
+    });
+    const groups = queryActivityIndex(index, { ...baseQuery, search: "inbox" }).windowMatches!;
+    expect(groups.total).toBe(2);
+    expect(new Set(groups.rows.map((row) => row.entityId))).toEqual(
+      new Set(["website:mail.com", "app:outlook.exe"]),
+    );
+  });
+
+  it("pages by title, so one busy window costs one row", () => {
+    const sessions = Array.from({ length: 40 }, (_, i) => ({
+      id: i + 1,
+      start: i * 10,
+      end: i * 10 + 5,
+      process: "claude.exe",
+      title: "Claude",
+      domain: null,
+      isAfk: false,
+    }));
+    const index = buildActivityIndex({ ...source, sessions });
+    const groups = queryActivityIndex(index, {
+      ...baseQuery,
+      endSec: 500, // the fixture runs past baseQuery's window
+      search: "claude",
+      windowLimit: 5,
+    }).windowMatches!;
+    expect(groups.rows).toHaveLength(1);
+    expect(groups.total).toBe(1);
+    expect(groups.sessionTotal).toBe(40);
+    // Every visit is selectable even though only a sample is carried.
+    expect(groups.rows[0].sessionIds).toHaveLength(40);
+    expect(groups.rows[0].sessions).toHaveLength(GROUP_SESSION_SAMPLE);
+  });
+
+  it("marks a group mixed when its sessions do not classify alike", () => {
+    const index = buildActivityIndex({
+      ...source,
+      sessions: [
+        { id: 1, start: 0, end: 30, process: "code.exe", title: "Project", domain: null, isAfk: false },
+        // Same window, corrected by hand to a different category.
+        { id: 2, start: 40, end: 70, process: "code.exe", title: "Project", domain: null, isAfk: false, categoryOverrideId: 2, isCorrected: true },
+      ],
+    });
+    const group = queryActivityIndex(index, { ...baseQuery, search: "project" }).windowMatches!.rows[0];
+    expect(group.mixed).toBe(true);
+    expect(group.categoryName).toBeNull();
+    expect(group.winningRulePattern).toBeNull();
+  });
+
+  it("returns both forms of Mixed, since they share the word on screen", () => {
+    const index = buildActivityIndex(source);
+    const mixed = queryActivityIndex(index, { ...baseQuery, classificationFilter: "mixed" });
+    const statuses = new Set(mixed.catalog.rows.map((row) => row.status));
+    // example.com is partly uncategorized; the filter must not drop it just
+    // because its status is spelled "partial" internally.
+    expect(mixed.catalog.rows.map((row) => row.id)).toContain("website:example.com");
+    for (const status of statuses) expect(["mixed", "partial"]).toContain(status);
   });
 
   it("filters Uncategorized without hiding low-duration identities", () => {
@@ -191,7 +287,7 @@ describe("Activity index", () => {
     expect(queryActivityIndex(unmatched, baseQuery).appliedRuleIds).not.toContain(9);
   });
 
-  it("returns paginated detail sessions with provenance", () => {
+  it("groups an entity's windows with provenance, paging by title", () => {
     const result = queryActivityIndex(buildActivityIndex(source), {
       ...baseQuery,
       selectedEntityId: "website:example.com",
@@ -199,9 +295,13 @@ describe("Activity index", () => {
     });
     expect(result.selectedEntity?.sessionCount).toBe(2);
     expect(result.detailTotal).toBe(2);
-    expect(result.detailSessions).toHaveLength(1);
-    expect(result.detailSessions[0].id).toBe(4);
-    expect(result.detailSessions[0].title).toBe("");
+    // Two distinct titles behind two sessions; the limit pages titles.
+    expect(result.detailGroups.total).toBe(2);
+    expect(result.detailGroups.sessionTotal).toBe(2);
+    expect(result.detailGroups.rows).toHaveLength(1);
+    // Titles are no longer withheld until searched — the drawer decides whether
+    // to show them, and the query always carries them.
+    expect(result.detailGroups.rows[0].title).not.toBe("");
     expect(result.selectedEntity?.rules.map((rule) => rule.ruleId)).toEqual([4]);
 
     const filtered = queryActivityIndex(buildActivityIndex(source), {
@@ -209,8 +309,8 @@ describe("Activity index", () => {
       selectedEntityId: "website:example.com",
       detailSearch: "mail",
     });
-    expect(filtered.detailSessions.map((session) => [session.id, session.title])).toEqual([
-      [3, "Inbox - mail"],
+    expect(filtered.detailGroups.rows.map((group) => [group.title, group.sessionIds])).toEqual([
+      ["Inbox - mail", [3]],
     ]);
   });
 

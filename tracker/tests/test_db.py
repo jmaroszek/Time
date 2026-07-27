@@ -94,7 +94,86 @@ def test_current_schema_constraints_and_category_cleanup(conn):
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
-def test_v1_database_migrates_to_v2_without_rewriting_sessions(tmp_path):
+def test_rule_scope_is_constrained_to_title_rules(conn):
+    category_id = conn.execute(
+        "INSERT INTO categories (name,color) VALUES ('Notes','#123456') RETURNING id"
+    ).fetchone()[0]
+    # The same words can mean different things in different programs, which is
+    # the whole point of the scope column.
+    for scope in ("", "@browsers", "obsidian.exe"):
+        conn.execute(
+            "INSERT INTO rules (match_type,pattern,category_id,priority,scope)"
+            " VALUES ('title','journal',?,2,?)",
+            (category_id, scope),
+        )
+    assert conn.execute("SELECT COUNT(*) FROM rules WHERE pattern='journal'").fetchone()[0] == 3
+    # Same pattern and scope twice is still one rule.
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO rules (match_type,pattern,category_id,priority,scope)"
+            " VALUES ('title','journal',?,2,'obsidian.exe')",
+            (category_id,),
+        )
+    # A process rule already names its process; a domain rule only fires for
+    # browsers. Neither has anything left for a scope to say.
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO rules (match_type,pattern,category_id,priority,scope)"
+            " VALUES ('process','code.exe',?,3,'obsidian.exe')",
+            (category_id,),
+        )
+
+
+def test_v2_database_migrates_to_v3_keeping_rules_and_backing_up(tmp_path):
+    path = tmp_path / "v2.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE categories (id INTEGER PRIMARY KEY,name TEXT UNIQUE NOT NULL,"
+        "color TEXT NOT NULL,is_productive INTEGER NOT NULL DEFAULT 0,"
+        "is_neutral INTEGER NOT NULL DEFAULT 0,is_ignored INTEGER NOT NULL DEFAULT 0,"
+        "sort_order INTEGER);"
+        "CREATE TABLE rules (id INTEGER PRIMARY KEY,match_type TEXT NOT NULL,pattern TEXT NOT NULL,"
+        "category_id INTEGER NOT NULL REFERENCES categories(id),priority INTEGER NOT NULL DEFAULT 0,"
+        "UNIQUE(match_type,pattern));"
+        "CREATE TABLE settings (key TEXT PRIMARY KEY,value TEXT);"
+        "INSERT INTO settings VALUES ('schema_version','2');"
+        "INSERT INTO categories (id,name,color) VALUES (1,'Media','#abcdef');"
+        "INSERT INTO rules (id,match_type,pattern,category_id,priority)"
+        " VALUES (5,'title','netflix',1,2);"
+    )
+    conn.close()
+
+    migrated = db.open_db(path)
+    assert db.read_settings_raw(migrated)["schema_version"] == "3"
+    # Rule identity survives the table rebuild: ids are referenced by the
+    # dashboard's "rules in use" reporting.
+    row = migrated.execute("SELECT id, pattern, priority, scope FROM rules").fetchone()
+    assert (row["id"], row["pattern"], row["priority"]) == (5, "netflix", 2)
+    # Existing title rules become unscoped, which widens them past the browser.
+    assert row["scope"] == ""
+    # The trigger is dropped and recreated around the rebuild; losing it would
+    # leave rules pointing at deleted categories.
+    conn_triggers = {
+        r[0] for r in migrated.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
+    }
+    assert "delete_category_rules" in conn_triggers
+    assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    migrated.close()
+
+    backups = list(tmp_path.glob("backup_schema2_*.db"))
+    assert len(backups) == 1, "a table rebuild must leave a restorable copy behind"
+    restored = sqlite3.connect(backups[0])
+    assert restored.execute("SELECT value FROM settings WHERE key='schema_version'").fetchone()[0] == "2"
+    restored.close()
+
+
+def test_fresh_database_is_not_backed_up(tmp_path):
+    path = tmp_path / "fresh.db"
+    db.open_db(path).close()
+    assert list(tmp_path.glob("backup_schema*.db")) == []
+
+
+def test_v1_database_migrates_to_v3_in_one_pass(tmp_path):
     path = tmp_path / "v1.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -114,13 +193,15 @@ def test_v1_database_migrates_to_v2_without_rewriting_sessions(tmp_path):
     conn.close()
 
     migrated = db.open_db(path)
-    assert db.read_settings_raw(migrated)["schema_version"] == "2"
+    # Every step in one open: v1 -> v2 adds the tables, v2 -> v3 rebuilds rules.
+    assert db.read_settings_raw(migrated)["schema_version"] == "3"
     assert migrated.execute("SELECT process FROM sessions WHERE id=7").fetchone()[0] == "code.exe"
     tables = {
         row[0]
         for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
     assert {"tracking_exclusions", "session_corrections"} <= tables
+    assert "scope" in {row[1] for row in migrated.execute("PRAGMA table_info(rules)")}
     migrated.close()
 
 
@@ -178,7 +259,7 @@ def test_ignored_seed_is_idempotent(tmp_path):
 
 def test_get_settings_parses_and_clamps(conn):
     s = db.get_settings(conn)
-    assert s.idle_threshold_seconds == 180.0
+    assert s.idle_threshold_seconds == 300.0
     assert s.heartbeat_seconds == 15.0
     assert "chrome.exe" in s.browser_processes
     assert s.recording_consent is False
@@ -188,7 +269,7 @@ def test_get_settings_parses_and_clamps(conn):
     assert db.get_settings(conn).idle_threshold_seconds == 30.0  # clamped to floor
 
     conn.execute("UPDATE settings SET value='garbage' WHERE key='idle_threshold_seconds'")
-    assert db.get_settings(conn).idle_threshold_seconds == 180.0  # fallback
+    assert db.get_settings(conn).idle_threshold_seconds == 300.0  # fallback
 
     conn.execute(
         "INSERT INTO tracking_exclusions VALUES ('app','code.exe',1),"

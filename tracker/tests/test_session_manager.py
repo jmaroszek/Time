@@ -32,9 +32,17 @@ def store():
     return FakeStore()
 
 
+# The idle tests are about behaviour at the threshold, not about whichever value
+# ships as the default, so they state it. Inheriting it meant raising the
+# shipped default silently broke three unrelated assertions.
+IDLE_THRESHOLD = 180.0
+
+
 @pytest.fixture
 def manager(store):
-    return SessionManager(store=store, settings=Settings())
+    return SessionManager(
+        store=store, settings=Settings(idle_threshold_seconds=IDLE_THRESHOLD)
+    )
 
 
 def active(now, process="code.exe", title="main.py", idle=0.0):

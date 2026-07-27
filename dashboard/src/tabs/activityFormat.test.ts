@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { formatLastSeen, titleMatchParts } from "./ActivityTab";
+import {
+  defaultRulePattern,
+  describeCorrectionWindow,
+  formatLastSeen,
+  previewTitleRule,
+  titleMatchParts,
+} from "./ActivityTab";
+import { ANY_APP, BROWSER_SCOPE, type Category, type Rule } from "../lib/classify";
+import type { ActivitySource } from "../lib/activity";
 
 /** Boundaries are calendar dates, not elapsed hours: 00:30 and 23:30 on the
  *  same date are both "today", and 23:30 last night is "Yesterday" even though
@@ -66,5 +74,155 @@ describe("titleMatchParts", () => {
     expect(titleMatchParts("", "mail")).toBeNull();
     expect(titleMatchParts("Inbox", "")).toBeNull();
     expect(titleMatchParts("Inbox", "spreadsheet")).toBeNull();
+  });
+});
+
+describe("defaultRulePattern", () => {
+  it("takes the leading segment, which is what names the work", () => {
+    // Window titles run document-first, program-last. The tail repeats what
+    // the rule's scope already says.
+    expect(defaultRulePattern("roadmap.md - Skill Tree - Obsidian")).toBe("roadmap.md");
+    expect(defaultRulePattern("Inbox — Mail")).toBe("Inbox");
+    expect(defaultRulePattern("Pull request #12 | myrepo")).toBe("Pull request #12");
+  });
+
+  it("keeps the whole title when the lead is too short to mean anything", () => {
+    expect(defaultRulePattern("v2 - Skill Tree - Obsidian")).toBe("v2 - Skill Tree - Obsidian");
+  });
+
+  it("leaves a title with no separators alone", () => {
+    expect(defaultRulePattern("Claude")).toBe("Claude");
+  });
+
+  it("does not treat a hyphen inside a word as a separator", () => {
+    expect(defaultRulePattern("well-known things")).toBe("well-known things");
+  });
+});
+
+describe("previewTitleRule", () => {
+  const categories: Category[] = [
+    { id: 1, name: "Dev", color: "#111", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 1 },
+    { id: 2, name: "Notes", color: "#222", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 2 },
+  ];
+  const rules: Rule[] = [
+    { id: 1, matchType: "process", pattern: "obsidian.exe", categoryId: 2, priority: 3 },
+  ];
+  const source: ActivitySource = {
+    categories,
+    rules,
+    browserProcesses: ["chrome.exe"],
+    aliases: {},
+    sessions: [
+      { id: 1, start: 0, end: 60, process: "obsidian.exe", title: "Skill Tree — roadmap", domain: null, isAfk: false },
+      { id: 2, start: 60, end: 120, process: "obsidian.exe", title: "Groceries", domain: null, isAfk: false },
+      { id: 3, start: 120, end: 180, process: "chrome.exe", title: "Skill Tree issue", domain: "github.com", isAfk: false },
+      { id: 4, start: 180, end: 240, process: "obsidian.exe", title: "Skill Tree — notes", domain: null, isAfk: true },
+    ],
+  };
+
+  it("counts what an unscoped rule would claim, across every app", () => {
+    const preview = previewTitleRule(source, "skill tree", ANY_APP);
+    expect(preview.sessions).toBe(2); // the AFK row is never classified
+    expect(preview.seconds).toBe(120);
+    expect(preview.entities).toBe(2); // obsidian.exe and github.com
+  });
+
+  it("honours the scope it is asked about", () => {
+    expect(previewTitleRule(source, "skill tree", "obsidian.exe").sessions).toBe(1);
+    expect(previewTitleRule(source, "skill tree", BROWSER_SCOPE).sessions).toBe(1);
+  });
+
+  it("separates sessions that would change category from ones merely claimed", () => {
+    // Session 1 is Notes today via the App rule, so the new rule takes it away.
+    // Session 3 has no rule at all, so it is claimed but not reclassified.
+    const preview = previewTitleRule(source, "skill tree", ANY_APP);
+    expect(preview.reclassified).toBe(1);
+  });
+
+  it("does not count sessions an existing higher-priority rule already wins", () => {
+    const shadowed: ActivitySource = {
+      ...source,
+      // A domain rule outranks any title rule, so the browser session is not
+      // this rule's to claim.
+      rules: [...rules, { id: 2, matchType: "domain", pattern: "github.com", categoryId: 1, priority: 1 }],
+    };
+    const preview = previewTitleRule(shadowed, "skill tree", ANY_APP);
+    expect(preview.sessions).toBe(1);
+    expect(preview.entities).toBe(1);
+  });
+
+  it("reports nothing for a pattern that matches no stored title", () => {
+    expect(previewTitleRule(source, "nonexistent", ANY_APP)).toEqual({
+      sessions: 0,
+      seconds: 0,
+      entities: 0,
+      reclassified: 0,
+    });
+  });
+});
+
+describe("describeCorrectionWindow", () => {
+  const base = { start: 1_000, end: 2_000 };
+
+  it("leads with shorten-only when neighbours abut both ends", () => {
+    // The normal case for a continuously-recording tracker, and the one the
+    // dialog used to reveal only by rejecting the save.
+    const text = describeCorrectionWindow({ ...base, earliestStart: 1_000, latestEnd: 2_000 });
+    expect(text).toBe(
+      "You can shorten this session but not extend it — the sessions before and after leave no gap.",
+    );
+  });
+
+  it("gives the outer bounds when there is room on both sides", () => {
+    const text = describeCorrectionWindow({ ...base, earliestStart: 400, latestEnd: 2_600 });
+    expect(text).toMatch(/^This session can run from .+ to .+ at most, before it would overlap another\.$/);
+  });
+
+  it("still gives bounds when only one side has room", () => {
+    // The start is pinned but the end can move, so stating the pair is honest:
+    // the range simply begins where it already is.
+    const text = describeCorrectionWindow({ ...base, earliestStart: 1_000, latestEnd: 2_600 });
+    expect(text).toContain("can run from");
+  });
+
+  it("says when nothing is recorded on one side", () => {
+    expect(describeCorrectionWindow({ ...base, earliestStart: null, latestEnd: 2_600 }))
+      .toContain("Nothing is recorded before this session");
+    expect(describeCorrectionWindow({ ...base, earliestStart: 400, latestEnd: null }))
+      .toContain("nothing is recorded after it");
+  });
+
+  it("says the times move freely when the session stands alone", () => {
+    expect(describeCorrectionWindow({ ...base, earliestStart: null, latestEnd: null })).toBe(
+      "Nothing else is recorded around this session, so its times can move freely.",
+    );
+  });
+
+  it("states bounds to the second, since a real gap can be shorter than a minute", () => {
+    // A tracker restart leaves about forty seconds. To the minute, both bounds
+    // print the same time and the message reads as "no room" when there is.
+    const start = new Date(2026, 6, 27, 10, 52, 37).getTime() / 1000;
+    const text = describeCorrectionWindow({
+      start,
+      end: start + 11,
+      earliestStart: start - 42,
+      latestEnd: start + 11,
+    });
+    expect(text).toContain("51:55");
+  });
+
+  it("never uses vocabulary the rest of the app does not", () => {
+    // "Recordings sit flush" was carpentry, and introduced a third noun for a
+    // thing the app calls a session everywhere else.
+    for (const bounds of [
+      { earliestStart: 1_000, latestEnd: 2_000 },
+      { earliestStart: 400, latestEnd: 2_600 },
+      { earliestStart: null, latestEnd: null },
+      { earliestStart: null, latestEnd: 2_600 },
+      { earliestStart: 400, latestEnd: null },
+    ]) {
+      const text = describeCorrectionWindow({ ...base, ...bounds });
+      expect(text).not.toMatch(/flush|recordings/i);
+    }
   });
 });

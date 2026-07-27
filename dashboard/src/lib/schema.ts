@@ -1,6 +1,13 @@
-/** Schema compatibility boundary shared with tracker/db.py. */
-
-export const SUPPORTED_SCHEMA_VERSION = 2;
+/**
+ * Schema compatibility boundary shared with tracker/db.py.
+ *
+ * The third of three copies of this number — `SCHEMA_VERSION` in
+ * `tracker/db.py`, `SCHEMA_VERSION` in `database.rs`, and this one. Raise all
+ * three together. The tracker's is the only one that migrates; the other two
+ * are refusals, and leaving this one behind makes the dashboard reject a
+ * database the tracker has already upgraded.
+ */
+export const SUPPORTED_SCHEMA_VERSION = 3;
 const NEWER_SCHEMA_PREFIX = "DatabaseSchemaTooNew:";
 
 /** Missing means the pre-versioning legacy schema, which remains readable. */
