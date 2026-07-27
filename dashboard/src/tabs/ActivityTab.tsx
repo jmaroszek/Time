@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -25,8 +26,8 @@ import {
   type ActivityEntitySummary,
   type ActivityQuery,
   type ActivityQueryResult,
-  type ActivitySessionPage,
-  type ActivitySessionRow,
+  type ActivityTitleGroup,
+  type ActivityTitleGroupPage,
   type ActivitySort,
   type ActivitySortDirection,
   type ActivitySource,
@@ -34,12 +35,16 @@ import {
 } from "../lib/activity";
 import { buildActivityExport, type ActivityExportKind } from "../lib/activityExport";
 import {
+  ANY_APP,
+  BROWSER_SCOPE,
+  buildClassifier,
   categoryState,
   categoryStateFlags,
   type Category,
   type CategoryState,
   type MatchType,
   type Productivity,
+  type Rule,
 } from "../lib/classify";
 import { UNCATEGORIZED } from "../lib/chartTheme";
 import type { Palette } from "../lib/palettes";
@@ -107,7 +112,7 @@ const RULE_LABELS: Record<MatchType, string> = {
 
 const RULE_HELP: Record<MatchType, string> = {
   domain: "Matches a site such as github.com. Page paths and searches are not stored.",
-  title: "Matches words in a stored browser window title.",
+  title: "Matches words in a stored window title, in whichever apps its scope allows.",
   process: "Matches the foreground executable, such as code.exe.",
 };
 
@@ -223,6 +228,11 @@ export default function ActivityTab({
     label: string;
   } | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
+  const [ruleDraft, setRuleDraft] = useState<ActivityTitleGroup | null>(null);
+  // Off means the drawer lists windows without naming them, for anyone sharing
+  // a screen. Titles are opt-in and off by default at capture, which is where
+  // the real consent lives; this is only about what is on screen right now.
+  const [showTitles, setShowTitles] = useState(true);
 
   const allRange = useMemo(() => allTimeRange(firstSessionSec), [firstSessionSec, historyRevision]);
   const sessionData = useSessions(
@@ -366,13 +376,16 @@ export default function ActivityTab({
   const toggleDrawerSession = toggle(setDrawerSessionIds);
   /** Scoped to the rows actually on screen, never the unloaded remainder: the
    *  only honest promise a checkbox can make is about what it can be seen to
-   *  tick, and deletion here is exact by design. */
-  const toggleAllSessions = (ids: number[]) => setSelectedSessionIds((current) => {
+   *  tick, and deletion here is exact by design. A window group is on screen as
+   *  one row, so ticking it takes every visit it stands for. */
+  const toggleAll = (set: Setter<Set<number>>) => (ids: number[]) => set((current) => {
     const next = new Set(current);
     if (ids.every((id) => next.has(id))) for (const id of ids) next.delete(id);
     else for (const id of ids) next.add(id);
     return next;
   });
+  const toggleAllSessions = toggleAll(setSelectedSessionIds);
+  const toggleAllDrawerSessions = toggleAll(setDrawerSessionIds);
   const requestSessionDeletion = (ids: Set<number>) => {
     if (ids.size === 0) return;
     setDeleteScope({
@@ -493,6 +506,7 @@ export default function ActivityTab({
                       onToggleAllSessions={toggleAllSessions}
                       onDeleteSelected={() => requestSessionDeletion(selectedSessionIds)}
                       onEditSession={setEditingSessionId}
+                      onMakeRule={setRuleDraft}
                       onLoadIdentities={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
                       onLoadWindows={() => setWindowLimit((limit) => limit + WINDOW_PAGE)}
                       isAllTime={isAllTime}
@@ -524,17 +538,19 @@ export default function ActivityTab({
       {result?.selectedEntity && (
         <EntityDrawer
           entity={result.selectedEntity}
-          sessions={result.detailSessions}
-          sessionTotal={result.detailTotal}
+          groups={result.detailGroups}
           hasStoredTitles={result.hasStoredTitles}
           detailSearch={detailSearch}
           onDetailSearch={setDetailSearch}
+          showTitles={showTitles}
+          onShowTitles={setShowTitles}
           onLoadMore={() => setDetailLimit((limit) => limit + 50)}
           onClose={() => setSelectedEntityId(null)}
           categories={meta.categories}
           aliases={meta.aliases}
           selectedSessionIds={drawerSessionIds}
           onToggleSession={toggleDrawerSession}
+          onToggleAllSessions={toggleAllDrawerSessions}
           onDeleteSelected={() => requestSessionDeletion(drawerSessionIds)}
           onDeleteEntity={() => requestEntityDeletion(result.selectedEntity!)}
           onExclude={() => setExcludeScope({
@@ -543,6 +559,7 @@ export default function ActivityTab({
             label: result.selectedEntity!.displayName,
           })}
           onEditSession={setEditingSessionId}
+          onMakeRule={setRuleDraft}
           onAssign={(categoryId) => assignEntity(result.selectedEntity!, categoryId)}
           onSaveAlias={(alias) => saveAlias(result.selectedEntity!.key, alias)}
           onRemoveExactRule={() => removeExactRules(result.selectedEntity!)}
@@ -567,6 +584,16 @@ export default function ActivityTab({
             setExcludeScope(null);
             if (deletedHistory) setSelectedEntityId(null);
           }}
+        />
+      )}
+      {ruleDraft && (
+        <WindowRuleDialog
+          group={ruleDraft}
+          categories={meta.categories}
+          source={source}
+          browserProcesses={browserProcesses}
+          onClose={() => setRuleDraft(null)}
+          onSaved={() => { setRuleDraft(null); void refreshMeta(); }}
         />
       )}
       {editingSessionId !== null && (
@@ -859,13 +886,14 @@ function SearchResults({
   onToggleAllSessions,
   onDeleteSelected,
   onEditSession,
+  onMakeRule,
   onLoadIdentities,
   onLoadWindows,
   isAllTime,
   onTryAllTime,
 }: {
   identities: ActivityEntityPage;
-  windows: ActivitySessionPage;
+  windows: ActivityTitleGroupPage;
   search: string;
   typeFilter: ActivityTypeFilter;
   scale: BarScale;
@@ -879,6 +907,7 @@ function SearchResults({
   onToggleAllSessions: (ids: number[]) => void;
   onDeleteSelected: () => void;
   onEditSession: (id: number) => void;
+  onMakeRule: (group: ActivityTitleGroup) => void;
   onLoadIdentities: () => void;
   onLoadWindows: () => void;
   isAllTime: boolean;
@@ -887,7 +916,7 @@ function SearchResults({
   if (identities.total === 0 && windows.total === 0) {
     return <NoResults search={search} isAllTime={isAllTime} onTryAllTime={onTryAllTime} />;
   }
-  const loadedWindowIds = windows.rows.map((session) => session.id);
+  const loadedWindowIds = windows.rows.flatMap((group) => group.sessionIds);
   const allWindowsSelected = loadedWindowIds.length > 0
     && loadedWindowIds.every((id) => selectedSessionIds.has(id));
   return (
@@ -913,6 +942,11 @@ function SearchResults({
         <ResultGroup
           title="Window matches"
           count={windows.total}
+          // What the grouping collapsed, so the number is accounted for rather
+          // than quietly smaller than it used to be.
+          subtitle={windows.sessionTotal > windows.total
+            ? `${windows.sessionTotal} visits`
+            : undefined}
           // Only worth saying while a type filter is set, which is the only
           // time the exception can read as a bug. A stored title has no kind
           // of its own, so narrowing by one would drop the rows searched for.
@@ -926,16 +960,18 @@ function SearchResults({
               onChange={() => onToggleAllSessions(loadedWindowIds)}
               className="text-[11px] text-ink-3 hover:text-ink-2"
             >
-              {allWindowsSelected ? "Clear" : `Select ${loadedWindowIds.length}`}
+              {allWindowsSelected ? "Clear" : `Select all ${loadedWindowIds.length} visits`}
             </Checkbox>
           }
         >
-          <SessionTable
+          <WindowGroupTable
             rows={windows.rows}
             search={search}
             selected={selectedSessionIds}
-            onToggle={onToggleSession}
+            onToggleGroup={onToggleAllSessions}
+            onToggleSession={onToggleSession}
             onEdit={onEditSession}
+            onMakeRule={onMakeRule}
           />
           {/* Paging belongs to the list, so it stays against the table it
               extends; the destructive action terminates the group. */}
@@ -967,12 +1003,14 @@ function SearchResults({
 function ResultGroup({
   title,
   count,
+  subtitle,
   note,
   action,
   children,
 }: {
   title: string;
   count: number;
+  subtitle?: string;
   note?: { label: string; title: string };
   action?: ReactNode;
   children: ReactNode;
@@ -982,6 +1020,7 @@ function ResultGroup({
       <div className="sticky top-0 z-20 flex h-8 items-center gap-2 bg-surface">
         <h3 className="text-[12.5px] font-medium text-ink-2">{title}</h3>
         <span className="text-[11px] tabular-nums text-ink-3">{count}</span>
+        {subtitle && <span className="text-[11px] tabular-nums text-ink-3">· {subtitle}</span>}
         {note && (
           <span className="rounded-full bg-surface-3 px-1.5 py-[1px] text-[9.5px] font-medium leading-[1.4] text-ink-3" title={note.title}>
             {note.label}
@@ -1198,9 +1237,12 @@ function ShareBar({
 function ClassificationLabel({ entity }: { entity: ActivityEntitySummary }) {
   if (entity.status === "uncategorized") return <span>Uncategorized</span>;
   if (entity.status === "partial") {
+    // "Mixed" is the app's one word for "not one clean category", covering both
+    // this and the several-categories case below. The tooltip carries what the
+    // longer label used to say.
     return (
-      <span title={`${fmtDuration(entity.uncategorizedSeconds)} remains uncategorized`}>
-        Partly uncategorized
+      <span title={`${fmtDuration(entity.uncategorizedSeconds)} of this is still uncategorized`}>
+        Mixed
       </span>
     );
   }
@@ -1223,66 +1265,204 @@ function ClassificationLabel({ entity }: { entity: ActivityEntitySummary }) {
   );
 }
 
-function SessionTable({
+/**
+ * Windows, not intervals.
+ *
+ * One row per distinct title, carrying how many times it was returned to and
+ * how long that came to. The tracker's own unit — an uninterrupted spell in the
+ * foreground — is the wrong thing to hand someone: half of a real database's
+ * rows last under ten seconds and carry a few percent of its time, so a search
+ * answered row by row buries what was asked for under hundreds of fragments of
+ * the same window. Expanding a row puts the intervals back for the cases that
+ * genuinely need them.
+ */
+function WindowGroupTable({
   rows,
   search,
+  selected,
+  onToggleGroup,
+  onToggleSession,
+  onEdit,
+  onMakeRule,
+  showIdentity = true,
+}: {
+  rows: ActivityTitleGroup[];
+  search: string;
+  selected: Set<number>;
+  onToggleGroup: (ids: number[]) => void;
+  onToggleSession: (id: number) => void;
+  onEdit: (id: number) => void;
+  onMakeRule: (group: ActivityTitleGroup) => void;
+  /** The drawer already names the app in its header; only search results have
+   *  to say which one each window belongs to. */
+  showIdentity?: boolean;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = (key: string) => setExpanded((current) => {
+    const next = new Set(current);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  return (
+    <div>
+      <table className="w-full min-w-[720px] table-fixed text-xs">
+        <StickyHead offset="top-8">
+          <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
+            <th className="w-9 pb-2"><span className="sr-only">Select</span></th>
+            {/* The widest column, because the title is the only reason any of
+                these rows is in the list. */}
+            <th className={`${showIdentity ? "w-[44%]" : "w-[58%]"} pb-2 font-medium`}>Window</th>
+            {showIdentity && <th className="w-[14%] pb-2 font-medium">App / Website</th>}
+            <th className="w-[16%] pb-2 font-medium">Classification</th>
+            <th className="w-[9%] pb-2 text-right font-medium">Visits</th>
+            <th className="w-[9%] pb-2 text-right font-medium">Time</th>
+            <th className="w-16 pb-2"><span className="sr-only">Actions</span></th>
+          </tr>
+        </StickyHead>
+        <tbody>
+          {rows.map((group) => {
+            const open = expanded.has(group.key);
+            const allSelected = group.sessionIds.every((id) => selected.has(id));
+            const someSelected = !allSelected && group.sessionIds.some((id) => selected.has(id));
+            return (
+              <Fragment key={group.key}>
+                <tr className={`border-b border-edge/40 transition-colors ${allSelected || someSelected ? "bg-white/[.05]" : ""}`}>
+                  <td className="py-2.5">
+                    <Checkbox
+                      size="md"
+                      checked={allSelected}
+                      indeterminate={someSelected}
+                      onChange={() => onToggleGroup(group.sessionIds)}
+                      label={`Select all ${group.sessionCount} visits to ${group.title}`}
+                    />
+                  </td>
+                  <td className="py-2.5 pr-3 text-ink-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      {/* The disclosure is the title itself: a separate chevron
+                          would be a second control for one action. */}
+                      <button
+                        type="button"
+                        onClick={() => toggleExpanded(group.key)}
+                        aria-expanded={open}
+                        className="flex min-w-0 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
+                      >
+                        <Chevron open={open} />
+                        <MatchedTitle title={group.title} search={search} />
+                      </button>
+                    </span>
+                  </td>
+                  {showIdentity && (
+                    <td className="truncate py-2.5 pr-3" title={group.entityKey}>{group.displayName}</td>
+                  )}
+                  <td className="min-w-0 py-2.5 pr-3 text-ink-2">
+                    <span className="block truncate">
+                      {group.mixed ? "Mixed" : group.categoryName ?? "Uncategorized"}
+                    </span>
+                    <span className="block truncate text-[10px] text-ink-3">
+                      {group.mixed
+                        ? "Its visits classify differently"
+                        : group.winningRulePattern
+                          ? `${RULE_LABELS[group.winningRuleType!]} · ${group.winningRulePattern}`
+                          : "No matching rule"}
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-right tabular-nums text-ink-3">{group.sessionCount}</td>
+                  <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(group.seconds)}</td>
+                  <td className="py-2.5 text-right">
+                    {/* The bridge from "I found a pattern" to "classify it
+                        forever". Without it the only bulk verb here is delete,
+                        which is backwards for an app about classification. */}
+                    <button
+                      type="button"
+                      onClick={() => onMakeRule(group)}
+                      title="Create a Window rule from this title"
+                      className="rounded px-1.5 py-1 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
+                    >
+                      Rule…
+                    </button>
+                  </td>
+                </tr>
+                {open && (
+                  <tr className="border-b border-edge/40 bg-surface-2/40">
+                    <td />
+                    <td colSpan={showIdentity ? 6 : 5} className="py-2 pr-3">
+                      <GroupSessions
+                        group={group}
+                        selected={selected}
+                        onToggle={onToggleSession}
+                        onEdit={onEdit}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      className={`h-3 w-3 shrink-0 text-ink-3 transition-transform ${open ? "rotate-90" : ""}`}
+    >
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+/** The intervals behind one window, for the rare case that needs them: which
+ *  exact visit to correct, or proof of when something actually happened. */
+function GroupSessions({
+  group,
   selected,
   onToggle,
   onEdit,
 }: {
-  rows: ActivitySessionRow[];
-  search: string;
+  group: ActivityTitleGroup;
   selected: Set<number>;
   onToggle: (id: number) => void;
   onEdit: (id: number) => void;
 }) {
   return (
-    <div>
-      <table className="w-full min-w-[760px] table-fixed text-xs">
-        <StickyHead offset="top-8">
-          <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
-            <th className="w-9 pb-2"><span className="sr-only">Select</span></th>
-            <th className="w-[17%] pb-2 font-medium">When</th>
-            <th className="w-[16%] pb-2 font-medium">App / Website</th>
-            {/* The widest column, because it is the only reason these rows are
-                in the list at all. */}
-            <th className="w-[36%] pb-2 font-medium">Window</th>
-            <th className="w-[17%] pb-2 font-medium">Classification</th>
-            <th className="w-[8%] pb-2 text-right font-medium">Time</th>
-            <th className="w-11 pb-2"><span className="sr-only">Actions</span></th>
-          </tr>
-        </StickyHead>
-        <tbody>
-          {rows.map((session) => (
-            <tr key={session.id} className={`border-b border-edge/40 transition-colors ${selected.has(session.id) ? "bg-white/[.05]" : ""}`}>
-              <td className="py-2.5"><Checkbox size="md" checked={selected.has(session.id)} onChange={() => onToggle(session.id)} label={`Select session ${formatDateTime(session.start)}`} /></td>
-              <td className="py-2.5 pr-3 tabular-nums text-ink-3">{formatDateTime(session.start)}</td>
-              <td className="truncate py-2.5 pr-3" title={session.entityKey}>{session.displayName}</td>
-              <td className="py-2.5 pr-3 text-ink-2"><MatchedTitle title={session.title} search={search} /></td>
-              {/* No dot: the same argument that took it out of the entity table
-                  applies here, and the two now sit in one scroll well. */}
-              <td className="min-w-0 py-2.5 pr-3 text-ink-2">
-                <span className="block truncate">{session.categoryName ?? "Uncategorized"}</span>
-                <span className="block truncate text-[10px] text-ink-3">{session.classificationSource === "session_override" ? "Session override" : session.winningRulePattern ? `${RULE_LABELS[session.winningRuleType!]} · ${session.winningRulePattern}` : "No matching rule"}</span>
-              </td>
-              <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(session.seconds)}</td>
-              {/* Quiet at rest, accent on approach. Fifty rows of accent-blue
-                  Edit put the loudest colour in the table on its least
-                  consequential control — the same reason the noise toggle in
-                  the header is muted. */}
-              <td className="py-2.5 text-right">
-                <button
-                  type="button"
-                  onClick={() => onEdit(session.id)}
-                  className="rounded px-1.5 py-1 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
-                >
-                  Edit
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="flex flex-col gap-1">
+      {group.sessions.map((session) => (
+        <div key={session.id} className="flex items-center gap-2 text-[11px]">
+          <Checkbox
+            checked={selected.has(session.id)}
+            onChange={() => onToggle(session.id)}
+            label={`Select the visit starting ${formatDateTime(session.start)}`}
+          />
+          <span className="tabular-nums text-ink-2">{formatDateTime(session.start)}</span>
+          <span className="tabular-nums text-ink-3">{fmtDuration(session.seconds)}</span>
+          {session.isCorrected && (
+            <span className="rounded-full bg-accent/10 px-1.5 py-[1px] text-[9px] text-accent">Corrected</span>
+          )}
+          <button
+            type="button"
+            onClick={() => onEdit(session.id)}
+            className="ml-auto rounded px-1.5 py-0.5 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
+          >
+            Edit
+          </button>
+        </div>
+      ))}
+      {group.sessionCount > group.sessions.length && (
+        // Never silently truncated: the count above says how many visits there
+        // were, so the difference has to be accounted for.
+        <span className="pt-1 text-[10.5px] text-ink-3">
+          Showing the {group.sessions.length} most recent of {group.sessionCount} visits. Selecting
+          the window still takes all {group.sessionCount}.
+        </span>
+      )}
     </div>
   );
 }
@@ -1483,43 +1663,140 @@ function LoadMore({ shown, total, onClick }: { shown: number; total: number; onC
   );
 }
 
+/**
+ * One window in the drawer's list. Card-shaped rather than tabular because the
+ * drawer is a narrow column, and its sibling sections are all cards.
+ *
+ * With titles hidden the row still says everything a session row used to —
+ * when, how long, how it classifies — and withholds only the words themselves.
+ */
+function DrawerWindowGroup({
+  group,
+  showTitle,
+  search,
+  selected,
+  onToggleGroup,
+  onToggleSession,
+  onEditSession,
+  onMakeRule,
+}: {
+  group: ActivityTitleGroup;
+  showTitle: boolean;
+  search: string;
+  selected: Set<number>;
+  onToggleGroup: (ids: number[]) => void;
+  onToggleSession: (id: number) => void;
+  onEditSession: (id: number) => void;
+  onMakeRule: (group: ActivityTitleGroup) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const allSelected = group.sessionIds.every((id) => selected.has(id));
+  const someSelected = !allSelected && group.sessionIds.some((id) => selected.has(id));
+  return (
+    <div className="rounded-lg border border-edge/60 px-2.5 py-2 text-[11px] hover:bg-white/[.018]">
+      <div className="flex items-start gap-2">
+        <Checkbox
+          size="md"
+          align="start"
+          checked={allSelected}
+          indeterminate={someSelected}
+          onChange={() => onToggleGroup(group.sessionIds)}
+          label={`Select all ${group.sessionCount} visits to this window`}
+        />
+        <span className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => setOpen((current) => !current)}
+            aria-expanded={open}
+            className="flex w-full min-w-0 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
+          >
+            <Chevron open={open} />
+            <span className="min-w-0 flex-1 text-ink-2">
+              {showTitle
+                ? <MatchedTitle title={group.title} search={search} />
+                : <span className="italic text-ink-3">Window title hidden</span>}
+            </span>
+          </button>
+          <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-ink-3">
+            <span className="tabular-nums">{group.sessionCount} visit{group.sessionCount === 1 ? "" : "s"}</span>
+            <span aria-hidden="true">·</span>
+            <span className="tabular-nums">{fmtDuration(group.seconds)}</span>
+            <span aria-hidden="true">·</span>
+            <span>{group.mixed ? "Mixed" : group.categoryName ?? "Uncategorized"}</span>
+            {!group.mixed && group.winningRuleType && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>{RULE_LABELS[group.winningRuleType]} rule</span>
+              </>
+            )}
+          </span>
+        </span>
+        <button
+          type="button"
+          onClick={() => onMakeRule(group)}
+          title="Create a Window rule from this title"
+          className="shrink-0 rounded px-1.5 py-1 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
+        >
+          Rule…
+        </button>
+      </div>
+      {open && (
+        <div className="mt-2 border-t border-edge/60 pt-2">
+          <GroupSessions
+            group={group}
+            selected={selected}
+            onToggle={onToggleSession}
+            onEdit={onEditSession}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EntityDrawer({
   entity,
-  sessions,
-  sessionTotal,
+  groups,
   hasStoredTitles,
   detailSearch,
   onDetailSearch,
+  showTitles,
+  onShowTitles,
   onLoadMore,
   onClose,
   categories,
   aliases,
   selectedSessionIds,
   onToggleSession,
+  onToggleAllSessions,
   onDeleteSelected,
   onDeleteEntity,
   onExclude,
   onEditSession,
+  onMakeRule,
   onAssign,
   onSaveAlias,
   onRemoveExactRule,
 }: {
   entity: ActivityEntitySummary;
-  sessions: ActivitySessionRow[];
-  sessionTotal: number;
+  groups: ActivityTitleGroupPage;
   hasStoredTitles: boolean;
   detailSearch: string;
   onDetailSearch: (value: string) => void;
+  showTitles: boolean;
+  onShowTitles: (show: boolean) => void;
   onLoadMore: () => void;
   onClose: () => void;
   categories: Category[];
   aliases: Record<string, string>;
   selectedSessionIds: Set<number>;
   onToggleSession: (id: number) => void;
+  onToggleAllSessions: (ids: number[]) => void;
   onDeleteSelected: () => void;
   onDeleteEntity: () => void;
   onExclude: () => void;
   onEditSession: (id: number) => void;
+  onMakeRule: (group: ActivityTitleGroup) => void;
   onAssign: (categoryId: number) => Promise<void>;
   onSaveAlias: (alias: string) => Promise<void>;
   onRemoveExactRule: () => Promise<void>;
@@ -1604,25 +1881,52 @@ function EntityDrawer({
             <p className="mt-3 text-[10.5px] leading-snug text-ink-3">Classification changes apply to all matching historical and future activity, not only this date range.</p>
             {entity.exactRuleId !== null && <button type="button" onClick={() => void onRemoveExactRule()} className="mt-2 text-[11px] text-bad hover:text-bad/80">Remove exact {entity.kind === "website" ? "Website" : "App"} rule</button>}
           </section>
+          {/* Windows rather than raw sessions, for the same reason search
+              results changed: this entity's list is one app's worth of the
+              same fragmentation, and "45 windows" is a thing to read where
+              "1269 sessions" is not. */}
           <section className="mt-5">
             <div className="flex items-center gap-2">
-              <h3 className="text-xs font-semibold">Sessions</h3>
-              <span className="text-[10.5px] text-ink-3">{sessionTotal}</span>
+              <h3 className="text-xs font-semibold">Windows</h3>
+              <span className="text-[10.5px] tabular-nums text-ink-3">
+                {groups.total}
+                {groups.sessionTotal > groups.total && ` · ${groups.sessionTotal} visits`}
+              </span>
               <span className="flex-1" />
               {selectedSessionIds.size > 0 && <Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button>}
             </div>
-            {hasStoredTitles && <input value={detailSearch} onChange={(event) => onDetailSearch(event.target.value)} placeholder="Filter windows…" className="mt-3 w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" />}
+            {hasStoredTitles && (
+              <div className="mt-3 flex items-center gap-3">
+                <input value={detailSearch} onChange={(event) => onDetailSearch(event.target.value)} placeholder="Filter windows…" className="min-w-0 flex-1 rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" />
+                {/* Named, and independent of the filter box. Hiding titles
+                    until something was typed tied a privacy decision to an
+                    unrelated control, and one keystroke undid it anyway. */}
+                <Checkbox
+                  checked={showTitles}
+                  onChange={onShowTitles}
+                  className="shrink-0 text-[11px] text-ink-3 hover:text-ink-2"
+                >
+                  Show titles
+                </Checkbox>
+              </div>
+            )}
             <div className="mt-3 flex flex-col gap-1.5">
-              {sessions.map((session) => (
-                <div key={session.id} className="flex items-start gap-2 rounded-lg border border-edge/60 px-2.5 py-2 text-[11px] hover:bg-white/[.018]">
-                  <Checkbox size="md" align="start" checked={selectedSessionIds.has(session.id)} onChange={() => onToggleSession(session.id)} label={`Select session ${formatDateTime(session.start)}`} />
-                  <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="text-ink-2">{formatDateTime(session.start)}</span><span className="text-ink-3">{fmtDuration(session.seconds)}</span>{session.isCorrected && <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] text-accent">Corrected</span>}</span>{session.title && <span className="mt-0.5 block truncate text-ink-3" title={session.title}>{session.title}</span>}<span className="mt-0.5 flex items-center gap-1.5 text-ink-3"><CategoryDot color={session.categoryColor ?? UNCATEGORIZED} />{session.categoryName ?? "Uncategorized"}{session.classificationSource === "session_override" ? " · Session override" : session.winningRuleType ? ` · ${RULE_LABELS[session.winningRuleType]} rule` : ""}</span></span>
-                  <button type="button" onClick={() => onEditSession(session.id)} className="rounded px-1.5 py-1 text-[10.5px] text-accent hover:bg-accent/10">Edit</button>
-                </div>
+              {groups.rows.map((group) => (
+                <DrawerWindowGroup
+                  key={group.key}
+                  group={group}
+                  showTitle={showTitles}
+                  search={detailSearch}
+                  selected={selectedSessionIds}
+                  onToggleGroup={onToggleAllSessions}
+                  onToggleSession={onToggleSession}
+                  onEditSession={onEditSession}
+                  onMakeRule={onMakeRule}
+                />
               ))}
-              {sessions.length === 0 && <p className="py-5 text-center text-[11px] text-ink-3">No sessions match this filter.</p>}
+              {groups.rows.length === 0 && <p className="py-5 text-center text-[11px] text-ink-3">No windows match this filter.</p>}
             </div>
-            {sessions.length < sessionTotal && <LoadMore shown={sessions.length} total={sessionTotal} onClick={onLoadMore} />}
+            {groups.rows.length < groups.total && <LoadMore shown={groups.rows.length} total={groups.total} onClick={onLoadMore} />}
           </section>
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-edge px-5 py-4">
@@ -1770,10 +2074,303 @@ function TrackingExclusionDialog({
   );
 }
 
+/**
+ * Says what room a correction actually has, before anything is typed.
+ *
+ * A corrected span may not overlap another recording. Because the tracker
+ * records continuously while the machine is on, the neighbours usually sit
+ * flush against the session, so the honest answer is normally "you can shorten
+ * this, not lengthen it" — which is exactly what someone needs to know first
+ * and what the old dialog only revealed by rejecting the save.
+ */
+export function describeCorrectionWindow(
+  session: Pick<SessionCorrection, "start" | "end" | "earliestStart" | "latestEnd">,
+): string {
+  const { earliestStart, latestEnd } = session;
+  // Seconds included: the fields below are second-granular, and a real gap is
+  // often shorter than a minute — the tracker being restarted leaves one of
+  // about forty seconds. Rounded to the minute, such a bound reads as though
+  // there were no room at all.
+  const clock = (seconds: number) =>
+    new Date(seconds * 1000).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  // Every branch leads with what can be done, in the app's own noun. Naming the
+  // mechanism first — which recording abuts which — makes the reader work for
+  // the one thing they opened the panel to find out.
+  if (earliestStart == null && latestEnd == null) {
+    return "Nothing else is recorded around this session, so its times can move freely.";
+  }
+  if (earliestStart === session.start && latestEnd === session.end) {
+    return "You can shorten this session but not extend it — the sessions before and after leave no gap.";
+  }
+  if (earliestStart == null) {
+    return `Nothing is recorded before this session, and it can end as late as ${clock(latestEnd!)}.`;
+  }
+  if (latestEnd == null) {
+    return `This session can start as early as ${clock(earliestStart)}, and nothing is recorded after it.`;
+  }
+  return `This session can run from ${clock(earliestStart)} to ${clock(latestEnd)} at most, before it would overlap another.`;
+}
+
 function localInputValue(seconds: number): string {
   const date = new Date(seconds * 1000);
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/**
+ * Turn a window someone just found into a standing rule.
+ *
+ * This is the flow that makes Window rules discoverable at all: they are the
+ * only rule kind whose pattern is a fragment of something rather than a whole
+ * identity, so nobody guesses them from an empty text field. Starting from a
+ * concrete window means the pattern and the scope both have obvious defaults.
+ *
+ * The scope defaults to the app the window belongs to, not to "any app". A
+ * title is evidence about the program showing it — "Skill Tree" in an editor is
+ * a project, in a browser it might be anything — and the broader reading should
+ * be a deliberate widening rather than what you get by not choosing.
+ */
+function WindowRuleDialog({
+  group,
+  categories,
+  source,
+  browserProcesses,
+  onClose,
+  onSaved,
+}: {
+  group: ActivityTitleGroup;
+  categories: Category[];
+  source: ActivitySource | null;
+  browserProcesses: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const banner = useBanner();
+  const [pattern, setPattern] = useState(() => defaultRulePattern(group.title));
+  const [scope, setScope] = useState(() => defaultRuleScope(group, browserProcesses));
+  const [categoryId, setCategoryId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const trimmed = pattern.trim();
+  // Counted against all of history, like the "unused" tag on a rule, because a
+  // rule is not scoped to the visible range and pretending otherwise would
+  // understate what it claims.
+  const preview = useMemo(
+    () => (source && trimmed ? previewTitleRule(source, trimmed, scope) : null),
+    [source, trimmed, scope],
+  );
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await addRule("title", trimmed, Number(categoryId), scope);
+      banner.show(`Window rule “${trimmed}” added.`);
+      onSaved();
+    } catch (error) {
+      banner.report(error, "rule");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="window-rule-title">
+      <div className="w-full max-w-lg rounded-2xl border border-edge bg-surface p-5 shadow-2xl">
+        <h2 id="window-rule-title" className="text-base font-semibold">New Window rule</h2>
+        <p className="mt-1 text-[11px] text-ink-3">
+          Classifies any session whose stored window title contains these words. Applies to
+          past and future activity alike.
+        </p>
+
+        <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px]">
+          <p className="truncate font-medium" title={group.title}>{group.title}</p>
+          <p className="mt-1 text-ink-3">
+            {group.displayName} · {group.sessionCount} visit{group.sessionCount === 1 ? "" : "s"} · {fmtDuration(group.seconds)} in range
+          </p>
+        </div>
+
+        <label className="mt-4 block text-[11px] text-ink-3">
+          Words to match
+          <input
+            value={pattern}
+            onChange={(event) => setPattern(event.target.value)}
+            className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60"
+          />
+        </label>
+
+        <div className="mt-3 text-[11px] text-ink-3">
+          <span>Where it applies</span>
+          <MenuSelect
+            size="field"
+            className="mt-1 w-full"
+            value={scope}
+            onChange={setScope}
+            label="Rule scope"
+            options={ruleScopeOptions(group, browserProcesses)}
+          />
+        </div>
+
+        <div className="mt-3 text-[11px] text-ink-3">
+          <span>Category</span>
+          <MenuSelect
+            size="field"
+            className="mt-1 w-full"
+            value={categoryId}
+            onChange={setCategoryId}
+            label="Category"
+            options={[
+              { value: "", label: "Choose a category…" },
+              ...categories.map((category, i) => ({
+                value: String(category.id),
+                label: category.name,
+                divider: i === 0,
+              })),
+            ]}
+          />
+        </div>
+
+        {/* The safety net for a pattern aimed too widely: say what it takes
+            before it takes it, counted over all history rather than the range
+            on screen, because that is the scope a rule actually has. */}
+        <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px] leading-snug text-ink-3">
+          {!trimmed
+            ? "Enter the words this rule should match."
+            : preview === null
+              ? "Counting what this would match…"
+              : preview.sessions === 0
+                ? "Nothing in your history matches this yet. It will still apply to future activity."
+                : (
+                  <>
+                    Claims <span className="text-ink-2">{preview.sessions}</span> session
+                    {preview.sessions === 1 ? "" : "s"} across{" "}
+                    <span className="text-ink-2">{preview.entities}</span>{" "}
+                    {preview.entities === 1 ? "app or website" : "apps and websites"} —{" "}
+                    <span className="text-ink-2">{fmtDuration(preview.seconds)}</span> of all
+                    recorded time.
+                    {preview.reclassified > 0 && (
+                      <> <span className="text-ink-2">{preview.reclassified}</span> of them
+                      currently classify differently and would change.</>
+                    )}
+                  </>
+                )}
+        </p>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button disabled={saving} onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={saving || !trimmed || !categoryId}
+            onClick={() => void save()}
+          >
+            {saving ? "Adding…" : "Add rule"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The scope field's "One app is chosen, but not named yet" state. A lone dot
+ *  cannot be a real executable name, so it can never be saved by accident. */
+const SCOPE_PENDING = ".";
+
+/** Whether a draft rule's scope is answerable. "Any app" is the empty string
+ *  and perfectly valid; what is not is "One app" with nothing named yet, which
+ *  is a half-made choice rather than a rule about an app called ".". */
+function ruleDraftReady(draft: { type: MatchType; scope: string }): boolean {
+  if (draft.type !== "title") return true;
+  if (draft.scope === ANY_APP || draft.scope === BROWSER_SCOPE) return true;
+  return draft.scope !== SCOPE_PENDING && draft.scope.trim() !== "";
+}
+
+/**
+ * A first guess at the words worth matching. Window titles carry the document
+ * first and the program last — "roadmap.md - Skill Tree - Obsidian" — so the
+ * leading segment is the part that identifies the work, and the trailing ones
+ * repeat what the scope already says.
+ */
+export function defaultRulePattern(title: string): string {
+  const [first] = title.split(/\s+[-–—|·]\s+/);
+  const guess = (first ?? "").trim();
+  return guess.length >= 3 ? guess : title.trim();
+}
+
+function defaultRuleScope(group: ActivityTitleGroup, browserProcesses: string[]): string {
+  // A website's sessions come from whichever browser was open at the time, so
+  // pinning one executable would miss the others.
+  if (group.entityKind === "website") return BROWSER_SCOPE;
+  const process = group.sessions[0]?.process.toLowerCase();
+  if (!process) return ANY_APP;
+  return browserProcesses.includes(process) ? BROWSER_SCOPE : process;
+}
+
+function ruleScopeOptions(group: ActivityTitleGroup, browserProcesses: string[]): MenuOption[] {
+  const process = group.sessions[0]?.process.toLowerCase();
+  const options: MenuOption[] = [];
+  if (process && !browserProcesses.includes(process)) {
+    options.push({ value: process, label: `Only ${group.displayName} (${process})` });
+  }
+  options.push({ value: BROWSER_SCOPE, label: "Any browser" });
+  options.push({ value: ANY_APP, label: "Any app" });
+  return options;
+}
+
+interface TitleRulePreview {
+  sessions: number;
+  seconds: number;
+  entities: number;
+  /** Sessions the rule would pull away from whatever classifies them now —
+   *  the number worth reading twice before pressing Add. */
+  reclassified: number;
+}
+
+/**
+ * What a proposed title rule would claim across all recorded history.
+ *
+ * Runs the real classifier twice rather than re-deriving what a match means:
+ * once as things stand and once with the candidate rule added, so the answer
+ * accounts for priority and scope exactly as the app will.
+ */
+export function previewTitleRule(
+  source: ActivitySource,
+  pattern: string,
+  scope: string,
+): TitleRulePreview {
+  const needle = pattern.trim().toLowerCase();
+  const browsers = new Set(source.browserProcesses.map((process) => process.toLowerCase()));
+  const before = buildClassifier(source.categories, source.rules, browsers);
+  // A priority below every real rule would not answer the question either; the
+  // candidate has to sit exactly where a saved Window rule would.
+  const candidate: Rule = {
+    id: -1,
+    matchType: "title",
+    pattern: needle,
+    categoryId: -1,
+    priority: 2,
+    scope,
+  };
+  const after = buildClassifier(
+    [...source.categories, { id: -1, name: "", color: "#000", isProductive: false, isNeutral: true, isIgnored: false, sortOrder: null }],
+    [...source.rules, candidate],
+    browsers,
+  );
+  let sessions = 0;
+  let seconds = 0;
+  let reclassified = 0;
+  const entities = new Set<string>();
+  for (const session of source.sessions) {
+    if (session.isAfk || !session.title) continue;
+    if (!session.title.toLowerCase().includes(needle)) continue;
+    if (after(session)?.id !== -1) continue; // outranked by an existing rule
+    sessions += 1;
+    seconds += Math.max(0, session.end - session.start);
+    entities.add(session.domain ? `website:${session.domain}` : `app:${session.process.toLowerCase()}`);
+    if (before(session) !== null) reclassified += 1;
+  }
+  return { sessions, seconds, entities: entities.size, reclassified };
 }
 
 function SessionCorrectionDialog({
@@ -1791,6 +2388,10 @@ function SessionCorrectionDialog({
   const [end, setEnd] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [saving, setSaving] = useState(false);
+  // Folded by default. Reclassifying is the routine reason to open this dialog;
+  // the recorded times are a repair for the rare occasion the clock went wrong,
+  // and leading with them made the common action look like the afterthought.
+  const [editingTimes, setEditingTimes] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void fetchSessionCorrection(sessionId).then(
@@ -1843,11 +2444,9 @@ function SessionCorrectionDialog({
           <>
             <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px]"><p className="font-medium">{session.domain ?? session.process}</p>{session.title && <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>}</div>
             {(session.isLive || session.isAfk) && <p className="mt-3 rounded-lg border border-bad/30 bg-bad/[.04] px-3 py-2 text-[11px] text-bad">{session.isLive ? "The current live session cannot be edited." : "AFK sessions are not editable in this version."}</p>}
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="text-[11px] text-ink-3">Start<input type="datetime-local" step="1" value={start} onChange={(event) => setStart(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
-              <label className="text-[11px] text-ink-3">End<input type="datetime-local" step="1" value={end} onChange={(event) => setEnd(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
-            </div>
-            <div className="mt-3 text-[11px] text-ink-3">
+            {/* Category leads: it is why this dialog is normally opened, it
+                always succeeds, and it is the app's actual subject. */}
+            <div className="mt-4 text-[11px] text-ink-3">
               <span>Category</span>
               <MenuSelect
                 size="field"
@@ -1867,7 +2466,38 @@ function SessionCorrectionDialog({
                 ]}
               />
             </div>
-            <p className="mt-3 text-[10.5px] leading-snug text-ink-3">Times use your local timezone. Corrections cannot overlap another recorded session or end in the future.</p>
+
+            <div className="mt-4 border-t border-edge/60 pt-3">
+              <button
+                type="button"
+                onClick={() => setEditingTimes((open) => !open)}
+                aria-expanded={editingTimes}
+                className="flex w-full items-center gap-1.5 rounded-sm text-left text-[11px] text-ink-3 outline-none hover:text-ink-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
+              >
+                <Chevron open={editingTimes} />
+                Adjust recorded times
+                <span className="ml-auto tabular-nums">
+                  {fmtDuration(Math.max(0, session.end - session.start))}
+                </span>
+              </button>
+              {editingTimes && (
+                <>
+                  {/* Stated before the edit rather than after it fails. The
+                      tracker records continuously, so the gap around a session
+                      is usually the session itself — meaning it can be
+                      shortened but almost never extended, which is worth
+                      knowing before typing a time. */}
+                  <p className="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[10.5px] leading-snug text-ink-3">
+                    {describeCorrectionWindow(session)}
+                  </p>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="text-[11px] text-ink-3">Start<input type="datetime-local" step="1" value={start} min={session.earliestStart == null ? undefined : localInputValue(session.earliestStart)} max={end} onChange={(event) => setStart(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
+                    <label className="text-[11px] text-ink-3">End<input type="datetime-local" step="1" value={end} min={start} max={session.latestEnd == null ? undefined : localInputValue(session.latestEnd)} onChange={(event) => setEnd(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
+                  </div>
+                  <p className="mt-2 text-[10.5px] leading-snug text-ink-3">Times use your local timezone and cannot end in the future.</p>
+                </>
+              )}
+            </div>
             <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="danger" disabled={saving} onClick={() => void reset()}>Reset corrections</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save correction"}</Button></span></div>
           </>
         )}
@@ -1965,11 +2595,13 @@ function CategoriesAndRules({
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [newName, setNewName] = useState("");
-  const [drafts, setDrafts] = useState<Record<number, { type: MatchType; pattern: string }>>({});
+  type RuleDraft = { type: MatchType; pattern: string; scope: string };
+  const [drafts, setDrafts] = useState<Record<number, RuleDraft>>({});
   const applied = appliedRuleIds === null ? null : new Set(appliedRuleIds);
 
-  const draftFor = (id: number) => drafts[id] ?? { type: "domain" as const, pattern: "" };
-  const setDraft = (id: number, patch: Partial<{ type: MatchType; pattern: string }>) =>
+  const draftFor = (id: number): RuleDraft =>
+    drafts[id] ?? { type: "domain" as const, pattern: "", scope: ANY_APP };
+  const setDraft = (id: number, patch: Partial<RuleDraft>) =>
     setDrafts((current) => ({ ...current, [id]: { ...draftFor(id), ...patch } }));
   const toggle = (id: number) => setExpanded((current) => {
     const next = new Set(current);
@@ -1978,9 +2610,9 @@ function CategoriesAndRules({
   });
   const submitRule = async (categoryId: number) => {
     const draft = draftFor(categoryId);
-    if (!draft.pattern.trim()) return;
+    if (!draft.pattern.trim() || !ruleDraftReady(draft)) return;
     try {
-      await addRule(draft.type, draft.pattern, categoryId);
+      await addRule(draft.type, draft.pattern, categoryId, draft.scope);
       setDraft(categoryId, { pattern: "" });
       await onChanged();
     } catch (error) {
@@ -2122,6 +2754,19 @@ function CategoriesAndRules({
                           {RULE_LABELS[rule.matchType]}
                         </span>
                         <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
+                        {/* Only Window rules can be scoped, and an unscoped one
+                            says nothing worth a chip — the absence is the
+                            default reading. */}
+                        {rule.matchType === "title" && rule.scope && rule.scope !== ANY_APP && (
+                          <span
+                            className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3"
+                            title={rule.scope === BROWSER_SCOPE
+                              ? "Only matches windows in a browser."
+                              : `Only matches windows belonging to ${rule.scope}.`}
+                          >
+                            {rule.scope === BROWSER_SCOPE ? "browsers" : rule.scope}
+                          </span>
+                        )}
                         {applied !== null && !applied.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3" title="Nothing in your history has ever matched this rule.">unused</span>}
                         <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
                       </div>
@@ -2132,8 +2777,48 @@ function CategoriesAndRules({
                     <div className="flex items-center gap-2">
                       <span className="flex rounded-lg border border-edge bg-surface p-0.5">{(["domain", "title", "process"] as MatchType[]).map((type) => <button key={type} type="button" className={`rounded-md px-2 py-1 text-[10.5px] ${draft.type === type ? "bg-surface-3 text-ink-2" : "text-ink-3 hover:text-ink-2"}`} onClick={() => setDraft(category.id, { type })}>{RULE_LABELS[type]}</button>)}</span>
                       <input value={draft.pattern} onChange={(event) => setDraft(category.id, { pattern: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") void submitRule(category.id); }} placeholder={draft.type === "domain" ? "example.com" : draft.type === "title" ? "words to match…" : "example.exe"} className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60" />
-                      <Button variant="primary" disabled={!draft.pattern.trim()} onClick={() => void submitRule(category.id)}>Add rule</Button>
+                      <Button variant="primary" disabled={!draft.pattern.trim() || !ruleDraftReady(draft)} onClick={() => void submitRule(category.id)}>Add rule</Button>
                     </div>
+                    {/* Only Window rules take a scope, and only they need one:
+                        the other two already name what they match. Typed rather
+                        than picked from a list of apps, because the rule should
+                        be able to name a program that has not been recorded
+                        yet. */}
+                    {draft.type === "title" && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="shrink-0 text-[10.5px] text-ink-3">Applies to</span>
+                        <span className="flex rounded-lg border border-edge bg-surface p-0.5">
+                          {([
+                            [ANY_APP, "Any app"],
+                            [BROWSER_SCOPE, "Browsers"],
+                          ] as const).map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              className={`rounded-md px-2 py-1 text-[10.5px] ${draft.scope === value ? "bg-surface-3 text-ink-2" : "text-ink-3 hover:text-ink-2"}`}
+                              onClick={() => setDraft(category.id, { scope: value })}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            className={`rounded-md px-2 py-1 text-[10.5px] ${draft.scope !== ANY_APP && draft.scope !== BROWSER_SCOPE ? "bg-surface-3 text-ink-2" : "text-ink-3 hover:text-ink-2"}`}
+                            onClick={() => setDraft(category.id, { scope: SCOPE_PENDING })}
+                          >
+                            One app
+                          </button>
+                        </span>
+                        {draft.scope !== ANY_APP && draft.scope !== BROWSER_SCOPE && (
+                          <input
+                            value={draft.scope === SCOPE_PENDING ? "" : draft.scope}
+                            onChange={(event) => setDraft(category.id, { scope: event.target.value || SCOPE_PENDING })}
+                            placeholder="obsidian.exe"
+                            className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60"
+                          />
+                        )}
+                      </div>
+                    )}
                     <p className="mt-2 text-[10.5px] text-ink-3">
                       {RULE_HELP[draft.type]}
                       {draft.type === "domain" && " Website rules require a supported browser and detected website information."}

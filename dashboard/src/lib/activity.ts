@@ -123,9 +123,120 @@ export interface ActivityEntityPage {
   total: number;
 }
 
-export interface ActivitySessionPage {
-  rows: ActivitySessionRow[];
+/** Sessions carried inside a group for inspection. A group is a summary first;
+ *  this is enough to check a few rows without shipping thousands across the
+ *  worker boundary, and the group reports its true count either way. */
+export const GROUP_SESSION_SAMPLE = 25;
+
+/** Joins an entity id to a title into one map key. NUL cannot occur in either
+ *  half — the tracker strips it from every title before storing — so no pair of
+ *  different (entity, title) values can collide on the joined string. Written
+ *  as an escape because a literal NUL in source is invisible and makes the file
+ *  read as binary. */
+const GROUP_KEY_SEP = "\u0000";
+
+/**
+ * One window title, and every visit to it.
+ *
+ * A session row is the tracker's honest storage unit — one uninterrupted spell
+ * in the foreground — but it is a poor thing to read. Half of a typical
+ * database's rows are under ten seconds and together they carry a few percent
+ * of its time, so a title search answered row by row returns hundreds of
+ * fragments of what a person thinks of as one thing. Grouping restores the
+ * unit someone actually meant: this window, this many visits, this much time.
+ */
+export interface ActivityTitleGroup {
+  /** Identity plus exact title. Stable across queries, so it can key both a
+   *  React list and an expanded-group selection. */
+  key: string;
+  entityId: string;
+  entityKind: ActivityEntityKind;
+  entityKey: string;
+  /** The entity's friendly name — "Obsidian", not "obsidian.exe". */
+  displayName: string;
+  title: string;
+  /** Every visit, not just the sampled ones. */
+  sessionCount: number;
+  seconds: number;
+  firstSeen: number;
+  lastSeen: number;
+  /** All of them, so ticking a group can select every visit it stands for
+   *  without a second round trip. Numbers are cheap; rows are not. */
+  sessionIds: number[];
+  /** Newest first, capped at GROUP_SESSION_SAMPLE. */
+  sessions: ActivitySessionRow[];
+  /** Null when the group's sessions disagree or none is categorized. */
+  categoryName: string | null;
+  categoryColor: string | null;
+  /** The group's sessions do not all resolve the same way — usually a session
+   *  override on one of them. */
+  mixed: boolean;
+  /** The rule deciding the group, when they agree. Shows at a glance whether a
+   *  Window rule is doing any work here. */
+  winningRuleType: MatchType | null;
+  winningRulePattern: string | null;
+}
+
+export interface ActivityTitleGroupPage {
+  rows: ActivityTitleGroup[];
+  /** Distinct titles, which is what `rows` is a page of. */
   total: number;
+  /** Sessions behind every group, paged or not — what the old flat list
+   *  would have shown, kept so the view can say what it collapsed. */
+  sessionTotal: number;
+}
+
+/**
+ * Collapse sessions into one row per distinct title, ordered by total time so
+ * the heaviest window leads. Sessions arrive newest-first and that order is
+ * preserved inside each group.
+ */
+function groupSessionsByTitle(sessions: ActivitySessionRow[]): ActivityTitleGroup[] {
+  const groups = new Map<string, ActivityTitleGroup>();
+  for (const session of sessions) {
+    // Entity as well as title: "Inbox" in a browser and "Inbox" in a mail
+    // client are different activities that happen to share a word.
+    const key = `${session.entityId}${GROUP_KEY_SEP}${session.title}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        key,
+        entityId: session.entityId,
+        entityKind: session.entityKind,
+        entityKey: session.entityKey,
+        displayName: session.displayName,
+        title: session.title,
+        sessionCount: 0,
+        seconds: 0,
+        firstSeen: session.start,
+        lastSeen: session.end,
+        sessionIds: [],
+        sessions: [],
+        categoryName: session.categoryName,
+        categoryColor: session.categoryColor,
+        mixed: false,
+        winningRuleType: session.winningRuleType,
+        winningRulePattern: session.winningRulePattern,
+      };
+      groups.set(key, group);
+    }
+    group.sessionCount += 1;
+    group.seconds += session.seconds;
+    group.firstSeen = Math.min(group.firstSeen, session.start);
+    group.lastSeen = Math.max(group.lastSeen, session.end);
+    group.sessionIds.push(session.id);
+    if (group.sessions.length < GROUP_SESSION_SAMPLE) group.sessions.push(session);
+    if (session.categoryName !== group.categoryName) {
+      group.mixed = true;
+      group.categoryName = null;
+      group.categoryColor = null;
+      group.winningRuleType = null;
+      group.winningRulePattern = null;
+    }
+  }
+  return [...groups.values()].sort(
+    (left, right) => right.seconds - left.seconds || right.lastSeen - left.lastSeen,
+  );
 }
 
 /** Triage counter carried by the classification menu's Uncategorized option.
@@ -142,9 +253,9 @@ export interface ActivityQueryResult {
    *  includeNoise is currently showing them. Zero while searching. */
   noiseHidden: number;
   /**
-   * Sessions whose stored title contains the search text, newest first. Null
-   * when nothing is being searched, because stored titles are never listed
-   * until someone asks for them.
+   * Windows whose stored title contains the search text, one row per distinct
+   * title. Null when nothing is being searched, because stored titles are
+   * never listed until someone asks for them.
    *
    * Matching identities are not carried alongside: a search narrows `catalog`
    * in place, and `catalog` mixes apps and websites exactly as the unsearched
@@ -152,7 +263,7 @@ export interface ActivityQueryResult {
    * duplicated a distinction every row already states on its own metadata line
    * and the type filter already controls.
    */
-  windowMatches: ActivitySessionPage | null;
+  windowMatches: ActivityTitleGroupPage | null;
   /** All recorded time in range, hidden and filtered rows included. Every
    *  session maps to exactly one entity, so summing them double-counts
    *  nothing. Backs the share each row reports, not the length it draws. */
@@ -166,7 +277,9 @@ export interface ActivityQueryResult {
    *  filters — the same rows picking "Uncategorized" would land on. */
   uncategorized: ActivityUncategorizedSummary;
   selectedEntity: ActivityEntitySummary | null;
-  detailSessions: ActivitySessionRow[];
+  /** The selected entity's windows, grouped the same way as a title search.
+   *  One entity, so titles alone separate the groups. */
+  detailGroups: ActivityTitleGroupPage;
   detailTotal: number;
   hasStoredTitles: boolean;
   appliedRuleIds: number[];
@@ -423,7 +536,10 @@ function matchesClassification(
 ): boolean {
   if (filter === "all") return true;
   if (filter === "uncategorized") return entity.uncategorizedSeconds > 0;
-  if (filter === "mixed") return entity.status === "mixed";
+  // Both states the interface calls "Mixed": time split across categories, and
+  // time only partly categorized at all. The filter has to answer for the word
+  // it shares with the label, or picking Mixed would hide rows marked Mixed.
+  if (filter === "mixed") return entity.status === "mixed" || entity.status === "partial";
   if (filter === "ignored") return entity.status === "ignored";
   const categoryId = Number(filter.slice("category:".length));
   return entity.categories.some((category) => category.categoryId === categoryId);
@@ -527,7 +643,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
   // no kind of its own — the browser session that carries one is filed under a
   // website, and the app filter would throw away the very rows a title search
   // is for. The view labels that exception rather than hiding it.
-  let windowMatches: ActivitySessionPage | null = null;
+  let windowMatches: ActivityTitleGroupPage | null = null;
   if (search) {
     const matching: ActivitySessionRow[] = [];
     for (const session of index.sessions) {
@@ -538,9 +654,13 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
       if (clipped) matching.push(clipped);
     }
     matching.sort((left, right) => right.start - left.start || right.id - left.id);
+    const grouped = groupSessionsByTitle(matching);
+    // The page limit counts titles, not sessions: one busy window should cost
+    // one row here, which is the entire point of grouping.
     windowMatches = {
-      rows: page(matching, query.windowOffset, query.windowLimit),
-      total: matching.length,
+      rows: page(grouped, query.windowOffset, query.windowLimit),
+      total: grouped.length,
+      sessionTotal: matching.length,
     };
   }
 
@@ -558,7 +678,13 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     }
     detailRows.sort((left, right) => right.start - left.start || right.id - left.id);
   }
-  const exposeDetailTitles = detailSearch.length > 0;
+  // Titles are no longer blanked until searched. That rule tied a privacy
+  // decision to an unrelated control — one character in the detail search
+  // revealed everything anyway — and it cannot coexist with grouping, which
+  // has nothing to name its groups by if the titles are empty. The drawer
+  // offers an explicit toggle instead, and title capture is still opt-in and
+  // off by default, which is where the real consent lives.
+  const detailGrouped = groupSessionsByTitle(detailRows);
 
   return {
     catalog,
@@ -571,9 +697,11 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     // would zero it the moment any other classification was chosen.
     uncategorized: uncategorizedSummary(allEntities.filter(inType)),
     selectedEntity,
-    detailSessions: page(detailRows, query.detailOffset ?? 0, query.detailLimit ?? 50).map(
-      (session) => exposeDetailTitles ? session : { ...session, title: "" },
-    ),
+    detailGroups: {
+      rows: page(detailGrouped, query.detailOffset ?? 0, query.detailLimit ?? 50),
+      total: detailGrouped.length,
+      sessionTotal: detailRows.length,
+    },
     detailTotal: detailRows.length,
     hasStoredTitles: index.hasStoredTitles,
     appliedRuleIds: index.appliedRuleIds,

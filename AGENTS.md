@@ -64,6 +64,13 @@ nobody can resolve is worse than no comment.
 - **The schema is duplicated** in `tracker/db.py` (`_SCHEMA`) and
   `database.rs` (`BOOTSTRAP_SQL`), because either half may create the database
   first. Change both or neither.
+- **The schema version is declared in four places**, and a bump has to reach
+  every one: `SCHEMA_VERSION` in `tracker/db.py`, `SCHEMA_VERSION` in
+  `database.rs`, the `('schema_version','N')` literal inside its
+  `BOOTSTRAP_SQL`, and `SUPPORTED_SCHEMA_VERSION` in
+  `dashboard/src/lib/schema.ts`. Only the tracker migrates; the other three are
+  refusals, so a missed one does not fail loudly at build time — it rejects a
+  database the tracker has already upgraded, on the user's machine.
 - **Settings defaults are mirrored in three places**: `DEFAULT_SETTINGS`
   (`tracker/db.py`), `BOOTSTRAP_SQL` (`database.rs`), and the clamp ranges in
   `dashboard/src/tabs/SettingsTab.tsx`. Comments at each site say so.

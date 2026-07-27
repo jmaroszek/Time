@@ -93,7 +93,11 @@ body {
   scrollbar-gutter: stable;
 }
 
-input[type="date"]::-webkit-calendar-picker-indicator {
+/* Both date pickers, not just the range picker's: the session correction dialog
+   uses datetime-local, which was left with the browser's default indicator and
+   a light-mode popup on a dark page. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   appearance: none;
   width: 14px;
   height: 14px;
@@ -102,7 +106,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
 }
 
-input[type="date"] {
+/* Drives the native calendar popup's own theme, which no page CSS can reach. */
+input[type="date"],
+input[type="datetime-local"] {
   color-scheme: dark;
 }
 

@@ -236,7 +236,7 @@ export default function SettingsTab() {
         />
         <Row
           label="Store window titles"
-          help="Stores searchable window titles and enables Window rules for future activity. Turning it off leaves future titles blank; existing titles and App or Website rules still work. Titles may contain sensitive text. Off by default."
+          help="Stores searchable window titles and enables Window rules for future activity, in any app rather than only browsers. Turning it off leaves future titles blank; existing titles and App or Website rules still work. Titles may contain sensitive text. Off by default."
           control={
             <PrivacyToggle
               enabled={meta.settings.record_window_titles === "1"}

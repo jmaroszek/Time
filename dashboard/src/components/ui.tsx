@@ -133,7 +133,9 @@ export function FloatingTooltip({
         <span
           role="tooltip"
           style={{ left: position.left, top: position.top }}
-          className="pointer-events-none fixed z-50 w-52 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-left text-[11px] font-normal leading-snug text-ink-2 shadow-lg"
+          // Above menus, which are above dialogs: a tooltip explains whatever
+          // is frontmost, so it can never be the thing that gets covered.
+          className="pointer-events-none fixed z-[85] w-52 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-left text-[11px] font-normal leading-snug text-ink-2 shadow-lg"
         >
           {text}
         </span>,
@@ -518,7 +520,9 @@ export function MenuSelect({
             // never flashes at the top-left corner.
             visibility: box ? "visible" : "hidden",
           }}
-          className="menu-pop fixed z-50 rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-[0_12px_34px_rgba(0,0,0,.5)]"
+          // Above the dialog layer (z-70): a menu belongs on top of whatever
+          // opened it, and these are used inside modals as well as on the page.
+          className="menu-pop fixed z-[80] rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-[0_12px_34px_rgba(0,0,0,.5)]"
         >
           {header && (
             <p className="px-2.5 py-1.5 text-[10px] leading-snug text-ink-3">{header}</p>
@@ -574,6 +578,7 @@ export function CategoryDot({ color, label }: { color: string; label?: string })
  */
 export function Checkbox({
   checked,
+  indeterminate = false,
   onChange,
   children,
   label,
@@ -582,6 +587,9 @@ export function Checkbox({
   className = "",
 }: {
   checked: boolean;
+  /** Some but not all of what this box stands for is selected. Drawn as a dash
+   *  and announced as "mixed"; clicking it selects the rest, as everywhere. */
+  indeterminate?: boolean;
   onChange: (checked: boolean) => void;
   /** Visible text beside the box, styled by the caller through className. */
   children?: ReactNode;
@@ -596,11 +604,18 @@ export function Checkbox({
 }) {
   const box = size === "md" ? "h-4 w-4" : "h-3 w-3";
   const tick = size === "md" ? "h-3 w-3" : "h-2.5 w-2.5";
+  // The DOM property, not an attribute: indeterminate cannot be set in markup,
+  // and without it the control is announced as plainly unchecked.
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (input.current) input.current.indeterminate = indeterminate && !checked;
+  }, [indeterminate, checked]);
   return (
     <label
       className={`group flex cursor-pointer gap-2 ${align === "start" ? "items-start" : "items-center"} ${className}`}
     >
       <input
+        ref={input}
         type="checkbox"
         checked={checked}
         aria-label={children === undefined ? label : undefined}
@@ -611,11 +626,15 @@ export function Checkbox({
         aria-hidden="true"
         className={`flex shrink-0 items-center justify-center rounded-[3px] border border-edge bg-surface text-ink-3 transition-colors group-hover:border-edge-2 peer-focus-visible:outline peer-focus-visible:outline-1 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-edge-2 ${box} ${align === "start" ? "mt-px" : ""}`}
       >
-        {checked && (
+        {checked ? (
           <svg viewBox="0 0 12 12" className={tick} fill="none">
             <path d="m2.5 6 2.1 2.1 4.9-4.9" stroke="currentColor" strokeWidth="1.4" />
           </svg>
-        )}
+        ) : indeterminate ? (
+          <svg viewBox="0 0 12 12" className={tick} fill="none">
+            <path d="M3 6h6" stroke="currentColor" strokeWidth="1.4" />
+          </svg>
+        ) : null}
       </span>
       {children}
     </label>

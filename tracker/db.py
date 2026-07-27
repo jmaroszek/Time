@@ -11,7 +11,7 @@ from typing import Callable, TypeVar
 from tracker.session_manager import Settings
 
 T = TypeVar("T")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class SchemaTooNewError(RuntimeError):
@@ -47,7 +47,16 @@ CREATE TABLE IF NOT EXISTS rules (
     pattern TEXT NOT NULL,
     category_id INTEGER NOT NULL REFERENCES categories(id),
     priority INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(match_type, pattern)
+    -- Which foreground programs a title rule is allowed to match:
+    --   ''          any app
+    --   '@browsers' any process in the browser_processes setting
+    --   'code.exe'  that executable only
+    -- Empty string rather than NULL because SQLite treats NULLs as distinct in
+    -- a UNIQUE constraint, which would let the same unscoped pattern be stored
+    -- twice. Only title rules carry a scope: a process rule already names its
+    -- process, and a domain rule only fires for browsers.
+    scope TEXT NOT NULL DEFAULT '' CHECK(scope = '' OR match_type = 'title'),
+    UNIQUE(match_type, pattern, scope)
 );
 
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
@@ -107,13 +116,13 @@ _SEED_CATEGORIES = [
 # Deliberately empty: Time ships with no opinion about which apps or sites are
 # productive. The shape stays here because the priority contract has to hold for
 # any rule that is added later — lower number wins: domain (1), title (2),
-# process (3). Domain and title rules are evaluated only for browser sessions;
-# process rules apply everywhere.
+# process (3). Domain rules are evaluated only for browser sessions; process
+# rules apply everywhere; title rules apply wherever their scope column allows.
 _SEED_RULES: list[tuple[str, str, str, int]] = []
 
 DEFAULT_SETTINGS = {
     "weekly_goal_hours": "0",
-    "idle_threshold_seconds": "180",
+    "idle_threshold_seconds": "300",
     "heartbeat_seconds": "15",
     "week_start": "auto",
     "browser_processes": (
@@ -198,6 +207,12 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA temp_store=MEMORY;")
+        # Before the first write of an upgrade, not after: _migrate rebuilds
+        # tables, and a rolled-back transaction restores the schema but is no
+        # comfort if the upgrade itself was the wrong call. Outside the
+        # transaction below because VACUUM cannot run inside one.
+        if existed and 0 < version < SCHEMA_VERSION:
+            _backup_before_migration(conn, path, version)
         conn.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA)
         try:
             _migrate(conn, version)
@@ -232,11 +247,33 @@ def _read_schema_version(conn: sqlite3.Connection) -> int:
     return version
 
 
+def _backup_before_migration(conn: sqlite3.Connection, path: Path, version: int) -> str:
+    """Snapshot the database beside itself and return the path written.
+
+    VACUUM INTO rather than a file copy: it takes a consistent snapshot of a
+    WAL database without having to reason about the -wal and -shm sidecars, and
+    it is the same mechanism the dashboard's manual backup uses.
+    """
+    target = path.with_name(f"backup_schema{version}_{int(time.time())}.db")
+    if target.exists():  # same-second retry; the older copy is the useful one
+        return str(target)
+    conn.execute("VACUUM INTO ?", (str(target),))
+    logging.info("Backed up schema %s database to %s before migrating", version, target.name)
+    return str(target)
+
+
 def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
-    """Apply known upgrades inside open_db's single immediate transaction."""
-    if from_version not in {0, 1, SCHEMA_VERSION}:
+    """Apply known upgrades inside open_db's single immediate transaction.
+
+    Cumulative rather than one branch per starting point: a database two
+    releases behind has to walk every step, so each block upgrades by one
+    version and falls through to the next.
+    """
+    if from_version not in {0, 1, 2, SCHEMA_VERSION}:
         raise RuntimeError(f"unsupported database schema {from_version}")
-    if from_version == 1:
+    if from_version == 0:
+        return  # _SCHEMA is the authoritative fresh-install shape
+    if from_version <= 1:
         # _SCHEMA is the authoritative fresh-install shape and has already run
         # with IF NOT EXISTS. These statements make the v1 -> v2 transition
         # explicit and restart-safe if a prior attempt stopped partway through.
@@ -265,6 +302,44 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
             "AFTER DELETE ON categories FOR EACH ROW BEGIN "
             "DELETE FROM session_corrections WHERE corrected_start_ts IS NULL "
             "AND corrected_end_ts IS NULL AND category_id IS NULL; END"
+        )
+    if from_version <= 2:
+        # Title rules gain a scope, which means widening UNIQUE(match_type,
+        # pattern) to include it — the whole point being that the same words can
+        # mean different things in different programs. A table constraint cannot
+        # be altered in place, so this is SQLite's rebuild dance. _SCHEMA has
+        # already run with IF NOT EXISTS and left the old table untouched, so
+        # the new shape is spelled out again here rather than shared: the two
+        # must be able to disagree while this block is running.
+        #
+        # Existing title rules land on '' (any app). They were browser-only
+        # before, so a rule whose words also appear in an editor or note-taking
+        # window will start matching there. That is the upgrade's intent, and
+        # scoping the rule back to '@browsers' restores the old behaviour
+        # exactly, because rules are evaluated against history rather than
+        # written into session rows.
+        conn.execute("DROP TRIGGER IF EXISTS delete_category_rules")
+        conn.execute("DROP TABLE IF EXISTS rules_scoped")
+        conn.execute(
+            "CREATE TABLE rules_scoped ("
+            "id INTEGER PRIMARY KEY,"
+            "match_type TEXT NOT NULL CHECK(match_type IN ('process','domain','title')),"
+            "pattern TEXT NOT NULL,"
+            "category_id INTEGER NOT NULL REFERENCES categories(id),"
+            "priority INTEGER NOT NULL DEFAULT 0,"
+            "scope TEXT NOT NULL DEFAULT '' CHECK(scope = '' OR match_type = 'title'),"
+            "UNIQUE(match_type, pattern, scope))"
+        )
+        conn.execute(
+            "INSERT INTO rules_scoped (id, match_type, pattern, category_id, priority, scope)"
+            " SELECT id, match_type, pattern, category_id, priority, '' FROM rules"
+        )
+        conn.execute("DROP TABLE rules")
+        conn.execute("ALTER TABLE rules_scoped RENAME TO rules")
+        conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS delete_category_rules "
+            "BEFORE DELETE ON categories FOR EACH ROW BEGIN "
+            "DELETE FROM rules WHERE category_id = OLD.id; END"
         )
 
 
@@ -338,7 +413,7 @@ def get_settings(conn: sqlite3.Connection) -> Settings:
         row["pattern"].lower() for row in exclusions if row["kind"] == "website"
     )
     return Settings(
-        idle_threshold_seconds=_float("idle_threshold_seconds", 180.0, 30.0, 3600.0),
+        idle_threshold_seconds=_float("idle_threshold_seconds", 300.0, 30.0, 3600.0),
         heartbeat_seconds=_float("heartbeat_seconds", 15.0, 5.0, 300.0),
         browser_processes=browsers
         or normalize_browser_processes(DEFAULT_SETTINGS["browser_processes"]),

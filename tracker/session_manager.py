@@ -37,7 +37,7 @@ class Snapshot:
 
 @dataclass(frozen=True)
 class Settings:
-    idle_threshold_seconds: float = 180.0
+    idle_threshold_seconds: float = 300.0
     heartbeat_seconds: float = 15.0
     browser_processes: frozenset[str] = frozenset(
         {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe"}
