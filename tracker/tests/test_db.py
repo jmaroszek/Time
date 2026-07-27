@@ -94,37 +94,63 @@ def test_current_schema_constraints_and_category_cleanup(conn):
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
-def test_rule_scope_is_constrained_to_title_rules(conn):
+def test_window_rule_shape_is_explicit_and_constrained(conn):
     category_id = conn.execute(
         "INSERT INTO categories (name,color) VALUES ('Notes','#123456') RETURNING id"
     ).fetchone()[0]
-    # The same words can mean different things in different programs, which is
-    # the whole point of the scope column.
-    for scope in ("", "@browsers", "obsidian.exe"):
+    # The same phrase may safely mean different things in different scopes and
+    # match modes; all of those choices are part of rule identity.
+    for scope_kind, scope_value, mode, anchor in (
+        ("any", "", "phrase", "any"),
+        ("browsers", "", "phrase", "any"),
+        ("process", "obsidian.exe", "segment", "last"),
+        ("domain", "github.com", "contains", "any"),
+    ):
         conn.execute(
-            "INSERT INTO rules (match_type,pattern,category_id,priority,scope)"
-            " VALUES ('title','journal',?,2,?)",
-            (category_id, scope),
+            "INSERT INTO rules "
+            "(match_type,pattern,category_id,priority,scope_kind,scope_value,"
+            "title_match_mode,title_anchor) VALUES ('title','journal',?,?,?,?,?,?)",
+            (
+                category_id,
+                0 if scope_kind == "domain" else 2,
+                scope_kind,
+                scope_value,
+                mode,
+                anchor,
+            ),
         )
-    assert conn.execute("SELECT COUNT(*) FROM rules WHERE pattern='journal'").fetchone()[0] == 3
-    # Same pattern and scope twice is still one rule.
+    assert conn.execute("SELECT COUNT(*) FROM rules WHERE pattern='journal'").fetchone()[0] == 4
+    # Same complete meaning twice is still one rule.
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(
-            "INSERT INTO rules (match_type,pattern,category_id,priority,scope)"
-            " VALUES ('title','journal',?,2,'obsidian.exe')",
+            "INSERT INTO rules "
+            "(match_type,pattern,category_id,priority,scope_kind,scope_value,"
+            "title_match_mode,title_anchor)"
+            " VALUES ('title','journal',?,2,'process','obsidian.exe','segment','last')",
             (category_id,),
         )
-    # A process rule already names its process; a domain rule only fires for
-    # browsers. Neither has anything left for a scope to say.
+    # App and Website rules already name their own identity and cannot carry
+    # Window-only fields.
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(
-            "INSERT INTO rules (match_type,pattern,category_id,priority,scope)"
-            " VALUES ('process','code.exe',?,3,'obsidian.exe')",
+            "INSERT INTO rules "
+            "(match_type,pattern,category_id,priority,scope_kind,scope_value,"
+            "title_match_mode,title_anchor)"
+            " VALUES ('process','code.exe',?,3,'process','obsidian.exe','phrase','any')",
+            (category_id,),
+        )
+    # Only exact-segment rules have a meaningful position.
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO rules "
+            "(match_type,pattern,category_id,priority,scope_kind,scope_value,"
+            "title_match_mode,title_anchor)"
+            " VALUES ('title','notes',?,2,'any','','phrase','first')",
             (category_id,),
         )
 
 
-def test_v2_database_migrates_to_v3_keeping_rules_and_backing_up(tmp_path):
+def test_v2_database_migrates_to_v4_resetting_title_rules_and_backing_up(tmp_path):
     path = tmp_path / "v2.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -144,13 +170,11 @@ def test_v2_database_migrates_to_v3_keeping_rules_and_backing_up(tmp_path):
     conn.close()
 
     migrated = db.open_db(path)
-    assert db.read_settings_raw(migrated)["schema_version"] == "3"
-    # Rule identity survives the table rebuild: ids are referenced by the
-    # dashboard's "rules in use" reporting.
-    row = migrated.execute("SELECT id, pattern, priority, scope FROM rules").fetchone()
-    assert (row["id"], row["pattern"], row["priority"]) == (5, "netflix", 2)
-    # Existing title rules become unscoped, which widens them past the browser.
-    assert row["scope"] == ""
+    raw = db.read_settings_raw(migrated)
+    assert raw["schema_version"] == "4"
+    assert raw["window_rules_reset_v4_count"] == "1"
+    assert raw["window_rules_reset_v4_pending"] == "1"
+    assert migrated.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0
     # The trigger is dropped and recreated around the rebuild; losing it would
     # leave rules pointing at deleted categories.
     conn_triggers = {
@@ -167,13 +191,53 @@ def test_v2_database_migrates_to_v3_keeping_rules_and_backing_up(tmp_path):
     restored.close()
 
 
+def test_v3_database_migrates_to_v4_preserving_app_and_website_rules(tmp_path):
+    path = tmp_path / "v3.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE categories (id INTEGER PRIMARY KEY,name TEXT UNIQUE NOT NULL,"
+        "color TEXT NOT NULL,is_productive INTEGER NOT NULL DEFAULT 0,"
+        "is_neutral INTEGER NOT NULL DEFAULT 0,is_ignored INTEGER NOT NULL DEFAULT 0,"
+        "sort_order INTEGER);"
+        "CREATE TABLE rules (id INTEGER PRIMARY KEY,match_type TEXT NOT NULL,pattern TEXT NOT NULL,"
+        "category_id INTEGER NOT NULL REFERENCES categories(id),priority INTEGER NOT NULL DEFAULT 0,"
+        "scope TEXT NOT NULL DEFAULT '',UNIQUE(match_type,pattern,scope));"
+        "CREATE TABLE settings (key TEXT PRIMARY KEY,value TEXT);"
+        "INSERT INTO settings VALUES ('schema_version','3');"
+        "INSERT INTO categories (id,name,color) VALUES (1,'Dev','#abcdef');"
+        "INSERT INTO rules VALUES (5,'process','code.exe',1,3,'');"
+        "INSERT INTO rules VALUES (6,'domain','github.com',1,1,'');"
+        "INSERT INTO rules VALUES (7,'title','skill tree',1,2,'');"
+    )
+    conn.close()
+
+    migrated = db.open_db(path)
+    rows = migrated.execute(
+        "SELECT id,match_type,pattern,scope_kind,scope_value,title_match_mode,title_anchor "
+        "FROM rules ORDER BY id"
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        (5, "process", "code.exe", "", "", "", ""),
+        (6, "domain", "github.com", "", "", "", ""),
+    ]
+    raw = db.read_settings_raw(migrated)
+    assert raw["schema_version"] == "4"
+    assert raw["window_rules_reset_v4_count"] == "1"
+    assert raw["window_rules_reset_v4_pending"] == "1"
+    assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    migrated.close()
+
+    backups = list(tmp_path.glob("backup_schema3_*.db"))
+    assert len(backups) == 1
+
+
 def test_fresh_database_is_not_backed_up(tmp_path):
     path = tmp_path / "fresh.db"
     db.open_db(path).close()
     assert list(tmp_path.glob("backup_schema*.db")) == []
 
 
-def test_v1_database_migrates_to_v3_in_one_pass(tmp_path):
+def test_v1_database_migrates_to_v4_in_one_pass(tmp_path):
     path = tmp_path / "v1.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -193,15 +257,21 @@ def test_v1_database_migrates_to_v3_in_one_pass(tmp_path):
     conn.close()
 
     migrated = db.open_db(path)
-    # Every step in one open: v1 -> v2 adds the tables, v2 -> v3 rebuilds rules.
-    assert db.read_settings_raw(migrated)["schema_version"] == "3"
+    # Every step in one open: v1 -> v2 adds tables, v3/v4 rebuild rules.
+    assert db.read_settings_raw(migrated)["schema_version"] == "4"
     assert migrated.execute("SELECT process FROM sessions WHERE id=7").fetchone()[0] == "code.exe"
     tables = {
         row[0]
         for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
     assert {"tracking_exclusions", "session_corrections"} <= tables
-    assert "scope" in {row[1] for row in migrated.execute("PRAGMA table_info(rules)")}
+    columns = {row[1] for row in migrated.execute("PRAGMA table_info(rules)")}
+    assert {
+        "scope_kind",
+        "scope_value",
+        "title_match_mode",
+        "title_anchor",
+    } <= columns
     migrated.close()
 
 

@@ -4,10 +4,10 @@ import {
   defaultRulePattern,
   describeCorrectionWindow,
   formatLastSeen,
-  previewTitleRule,
   titleMatchParts,
 } from "./ActivityTab";
-import { ANY_APP, BROWSER_SCOPE, type Category, type Rule } from "../lib/classify";
+import { previewTitleRule } from "../lib/titleRuleAnalysis";
+import type { Category, Rule, TitleRuleSpec } from "../lib/classify";
 import type { ActivitySource } from "../lib/activity";
 
 /** Boundaries are calendar dates, not elapsed hours: 00:30 and 23:30 on the
@@ -78,20 +78,18 @@ describe("titleMatchParts", () => {
 });
 
 describe("defaultRulePattern", () => {
-  it("takes the leading segment, which is what names the work", () => {
-    // Window titles run document-first, program-last. The tail repeats what
-    // the rule's scope already says.
-    expect(defaultRulePattern("roadmap.md - Skill Tree - Obsidian")).toBe("roadmap.md");
-    expect(defaultRulePattern("Inbox — Mail")).toBe("Inbox");
-    expect(defaultRulePattern("Pull request #12 | myrepo")).toBe("Pull request #12");
+  it("uses one durable title part while history-backed ranking loads", () => {
+    expect(defaultRulePattern("roadmap.md - Skill Tree - Obsidian")).toBe("skill tree");
+    expect(defaultRulePattern("Inbox — Mail")).toBe("inbox");
+    expect(defaultRulePattern("Pull request #12 | myrepo")).toBe("pull request #12");
   });
 
-  it("keeps the whole title when the lead is too short to mean anything", () => {
-    expect(defaultRulePattern("v2 - Skill Tree - Obsidian")).toBe("v2 - Skill Tree - Obsidian");
+  it("never falls back to a version-bearing segment", () => {
+    expect(defaultRulePattern("v2.4 - Skill Tree - Obsidian")).toBe("skill tree");
   });
 
   it("leaves a title with no separators alone", () => {
-    expect(defaultRulePattern("Claude")).toBe("Claude");
+    expect(defaultRulePattern("Claude")).toBe("claude");
   });
 
   it("does not treat a hyphen inside a word as a separator", () => {
@@ -119,23 +117,34 @@ describe("previewTitleRule", () => {
       { id: 4, start: 180, end: 240, process: "obsidian.exe", title: "Skill Tree — notes", domain: null, isAfk: true },
     ],
   };
+  const spec = (
+    scopeKind: TitleRuleSpec["scopeKind"],
+    scopeValue = "",
+  ): TitleRuleSpec => ({
+    pattern: "skill tree",
+    scopeKind,
+    scopeValue,
+    titleMatchMode: "phrase",
+    titleAnchor: "any",
+  });
 
   it("counts what an unscoped rule would claim, across every app", () => {
-    const preview = previewTitleRule(source, "skill tree", ANY_APP);
+    const preview = previewTitleRule(source, spec("any"));
     expect(preview.sessions).toBe(2); // the AFK row is never classified
     expect(preview.seconds).toBe(120);
     expect(preview.entities).toBe(2); // obsidian.exe and github.com
+    expect(preview.titles).toBe(2);
   });
 
   it("honours the scope it is asked about", () => {
-    expect(previewTitleRule(source, "skill tree", "obsidian.exe").sessions).toBe(1);
-    expect(previewTitleRule(source, "skill tree", BROWSER_SCOPE).sessions).toBe(1);
+    expect(previewTitleRule(source, spec("process", "obsidian.exe")).sessions).toBe(1);
+    expect(previewTitleRule(source, spec("browsers")).sessions).toBe(1);
   });
 
   it("separates sessions that would change category from ones merely claimed", () => {
     // Session 1 is Notes today via the App rule, so the new rule takes it away.
     // Session 3 has no rule at all, so it is claimed but not reclassified.
-    const preview = previewTitleRule(source, "skill tree", ANY_APP);
+    const preview = previewTitleRule(source, spec("any"));
     expect(preview.reclassified).toBe(1);
   });
 
@@ -146,15 +155,17 @@ describe("previewTitleRule", () => {
       // this rule's to claim.
       rules: [...rules, { id: 2, matchType: "domain", pattern: "github.com", categoryId: 1, priority: 1 }],
     };
-    const preview = previewTitleRule(shadowed, "skill tree", ANY_APP);
+    const preview = previewTitleRule(shadowed, spec("any"));
     expect(preview.sessions).toBe(1);
     expect(preview.entities).toBe(1);
   });
 
   it("reports nothing for a pattern that matches no stored title", () => {
-    expect(previewTitleRule(source, "nonexistent", ANY_APP)).toEqual({
+    expect(previewTitleRule(source, { ...spec("any"), pattern: "nonexistent" })).toEqual({
       sessions: 0,
       seconds: 0,
+      days: 0,
+      titles: 0,
       entities: 0,
       reclassified: 0,
     });

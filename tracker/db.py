@@ -11,7 +11,7 @@ from typing import Callable, TypeVar
 from tracker.session_manager import Settings
 
 T = TypeVar("T")
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class SchemaTooNewError(RuntimeError):
@@ -47,16 +47,42 @@ CREATE TABLE IF NOT EXISTS rules (
     pattern TEXT NOT NULL,
     category_id INTEGER NOT NULL REFERENCES categories(id),
     priority INTEGER NOT NULL DEFAULT 0,
-    -- Which foreground programs a title rule is allowed to match:
-    --   ''          any app
-    --   '@browsers' any process in the browser_processes setting
-    --   'code.exe'  that executable only
-    -- Empty string rather than NULL because SQLite treats NULLs as distinct in
-    -- a UNIQUE constraint, which would let the same unscoped pattern be stored
-    -- twice. Only title rules carry a scope: a process rule already names its
-    -- process, and a domain rule only fires for browsers.
-    scope TEXT NOT NULL DEFAULT '' CHECK(scope = '' OR match_type = 'title'),
-    UNIQUE(match_type, pattern, scope)
+    -- Window rules need two independent claims: what part of a normalized
+    -- title matches, and where that claim is allowed to apply. Empty strings
+    -- keep the extra fields impossible on App/Website rules and make UNIQUE
+    -- deterministic (SQLite treats NULLs as distinct).
+    scope_kind TEXT NOT NULL DEFAULT ''
+        CHECK(scope_kind IN ('','any','browsers','process','domain')),
+    scope_value TEXT NOT NULL DEFAULT '',
+    title_match_mode TEXT NOT NULL DEFAULT ''
+        CHECK(title_match_mode IN ('','segment','phrase','contains')),
+    title_anchor TEXT NOT NULL DEFAULT ''
+        CHECK(title_anchor IN ('','any','first','interior','last')),
+    CHECK (
+        (
+            match_type = 'title'
+            AND scope_kind IN ('any','browsers','process','domain')
+            AND title_match_mode IN ('segment','phrase','contains')
+            AND title_anchor IN ('any','first','interior','last')
+            AND (title_match_mode = 'segment' OR title_anchor = 'any')
+            AND (
+                (scope_kind IN ('any','browsers') AND scope_value = '')
+                OR (scope_kind IN ('process','domain') AND length(scope_value) > 0)
+            )
+        )
+        OR
+        (
+            match_type <> 'title'
+            AND scope_kind = ''
+            AND scope_value = ''
+            AND title_match_mode = ''
+            AND title_anchor = ''
+        )
+    ),
+    UNIQUE(
+        match_type, pattern, scope_kind, scope_value,
+        title_match_mode, title_anchor
+    )
 );
 
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
@@ -115,9 +141,10 @@ _SEED_CATEGORIES = [
 
 # Deliberately empty: Time ships with no opinion about which apps or sites are
 # productive. The shape stays here because the priority contract has to hold for
-# any rule that is added later — lower number wins: domain (1), title (2),
-# process (3). Domain rules are evaluated only for browser sessions; process
-# rules apply everywhere; title rules apply wherever their scope column allows.
+# any rule that is added later — lower number wins: domain-scoped title (0),
+# domain (1), other title (2), process (3). Domain rules are evaluated only for
+# browser sessions; process rules apply everywhere; title rules apply wherever
+# their explicit scope allows.
 _SEED_RULES: list[tuple[str, str, str, int]] = []
 
 DEFAULT_SETTINGS = {
@@ -269,7 +296,7 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     releases behind has to walk every step, so each block upgrades by one
     version and falls through to the next.
     """
-    if from_version not in {0, 1, 2, SCHEMA_VERSION}:
+    if from_version not in {0, 1, 2, 3, SCHEMA_VERSION}:
         raise RuntimeError(f"unsupported database schema {from_version}")
     if from_version == 0:
         return  # _SCHEMA is the authoritative fresh-install shape
@@ -341,6 +368,64 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
             "BEFORE DELETE ON categories FOR EACH ROW BEGIN "
             "DELETE FROM rules WHERE category_id = OLD.id; END"
         )
+    if from_version <= 3:
+        # A v3 title pattern was only a lowercased substring with a coarse scope.
+        # There is no honest way to infer whether its owner meant a whole
+        # phrase, one exact title segment, or the legacy contains behavior.
+        # Preserve App and Website rules exactly; reset Window rules and leave a
+        # durable notice for the dashboard. This is safer than silently giving
+        # an old broad pattern a new meaning over all historical sessions.
+        title_rule_count = conn.execute(
+            "SELECT COUNT(*) FROM rules WHERE match_type='title'"
+        ).fetchone()[0]
+        conn.execute("DROP TRIGGER IF EXISTS delete_category_rules")
+        conn.execute("DROP TABLE IF EXISTS rules_window_v4")
+        conn.execute(
+            "CREATE TABLE rules_window_v4 ("
+            "id INTEGER PRIMARY KEY,"
+            "match_type TEXT NOT NULL CHECK(match_type IN ('process','domain','title')),"
+            "pattern TEXT NOT NULL,"
+            "category_id INTEGER NOT NULL REFERENCES categories(id),"
+            "priority INTEGER NOT NULL DEFAULT 0,"
+            "scope_kind TEXT NOT NULL DEFAULT '' "
+            "CHECK(scope_kind IN ('','any','browsers','process','domain')),"
+            "scope_value TEXT NOT NULL DEFAULT '',"
+            "title_match_mode TEXT NOT NULL DEFAULT '' "
+            "CHECK(title_match_mode IN ('','segment','phrase','contains')),"
+            "title_anchor TEXT NOT NULL DEFAULT '' "
+            "CHECK(title_anchor IN ('','any','first','interior','last')),"
+            "CHECK ("
+            "(match_type='title' "
+            "AND scope_kind IN ('any','browsers','process','domain') "
+            "AND title_match_mode IN ('segment','phrase','contains') "
+            "AND title_anchor IN ('any','first','interior','last') "
+            "AND (title_match_mode='segment' OR title_anchor='any') "
+            "AND (((scope_kind IN ('any','browsers')) AND scope_value='') "
+            "OR (scope_kind IN ('process','domain') AND length(scope_value)>0))) "
+            "OR (match_type<>'title' AND scope_kind='' AND scope_value='' "
+            "AND title_match_mode='' AND title_anchor='')),"
+            "UNIQUE(match_type,pattern,scope_kind,scope_value,title_match_mode,title_anchor))"
+        )
+        conn.execute(
+            "INSERT INTO rules_window_v4 "
+            "(id,match_type,pattern,category_id,priority) "
+            "SELECT id,match_type,pattern,category_id,priority FROM rules "
+            "WHERE match_type<>'title'"
+        )
+        conn.execute("DROP TABLE rules")
+        conn.execute("ALTER TABLE rules_window_v4 RENAME TO rules")
+        conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS delete_category_rules "
+            "BEFORE DELETE ON categories FOR EACH ROW BEGIN "
+            "DELETE FROM rules WHERE category_id = OLD.id; END"
+        )
+        if title_rule_count:
+            conn.execute(
+                "INSERT INTO settings (key,value) VALUES "
+                "('window_rules_reset_v4_count',?),('window_rules_reset_v4_pending','1') "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(title_rule_count),),
+            )
 
 
 def _seed(conn: sqlite3.Connection) -> None:

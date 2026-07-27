@@ -2,14 +2,14 @@
 // categories/rules/settings (the tracker owns session writes).
 
 import {
-  ANY_APP,
   normalizeRulePattern,
-  normalizeRuleScope,
   type Category,
   type CategoryState,
   type MatchType,
   type Rule,
+  type TitleRuleSpec,
 } from "./classify";
+import { normalizeTitleRuleSpec } from "./titleRules";
 import { invoke } from "@tauri-apps/api/core";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
@@ -95,13 +95,17 @@ interface RuleRow {
   pattern: string;
   category_id: number;
   priority: number;
-  scope: string;
+  scope_kind: "" | TitleRuleSpec["scopeKind"];
+  scope_value: string;
+  title_match_mode: "" | TitleRuleSpec["titleMatchMode"];
+  title_anchor: "" | TitleRuleSpec["titleAnchor"];
 }
 
 export async function fetchRules(): Promise<Rule[]> {
   const db = await getDb();
   const rows = await db.select<RuleRow[]>(
-    "SELECT id, match_type, pattern, category_id, priority, scope FROM rules ORDER BY priority ASC, id",
+    "SELECT id, match_type, pattern, category_id, priority, scope_kind, scope_value," +
+      " title_match_mode, title_anchor FROM rules ORDER BY priority ASC, id",
   );
   return rows.map((r) => ({
     id: r.id,
@@ -109,7 +113,10 @@ export async function fetchRules(): Promise<Rule[]> {
     pattern: r.pattern,
     categoryId: r.category_id,
     priority: r.priority,
-    scope: r.scope ?? ANY_APP,
+    scopeKind: r.scope_kind || undefined,
+    scopeValue: r.scope_value || undefined,
+    titleMatchMode: r.title_match_mode || undefined,
+    titleAnchor: r.title_anchor || undefined,
   }));
 }
 
@@ -186,12 +193,15 @@ export async function saveProcessAliases(aliases: Record<string, string>): Promi
 
 const DEFAULT_PRIORITY: Record<MatchType, number> = { domain: 1, title: 2, process: 3 };
 
+export type AddRuleOptions = Partial<Omit<TitleRuleSpec, "pattern">> & {
+  priority?: number;
+};
+
 export async function addRule(
   matchType: MatchType,
   pattern: string,
   categoryId: number,
-  scope: string = ANY_APP,
-  priority?: number,
+  options: AddRuleOptions = {},
 ): Promise<void> {
   const db = await getDb();
   const pat = normalizeRulePattern(matchType, pattern);
@@ -204,14 +214,45 @@ export async function addRule(
     err.name = "ValidationError"; // explainDbError passes the message through untouched
     throw err;
   }
-  // The CHECK constraint refuses a scope on anything but a title rule, so
-  // normalize here rather than letting a stray argument raise a DB error.
-  const ruleScope = matchType === "title" ? normalizeRuleScope(scope) : ANY_APP;
+  const titleSpec = normalizeTitleRuleSpec({
+    pattern: pat,
+    scopeKind: options.scopeKind ?? "any",
+    scopeValue: options.scopeValue ?? "",
+    titleMatchMode: options.titleMatchMode ?? "phrase",
+    titleAnchor: options.titleAnchor ?? "any",
+  });
+  if (
+    matchType === "title" &&
+    (titleSpec.scopeKind === "process" || titleSpec.scopeKind === "domain") &&
+    !titleSpec.scopeValue
+  ) {
+    const err = new Error(
+      titleSpec.scopeKind === "process"
+        ? "Choose the app this Window rule should match."
+        : "Choose the website this Window rule should match.",
+    );
+    err.name = "ValidationError";
+    throw err;
+  }
+  const windowFields = matchType === "title"
+    ? [
+        titleSpec.scopeKind,
+        titleSpec.scopeValue,
+        titleSpec.titleMatchMode,
+        titleSpec.titleAnchor,
+      ]
+    : ["", "", "", ""];
+  const priority = options.priority ??
+    (matchType === "title" && titleSpec.scopeKind === "domain"
+      ? 0
+      : DEFAULT_PRIORITY[matchType]);
   await db.execute(
-    "INSERT INTO rules (match_type, pattern, category_id, priority, scope) VALUES ($1, $2, $3, $4, $5)" +
-      " ON CONFLICT(match_type, pattern, scope) DO UPDATE SET" +
+    "INSERT INTO rules (match_type,pattern,category_id,priority,scope_kind,scope_value," +
+      "title_match_mode,title_anchor) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)" +
+      " ON CONFLICT(match_type,pattern,scope_kind,scope_value,title_match_mode,title_anchor)" +
+      " DO UPDATE SET" +
       " category_id=excluded.category_id, priority=excluded.priority",
-    [matchType, pat, categoryId, priority ?? DEFAULT_PRIORITY[matchType], ruleScope],
+    [matchType, pat, categoryId, priority, ...windowFields],
   );
 }
 

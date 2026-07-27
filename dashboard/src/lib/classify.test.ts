@@ -22,7 +22,17 @@ const RULES: Rule[] = [
   { id: 1, matchType: "process", pattern: "chrome.exe", categoryId: 1, priority: 3 },
   { id: 2, matchType: "process", pattern: "code.exe", categoryId: 3, priority: 3 },
   { id: 3, matchType: "domain", pattern: "youtube.com", categoryId: 2, priority: 1 },
-  { id: 4, matchType: "title", pattern: "netflix", categoryId: 2, priority: 2 },
+  {
+    id: 4,
+    matchType: "title",
+    pattern: "netflix",
+    categoryId: 2,
+    priority: 2,
+    scopeKind: "any",
+    scopeValue: "",
+    titleMatchMode: "phrase",
+    titleAnchor: "any",
+  },
 ];
 
 const BROWSERS = new Set(["chrome.exe"]);
@@ -87,7 +97,7 @@ describe("buildClassifier", () => {
     expect(classify(session({ process: "Chrome.EXE" }))?.name).toBe("Browsing");
   });
 
-  it("preserves first-match behavior when equal-priority domain suffixes match", () => {
+  it("prefers the more specific domain when suffix rules overlap", () => {
     const tied = buildClassifier(
       CATS,
       [
@@ -96,39 +106,53 @@ describe("buildClassifier", () => {
       ],
       BROWSERS,
     );
-    expect(tied(session({ domain: "music.youtube.com" }))?.name).toBe("Browsing");
+    expect(tied(session({ domain: "music.youtube.com" }))?.name).toBe("Media");
   });
 });
 
 describe("title rule scope", () => {
-  const scoped = (scope: string, categoryId = 2): Rule[] => [
+  const scoped = (
+    scopeKind: "any" | "browsers" | "process" | "domain",
+    scopeValue = "",
+    categoryId = 2,
+  ): Rule[] => [
     ...RULES.filter((rule) => rule.matchType === "process"),
-    { id: 20, matchType: "title", pattern: "journal", categoryId, priority: 2, scope },
+    {
+      id: 20,
+      matchType: "title",
+      pattern: "journal",
+      categoryId,
+      priority: scopeKind === "domain" ? 0 : 2,
+      scopeKind,
+      scopeValue,
+      titleMatchMode: "phrase",
+      titleAnchor: "any",
+    },
   ];
   const at = (rules: Rule[], process: string) =>
     buildClassifier(CATS, rules, BROWSERS)(session({ process, title: "Work journal — notes" }))?.name;
 
-  it("'' matches whatever program is in front", () => {
-    expect(at(scoped(""), "chrome.exe")).toBe("Media");
-    expect(at(scoped(""), "obsidian.exe")).toBe("Media");
+  it("'any' matches whatever program is in front", () => {
+    expect(at(scoped("any"), "chrome.exe")).toBe("Media");
+    expect(at(scoped("any"), "obsidian.exe")).toBe("Media");
   });
 
-  it("'@browsers' matches any configured browser and nothing else", () => {
-    expect(at(scoped("@browsers"), "chrome.exe")).toBe("Media");
+  it("'browsers' matches any configured browser and nothing else", () => {
+    expect(at(scoped("browsers"), "chrome.exe")).toBe("Media");
     // Falls through to the App rule rather than matching.
-    expect(at(scoped("@browsers"), "code.exe")).toBe("Dev");
+    expect(at(scoped("browsers"), "code.exe")).toBe("Dev");
   });
 
   it("a process scope matches only that executable", () => {
-    expect(at(scoped("obsidian.exe"), "obsidian.exe")).toBe("Media");
-    expect(at(scoped("obsidian.exe"), "chrome.exe")).toBe("Browsing");
+    expect(at(scoped("process", "obsidian.exe"), "obsidian.exe")).toBe("Media");
+    expect(at(scoped("process", "obsidian.exe"), "chrome.exe")).toBe("Browsing");
   });
 
   it("scopes are matched case-insensitively, like every other pattern", () => {
-    expect(at(scoped("Obsidian.EXE"), "obsidian.exe")).toBe("Media");
+    expect(at(scoped("process", "Obsidian.EXE"), "obsidian.exe")).toBe("Media");
   });
 
-  it("an absent scope reads as unscoped, so old rules keep working", () => {
+  it("an absent scope reads as any-app for in-memory callers", () => {
     const legacy: Rule[] = [{ id: 21, matchType: "title", pattern: "journal", categoryId: 2, priority: 2 }];
     expect(at(legacy, "obsidian.exe")).toBe("Media");
   });
@@ -138,8 +162,15 @@ describe("title rule scope", () => {
     // tiebreak the winner would be whichever was inserted first — invisible
     // to anyone reading the rule list.
     const both: Rule[] = [
-      { id: 30, matchType: "title", pattern: "journal", categoryId: 2, priority: 2, scope: "" },
-      { id: 31, matchType: "title", pattern: "journal", categoryId: 3, priority: 2, scope: "obsidian.exe" },
+      {
+        id: 30, matchType: "title", pattern: "journal", categoryId: 2, priority: 2,
+        scopeKind: "any", scopeValue: "", titleMatchMode: "phrase", titleAnchor: "any",
+      },
+      {
+        id: 31, matchType: "title", pattern: "journal", categoryId: 3, priority: 2,
+        scopeKind: "process", scopeValue: "obsidian.exe",
+        titleMatchMode: "phrase", titleAnchor: "any",
+      },
     ];
     expect(at(both, "obsidian.exe")).toBe("Dev");
     expect(at(both, "chrome.exe")).toBe("Media");
@@ -149,17 +180,27 @@ describe("title rule scope", () => {
 
   it("prefers a browser scope over no scope at all", () => {
     const both: Rule[] = [
-      { id: 40, matchType: "title", pattern: "journal", categoryId: 2, priority: 2, scope: "" },
-      { id: 41, matchType: "title", pattern: "journal", categoryId: 3, priority: 2, scope: "@browsers" },
+      {
+        id: 40, matchType: "title", pattern: "journal", categoryId: 2, priority: 2,
+        scopeKind: "any", scopeValue: "", titleMatchMode: "phrase", titleAnchor: "any",
+      },
+      {
+        id: 41, matchType: "title", pattern: "journal", categoryId: 3, priority: 2,
+        scopeKind: "browsers", scopeValue: "", titleMatchMode: "phrase", titleAnchor: "any",
+      },
     ];
     expect(at(both, "chrome.exe")).toBe("Dev");
     expect(at(both, "obsidian.exe")).toBe("Media");
   });
 
-  it("still loses to a domain rule, which is more specific than any title", () => {
+  it("a general title still loses to a Website rule", () => {
     const rules: Rule[] = [
       { id: 50, matchType: "domain", pattern: "youtube.com", categoryId: 2, priority: 1 },
-      { id: 51, matchType: "title", pattern: "journal", categoryId: 3, priority: 2, scope: "chrome.exe" },
+      {
+        id: 51, matchType: "title", pattern: "journal", categoryId: 3, priority: 2,
+        scopeKind: "process", scopeValue: "chrome.exe",
+        titleMatchMode: "phrase", titleAnchor: "any",
+      },
     ];
     const explain = buildClassificationExplainer(CATS, rules, BROWSERS);
     const result = explain(session({ domain: "youtube.com", title: "Work journal" }));
@@ -167,8 +208,24 @@ describe("title rule scope", () => {
     expect(result.winningRule?.matchType).toBe("domain");
   });
 
+  it("a title scoped to that website can refine its Website rule", () => {
+    const rules: Rule[] = [
+      { id: 52, matchType: "domain", pattern: "youtube.com", categoryId: 2, priority: 1 },
+      {
+        id: 53, matchType: "title", pattern: "journal", categoryId: 3, priority: 0,
+        scopeKind: "domain", scopeValue: "youtube.com",
+        titleMatchMode: "phrase", titleAnchor: "any",
+      },
+    ];
+    const result = buildClassificationExplainer(CATS, rules, BROWSERS)(
+      session({ domain: "music.youtube.com", title: "Work journal" }),
+    );
+    expect(result.category?.name).toBe("Dev");
+    expect(result.winningRule?.id).toBe(53);
+  });
+
   it("does not match a session with no stored title", () => {
-    expect(buildClassifier(CATS, scoped(""), BROWSERS)(
+    expect(buildClassifier(CATS, scoped("any"), BROWSERS)(
       session({ process: "obsidian.exe", title: "" }),
     )).toBeNull();
   });

@@ -37,7 +37,6 @@ import { buildActivityExport, type ActivityExportKind } from "../lib/activityExp
 import {
   ANY_APP,
   BROWSER_SCOPE,
-  buildClassifier,
   categoryState,
   categoryStateFlags,
   type Category,
@@ -45,7 +44,22 @@ import {
   type MatchType,
   type Productivity,
   type Rule,
+  type TitleRuleAnchor,
+  type TitleRuleMatchMode,
+  type TitleRuleScopeKind,
+  type TitleRuleSpec,
 } from "../lib/classify";
+import {
+  previewTitleRule,
+  suggestTitleRuleCandidates,
+  type TitleRuleCandidate,
+  type TitleRulePreview,
+} from "../lib/titleRuleAnalysis";
+import {
+  containsVersion,
+  normalizeWindowTitle,
+  splitWindowTitle,
+} from "../lib/titleRules";
 import { UNCATEGORIZED } from "../lib/chartTheme";
 import type { Palette } from "../lib/palettes";
 import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
@@ -68,6 +82,7 @@ import {
   resetSessionCorrection,
   saveActivityExport,
   saveProcessAliases,
+  updateSetting,
   updateCategory,
   type ActivityDeletePreview,
   type ActivityDeleteRequest,
@@ -112,7 +127,7 @@ const RULE_LABELS: Record<MatchType, string> = {
 
 const RULE_HELP: Record<MatchType, string> = {
   domain: "Matches a site such as github.com. Page paths and searches are not stored.",
-  title: "Matches words in a stored window title, in whichever apps its scope allows.",
+  title: "Matches normalized text in a stored window title, inside the scope you choose.",
   process: "Matches the foreground executable, such as code.exe.",
 };
 
@@ -2129,10 +2144,9 @@ function localInputValue(seconds: number): string {
  * identity, so nobody guesses them from an empty text field. Starting from a
  * concrete window means the pattern and the scope both have obvious defaults.
  *
- * The scope defaults to the app the window belongs to, not to "any app". A
- * title is evidence about the program showing it — "Skill Tree" in an editor is
- * a project, in a browser it might be anything — and the broader reading should
- * be a deliberate widening rather than what you get by not choosing.
+ * Scope defaults to the exact website when one is known, otherwise the exact
+ * process. "Skill Tree" in an editor is a project; in a browser it might be
+ * anything. A broader reading must be a deliberate choice.
  */
 function WindowRuleDialog({
   group,
@@ -2150,39 +2164,103 @@ function WindowRuleDialog({
   onSaved: () => void;
 }) {
   const banner = useBanner();
-  const [pattern, setPattern] = useState(() => defaultRulePattern(group.title));
-  const [scope, setScope] = useState(() => defaultRuleScope(group, browserProcesses));
+  const [spec, setSpec] = useState<TitleRuleSpec>(() => defaultWindowRuleSpec(group));
+  const [candidates, setCandidates] = useState<TitleRuleCandidate[] | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState("");
+  const [advanced, setAdvanced] = useState(false);
+  const [preview, setPreview] = useState<TitleRulePreview | null>(null);
   const [categoryId, setCategoryId] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const trimmed = pattern.trim();
-  // Counted against all of history, like the "unused" tag on a rule, because a
-  // rule is not scoped to the visible range and pretending otherwise would
-  // understate what it claims.
-  const preview = useMemo(
-    () => (source && trimmed ? previewTitleRule(source, trimmed, scope) : null),
-    [source, trimmed, scope],
-  );
+  useEffect(() => {
+    setCandidates(null);
+    setSelectedCandidateId("");
+    if (!source) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const next = suggestTitleRuleCandidates(
+        source,
+        group.title,
+        { scopeKind: spec.scopeKind, scopeValue: spec.scopeValue },
+        [group.displayName, group.entityKey],
+      );
+      if (cancelled) return;
+      setCandidates(next);
+      if (next[0]) {
+        setSpec(ruleSpecFromCandidate(next[0]));
+        setSelectedCandidateId(next[0].id);
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [source, group.key, spec.scopeKind, spec.scopeValue]);
+
+  // Count against all history, like the rule list's "unused" tag. Deferring
+  // keeps typing in Advanced responsive even when the history is large.
+  const deferredSpec = useDeferredValue(spec);
+  useEffect(() => {
+    setPreview(null);
+    if (!source || !deferredSpec.pattern.trim() || !titleSpecReady(deferredSpec)) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const next = previewTitleRule(source, deferredSpec);
+      if (!cancelled) setPreview(next);
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [source, deferredSpec]);
+
+  const chooseCandidate = (candidate: TitleRuleCandidate) => {
+    setSpec(ruleSpecFromCandidate(candidate));
+    setSelectedCandidateId(candidate.id);
+  };
+  const changeSpec = (patch: Partial<TitleRuleSpec>) => {
+    setSelectedCandidateId("");
+    setSpec((current) => {
+      const next = { ...current, ...patch };
+      return next.titleMatchMode === "segment"
+        ? next
+        : { ...next, titleAnchor: "any" };
+    });
+  };
 
   const save = async () => {
     setSaving(true);
     try {
-      await addRule("title", trimmed, Number(categoryId), scope);
-      banner.show(`Window rule “${trimmed}” added.`);
+      await addRule("title", spec.pattern, Number(categoryId), spec);
+      banner.show(`Window rule “${spec.pattern.trim()}” added.`);
       onSaved();
     } catch (error) {
       banner.report(error, "rule");
       setSaving(false);
     }
   };
+  const saveBroadRule = async () => {
+    setSaving(true);
+    try {
+      const matchType = group.entityKind === "website" ? "domain" : "process";
+      await addRule(matchType, group.entityKey, Number(categoryId));
+      banner.show(`${RULE_LABELS[matchType]} rule for ${group.displayName} added.`);
+      onSaved();
+    } catch (error) {
+      banner.report(error, "rule");
+      setSaving(false);
+    }
+  };
+  const scopeOptions = titleRuleScopeOptions(group, browserProcesses);
+  const encodedScope = encodeTitleScope(spec.scopeKind, spec.scopeValue);
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="window-rule-title">
-      <div className="w-full max-w-lg rounded-2xl border border-edge bg-surface p-5 shadow-2xl">
+      <div className="scroll-well max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-edge bg-surface p-5 shadow-2xl">
         <h2 id="window-rule-title" className="text-base font-semibold">New Window rule</h2>
         <p className="mt-1 text-[11px] text-ink-3">
-          Classifies any session whose stored window title contains these words. Applies to
-          past and future activity alike.
+          Choose what this window has in common with the other windows you mean.
+          The rule applies to past and future activity.
         </p>
 
         <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px]">
@@ -2192,25 +2270,53 @@ function WindowRuleDialog({
           </p>
         </div>
 
-        <label className="mt-4 block text-[11px] text-ink-3">
-          Words to match
-          <input
-            value={pattern}
-            onChange={(event) => setPattern(event.target.value)}
-            className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60"
-          />
-        </label>
-
-        <div className="mt-3 text-[11px] text-ink-3">
-          <span>Where it applies</span>
-          <MenuSelect
-            size="field"
-            className="mt-1 w-full"
-            value={scope}
-            onChange={setScope}
-            label="Rule scope"
-            options={ruleScopeOptions(group, browserProcesses)}
-          />
+        <div className="mt-4">
+          <p className="text-[11px] text-ink-3">Suggested matches</p>
+          {candidates === null ? (
+            <div className="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-3">
+              <Spinner label="Comparing with your title history…" />
+            </div>
+          ) : candidates.length > 0 ? (
+            <div className="mt-2 grid gap-2">
+              {candidates.map((candidate) => {
+                const selected = selectedCandidateId === candidate.id;
+                return (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                      selected
+                        ? "border-accent/60 bg-accent/[.08]"
+                        : "border-edge bg-surface-2 hover:border-edge-2"
+                    }`}
+                    onClick={() => chooseCandidate(candidate)}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                        {candidate.pattern}
+                      </span>
+                      {candidate.recommended && (
+                        <span className="rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-2">
+                          recommended
+                        </span>
+                      )}
+                    </span>
+                    <span className="mt-1 block text-[10.5px] text-ink-3">
+                      {describeTitleRule(candidate)} · {Math.round(candidate.reach * 100)}% of
+                      titled windows in this scope · {candidate.days} active{" "}
+                      {candidate.days === 1 ? "day" : "days"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px] leading-snug text-ink-3">
+              This title has no durable, reusable part in the selected scope. Use
+              an App or Website rule if all of {group.displayName} belongs together,
+              or open Advanced to write a precise rule yourself.
+            </p>
+          )}
         </div>
 
         <div className="mt-3 text-[11px] text-ink-3">
@@ -2232,12 +2338,94 @@ function WindowRuleDialog({
           />
         </div>
 
+        <button
+          type="button"
+          className="mt-3 text-[11px] text-ink-3 hover:text-ink-2"
+          onClick={() => setAdvanced((current) => !current)}
+          aria-expanded={advanced}
+        >
+          {advanced ? "Hide advanced options" : "Advanced matching and scope…"}
+        </button>
+        {advanced && (
+          <div className="mt-2 rounded-lg border border-edge bg-surface-2 p-3">
+            <label className="block text-[10.5px] text-ink-3">
+              Text to match
+              <input
+                value={spec.pattern}
+                onChange={(event) => changeSpec({ pattern: event.target.value })}
+                className="mt-1 block w-full rounded-lg border border-edge bg-surface px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60"
+              />
+            </label>
+            <div className="mt-3">
+              <span className="text-[10.5px] text-ink-3">Match as</span>
+              <span className="mt-1 flex w-fit rounded-lg border border-edge bg-surface p-0.5">
+                {([
+                  ["phrase", "Whole words"],
+                  ["segment", "Exact title part"],
+                  ["contains", "Contains text"],
+                ] as Array<[TitleRuleMatchMode, string]>).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`rounded-md px-2 py-1 text-[10.5px] ${
+                      spec.titleMatchMode === mode
+                        ? "bg-surface-3 text-ink-2"
+                        : "text-ink-3 hover:text-ink-2"
+                    }`}
+                    onClick={() => changeSpec({ titleMatchMode: mode })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </span>
+              {spec.titleMatchMode === "contains" && (
+                <p className="mt-1.5 text-[10px] leading-snug text-ink-3">
+                  Broadest option: it can also match inside longer words. Prefer a
+                  suggested whole-word or exact-part rule when one is available.
+                </p>
+              )}
+            </div>
+            {spec.titleMatchMode === "segment" && (
+              <div className="mt-3 text-[10.5px] text-ink-3">
+                <span>Position</span>
+                <MenuSelect
+                  size="field"
+                  className="mt-1 w-full"
+                  value={spec.titleAnchor}
+                  onChange={(value) => changeSpec({ titleAnchor: value as TitleRuleAnchor })}
+                  label="Title-part position"
+                  options={[
+                    { value: "any", label: "Anywhere in the title" },
+                    { value: "first", label: "First title part" },
+                    { value: "interior", label: "Middle title part" },
+                    { value: "last", label: "Last title part" },
+                  ]}
+                />
+              </div>
+            )}
+            <div className="mt-3 text-[10.5px] text-ink-3">
+              <span>Where it applies</span>
+              <MenuSelect
+                size="field"
+                className="mt-1 w-full"
+                value={encodedScope}
+                onChange={(value) => {
+                  const scope = decodeTitleScope(value);
+                  changeSpec(scope);
+                }}
+                label="Rule scope"
+                options={scopeOptions}
+              />
+            </div>
+          </div>
+        )}
+
         {/* The safety net for a pattern aimed too widely: say what it takes
             before it takes it, counted over all history rather than the range
             on screen, because that is the scope a rule actually has. */}
         <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px] leading-snug text-ink-3">
-          {!trimmed
-            ? "Enter the words this rule should match."
+          {!spec.pattern.trim()
+            ? "Enter text this rule should match."
             : preview === null
               ? "Counting what this would match…"
               : preview.sessions === 0
@@ -2245,9 +2433,11 @@ function WindowRuleDialog({
                 : (
                   <>
                     Claims <span className="text-ink-2">{preview.sessions}</span> session
-                    {preview.sessions === 1 ? "" : "s"} across{" "}
-                    <span className="text-ink-2">{preview.entities}</span>{" "}
-                    {preview.entities === 1 ? "app or website" : "apps and websites"} —{" "}
+                    {preview.sessions === 1 ? "" : "s"} with{" "}
+                    <span className="text-ink-2">{preview.titles}</span> distinct title
+                    {preview.titles === 1 ? "" : "s"} across{" "}
+                    <span className="text-ink-2">{preview.days}</span> active{" "}
+                    {preview.days === 1 ? "day" : "days"} —{" "}
                     <span className="text-ink-2">{fmtDuration(preview.seconds)}</span> of all
                     recorded time.
                     {preview.reclassified > 0 && (
@@ -2259,10 +2449,18 @@ function WindowRuleDialog({
         </p>
 
         <div className="mt-5 flex justify-end gap-2">
+          <Button
+            disabled={saving || !categoryId}
+            title={`Use one ${group.entityKind === "website" ? "Website" : "App"} rule instead of inspecting the title`}
+            onClick={() => void saveBroadRule()}
+          >
+            Classify all of {group.displayName}
+          </Button>
+          <span className="flex-1" />
           <Button disabled={saving} onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            disabled={saving || !trimmed || !categoryId}
+            disabled={saving || !spec.pattern.trim() || !categoryId || !titleSpecReady(spec)}
             onClick={() => void save()}
           >
             {saving ? "Adding…" : "Add rule"}
@@ -2273,104 +2471,113 @@ function WindowRuleDialog({
   );
 }
 
-/** The scope field's "One app is chosen, but not named yet" state. A lone dot
- *  cannot be a real executable name, so it can never be saved by accident. */
-const SCOPE_PENDING = ".";
+function titleSpecReady(
+  spec: Pick<TitleRuleSpec, "scopeKind" | "scopeValue">,
+): boolean {
+  if (spec.scopeKind === "any" || spec.scopeKind === "browsers") return true;
+  return spec.scopeValue.trim() !== "";
+}
 
-/** Whether a draft rule's scope is answerable. "Any app" is the empty string
- *  and perfectly valid; what is not is "One app" with nothing named yet, which
- *  is a half-made choice rather than a rule about an app called ".". */
-function ruleDraftReady(draft: { type: MatchType; scope: string }): boolean {
+function ruleDraftReady(
+  draft: { type: MatchType } & Pick<TitleRuleSpec, "scopeKind" | "scopeValue">,
+): boolean {
   if (draft.type !== "title") return true;
-  if (draft.scope === ANY_APP || draft.scope === BROWSER_SCOPE) return true;
-  return draft.scope !== SCOPE_PENDING && draft.scope.trim() !== "";
+  return titleSpecReady(draft);
 }
 
 /**
- * A first guess at the words worth matching. Window titles carry the document
- * first and the program last — "roadmap.md - Skill Tree - Obsidian" — so the
- * leading segment is the part that identifies the work, and the trailing ones
- * repeat what the scope already says.
+ * A history-free fallback while ranked candidates are being computed. It never
+ * returns the whole delimiter-bearing title or a version-bearing part.
  */
 export function defaultRulePattern(title: string): string {
-  const [first] = title.split(/\s+[-–—|·]\s+/);
-  const guess = (first ?? "").trim();
-  return guess.length >= 3 ? guess : title.trim();
+  const durable = splitWindowTitle(title)
+    .filter((part) => part.length >= 3 && !containsVersion(part));
+  return durable.reduce(
+    (best, part) => part.length >= best.length ? part : best,
+    "",
+  ) || normalizeWindowTitle(title);
 }
 
-function defaultRuleScope(group: ActivityTitleGroup, browserProcesses: string[]): string {
-  // A website's sessions come from whichever browser was open at the time, so
-  // pinning one executable would miss the others.
-  if (group.entityKind === "website") return BROWSER_SCOPE;
-  const process = group.sessions[0]?.process.toLowerCase();
-  if (!process) return ANY_APP;
-  return browserProcesses.includes(process) ? BROWSER_SCOPE : process;
+function defaultWindowRuleSpec(group: ActivityTitleGroup): TitleRuleSpec {
+  return {
+    pattern: defaultRulePattern(group.title),
+    scopeKind: group.entityKind === "website" ? "domain" : "process",
+    scopeValue: group.entityKey.toLowerCase(),
+    titleMatchMode: "segment",
+    titleAnchor: "any",
+  };
 }
 
-function ruleScopeOptions(group: ActivityTitleGroup, browserProcesses: string[]): MenuOption[] {
+function encodeTitleScope(kind: TitleRuleScopeKind, value: string): string {
+  return `${kind}:${value}`;
+}
+
+function decodeTitleScope(value: string): Pick<TitleRuleSpec, "scopeKind" | "scopeValue"> {
+  const colon = value.indexOf(":");
+  const scopeKind = value.slice(0, colon) as TitleRuleScopeKind;
+  return { scopeKind, scopeValue: value.slice(colon + 1) };
+}
+
+function titleRuleScopeOptions(
+  group: ActivityTitleGroup,
+  browserProcesses: string[],
+): MenuOption[] {
   const process = group.sessions[0]?.process.toLowerCase();
   const options: MenuOption[] = [];
-  if (process && !browserProcesses.includes(process)) {
-    options.push({ value: process, label: `Only ${group.displayName} (${process})` });
+  if (group.entityKind === "website") {
+    options.push({
+      value: encodeTitleScope("domain", group.entityKey),
+      label: `Only ${group.entityKey}`,
+    });
+  } else {
+    options.push({
+      value: encodeTitleScope("process", group.entityKey),
+      label: `Only ${group.displayName} (${group.entityKey})`,
+    });
   }
-  options.push({ value: BROWSER_SCOPE, label: "Any browser" });
-  options.push({ value: ANY_APP, label: "Any app" });
+  if (
+    process &&
+    group.entityKind === "website"
+  ) {
+    options.push({
+      value: encodeTitleScope("process", process),
+      label: `Only this browser (${process})`,
+    });
+  }
+  if (group.entityKind === "website" || (process && browserProcesses.includes(process))) {
+    options.push({ value: encodeTitleScope(BROWSER_SCOPE, ""), label: "Any browser" });
+  }
+  options.push({ value: encodeTitleScope(ANY_APP, ""), label: "Any app" });
   return options;
 }
 
-interface TitleRulePreview {
-  sessions: number;
-  seconds: number;
-  entities: number;
-  /** Sessions the rule would pull away from whatever classifies them now —
-   *  the number worth reading twice before pressing Add. */
-  reclassified: number;
+function ruleSpecFromCandidate(candidate: TitleRuleCandidate): TitleRuleSpec {
+  return {
+    pattern: candidate.pattern,
+    scopeKind: candidate.scopeKind,
+    scopeValue: candidate.scopeValue,
+    titleMatchMode: candidate.titleMatchMode,
+    titleAnchor: candidate.titleAnchor,
+  };
 }
 
-/**
- * What a proposed title rule would claim across all recorded history.
- *
- * Runs the real classifier twice rather than re-deriving what a match means:
- * once as things stand and once with the candidate rule added, so the answer
- * accounts for priority and scope exactly as the app will.
- */
-export function previewTitleRule(
-  source: ActivitySource,
-  pattern: string,
-  scope: string,
-): TitleRulePreview {
-  const needle = pattern.trim().toLowerCase();
-  const browsers = new Set(source.browserProcesses.map((process) => process.toLowerCase()));
-  const before = buildClassifier(source.categories, source.rules, browsers);
-  // A priority below every real rule would not answer the question either; the
-  // candidate has to sit exactly where a saved Window rule would.
-  const candidate: Rule = {
-    id: -1,
-    matchType: "title",
-    pattern: needle,
-    categoryId: -1,
-    priority: 2,
-    scope,
-  };
-  const after = buildClassifier(
-    [...source.categories, { id: -1, name: "", color: "#000", isProductive: false, isNeutral: true, isIgnored: false, sortOrder: null }],
-    [...source.rules, candidate],
-    browsers,
-  );
-  let sessions = 0;
-  let seconds = 0;
-  let reclassified = 0;
-  const entities = new Set<string>();
-  for (const session of source.sessions) {
-    if (session.isAfk || !session.title) continue;
-    if (!session.title.toLowerCase().includes(needle)) continue;
-    if (after(session)?.id !== -1) continue; // outranked by an existing rule
-    sessions += 1;
-    seconds += Math.max(0, session.end - session.start);
-    entities.add(session.domain ? `website:${session.domain}` : `app:${session.process.toLowerCase()}`);
-    if (before(session) !== null) reclassified += 1;
-  }
-  return { sessions, seconds, entities: entities.size, reclassified };
+function describeTitleRule(
+  spec: Pick<TitleRuleSpec, "titleMatchMode" | "titleAnchor">,
+): string {
+  if (spec.titleMatchMode === "phrase") return "whole words";
+  if (spec.titleMatchMode === "contains") return "contains text";
+  if (spec.titleAnchor === "any") return "exact title part";
+  if (spec.titleAnchor === "interior") return "exact middle part";
+  return `exact ${spec.titleAnchor} part`;
+}
+
+function titleRuleScopeLabel(
+  rule: Pick<Rule, "scopeKind" | "scopeValue">,
+): string {
+  if (rule.scopeKind === "domain") return rule.scopeValue ?? "one website";
+  if (rule.scopeKind === "process") return rule.scopeValue ?? "one app";
+  if (rule.scopeKind === "browsers") return "browsers";
+  return "any app";
 }
 
 function SessionCorrectionDialog({
@@ -2595,12 +2802,26 @@ function CategoriesAndRules({
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [newName, setNewName] = useState("");
-  type RuleDraft = { type: MatchType; pattern: string; scope: string };
+  type RuleDraft = {
+    type: MatchType;
+    pattern: string;
+    scopeKind: TitleRuleScopeKind;
+    scopeValue: string;
+    titleMatchMode: TitleRuleMatchMode;
+    titleAnchor: TitleRuleAnchor;
+  };
   const [drafts, setDrafts] = useState<Record<number, RuleDraft>>({});
   const applied = appliedRuleIds === null ? null : new Set(appliedRuleIds);
 
   const draftFor = (id: number): RuleDraft =>
-    drafts[id] ?? { type: "domain" as const, pattern: "", scope: ANY_APP };
+    drafts[id] ?? {
+      type: "domain" as const,
+      pattern: "",
+      scopeKind: "process",
+      scopeValue: "",
+      titleMatchMode: "phrase",
+      titleAnchor: "any",
+    };
   const setDraft = (id: number, patch: Partial<RuleDraft>) =>
     setDrafts((current) => ({ ...current, [id]: { ...draftFor(id), ...patch } }));
   const toggle = (id: number) => setExpanded((current) => {
@@ -2612,7 +2833,12 @@ function CategoriesAndRules({
     const draft = draftFor(categoryId);
     if (!draft.pattern.trim() || !ruleDraftReady(draft)) return;
     try {
-      await addRule(draft.type, draft.pattern, categoryId, draft.scope);
+      await addRule(
+        draft.type,
+        draft.pattern,
+        categoryId,
+        draft.type === "title" ? draft : {},
+      );
       setDraft(categoryId, { pattern: "" });
       await onChanged();
     } catch (error) {
@@ -2661,6 +2887,17 @@ function CategoriesAndRules({
       await onChanged();
     } catch (error) { banner.report(error, "category"); }
   };
+  const resetCount = Number(meta.settings.window_rules_reset_v4_count ?? "0");
+  const showResetNotice =
+    meta.settings.window_rules_reset_v4_pending === "1" && resetCount > 0;
+  const dismissResetNotice = async () => {
+    try {
+      await updateSetting("window_rules_reset_v4_pending", "0");
+      await onChanged();
+    } catch (error) {
+      banner.report(error, "Window rule notice");
+    }
+  };
 
   return (
     // Scrolls itself rather than the page once enough categories are open. The
@@ -2668,9 +2905,27 @@ function CategoriesAndRules({
     // when there is nothing to scroll.
     <div className="scroll-well -mr-2 flex min-h-0 flex-col overflow-y-auto pr-2">
       {colorMenu !== null && <button type="button" aria-label="Close menu" className="fixed inset-0 z-40 cursor-default" onClick={() => setColorMenu(null)} />}
+      {showResetNotice && (
+        <div className="mb-3 flex items-start gap-3 rounded-lg border border-accent/25 bg-accent/[.055] px-3 py-2.5 text-[11px] leading-relaxed text-ink-2">
+          <p className="min-w-0 flex-1">
+            Window matching was upgraded. {resetCount} older Window{" "}
+            {resetCount === 1 ? "rule was" : "rules were"} removed because the old
+            substring meaning could not be translated reliably. App and Website rules
+            were preserved.
+          </p>
+          <button
+            type="button"
+            className="shrink-0 text-ink-3 hover:text-ink-2"
+            onClick={() => void dismissResetNotice()}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <p className="mb-4 text-[11px] leading-relaxed text-ink-3">
-        Rules classify all matching historical and future activity. When several rules match,
-        Website wins, then Window, then App.
+        Rules classify matching historical and future activity. A Website rule beats a
+        general Window rule; a Window rule limited to one website can refine it. Window
+        rules beat App rules.
       </p>
       <div className="flex flex-col gap-2">
         {meta.categories.map((category) => {
@@ -2754,18 +3009,24 @@ function CategoriesAndRules({
                           {RULE_LABELS[rule.matchType]}
                         </span>
                         <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
-                        {/* Only Window rules can be scoped, and an unscoped one
-                            says nothing worth a chip — the absence is the
-                            default reading. */}
-                        {rule.matchType === "title" && rule.scope && rule.scope !== ANY_APP && (
-                          <span
-                            className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3"
-                            title={rule.scope === BROWSER_SCOPE
-                              ? "Only matches windows in a browser."
-                              : `Only matches windows belonging to ${rule.scope}.`}
-                          >
-                            {rule.scope === BROWSER_SCOPE ? "browsers" : rule.scope}
-                          </span>
+                        {rule.matchType === "title" && (
+                          <>
+                            <span
+                              className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3"
+                              title="How the text is compared with a normalized window title."
+                            >
+                              {describeTitleRule({
+                                titleMatchMode: rule.titleMatchMode ?? "phrase",
+                                titleAnchor: rule.titleAnchor ?? "any",
+                              })}
+                            </span>
+                            <span
+                              className="max-w-[118px] shrink-0 truncate rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3"
+                              title={`Only matches ${titleRuleScopeLabel(rule)}.`}
+                            >
+                              {titleRuleScopeLabel(rule)}
+                            </span>
+                          </>
                         )}
                         {applied !== null && !applied.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3" title="Nothing in your history has ever matched this rule.">unused</span>}
                         <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
@@ -2779,44 +3040,98 @@ function CategoriesAndRules({
                       <input value={draft.pattern} onChange={(event) => setDraft(category.id, { pattern: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") void submitRule(category.id); }} placeholder={draft.type === "domain" ? "example.com" : draft.type === "title" ? "words to match…" : "example.exe"} className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60" />
                       <Button variant="primary" disabled={!draft.pattern.trim() || !ruleDraftReady(draft)} onClick={() => void submitRule(category.id)}>Add rule</Button>
                     </div>
-                    {/* Only Window rules take a scope, and only they need one:
-                        the other two already name what they match. Typed rather
-                        than picked from a list of apps, because the rule should
-                        be able to name a program that has not been recorded
-                        yet. */}
                     {draft.type === "title" && (
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="shrink-0 text-[10.5px] text-ink-3">Applies to</span>
-                        <span className="flex rounded-lg border border-edge bg-surface p-0.5">
-                          {([
-                            [ANY_APP, "Any app"],
-                            [BROWSER_SCOPE, "Browsers"],
-                          ] as const).map(([value, label]) => (
+                      <div className="mt-2 rounded-lg border border-edge/60 bg-surface/45 p-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Match as</span>
+                          <span className="flex rounded-lg border border-edge bg-surface p-0.5">
+                            {([
+                              ["phrase", "Whole words"],
+                              ["segment", "Exact part"],
+                              ["contains", "Contains"],
+                            ] as Array<[TitleRuleMatchMode, string]>).map(([mode, label]) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                className={`rounded-md px-2 py-1 text-[10.5px] ${
+                                  draft.titleMatchMode === mode
+                                    ? "bg-surface-3 text-ink-2"
+                                    : "text-ink-3 hover:text-ink-2"
+                                }`}
+                                onClick={() => setDraft(category.id, {
+                                  titleMatchMode: mode,
+                                  titleAnchor: mode === "segment" ? draft.titleAnchor : "any",
+                                })}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </span>
+                        </div>
+                        {draft.titleMatchMode === "segment" && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Position</span>
+                            <MenuSelect
+                              size="compact"
+                              className="w-44"
+                              value={draft.titleAnchor}
+                              onChange={(value) => setDraft(category.id, {
+                                titleAnchor: value as TitleRuleAnchor,
+                              })}
+                              label="Title-part position"
+                              options={[
+                                { value: "any", label: "Anywhere" },
+                                { value: "first", label: "First part" },
+                                { value: "interior", label: "Middle part" },
+                                { value: "last", label: "Last part" },
+                              ]}
+                            />
+                          </div>
+                        )}
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Applies to</span>
+                          <span className="flex rounded-lg border border-edge bg-surface p-0.5">
+                            {([
+                              [ANY_APP, "Any app"],
+                              [BROWSER_SCOPE, "Browsers"],
+                              ["process", "One app"],
+                              ["domain", "Website"],
+                            ] as Array<[TitleRuleScopeKind, string]>).map(([kind, label]) => (
                             <button
-                              key={value}
+                              key={kind}
                               type="button"
-                              className={`rounded-md px-2 py-1 text-[10.5px] ${draft.scope === value ? "bg-surface-3 text-ink-2" : "text-ink-3 hover:text-ink-2"}`}
-                              onClick={() => setDraft(category.id, { scope: value })}
+                              className={`rounded-md px-2 py-1 text-[10.5px] ${
+                                draft.scopeKind === kind
+                                  ? "bg-surface-3 text-ink-2"
+                                  : "text-ink-3 hover:text-ink-2"
+                              }`}
+                              onClick={() => setDraft(category.id, {
+                                scopeKind: kind,
+                                scopeValue:
+                                  kind === "any" || kind === "browsers"
+                                    ? ""
+                                    : draft.scopeValue,
+                              })}
                             >
                               {label}
                             </button>
                           ))}
-                          <button
-                            type="button"
-                            className={`rounded-md px-2 py-1 text-[10.5px] ${draft.scope !== ANY_APP && draft.scope !== BROWSER_SCOPE ? "bg-surface-3 text-ink-2" : "text-ink-3 hover:text-ink-2"}`}
-                            onClick={() => setDraft(category.id, { scope: SCOPE_PENDING })}
-                          >
-                            One app
-                          </button>
-                        </span>
-                        {draft.scope !== ANY_APP && draft.scope !== BROWSER_SCOPE && (
-                          <input
-                            value={draft.scope === SCOPE_PENDING ? "" : draft.scope}
-                            onChange={(event) => setDraft(category.id, { scope: event.target.value || SCOPE_PENDING })}
-                            placeholder="obsidian.exe"
-                            className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60"
-                          />
-                        )}
+                          </span>
+                          {(draft.scopeKind === "process" || draft.scopeKind === "domain") && (
+                            <input
+                              value={draft.scopeValue}
+                              onChange={(event) => setDraft(category.id, {
+                                scopeValue: event.target.value,
+                              })}
+                              placeholder={
+                                draft.scopeKind === "process"
+                                  ? "obsidian.exe"
+                                  : "github.com"
+                              }
+                              className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60"
+                            />
+                          )}
+                        </div>
                       </div>
                     )}
                     <p className="mt-2 text-[10.5px] text-ink-3">

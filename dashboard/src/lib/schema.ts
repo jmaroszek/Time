@@ -7,7 +7,7 @@
  * are refusals, and leaving this one behind makes the dashboard reject a
  * database the tracker has already upgraded.
  */
-export const SUPPORTED_SCHEMA_VERSION = 3;
+export const SUPPORTED_SCHEMA_VERSION = 4;
 const NEWER_SCHEMA_PREFIX = "DatabaseSchemaTooNew:";
 
 /** Missing means the pre-versioning legacy schema, which remains readable. */
