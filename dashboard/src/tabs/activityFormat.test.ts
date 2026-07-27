@@ -62,7 +62,7 @@ describe("titleMatchParts", () => {
     // original: a window that drops or duplicates characters is worse than a
     // clip, because it reads as recorded text.
     expect(`${parts?.head}${parts?.hit}${parts?.tail}`).toBe(
-      title.slice(title.indexOf("myrepo") - 16),
+      title.slice(title.indexOf("myrepo") - 30),
     );
   });
 

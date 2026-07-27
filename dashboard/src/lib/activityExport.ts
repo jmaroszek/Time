@@ -66,6 +66,8 @@ function buildSummaryExport(source: ActivitySource, startSec: number, endSec: nu
     classificationFilter: "all",
     sort: "name",
     direction: "asc",
+    windowSort: "seconds",
+    windowDirection: "desc",
     includeNoise: true,
     entityOffset: 0,
     entityLimit: Number.MAX_SAFE_INTEGER,

@@ -7,12 +7,14 @@ import {
 import { cleanDomainName, cleanProcessName } from "./format";
 import type { Session } from "./metrics";
 import { classifyNoise, type NoisePolicy, type NoiseReason } from "./noise";
+import { normalizeWindowTitle } from "./titleRules";
 
 export type ActivityEntityKind = "app" | "website";
 export type ActivityStatus = "uncategorized" | "partial" | "mixed" | "single" | "ignored";
 export type ActivityTypeFilter = "all" | ActivityEntityKind;
 export type ActivitySort = "name" | "seconds" | "lastSeen" | "days";
 export type ActivitySortDirection = "asc" | "desc";
+export type ActivityWindowSort = "title" | "seconds" | "days" | "lastSeen";
 
 export interface ActivitySource {
   sessions: Session[];
@@ -104,6 +106,8 @@ export interface ActivityQuery {
   classificationFilter: ActivityClassificationFilter;
   sort: ActivitySort;
   direction: ActivitySortDirection;
+  windowSort: ActivityWindowSort;
+  windowDirection: ActivitySortDirection;
   entityOffset: number;
   entityLimit: number;
   windowOffset: number;
@@ -121,6 +125,9 @@ export interface ActivityQuery {
 export interface ActivityEntityPage {
   rows: ActivityEntitySummary[];
   total: number;
+  /** Complete filtered totals, not merely the currently loaded page. */
+  apps: number;
+  websites: number;
 }
 
 /** Sessions carried inside a group for inspection. A group is a summary first;
@@ -128,11 +135,11 @@ export interface ActivityEntityPage {
  *  worker boundary, and the group reports its true count either way. */
 export const GROUP_SESSION_SAMPLE = 25;
 
-/** Joins an entity id to a title into one map key. NUL cannot occur in either
- *  half — the tracker strips it from every title before storing — so no pair of
- *  different (entity, title) values can collide on the joined string. Written
- *  as an escape because a literal NUL in source is invisible and makes the file
- *  read as binary. */
+/** Joins an entity id to a normalized title into one map key. NUL cannot occur
+ *  in either half — normalization strips controls — so no pair of different
+ *  (entity, title) values can collide on the joined string. Written as an
+ *  escape because a literal NUL in source is invisible and makes the file read
+ *  as binary. */
 const GROUP_KEY_SEP = "\u0000";
 
 /**
@@ -146,31 +153,45 @@ const GROUP_KEY_SEP = "\u0000";
  * unit someone actually meant: this window, this many visits, this much time.
  */
 export interface ActivityTitleGroup {
-  /** Identity plus exact title. Stable across queries, so it can key both a
-   *  React list and an expanded-group selection. */
+  /** Identity plus normalized full title. Stable across cosmetic title
+   *  changes, so it can key both a React list and an expanded-group selection. */
   key: string;
   entityId: string;
   entityKind: ActivityEntityKind;
   entityKey: string;
   /** The entity's friendly name — "Obsidian", not "obsidian.exe". */
   displayName: string;
+  /** Newest original spelling among the grouped sessions. */
   title: string;
   /** Every visit, not just the sampled ones. */
   sessionCount: number;
   seconds: number;
+  /** Distinct local days represented by every visit in the group. */
+  daysSeen: number;
   firstSeen: number;
   lastSeen: number;
+  /** First appeared in all history inside the selected range. */
+  isNew: boolean;
   /** All of them, so ticking a group can select every visit it stands for
    *  without a second round trip. Numbers are cheap; rows are not. */
   sessionIds: number[];
   /** Newest first, capped at GROUP_SESSION_SAMPLE. */
   sessions: ActivitySessionRow[];
   /** Null when the group's sessions disagree or none is categorized. */
+  categoryId: number | null;
   categoryName: string | null;
   categoryColor: string | null;
-  /** The group's sessions do not all resolve the same way — usually a session
-   *  override on one of them. */
+  /** The group's sessions resolve to different categories. */
   mixed: boolean;
+  /** Classification membership across every visit. These keep Library filters
+   *  honest without reducing a matching Window to a partial subtotal. */
+  categoryIds: number[];
+  hasUncategorized: boolean;
+  allIgnored: boolean;
+  /** The category agrees, but the rule or manual-correction source does not. */
+  provenanceMixed: boolean;
+  /** Null when provenance varies across visits. */
+  classificationSource: ActivitySessionRow["classificationSource"] | null;
   /** The rule deciding the group, when they agree. Shows at a glance whether a
    *  Window rule is doing any work here. */
   winningRuleType: MatchType | null;
@@ -179,7 +200,7 @@ export interface ActivityTitleGroup {
 
 export interface ActivityTitleGroupPage {
   rows: ActivityTitleGroup[];
-  /** Distinct titles, which is what `rows` is a page of. */
+  /** Distinct normalized titles, which is what `rows` is a page of. */
   total: number;
   /** Sessions behind every group, paged or not — what the old flat list
    *  would have shown, kept so the view can say what it collapsed. */
@@ -187,16 +208,22 @@ export interface ActivityTitleGroupPage {
 }
 
 /**
- * Collapse sessions into one row per distinct title, ordered by total time so
- * the heaviest window leads. Sessions arrive newest-first and that order is
- * preserved inside each group.
+ * Collapse sessions into one row per conservatively normalized full title,
+ * ordered by total time so the heaviest window leads. Sessions arrive
+ * newest-first, so the first original title becomes the representative label
+ * and that order is preserved inside each group.
  */
+function titleGroupKey(session: Pick<ActivitySessionRow, "entityId" | "title">): string {
+  return `${session.entityId}${GROUP_KEY_SEP}${normalizeWindowTitle(session.title)}`;
+}
+
 function groupSessionsByTitle(sessions: ActivitySessionRow[]): ActivityTitleGroup[] {
   const groups = new Map<string, ActivityTitleGroup>();
+  const daysByGroup = new Map<string, Set<number>>();
   for (const session of sessions) {
     // Entity as well as title: "Inbox" in a browser and "Inbox" in a mail
     // client are different activities that happen to share a word.
-    const key = `${session.entityId}${GROUP_KEY_SEP}${session.title}`;
+    const key = titleGroupKey(session);
     let group = groups.get(key);
     if (!group) {
       group = {
@@ -208,35 +235,87 @@ function groupSessionsByTitle(sessions: ActivitySessionRow[]): ActivityTitleGrou
         title: session.title,
         sessionCount: 0,
         seconds: 0,
+        daysSeen: 0,
         firstSeen: session.start,
         lastSeen: session.end,
+        isNew: false,
         sessionIds: [],
         sessions: [],
+        categoryId: session.categoryId,
         categoryName: session.categoryName,
         categoryColor: session.categoryColor,
         mixed: false,
+        categoryIds: [],
+        hasUncategorized: false,
+        allIgnored: true,
+        provenanceMixed: false,
+        classificationSource: session.classificationSource,
         winningRuleType: session.winningRuleType,
         winningRulePattern: session.winningRulePattern,
       };
       groups.set(key, group);
+      daysByGroup.set(key, new Set());
     }
     group.sessionCount += 1;
     group.seconds += session.seconds;
     group.firstSeen = Math.min(group.firstSeen, session.start);
     group.lastSeen = Math.max(group.lastSeen, session.end);
+    if (session.categoryId === null) group.hasUncategorized = true;
+    else if (!group.categoryIds.includes(session.categoryId)) group.categoryIds.push(session.categoryId);
+    group.allIgnored &&= session.categoryId !== null && session.categoryIgnored;
+    addDayKeys(daysByGroup.get(key)!, session.start, session.end);
     group.sessionIds.push(session.id);
     if (group.sessions.length < GROUP_SESSION_SAMPLE) group.sessions.push(session);
-    if (session.categoryName !== group.categoryName) {
+    if (!group.mixed && session.categoryId !== group.categoryId) {
       group.mixed = true;
+      group.categoryId = null;
       group.categoryName = null;
       group.categoryColor = null;
+      group.classificationSource = null;
+      group.winningRuleType = null;
+      group.winningRulePattern = null;
+    } else if (
+      !group.mixed
+      && !group.provenanceMixed
+      && (
+        session.classificationSource !== group.classificationSource
+        || session.winningRuleType !== group.winningRuleType
+        || session.winningRulePattern !== group.winningRulePattern
+      )
+    ) {
+      group.provenanceMixed = true;
+      group.classificationSource = null;
       group.winningRuleType = null;
       group.winningRulePattern = null;
     }
   }
-  return [...groups.values()].sort(
+  const result = [...groups.values()];
+  for (const group of result) {
+    group.daysSeen = daysByGroup.get(group.key)?.size ?? 0;
+    group.categoryIds.sort((left, right) => left - right);
+  }
+  return result.sort(
     (left, right) => right.seconds - left.seconds || right.lastSeen - left.lastSeen,
   );
+}
+
+function compareTitleGroups(
+  sort: ActivityWindowSort,
+  direction: ActivitySortDirection,
+): (left: ActivityTitleGroup, right: ActivityTitleGroup) => number {
+  const sign = direction === "asc" ? 1 : -1;
+  return (left, right) => {
+    const leftTitle = normalizeWindowTitle(left.title);
+    const rightTitle = normalizeWindowTitle(right.title);
+    let comparison = 0;
+    if (sort === "title") comparison = leftTitle.localeCompare(rightTitle);
+    else if (sort === "seconds") comparison = left.seconds - right.seconds;
+    else if (sort === "days") comparison = left.daysSeen - right.daysSeen;
+    else comparison = left.lastSeen - right.lastSeen;
+    return comparison * sign
+      || leftTitle.localeCompare(rightTitle)
+      || left.entityId.localeCompare(right.entityId);
+  };
 }
 
 /** Triage counter carried by the classification menu's Uncategorized option.
@@ -254,8 +333,8 @@ export interface ActivityQueryResult {
   noiseHidden: number;
   /**
    * Windows whose stored title contains the search text, one row per distinct
-   * title. Null when nothing is being searched, because stored titles are
-   * never listed until someone asks for them.
+   * normalized full title. Null when nothing is being searched, because stored
+   * titles are never listed until someone asks for them.
    *
    * Matching identities are not carried alongside: a search narrows `catalog`
    * in place, and `catalog` mixes apps and websites exactly as the unsearched
@@ -296,6 +375,8 @@ export interface ActivityIndex {
   exactRuleByEntity: Map<string, number>;
   /** Stable all-history summaries used only to decide whether an item is rare. */
   lifetimeEntities: Map<string, ActivityEntitySummary>;
+  /** Earliest visit for each normalized Window identity in all history. */
+  lifetimeWindowFirstSeen: Map<string, number>;
   hasStoredTitles: boolean;
   /** Rules that won at least one session in all of history. A rule missing here
    *  is the one actionable usage signal left: nothing matches it, so it is a
@@ -404,12 +485,22 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
         : null;
     if (entityId !== null && !exactRuleByEntity.has(entityId)) exactRuleByEntity.set(entityId, rule.id);
   }
+  const lifetimeWindowFirstSeen = new Map<string, number>();
+  for (const session of indexed) {
+    if (!normalizeWindowTitle(session.title)) continue;
+    const key = titleGroupKey(session);
+    lifetimeWindowFirstSeen.set(
+      key,
+      Math.min(lifetimeWindowFirstSeen.get(key) ?? Number.POSITIVE_INFINITY, session.start),
+    );
+  }
   const index: ActivityIndex = {
     sessions: indexed,
     categories: source.categories,
     rules: source.rules,
     exactRuleByEntity,
     lifetimeEntities: new Map(),
+    lifetimeWindowFirstSeen,
     hasStoredTitles,
     appliedRuleIds: [...appliedRuleIds],
   };
@@ -545,6 +636,20 @@ function matchesClassification(
   return entity.categories.some((category) => category.categoryId === categoryId);
 }
 
+function matchesTitleGroupClassification(
+  group: ActivityTitleGroup,
+  filter: ActivityClassificationFilter,
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "uncategorized") return group.hasUncategorized;
+  // As with identities, several ignored categories are still Ignored rather
+  // than Mixed; exclusion from Insights is the more important state.
+  if (filter === "mixed") return group.mixed && !group.allIgnored;
+  if (filter === "ignored") return group.allIgnored;
+  const categoryId = Number(filter.slice("category:".length));
+  return group.categoryIds.includes(categoryId);
+}
+
 function compareEntities(
   sort: ActivitySort,
   direction: ActivitySortDirection,
@@ -630,37 +735,49 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
 
   // Measured over every row the filters admit, not the loaded page, so the bar
   // scale is fixed the moment the filters are: pressing Load more must never
-  // rescale the rows already on screen. Search groups share it too, which is
-  // what keeps an app's bar comparable with a website's.
-  const maxSeconds = identityMatches.reduce((most, entity) => Math.max(most, entity.seconds), 0);
+  // rescale the rows already on screen. A title search extends the same scale
+  // with every matching Window below.
+  let maxSeconds = identityMatches.reduce((most, entity) => Math.max(most, entity.seconds), 0);
 
   const catalog = {
     rows: page(identityMatches, query.entityOffset, query.entityLimit),
     total: identityMatches.length,
+    apps: identityMatches.filter((entity) => entity.kind === "app").length,
+    websites: identityMatches.filter((entity) => entity.kind === "website").length,
   };
 
-  // Titles are matched regardless of the type filter, since a stored title has
-  // no kind of its own — the browser session that carries one is filed under a
-  // website, and the app filter would throw away the very rows a title search
-  // is for. The view labels that exception rather than hiding it.
+  // A title has no kind of its own, but every grouped Window has a parent
+  // identity that does. Classification is different: it belongs to each visit,
+  // so it must be evaluated after grouping rather than inherited from a parent
+  // identity that may contain unrelated categories.
   let windowMatches: ActivityTitleGroupPage | null = null;
   if (search) {
     const matching: ActivitySessionRow[] = [];
     for (const session of index.sessions) {
       if (!session.title.toLowerCase().includes(search)) continue;
       const entity = entitiesById.get(session.entityId);
-      if (!entity || !matchesClassification(entity, query.classificationFilter)) continue;
+      if (
+        !entity
+        || !inType(entity)
+      ) continue;
       const clipped = clippedSession(session, query.startSec, query.endSec);
       if (clipped) matching.push(clipped);
     }
     matching.sort((left, right) => right.start - left.start || right.id - left.id);
-    const grouped = groupSessionsByTitle(matching);
+    const grouped = groupSessionsByTitle(matching)
+      .filter((group) => matchesTitleGroupClassification(group, query.classificationFilter));
+    for (const group of grouped) {
+      const lifetimeFirstSeen = index.lifetimeWindowFirstSeen.get(group.key) ?? group.firstSeen;
+      group.isNew = canBeNew && lifetimeFirstSeen >= query.startSec;
+      maxSeconds = Math.max(maxSeconds, group.seconds);
+    }
+    grouped.sort(compareTitleGroups(query.windowSort, query.windowDirection));
     // The page limit counts titles, not sessions: one busy window should cost
     // one row here, which is the entire point of grouping.
     windowMatches = {
       rows: page(grouped, query.windowOffset, query.windowLimit),
       total: grouped.length,
-      sessionTotal: matching.length,
+      sessionTotal: grouped.reduce((total, group) => total + group.sessionCount, 0),
     };
   }
 
@@ -685,6 +802,10 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
   // offers an explicit toggle instead, and title capture is still opt-in and
   // off by default, which is where the real consent lives.
   const detailGrouped = groupSessionsByTitle(detailRows);
+  for (const group of detailGrouped) {
+    const lifetimeFirstSeen = index.lifetimeWindowFirstSeen.get(group.key) ?? group.firstSeen;
+    group.isNew = canBeNew && lifetimeFirstSeen >= query.startSec;
+  }
 
   return {
     catalog,

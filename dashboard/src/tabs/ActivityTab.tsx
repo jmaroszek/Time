@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -32,6 +31,7 @@ import {
   type ActivitySortDirection,
   type ActivitySource,
   type ActivityTypeFilter,
+  type ActivityWindowSort,
 } from "../lib/activity";
 import { buildActivityExport, type ActivityExportKind } from "../lib/activityExport";
 import {
@@ -223,18 +223,19 @@ export default function ActivityTab({
   const [classificationFilter, setClassificationFilter] = useState<LibraryFilter>("all");
   const [sort, setSort] = useState<ActivitySort>("seconds");
   const [direction, setDirection] = useState<ActivitySortDirection>("desc");
+  const [windowSort, setWindowSort] = useState<ActivityWindowSort>("seconds");
+  const [windowDirection, setWindowDirection] = useState<ActivitySortDirection>("desc");
   const [includeNoise, setIncludeNoise] = useState(false);
   const [entityLimit, setEntityLimit] = useState(ENTITY_PAGE);
   const [windowLimit, setWindowLimit] = useState(WINDOW_PAGE);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
   const [detailLimit, setDetailLimit] = useState(50);
-  // Two surfaces tick sessions — the window-match table and the drawer's
-  // session list — and they get a set each. Sharing one meant the drawer's
-  // "clear on a different entity" rule reached across and wiped a search
-  // selection the moment a result row was clicked, which is one stray click
-  // away from a list of fifty ticks.
-  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<number>>(() => new Set());
+  const [selectedWindow, setSelectedWindow] = useState<ActivityTitleGroup | null>(null);
+  const [selectedWindowTitleVisible, setSelectedWindowTitleVisible] = useState(true);
+  // Visit selection belongs to a detail surface. The compact search table only
+  // discovers a Window; it never silently turns one row into hundreds of
+  // selected sessions.
   const [drawerSessionIds, setDrawerSessionIds] = useState<Set<number>>(() => new Set());
   const [deleteScope, setDeleteScope] = useState<{ request: ActivityDeleteRequest; label: string } | null>(null);
   const [excludeScope, setExcludeScope] = useState<{
@@ -275,6 +276,8 @@ export default function ActivityTab({
     classificationFilter: classificationFilter === "excluded" ? "all" : classificationFilter,
     sort,
     direction,
+    windowSort,
+    windowDirection,
     noise: meta.noisePolicy,
     includeNoise,
     entityOffset: 0,
@@ -293,6 +296,8 @@ export default function ActivityTab({
     classificationFilter,
     sort,
     direction,
+    windowSort,
+    windowDirection,
     meta.noisePolicy,
     includeNoise,
     entityLimit,
@@ -303,11 +308,18 @@ export default function ActivityTab({
   ]);
   const analyzed = useActivityModel(source, query);
   const result = analyzed.result;
+  const currentWindow = useMemo(() => {
+    if (!selectedWindow || !result) return selectedWindow;
+    // Entity detail groups are complete; a global title-search group can be a
+    // subset when the query matches only one cosmetic spelling.
+    return result.detailGroups.rows.find((group) => group.key === selectedWindow.key)
+      ?? result.windowMatches?.rows.find((group) => group.key === selectedWindow.key)
+      ?? selectedWindow;
+  }, [result, selectedWindow]);
 
   useEffect(() => {
     setEntityLimit(ENTITY_PAGE);
     setWindowLimit(WINDOW_PAGE);
-    setSelectedSessionIds(new Set());
   }, [deferredSearch, typeFilter, classificationFilter, range.start, range.end]);
 
   useEffect(() => {
@@ -326,6 +338,10 @@ export default function ActivityTab({
     setDetailLimit(50);
     setDrawerSessionIds(new Set());
   }, [selectedEntityId]);
+
+  useEffect(() => {
+    setDrawerSessionIds(new Set());
+  }, [selectedWindow?.key]);
 
   useEffect(() => {
     setDetailLimit(50);
@@ -387,19 +403,16 @@ export default function ActivityTab({
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const toggleSession = toggle(setSelectedSessionIds);
   const toggleDrawerSession = toggle(setDrawerSessionIds);
-  /** Scoped to the rows actually on screen, never the unloaded remainder: the
-   *  only honest promise a checkbox can make is about what it can be seen to
-   *  tick, and deletion here is exact by design. A window group is on screen as
-   *  one row, so ticking it takes every visit it stands for. */
+  /** A Window detail action names the complete group explicitly, so selecting
+   *  all includes every represented visit even though only a recent sample is
+   *  carried for individual inspection. */
   const toggleAll = (set: Setter<Set<number>>) => (ids: number[]) => set((current) => {
     const next = new Set(current);
     if (ids.every((id) => next.has(id))) for (const id of ids) next.delete(id);
     else for (const id of ids) next.add(id);
     return next;
   });
-  const toggleAllSessions = toggleAll(setSelectedSessionIds);
   const toggleAllDrawerSessions = toggleAll(setDrawerSessionIds);
   const requestSessionDeletion = (ids: Set<number>) => {
     if (ids.size === 0) return;
@@ -422,10 +435,22 @@ export default function ActivityTab({
     });
   };
   const historyDeleted = (closeEntity: boolean) => {
-    // Both sets, whichever surface asked: the rows behind either are gone.
-    setSelectedSessionIds(new Set());
     setDrawerSessionIds(new Set());
-    if (closeEntity) setSelectedEntityId(null);
+    if (closeEntity) {
+      setSelectedWindow(null);
+      setSelectedEntityId(null);
+    }
+  };
+  const openEntity = (entityId: string) => {
+    setDrawerSessionIds(new Set());
+    setSelectedWindow(null);
+    setSelectedEntityId(entityId);
+  };
+  const openWindow = (group: ActivityTitleGroup, showTitle = true) => {
+    setDrawerSessionIds(new Set());
+    setSelectedEntityId(group.entityId);
+    setSelectedWindowTitleVisible(showTitle);
+    setSelectedWindow(group);
   };
 
   if (!meta.loaded || (!result && (sessionData.loading || analyzed.refreshing))) return <Spinner />;
@@ -433,6 +458,11 @@ export default function ActivityTab({
   if (error && !result) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
 
   const showingExclusions = classificationFilter === "excluded";
+  const hasActiveLibraryFilters = typeFilter !== "all" || classificationFilter !== "all";
+  const clearLibraryFilters = () => {
+    setTypeFilter("all");
+    setClassificationFilter("all");
+  };
   return (
     <div
       className="relative flex min-h-0 flex-1 flex-col gap-4"
@@ -509,23 +539,29 @@ export default function ActivityTab({
                       identities={result.catalog}
                       windows={result.windowMatches}
                       search={deferredSearch.trim()}
-                      typeFilter={typeFilter}
                       scale={result}
                       sort={sort}
                       direction={direction}
                       onSort={(next) => updateSort(next, sort, direction, setSort, setDirection)}
+                      windowSort={windowSort}
+                      windowDirection={windowDirection}
+                      onWindowSort={(next) => updateWindowSort(
+                        next,
+                        windowSort,
+                        windowDirection,
+                        setWindowSort,
+                        setWindowDirection,
+                      )}
                       selectedEntityId={selectedEntityId}
-                      onSelectEntity={setSelectedEntityId}
-                      selectedSessionIds={selectedSessionIds}
-                      onToggleSession={toggleSession}
-                      onToggleAllSessions={toggleAllSessions}
-                      onDeleteSelected={() => requestSessionDeletion(selectedSessionIds)}
-                      onEditSession={setEditingSessionId}
-                      onMakeRule={setRuleDraft}
+                      selectedWindowKey={currentWindow?.key ?? null}
+                      onSelectEntity={openEntity}
+                      onSelectWindow={openWindow}
                       onLoadIdentities={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
                       onLoadWindows={() => setWindowLimit((limit) => limit + WINDOW_PAGE)}
                       isAllTime={isAllTime}
                       onTryAllTime={onTryAllTime}
+                      hasActiveFilters={hasActiveLibraryFilters}
+                      onClearFilters={clearLibraryFilters}
                     />
                   ) : (
                     <EntityCatalog
@@ -535,10 +571,12 @@ export default function ActivityTab({
                       direction={direction}
                       onSort={(next) => updateSort(next, sort, direction, setSort, setDirection)}
                       selectedEntityId={selectedEntityId}
-                      onSelect={setSelectedEntityId}
+                      onSelect={openEntity}
                       onLoadMore={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
                       isAllTime={isAllTime}
                       onTryAllTime={onTryAllTime}
+                      hasActiveFilters={hasActiveLibraryFilters}
+                      onClearFilters={clearLibraryFilters}
                     />
                   )}
                 </TableRegion>
@@ -550,7 +588,27 @@ export default function ActivityTab({
         )}
       </Card>
 
-      {result?.selectedEntity && (
+      {currentWindow ? (
+        <WindowDrawer
+          group={currentWindow}
+          showTitle={selectedWindowTitleVisible}
+          selectedSessionIds={drawerSessionIds}
+          onToggleSession={toggleDrawerSession}
+          onToggleAllSessions={toggleAllDrawerSessions}
+          onDeleteSelected={() => requestSessionDeletion(drawerSessionIds)}
+          onEditSession={setEditingSessionId}
+          onMakeRule={setRuleDraft}
+          onBack={() => {
+            setDrawerSessionIds(new Set());
+            setSelectedWindow(null);
+          }}
+          onClose={() => {
+            setDrawerSessionIds(new Set());
+            setSelectedWindow(null);
+            setSelectedEntityId(null);
+          }}
+        />
+      ) : result?.selectedEntity ? (
         <EntityDrawer
           entity={result.selectedEntity}
           groups={result.detailGroups}
@@ -563,23 +621,18 @@ export default function ActivityTab({
           onClose={() => setSelectedEntityId(null)}
           categories={meta.categories}
           aliases={meta.aliases}
-          selectedSessionIds={drawerSessionIds}
-          onToggleSession={toggleDrawerSession}
-          onToggleAllSessions={toggleAllDrawerSessions}
-          onDeleteSelected={() => requestSessionDeletion(drawerSessionIds)}
           onDeleteEntity={() => requestEntityDeletion(result.selectedEntity!)}
           onExclude={() => setExcludeScope({
             kind: result.selectedEntity!.kind === "app" ? "app" : "website",
             pattern: result.selectedEntity!.key,
             label: result.selectedEntity!.displayName,
           })}
-          onEditSession={setEditingSessionId}
-          onMakeRule={setRuleDraft}
+          onOpenWindow={(group) => openWindow(group, showTitles)}
           onAssign={(categoryId) => assignEntity(result.selectedEntity!, categoryId)}
           onSaveAlias={(alias) => saveAlias(result.selectedEntity!.key, alias)}
           onRemoveExactRule={() => removeExactRules(result.selectedEntity!)}
         />
-      )}
+      ) : null}
 
       {deleteScope && (
         <DeleteActivityDialog
@@ -587,6 +640,12 @@ export default function ActivityTab({
           onClose={() => setDeleteScope(null)}
           onDeleted={(request) => {
             setDeleteScope(null);
+            if (request.mode === "sessions" && currentWindow) {
+              const deletedIds = new Set(request.sessionIds);
+              if (currentWindow.sessionIds.every((id) => deletedIds.has(id))) {
+                setSelectedWindow(null);
+              }
+            }
             historyDeleted(request.mode === "entity");
           }}
         />
@@ -796,6 +855,20 @@ function updateSort(
   }
 }
 
+function updateWindowSort(
+  next: ActivityWindowSort,
+  current: ActivityWindowSort,
+  direction: ActivitySortDirection,
+  setSort: (sort: ActivityWindowSort) => void,
+  setDirection: (direction: ActivitySortDirection) => void,
+): void {
+  if (next === current) setDirection(direction === "asc" ? "desc" : "asc");
+  else {
+    setSort(next);
+    setDirection(next === "title" ? "asc" : "desc");
+  }
+}
+
 /**
  * `offset` is for tables that sit under a sticky group heading: both stick to
  * the same scroll container, so the header row has to start where the heading
@@ -809,7 +882,30 @@ function StickyHead({ children, offset = "top-0" }: { children: ReactNode; offse
   );
 }
 
-function SortHeading({
+type SummaryTableSort = "label" | "seconds" | "days" | "lastSeen";
+
+interface SummaryTableBadge {
+  label: string;
+  title: string;
+  tone?: "muted" | "accent";
+}
+
+interface SummaryTableRow {
+  key: string;
+  primary: ReactNode;
+  primaryLabel: string;
+  primaryTitle?: string;
+  metadata: ReactNode;
+  badges: SummaryTableBadge[];
+  seconds: number;
+  daysSeen: number;
+  lastSeen: number;
+  selected: boolean;
+  openLabel: string;
+  onOpen: () => void;
+}
+
+function SummarySortHeading({
   label,
   field,
   active,
@@ -818,18 +914,141 @@ function SortHeading({
   onSort,
 }: {
   label: string;
-  field: ActivitySort;
+  field: SummaryTableSort;
   active: boolean;
   direction: ActivitySortDirection;
   className?: string;
-  onSort: (field: ActivitySort) => void;
+  onSort: (field: SummaryTableSort) => void;
 }) {
   return (
-    <th className={`pb-2 font-medium ${className}`}>
+    <th
+      scope="col"
+      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : undefined}
+      className={`pb-2 font-medium ${className}`}
+    >
       <button type="button" onClick={() => onSort(field)} className="inline-flex items-center gap-1 hover:text-ink-2">
         {label}{active && <span aria-hidden="true">{direction === "asc" ? "↑" : "↓"}</span>}
       </button>
     </th>
+  );
+}
+
+/**
+ * Both Activity summaries deliberately share this renderer. The columns are a
+ * reading rhythm, not a property of either data source: identity or title,
+ * relative time, exact time, recurrence, recency. Keeping their widths and
+ * cell spacing here means the two tables line up exactly and cannot drift as
+ * either row gains new metadata.
+ */
+function SummaryTable({
+  rows,
+  tableLabel,
+  scale,
+  sort,
+  direction,
+  onSort,
+  headOffset,
+}: {
+  rows: SummaryTableRow[];
+  tableLabel: string;
+  scale: BarScale;
+  sort: SummaryTableSort;
+  direction: ActivitySortDirection;
+  onSort: (field: SummaryTableSort) => void;
+  headOffset?: string;
+}) {
+  return (
+    <table aria-label={tableLabel} className="w-full min-w-[680px] table-fixed text-xs">
+      {/* Sticky via a shadow, not a border: a collapsed table's borders do not
+          travel with a stuck header row. */}
+      <StickyHead offset={headOffset}>
+        <tr className="text-left text-[10.5px] text-ink-3">
+          <SummarySortHeading
+            label="Name"
+            field="label"
+            active={sort === "label"}
+            direction={direction}
+            onSort={onSort}
+            className="w-[27%] text-left"
+          />
+          {/* The bar draws what Time already sorts, so it has no independent
+              heading or sort state. */}
+          <th scope="col" className="w-[37%] pb-2">
+            <span className="sr-only">Time relative to the busiest result</span>
+          </th>
+          <SummarySortHeading
+            label="Time"
+            field="seconds"
+            active={sort === "seconds"}
+            direction={direction}
+            onSort={onSort}
+            className="w-[9%] text-right"
+          />
+          {/* Centering keeps a one- or two-digit count from clinging to either
+              adjacent measure. The offset balances Last seen's right edge. */}
+          <SummarySortHeading
+            label="Days seen"
+            field="days"
+            active={sort === "days"}
+            direction={direction}
+            onSort={onSort}
+            className="w-[15%] pl-8 text-center"
+          />
+          <SummarySortHeading
+            label="Last seen"
+            field="lastSeen"
+            active={sort === "lastSeen"}
+            direction={direction}
+            onSort={onSort}
+            className="w-[12%] text-right"
+          />
+        </tr>
+      </StickyHead>
+      <tbody>
+        {rows.map((row) => (
+          <tr
+            key={row.key}
+            className={`cursor-pointer border-b border-edge/40 transition-colors hover:bg-white/[.035] ${row.selected ? "bg-white/[.05]" : ""}`}
+            onClick={row.onOpen}
+          >
+            <td className="py-2.5 pr-4">
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {/* The row is clickable for the mouse, but the keyboard needs
+                      a real control to land on. */}
+                  <button
+                    type="button"
+                    title={row.primaryTitle}
+                    aria-label={`${row.primaryLabel} — ${row.openLabel}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      row.onOpen();
+                    }}
+                    className="min-w-0 truncate rounded-sm text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
+                  >
+                    {row.primary}
+                  </button>
+                  {row.badges.map((badge) => (
+                    <RowTag key={`${badge.label}:${badge.title}`} tone={badge.tone} title={badge.title}>
+                      {badge.label}
+                    </RowTag>
+                  ))}
+                </span>
+                <span className="flex min-w-0 items-center gap-[5px] text-[10px] leading-[1.4] text-ink-3">
+                  {row.metadata}
+                </span>
+              </span>
+            </td>
+            <td className="py-2.5 pr-4">
+              <ShareBar seconds={row.seconds} maxSeconds={scale.maxSeconds} totalSeconds={scale.totalSeconds} />
+            </td>
+            <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(row.seconds)}</td>
+            <td className="py-2.5 pl-8 text-center tabular-nums text-ink-3">{row.daysSeen}</td>
+            <td className="py-2.5 text-right tabular-nums text-ink-3">{formatLastSeen(row.lastSeen)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -844,6 +1063,8 @@ function EntityCatalog({
   onLoadMore,
   isAllTime,
   onTryAllTime,
+  hasActiveFilters,
+  onClearFilters,
 }: {
   page: { rows: ActivityEntitySummary[]; total: number };
   scale: BarScale;
@@ -855,8 +1076,19 @@ function EntityCatalog({
   onLoadMore: () => void;
   isAllTime: boolean;
   onTryAllTime: () => void;
+  hasActiveFilters: boolean;
+  onClearFilters: () => void;
 }) {
-  if (page.total === 0) return <NoResults isAllTime={isAllTime} onTryAllTime={onTryAllTime} />;
+  if (page.total === 0) {
+    return (
+      <NoResults
+        isAllTime={isAllTime}
+        onTryAllTime={onTryAllTime}
+        hasActiveFilters={hasActiveFilters}
+        onClearFilters={onClearFilters}
+      />
+    );
+  }
   return (
     <>
       <EntityTable
@@ -881,63 +1113,75 @@ function EntityCatalog({
  * second copy of the sort control that silently drove the first, one page limit
  * feeding two lists, and a **Load more** stranded below the table it grew.
  *
- * What remains separate is worth separating: identities are clicked to inspect,
- * sessions are ticked to delete. Different question, different shape, different
- * verb.
+ * What remains separate is worth separating: identities and Windows are both
+ * compact discovery rows, but answer different searches and open different
+ * detail modes. Visit selection and deletion stay out of both tables.
  */
 function SearchResults({
   identities,
   windows,
   search,
-  typeFilter,
   scale,
   sort,
   direction,
   onSort,
+  windowSort,
+  windowDirection,
+  onWindowSort,
   selectedEntityId,
+  selectedWindowKey,
   onSelectEntity,
-  selectedSessionIds,
-  onToggleSession,
-  onToggleAllSessions,
-  onDeleteSelected,
-  onEditSession,
-  onMakeRule,
+  onSelectWindow,
   onLoadIdentities,
   onLoadWindows,
   isAllTime,
   onTryAllTime,
+  hasActiveFilters,
+  onClearFilters,
 }: {
   identities: ActivityEntityPage;
   windows: ActivityTitleGroupPage;
   search: string;
-  typeFilter: ActivityTypeFilter;
   scale: BarScale;
   sort: ActivitySort;
   direction: ActivitySortDirection;
   onSort: (field: ActivitySort) => void;
+  windowSort: ActivityWindowSort;
+  windowDirection: ActivitySortDirection;
+  onWindowSort: (field: ActivityWindowSort) => void;
   selectedEntityId: string | null;
+  selectedWindowKey: string | null;
   onSelectEntity: (id: string) => void;
-  selectedSessionIds: Set<number>;
-  onToggleSession: (id: number) => void;
-  onToggleAllSessions: (ids: number[]) => void;
-  onDeleteSelected: () => void;
-  onEditSession: (id: number) => void;
-  onMakeRule: (group: ActivityTitleGroup) => void;
+  onSelectWindow: (group: ActivityTitleGroup) => void;
   onLoadIdentities: () => void;
   onLoadWindows: () => void;
   isAllTime: boolean;
   onTryAllTime: () => void;
+  hasActiveFilters: boolean;
+  onClearFilters: () => void;
 }) {
   if (identities.total === 0 && windows.total === 0) {
-    return <NoResults search={search} isAllTime={isAllTime} onTryAllTime={onTryAllTime} />;
+    return (
+      <NoResults
+        search={search}
+        isAllTime={isAllTime}
+        onTryAllTime={onTryAllTime}
+        hasActiveFilters={hasActiveFilters}
+        onClearFilters={onClearFilters}
+      />
+    );
   }
-  const loadedWindowIds = windows.rows.flatMap((group) => group.sessionIds);
-  const allWindowsSelected = loadedWindowIds.length > 0
-    && loadedWindowIds.every((id) => selectedSessionIds.has(id));
   return (
     <div className="flex flex-col gap-6">
       {identities.total > 0 && (
-        <ResultGroup title="Apps and websites" count={identities.total}>
+        <ResultGroup
+          title="Apps and websites"
+          summary={[
+            countNoun(identities.total, "result"),
+            identities.apps > 0 ? countNoun(identities.apps, "app") : null,
+            identities.websites > 0 ? countNoun(identities.websites, "website") : null,
+          ].filter((part): part is string => part !== null).join(" · ")}
+        >
           <EntityTable
             rows={identities.rows}
             scale={scale}
@@ -946,7 +1190,7 @@ function SearchResults({
             onSort={onSort}
             selectedEntityId={selectedEntityId}
             onSelect={onSelectEntity}
-            headOffset="top-8"
+            headOffset="top-12"
           />
           {identities.rows.length < identities.total && (
             <LoadMore shown={identities.rows.length} total={identities.total} onClick={onLoadIdentities} />
@@ -955,49 +1199,22 @@ function SearchResults({
       )}
       {windows.total > 0 && (
         <ResultGroup
-          title="Window matches"
-          count={windows.total}
-          // What the grouping collapsed, so the number is accounted for rather
-          // than quietly smaller than it used to be.
-          subtitle={windows.sessionTotal > windows.total
-            ? `${windows.sessionTotal} visits`
-            : undefined}
-          // Only worth saying while a type filter is set, which is the only
-          // time the exception can read as a bug. A stored title has no kind
-          // of its own, so narrowing by one would drop the rows searched for.
-          note={typeFilter === "all" ? undefined : {
-            label: "all types",
-            title: "Window titles are matched whatever the type filter is set to — a stored title belongs to the session, not to an app or a website.",
-          }}
-          action={
-            <Checkbox
-              checked={allWindowsSelected}
-              onChange={() => onToggleAllSessions(loadedWindowIds)}
-              className="text-[11px] text-ink-3 hover:text-ink-2"
-            >
-              {allWindowsSelected ? "Clear" : `Select all ${loadedWindowIds.length} visits`}
-            </Checkbox>
-          }
+          title="Windows"
+          summary={`${countNoun(windows.total, "result")} · ${countNoun(windows.sessionTotal, "visit")}`}
         >
           <WindowGroupTable
             rows={windows.rows}
             search={search}
-            selected={selectedSessionIds}
-            onToggleGroup={onToggleAllSessions}
-            onToggleSession={onToggleSession}
-            onEdit={onEditSession}
-            onMakeRule={onMakeRule}
+            scale={scale}
+            sort={windowSort}
+            direction={windowDirection}
+            onSort={onWindowSort}
+            selectedKey={selectedWindowKey}
+            onSelect={onSelectWindow}
           />
-          {/* Paging belongs to the list, so it stays against the table it
-              extends; the destructive action terminates the group. */}
+          {/* Paging belongs to the list, so it stays against the table it extends. */}
           {windows.rows.length < windows.total && (
             <LoadMore shown={windows.rows.length} total={windows.total} onClick={onLoadWindows} />
-          )}
-          {selectedSessionIds.size > 0 && (
-            <div className="mt-3 flex items-center justify-end gap-3">
-              <span className="text-[11px] tabular-nums text-ink-3">{selectedSessionIds.size} selected</span>
-              <Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button>
-            </div>
           )}
         </ResultGroup>
       )}
@@ -1011,39 +1228,34 @@ function SearchResults({
  * belonged to either table — and at the handoff the incoming group's label was
  * the one thing hidden, sliding under the outgoing table's header.
  *
- * Sentence case at ink-2 so it outranks the column headings beneath it. The two
- * were within half a pixel of each other, both uppercase and both ink-3, which
- * left "this is a section of the results" reading as one more column name.
+ * A true text-sm heading with stronger weight and ink keeps the section label
+ * visibly above the compact table headings beneath it. Labeled totals sit on a
+ * second line: unlike bare inline numbers, each quantity states what it counts.
  */
+function countNoun(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
 function ResultGroup({
   title,
-  count,
-  subtitle,
-  note,
-  action,
+  summary,
   children,
 }: {
   title: string;
-  count: number;
-  subtitle?: string;
-  note?: { label: string; title: string };
-  action?: ReactNode;
+  summary: string;
   children: ReactNode;
 }) {
   return (
     <section>
-      <div className="sticky top-0 z-20 flex h-8 items-center gap-2 bg-surface">
-        <h3 className="text-[12.5px] font-medium text-ink-2">{title}</h3>
-        <span className="text-[11px] tabular-nums text-ink-3">{count}</span>
-        {subtitle && <span className="text-[11px] tabular-nums text-ink-3">· {subtitle}</span>}
-        {note && (
-          <span className="rounded-full bg-surface-3 px-1.5 py-[1px] text-[9.5px] font-medium leading-[1.4] text-ink-3" title={note.title}>
-            {note.label}
-          </span>
-        )}
-        {action && <span className="ml-auto">{action}</span>}
+      <div className="sticky top-0 z-20 flex h-12 items-center bg-surface">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-ink-1">{title}</h3>
+          <div className="mt-0.5 flex items-center gap-2 text-[10.5px] tabular-nums leading-[1.4] text-ink-3">
+            <span>{summary}</span>
+          </div>
+        </div>
       </div>
-      {children}
+      <div className="pt-1">{children}</div>
     </section>
   );
 }
@@ -1067,99 +1279,57 @@ function EntityTable({
   onSelect: (id: string) => void;
   headOffset?: string;
 }) {
+  const summarySort: SummaryTableSort = sort === "name" ? "label" : sort;
+  const summaryRows: SummaryTableRow[] = rows.map((entity) => {
+    const badges: SummaryTableBadge[] = [];
+    if (entity.isNew) {
+      badges.push({
+        label: "New",
+        title: "First seen in all of your history inside this date range.",
+        tone: "accent",
+      });
+    }
+    if (entity.noise) {
+      badges.push({
+        label: entity.noise === "utility" ? "Utility" : "Rare",
+        title: entity.noise === "utility"
+          ? "Looks like an installer, driver, or local file — normally hidden from this list."
+          : "Seen briefly and rarely across all history — normally hidden from this list.",
+      });
+    }
+    return {
+      key: entity.id,
+      primary: entity.displayName,
+      primaryLabel: entity.displayName,
+      primaryTitle: entity.key,
+      metadata: (
+        <>
+          <ClassificationLabel entity={entity} />
+          <span aria-hidden="true" className="shrink-0">·</span>
+          <span className="shrink-0 capitalize">{entity.kind}</span>
+        </>
+      ),
+      badges,
+      seconds: entity.seconds,
+      daysSeen: entity.daysSeen,
+      lastSeen: entity.lastSeen,
+      selected: selectedEntityId === entity.id,
+      openLabel: "open details",
+      onOpen: () => onSelect(entity.id),
+    };
+  });
+
   return (
     <div>
-      <table className="w-full min-w-[680px] table-fixed text-xs">
-        {/* Sticky via a shadow, not a border: a collapsed table's borders do not
-            travel with a stuck header row. */}
-        <StickyHead offset={headOffset}>
-          <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
-            <SortHeading label="Name" field="name" active={sort === "name"} direction={direction} onSort={onSort} className="w-[27%] text-left" />
-            {/* Bar then duration, as in Top Apps. The column is kept barely
-                wider than the longest duration it can hold, because a
-                right-aligned number leaves a ragged left edge — the wider the
-                column, the further a short duration drifts from its own bar.
-                No heading: the bar draws what Time already sorts, so a second
-                one would name a dimension it cannot order independently. */}
-            <th className="w-[37%] pb-2"><span className="sr-only">Time relative to the busiest item</span></th>
-            <SortHeading label="Time" field="seconds" active={sort === "seconds"} direction={direction} onSort={onSort} className="w-[9%] text-right" />
-            {/* Centered, unlike the other numbers: a count that is nearly
-                always one or two digits, right-aligned, strands the digit at
-                the column edge with a hole beside it. Nothing here is read
-                down the column digit by digit, which is what right alignment
-                would buy. Centring only pays off if the column is wide enough
-                that its middle falls between its neighbours — a narrow one
-                parks the digit against Time and leaves the whole gap on the
-                other side. That width is why Last seen gives up four points it
-                does not need, and the left padding is the last 16px of it:
-                Last seen is right-aligned, so its text starts further in than
-                its column does, and matching the two gaps means offsetting the
-                centre by half that difference. */}
-            <SortHeading label="Days seen" field="days" active={sort === "days"} direction={direction} onSort={onSort} className="w-[15%] pl-8 text-center" />
-            <SortHeading label="Last seen" field="lastSeen" active={sort === "lastSeen"} direction={direction} onSort={onSort} className="w-[12%] text-right" />
-          </tr>
-        </StickyHead>
-        <tbody>
-          {rows.map((entity) => (
-            <tr
-              key={entity.id}
-              className={`cursor-pointer border-b border-edge/40 transition-colors hover:bg-white/[.035] ${selectedEntityId === entity.id ? "bg-white/[.05]" : ""}`}
-              onClick={() => onSelect(entity.id)}
-            >
-              <td className="py-2.5 pr-4">
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  {/* Every tag rides with the name, because each is a fact
-                      about the item: this one is new, that one is barely used.
-                      The line below is only how the row has been filed. Split
-                      across the two, a row that was both new and rare wore one
-                      badge on each line for no reason a reader could see. */}
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    {/* The row is clickable for the mouse, but the keyboard
-                        needs a real control to land on — a focusable <tr>
-                        announces a row, not something that opens anything. */}
-                    <button
-                      type="button"
-                      title={entity.key}
-                      onClick={(event) => { event.stopPropagation(); onSelect(entity.id); }}
-                      className="truncate rounded-sm text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
-                    >
-                      {entity.displayName}
-                      <span className="sr-only"> — open details</span>
-                    </button>
-                    {entity.isNew && (
-                      <RowTag tone="accent" title="First seen in all of your history inside this date range.">New</RowTag>
-                    )}
-                    {entity.noise && (
-                      <RowTag
-                        title={entity.noise === "utility"
-                          ? "Looks like an installer, driver, or local file — normally hidden from this list."
-                          : "Seen briefly and rarely across all history — normally hidden from this list."}
-                      >
-                        {entity.noise === "utility" ? "Utility" : "Rare"}
-                      </RowTag>
-                    )}
-                  </span>
-                  {/* leading-none clipped descenders (the "g" in "browsing"):
-                      the truncate children below are overflow-hidden, so their
-                      box is exactly the font size and anything under the
-                      baseline is cut. A little line-height gives them room. */}
-                  <span className="flex min-w-0 items-center gap-1.5 text-[10px] leading-[1.4] text-ink-3">
-                    <ClassificationLabel entity={entity} />
-                    <span aria-hidden="true" className="shrink-0">·</span>
-                    <span className="shrink-0 capitalize">{entity.kind}</span>
-                  </span>
-                </span>
-              </td>
-              <td className="py-2.5 pr-4">
-                <ShareBar seconds={entity.seconds} maxSeconds={scale.maxSeconds} totalSeconds={scale.totalSeconds} />
-              </td>
-              <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(entity.seconds)}</td>
-              <td className="py-2.5 pl-8 text-center tabular-nums text-ink-3">{entity.daysSeen}</td>
-              <td className="py-2.5 text-right tabular-nums text-ink-3">{formatLastSeen(entity.lastSeen)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <SummaryTable
+        rows={summaryRows}
+        tableLabel="Apps and websites"
+        scale={scale}
+        sort={summarySort}
+        direction={direction}
+        onSort={(field) => onSort(field === "label" ? "name" : field)}
+        headOffset={headOffset}
+      />
     </div>
   );
 }
@@ -1283,138 +1453,101 @@ function ClassificationLabel({ entity }: { entity: ActivityEntitySummary }) {
 /**
  * Windows, not intervals.
  *
- * One row per distinct title, carrying how many times it was returned to and
- * how long that came to. The tracker's own unit — an uninterrupted spell in the
- * foreground — is the wrong thing to hand someone: half of a real database's
- * rows last under ten seconds and carry a few percent of its time, so a search
- * answered row by row buries what was asked for under hundreds of fragments of
- * the same window. Expanding a row puts the intervals back for the cases that
- * genuinely need them.
+ * One row per distinct normalized full title, carrying how many times it was
+ * returned to and how long that came to. The tracker's own unit — an
+ * uninterrupted spell in the foreground — is the wrong thing to hand someone:
+ * half of a real database's rows last under ten seconds and carry a few percent
+ * of its time, so a search answered row by row buries what was asked for under
+ * hundreds of fragments of the same window. The table stays a discovery list;
+ * selecting a row moves interval-level work into the Window drawer.
  */
+function windowGroupClassification(group: ActivityTitleGroup): { label: string; detail: string } {
+  if (group.allIgnored) {
+    return {
+      label: "Ignored",
+      detail: group.mixed ? "Visits use different ignored categories" : group.categoryName ?? "Ignored",
+    };
+  }
+  if (group.mixed) {
+    return { label: "Mixed", detail: "Visits use different classifications" };
+  }
+  const label = group.categoryName ?? "Uncategorized";
+  if (group.provenanceMixed) return { label, detail: "Varies across visits" };
+  if (group.classificationSource === "session_override") {
+    return { label, detail: "Manual correction" };
+  }
+  if (group.winningRuleType && group.winningRulePattern) {
+    return {
+      label,
+      detail: `${RULE_LABELS[group.winningRuleType]} rule · ${group.winningRulePattern}`,
+    };
+  }
+  return { label, detail: "No matching rule" };
+}
+
 function WindowGroupTable({
   rows,
   search,
-  selected,
-  onToggleGroup,
-  onToggleSession,
-  onEdit,
-  onMakeRule,
-  showIdentity = true,
+  scale,
+  sort,
+  direction,
+  onSort,
+  selectedKey,
+  onSelect,
 }: {
   rows: ActivityTitleGroup[];
   search: string;
-  selected: Set<number>;
-  onToggleGroup: (ids: number[]) => void;
-  onToggleSession: (id: number) => void;
-  onEdit: (id: number) => void;
-  onMakeRule: (group: ActivityTitleGroup) => void;
-  /** The drawer already names the app in its header; only search results have
-   *  to say which one each window belongs to. */
-  showIdentity?: boolean;
+  scale: BarScale;
+  sort: ActivityWindowSort;
+  direction: ActivitySortDirection;
+  onSort: (field: ActivityWindowSort) => void;
+  selectedKey: string | null;
+  onSelect: (group: ActivityTitleGroup) => void;
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const toggleExpanded = (key: string) => setExpanded((current) => {
-    const next = new Set(current);
-    if (next.has(key)) next.delete(key); else next.add(key);
-    return next;
+  const summarySort: SummaryTableSort = sort === "title" ? "label" : sort;
+  const summaryRows: SummaryTableRow[] = rows.map((group) => {
+    const classification = windowGroupClassification(group);
+    return {
+      key: group.key,
+      primary: <MatchedTitle title={group.title} search={search} />,
+      primaryLabel: group.title,
+      primaryTitle: group.title,
+      metadata: (
+        <>
+          <span className="shrink-0">{classification.label}</span>
+          <span aria-hidden="true" className="shrink-0">·</span>
+          <span className="min-w-0 truncate" title={group.entityKey}>{group.displayName}</span>
+          <span aria-hidden="true" className="shrink-0">·</span>
+          <span className="shrink-0">{group.entityKind === "website" ? "Website" : "App"}</span>
+        </>
+      ),
+      badges: group.isNew
+        ? [{
+            label: "New",
+            title: "First seen in all of your history inside this date range.",
+            tone: "accent" as const,
+          }]
+        : [],
+      seconds: group.seconds,
+      daysSeen: group.daysSeen,
+      lastSeen: group.lastSeen,
+      selected: selectedKey === group.key,
+      openLabel: "open Window details",
+      onOpen: () => onSelect(group),
+    };
   });
+
   return (
     <div>
-      <table className="w-full min-w-[720px] table-fixed text-xs">
-        <StickyHead offset="top-8">
-          <tr className="text-left text-[10.5px] uppercase tracking-[.04em] text-ink-3">
-            <th className="w-9 pb-2"><span className="sr-only">Select</span></th>
-            {/* The widest column, because the title is the only reason any of
-                these rows is in the list. */}
-            <th className={`${showIdentity ? "w-[44%]" : "w-[58%]"} pb-2 font-medium`}>Window</th>
-            {showIdentity && <th className="w-[14%] pb-2 font-medium">App / Website</th>}
-            <th className="w-[16%] pb-2 font-medium">Classification</th>
-            <th className="w-[9%] pb-2 text-right font-medium">Visits</th>
-            <th className="w-[9%] pb-2 text-right font-medium">Time</th>
-            <th className="w-16 pb-2"><span className="sr-only">Actions</span></th>
-          </tr>
-        </StickyHead>
-        <tbody>
-          {rows.map((group) => {
-            const open = expanded.has(group.key);
-            const allSelected = group.sessionIds.every((id) => selected.has(id));
-            const someSelected = !allSelected && group.sessionIds.some((id) => selected.has(id));
-            return (
-              <Fragment key={group.key}>
-                <tr className={`border-b border-edge/40 transition-colors ${allSelected || someSelected ? "bg-white/[.05]" : ""}`}>
-                  <td className="py-2.5">
-                    <Checkbox
-                      size="md"
-                      checked={allSelected}
-                      indeterminate={someSelected}
-                      onChange={() => onToggleGroup(group.sessionIds)}
-                      label={`Select all ${group.sessionCount} visits to ${group.title}`}
-                    />
-                  </td>
-                  <td className="py-2.5 pr-3 text-ink-2">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      {/* The disclosure is the title itself: a separate chevron
-                          would be a second control for one action. */}
-                      <button
-                        type="button"
-                        onClick={() => toggleExpanded(group.key)}
-                        aria-expanded={open}
-                        className="flex min-w-0 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
-                      >
-                        <Chevron open={open} />
-                        <MatchedTitle title={group.title} search={search} />
-                      </button>
-                    </span>
-                  </td>
-                  {showIdentity && (
-                    <td className="truncate py-2.5 pr-3" title={group.entityKey}>{group.displayName}</td>
-                  )}
-                  <td className="min-w-0 py-2.5 pr-3 text-ink-2">
-                    <span className="block truncate">
-                      {group.mixed ? "Mixed" : group.categoryName ?? "Uncategorized"}
-                    </span>
-                    <span className="block truncate text-[10px] text-ink-3">
-                      {group.mixed
-                        ? "Its visits classify differently"
-                        : group.winningRulePattern
-                          ? `${RULE_LABELS[group.winningRuleType!]} · ${group.winningRulePattern}`
-                          : "No matching rule"}
-                    </span>
-                  </td>
-                  <td className="py-2.5 text-right tabular-nums text-ink-3">{group.sessionCount}</td>
-                  <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(group.seconds)}</td>
-                  <td className="py-2.5 text-right">
-                    {/* The bridge from "I found a pattern" to "classify it
-                        forever". Without it the only bulk verb here is delete,
-                        which is backwards for an app about classification. */}
-                    <button
-                      type="button"
-                      onClick={() => onMakeRule(group)}
-                      title="Create a Window rule from this title"
-                      className="rounded px-1.5 py-1 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
-                    >
-                      Rule…
-                    </button>
-                  </td>
-                </tr>
-                {open && (
-                  <tr className="border-b border-edge/40 bg-surface-2/40">
-                    <td />
-                    <td colSpan={showIdentity ? 6 : 5} className="py-2 pr-3">
-                      <GroupSessions
-                        group={group}
-                        selected={selected}
-                        onToggle={onToggleSession}
-                        onEdit={onEdit}
-                      />
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+      <SummaryTable
+        rows={summaryRows}
+        tableLabel="Windows"
+        scale={scale}
+        sort={summarySort}
+        direction={direction}
+        onSort={(field) => onSort(field === "label" ? "title" : field)}
+        headOffset="top-12"
+      />
     </div>
   );
 }
@@ -1474,8 +1607,8 @@ function GroupSessions({
         // Never silently truncated: the count above says how many visits there
         // were, so the difference has to be accounted for.
         <span className="pt-1 text-[10.5px] text-ink-3">
-          Showing the {group.sessions.length} most recent of {group.sessionCount} visits. Selecting
-          the window still takes all {group.sessionCount}.
+          Showing the {group.sessions.length} most recent of {group.sessionCount} visits.
+          Select all visits includes the complete group.
         </span>
       )}
     </div>
@@ -1484,7 +1617,7 @@ function GroupSessions({
 
 /** Characters of the title kept ahead of the match, enough to read it in
  *  context without pushing the match itself back out of view. */
-const MATCH_LEAD = 16;
+const MATCH_LEAD = 30;
 
 /**
  * Splits a stored title around the search text. Null means there is nothing to
@@ -1654,17 +1787,38 @@ function NoResults({
   isAllTime,
   onTryAllTime,
   search,
+  hasActiveFilters,
+  onClearFilters,
 }: {
   isAllTime: boolean;
   onTryAllTime: () => void;
   search?: string;
+  hasActiveFilters: boolean;
+  onClearFilters: () => void;
 }) {
+  const message = search
+    ? hasActiveFilters
+      ? <>No matches for &ldquo;{search}&rdquo; with these filters</>
+      : <>No matches for &ldquo;{search}&rdquo; in this range</>
+    : hasActiveFilters
+      ? <>No activity matches these filters</>
+      : <>No activity found in this range</>;
   return (
     <div className="flex h-36 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-ink-3">
-      <span className="max-w-[36ch] truncate">
-        {search ? <>No matches for &ldquo;{search}&rdquo; in this range</> : "No activity found in this range"}
+      <span className="max-w-[42ch] truncate">{message}</span>
+      <span className="flex items-center gap-1.5">
+        {hasActiveFilters && (
+          <button type="button" onClick={onClearFilters} className="text-xs text-accent hover:text-accent/80">
+            Clear filters
+          </button>
+        )}
+        {hasActiveFilters && !isAllTime && <span aria-hidden="true">·</span>}
+        {!isAllTime && (
+          <button type="button" onClick={onTryAllTime} className="text-xs text-accent hover:text-accent/80">
+            Try all time
+          </button>
+        )}
       </span>
-      {!isAllTime && <button type="button" onClick={onTryAllTime} className="text-xs text-accent hover:text-accent/80">Try All time</button>}
     </div>
   );
 }
@@ -1678,94 +1832,130 @@ function LoadMore({ shown, total, onClick }: { shown: number; total: number; onC
   );
 }
 
-/**
- * One window in the drawer's list. Card-shaped rather than tabular because the
- * drawer is a narrow column, and its sibling sections are all cards.
- *
- * With titles hidden the row still says everything a session row used to —
- * when, how long, how it classifies — and withholds only the words themselves.
- */
-function DrawerWindowGroup({
+/** One Window in an entity's discovery list. Visit-level actions live in the
+ * Window drawer, so this row has one verb and cannot expand the list in place. */
+function DrawerWindowRow({
   group,
   showTitle,
   search,
-  selected,
-  onToggleGroup,
-  onToggleSession,
-  onEditSession,
-  onMakeRule,
+  onOpen,
 }: {
   group: ActivityTitleGroup;
   showTitle: boolean;
   search: string;
-  selected: Set<number>;
-  onToggleGroup: (ids: number[]) => void;
+  onOpen: (group: ActivityTitleGroup) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(group)}
+      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-[11px] outline-none hover:bg-white/[.025] focus-visible:border-accent/60"
+    >
+      <span className="block truncate text-ink-2">
+        {showTitle
+          ? <MatchedTitle title={group.title} search={search} />
+          : <span className="italic text-ink-3">Window title hidden</span>}
+      </span>
+      <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-ink-3">
+        <span className="tabular-nums">{group.sessionCount} visit{group.sessionCount === 1 ? "" : "s"}</span>
+        <span aria-hidden="true">·</span>
+        <span className="tabular-nums">{fmtDuration(group.seconds)}</span>
+        <span aria-hidden="true">·</span>
+        <span>{group.mixed ? "Mixed" : group.categoryName ?? "Uncategorized"}</span>
+      </span>
+    </button>
+  );
+}
+
+function WindowDrawer({
+  group,
+  showTitle,
+  selectedSessionIds,
+  onToggleSession,
+  onToggleAllSessions,
+  onDeleteSelected,
+  onEditSession,
+  onMakeRule,
+  onBack,
+  onClose,
+}: {
+  group: ActivityTitleGroup;
+  showTitle: boolean;
+  selectedSessionIds: Set<number>;
   onToggleSession: (id: number) => void;
+  onToggleAllSessions: (ids: number[]) => void;
+  onDeleteSelected: () => void;
   onEditSession: (id: number) => void;
   onMakeRule: (group: ActivityTitleGroup) => void;
+  onBack: () => void;
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const allSelected = group.sessionIds.every((id) => selected.has(id));
-  const someSelected = !allSelected && group.sessionIds.some((id) => selected.has(id));
+  const classification = windowGroupClassification(group);
+  const allSelected = group.sessionIds.every((id) => selectedSessionIds.has(id));
+  const exceptionalProvenance = group.mixed
+    || group.provenanceMixed
+    || group.classificationSource === "session_override"
+    || group.winningRuleType === "title";
   return (
-    <div className="rounded-lg border border-edge/60 px-2.5 py-2 text-[11px] hover:bg-white/[.018]">
-      <div className="flex items-start gap-2">
-        <Checkbox
-          size="md"
-          align="start"
-          checked={allSelected}
-          indeterminate={someSelected}
-          onChange={() => onToggleGroup(group.sessionIds)}
-          label={`Select all ${group.sessionCount} visits to this window`}
-        />
-        <span className="min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={() => setOpen((current) => !current)}
-            aria-expanded={open}
-            className="flex w-full min-w-0 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
-          >
-            <Chevron open={open} />
-            <span className="min-w-0 flex-1 text-ink-2">
-              {showTitle
-                ? <MatchedTitle title={group.title} search={search} />
-                : <span className="italic text-ink-3">Window title hidden</span>}
-            </span>
-          </button>
-          <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-ink-3">
-            <span className="tabular-nums">{group.sessionCount} visit{group.sessionCount === 1 ? "" : "s"}</span>
-            <span aria-hidden="true">·</span>
-            <span className="tabular-nums">{fmtDuration(group.seconds)}</span>
-            <span aria-hidden="true">·</span>
-            <span>{group.mixed ? "Mixed" : group.categoryName ?? "Uncategorized"}</span>
-            {!group.mixed && group.winningRuleType && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>{RULE_LABELS[group.winningRuleType]} rule</span>
-              </>
-            )}
-          </span>
-        </span>
-        <button
-          type="button"
-          onClick={() => onMakeRule(group)}
-          title="Create a Window rule from this title"
-          className="shrink-0 rounded px-1.5 py-1 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
-        >
-          Rule…
-        </button>
-      </div>
-      {open && (
-        <div className="mt-2 border-t border-edge/60 pt-2">
-          <GroupSessions
-            group={group}
-            selected={selected}
-            onToggle={onToggleSession}
-            onEdit={onEditSession}
-          />
+    <>
+      <button type="button" aria-label="Close Window details" className="fixed inset-0 z-40 bg-black/25 max-md:hidden" onClick={onClose} />
+      <aside className="fixed bottom-0 right-0 top-0 z-50 flex w-[min(620px,92vw)] flex-col border-l border-edge bg-surface shadow-[-18px_0_48px_rgba(0,0,0,.4)] max-md:static max-md:z-auto max-md:w-full max-md:border-l-0 max-md:border-t max-md:shadow-none">
+        <div className="flex items-start gap-3 border-b border-edge px-5 py-4">
+          <button type="button" onClick={onBack} title={`Back to ${group.displayName} details`} className="mt-0.5 rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink">←</button>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10.5px] uppercase tracking-[.05em] text-ink-3">Window</p>
+            <h2 className="break-words text-lg font-semibold">
+              {showTitle ? group.title : <span className="italic text-ink-3">Window title hidden</span>}
+            </h2>
+            <p className="truncate text-[11px] text-ink-3" title={group.entityKey}>
+              {group.displayName} · {group.entityKind === "website" ? "Website" : "App"} · <span className="font-mono">{group.entityKey}</span>
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink">✕</button>
         </div>
-      )}
-    </div>
+        <div className="scroll-well flex-1 overflow-y-auto p-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <DetailMetric label="Time in range" value={fmtDuration(group.seconds)} />
+            <DetailMetric label="Days seen" value={String(group.daysSeen)} />
+            <DetailMetric label="First seen" value={formatShortDate(group.firstSeen)} />
+            <DetailMetric label="Last seen" value={formatShortDate(group.lastSeen)} />
+          </div>
+          <section className="mt-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-xs font-semibold">Classification</h3>
+                <p className="mt-2 text-[11.5px] text-ink-2">{classification.label}</p>
+                {exceptionalProvenance && (
+                  <p className="mt-1 truncate text-[10.5px] text-ink-3" title={classification.detail}>
+                    {classification.detail}
+                  </p>
+                )}
+              </div>
+              <Button onClick={() => onMakeRule(group)}>Create Window rule…</Button>
+            </div>
+          </section>
+          <section className="mt-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="mr-auto text-xs font-semibold">Visits</h3>
+              <Button onClick={() => onToggleAllSessions(group.sessionIds)}>
+                {allSelected ? "Clear selection" : `Select all ${group.sessionCount} visits`}
+              </Button>
+              {selectedSessionIds.size > 0 && (
+                <Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button>
+              )}
+            </div>
+            <div className="mt-3 rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-2.5">
+              <GroupSessions
+                group={group}
+                selected={selectedSessionIds}
+                onToggle={onToggleSession}
+                onEdit={onEditSession}
+              />
+            </div>
+          </section>
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -1781,14 +1971,9 @@ function EntityDrawer({
   onClose,
   categories,
   aliases,
-  selectedSessionIds,
-  onToggleSession,
-  onToggleAllSessions,
-  onDeleteSelected,
   onDeleteEntity,
   onExclude,
-  onEditSession,
-  onMakeRule,
+  onOpenWindow,
   onAssign,
   onSaveAlias,
   onRemoveExactRule,
@@ -1804,14 +1989,9 @@ function EntityDrawer({
   onClose: () => void;
   categories: Category[];
   aliases: Record<string, string>;
-  selectedSessionIds: Set<number>;
-  onToggleSession: (id: number) => void;
-  onToggleAllSessions: (ids: number[]) => void;
-  onDeleteSelected: () => void;
   onDeleteEntity: () => void;
   onExclude: () => void;
-  onEditSession: (id: number) => void;
-  onMakeRule: (group: ActivityTitleGroup) => void;
+  onOpenWindow: (group: ActivityTitleGroup) => void;
   onAssign: (categoryId: number) => Promise<void>;
   onSaveAlias: (alias: string) => Promise<void>;
   onRemoveExactRule: () => Promise<void>;
@@ -1907,8 +2087,6 @@ function EntityDrawer({
                 {groups.total}
                 {groups.sessionTotal > groups.total && ` · ${groups.sessionTotal} visits`}
               </span>
-              <span className="flex-1" />
-              {selectedSessionIds.size > 0 && <Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button>}
             </div>
             {hasStoredTitles && (
               <div className="mt-3 flex items-center gap-3">
@@ -1927,16 +2105,12 @@ function EntityDrawer({
             )}
             <div className="mt-3 flex flex-col gap-1.5">
               {groups.rows.map((group) => (
-                <DrawerWindowGroup
+                <DrawerWindowRow
                   key={group.key}
                   group={group}
                   showTitle={showTitles}
                   search={detailSearch}
-                  selected={selectedSessionIds}
-                  onToggleGroup={onToggleAllSessions}
-                  onToggleSession={onToggleSession}
-                  onEditSession={onEditSession}
-                  onMakeRule={onMakeRule}
+                  onOpen={onOpenWindow}
                 />
               ))}
               {groups.rows.length === 0 && <p className="py-5 text-center text-[11px] text-ink-3">No windows match this filter.</p>}
