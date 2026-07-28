@@ -19,7 +19,7 @@ import {
 } from "../lib/overview";
 import { useMeta } from "../state/meta";
 import { metricRamps } from "../lib/palettes";
-import { CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -55,6 +55,7 @@ export default function RhythmChart({
 
     return {
       animation: false,
+      textStyle: { fontFamily: CHART_FONT_FAMILY },
       grid: { left: 44, right: 16, top: 8, bottom: 28 },
       tooltip: {
         ...TOOLTIP_STYLE,

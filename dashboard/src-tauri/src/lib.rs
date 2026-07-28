@@ -3,15 +3,61 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 #[cfg(windows)]
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
+};
+#[cfg(windows)]
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 mod database;
 
 use database::{
     database_path, ActivityDeletePreview, ActivityDeleteRequest, ActivityDeleteResult,
-    ExecuteResult, SessionColumns, SessionCorrection, SessionCorrectionRequest, TimeDatabase,
-    TrackingExclusion, TrackingExclusionPreview, TrackingExclusionResult,
+    DatabaseBackup, ExecuteResult, RestoreNotice, SessionColumns, SessionCorrection,
+    SessionCorrectionRequest, TimeDatabase, TrackingExclusion, TrackingExclusionPreview,
+    TrackingExclusionResult, SCHEMA_VERSION,
 };
+
+#[cfg(windows)]
+const fn colorref(red: u8, green: u8, blue: u8) -> u32 {
+    red as u32 | ((green as u32) << 8) | ((blue as u32) << 16)
+}
+
+#[cfg(windows)]
+fn style_windows_title_bar<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+
+    // These mirror --color-bg and --color-ink-3 in dashboard/src/index.css.
+    // Keeping the system-drawn frame preserves Windows snap, menu, and caption
+    // behavior while making that frame part of Time's existing visual canvas.
+    let dark_mode = 1i32;
+    let caption_color = colorref(0x0f, 0x11, 0x15);
+    let text_color = colorref(0x79, 0x80, 0x8d);
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            std::ptr::from_ref(&dark_mode).cast(),
+            std::mem::size_of_val(&dark_mode) as u32,
+        );
+        // Custom caption and text colors were added in Windows 11. Ignore an
+        // unsupported result so Windows 10 keeps its native dark title bar.
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR,
+            std::ptr::from_ref(&caption_color).cast(),
+            std::mem::size_of_val(&caption_color) as u32,
+        );
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TEXT_COLOR,
+            std::ptr::from_ref(&text_color).cast(),
+            std::mem::size_of_val(&text_color) as u32,
+        );
+    }
+}
 
 /// Resolve the shared SQLite path (%LOCALAPPDATA%\Time\time_log.db) and ensure
 /// the directory exists. The tracker derives the same location in
@@ -58,6 +104,70 @@ async fn fetch_sessions(
 #[tauri::command]
 async fn backup_database(database: tauri::State<'_, TimeDatabase>) -> Result<String, String> {
     database.backup().await
+}
+
+#[tauri::command]
+async fn list_database_backups(
+    database: tauri::State<'_, TimeDatabase>,
+) -> Result<Vec<DatabaseBackup>, String> {
+    database.list_backups().await
+}
+
+#[tauri::command]
+async fn inspect_database_backup(
+    database: tauri::State<'_, TimeDatabase>,
+    backup_path: String,
+) -> Result<DatabaseBackup, String> {
+    database.inspect_backup(PathBuf::from(backup_path)).await
+}
+
+#[tauri::command]
+fn choose_database_backup_file(
+    app: tauri::AppHandle,
+    database: tauri::State<'_, TimeDatabase>,
+) -> Result<Option<String>, String> {
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .set_directory(database.backups_dir()?)
+        .add_filter("SQLite database", &["db"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = file_path.into_path().map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+async fn restore_database(
+    app: tauri::AppHandle,
+    database: tauri::State<'_, TimeDatabase>,
+    backup_path: String,
+) -> Result<(), String> {
+    let tracker_was_enabled = database.recording_consent().await?;
+    let mut pending = database.prepare_restore(PathBuf::from(backup_path)).await?;
+    if let Err(error) = stop_tracker() {
+        database.cancel_pending_restore()?;
+        return Err(error);
+    }
+    if let Err(error) = database.refresh_pending_safety_backup(&mut pending).await {
+        database.cancel_pending_restore()?;
+        if tracker_was_enabled {
+            let _ = start_tracker();
+        }
+        return Err(error);
+    }
+    app.restart()
+}
+
+#[tauri::command]
+fn take_restore_notice(app: tauri::AppHandle) -> Result<Option<RestoreNotice>, String> {
+    let base = app
+        .path()
+        .local_data_dir()
+        .map_err(|error| error.to_string())?;
+    TimeDatabase::take_restore_notice(&database_path(&base))
 }
 
 #[tauri::command]
@@ -227,6 +337,10 @@ fn stop_tracker() -> Result<(), String> {
 
 #[tauri::command]
 fn set_launch_at_login(enabled: bool) -> Result<(), String> {
+    set_launch_at_login_impl(enabled)
+}
+
+fn set_launch_at_login_impl(enabled: bool) -> Result<(), String> {
     #[cfg(windows)]
     {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -259,16 +373,110 @@ fn set_launch_at_login(enabled: bool) -> Result<(), String> {
     }
 }
 
+fn run_tracker_migration() -> Result<(), String> {
+    let path = tracker_path()?;
+    if !path.is_file() {
+        return Err(format!(
+            "Packaged tracker was not found at {}; an older backup cannot be migrated",
+            path.display()
+        ));
+    }
+    let status = Command::new(&path)
+        .current_dir(path.parent().ok_or("tracker path has no parent")?)
+        .env("TIME_MIGRATE_ONLY", "1")
+        .status()
+        .map_err(|error| error.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Tracker could not migrate the restored database (exit {status})"
+        ))
+    }
+}
+
+fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, String> {
+    let pending = tauri::async_runtime::block_on(TimeDatabase::begin_pending_restore(&path));
+    let swap = match pending {
+        Ok(Some(swap)) => swap,
+        Ok(None) => return tauri::async_runtime::block_on(TimeDatabase::open(path)),
+        Err(error) => {
+            let message = format!("Restore was canceled before replacement: {error}");
+            TimeDatabase::discard_pending_restore(&path, message)?;
+            return tauri::async_runtime::block_on(TimeDatabase::open(path));
+        }
+    };
+    let restored = swap.pending.clone();
+    let opened = (|| {
+        if restored.schema_version < SCHEMA_VERSION {
+            run_tracker_migration()?;
+        }
+        tauri::async_runtime::block_on(TimeDatabase::open(path.clone()))
+    })();
+    let database = match opened {
+        Ok(database) => database,
+        Err(error) => {
+            if let Err(rollback) = swap.rollback() {
+                return Err(format!(
+                    "Restore failed ({error}), and Time could not put the previous database back: {rollback}"
+                ));
+            }
+            let message =
+                format!("Restore failed and the previous database was put back unchanged: {error}");
+            TimeDatabase::write_restore_notice(&path, RestoreNotice { ok: false, message })?;
+            return tauri::async_runtime::block_on(TimeDatabase::open(path));
+        }
+    };
+
+    let mut warnings = Vec::new();
+    if let Err(error) =
+        set_launch_at_login_impl(restored.recording_consent && restored.launch_at_login)
+    {
+        warnings.push(format!("Windows startup could not be updated: {error}"));
+    }
+    if restored.recording_consent {
+        if let Err(error) = start_tracker() {
+            warnings.push(format!("the tracker could not be restarted: {error}"));
+        }
+    }
+    if let Err(error) = swap.commit() {
+        warnings.push(format!(
+            "the temporary rollback file could not be removed: {error}"
+        ));
+    }
+    let suffix = if warnings.is_empty() {
+        String::new()
+    } else {
+        format!(" Restore completed, but {}.", warnings.join("; "))
+    };
+    TimeDatabase::write_restore_notice(
+        &path,
+        RestoreNotice {
+            ok: true,
+            message: format!(
+                "Restored {}. Safety backup: {}.{}",
+                restored.source_name, restored.safety_backup_path, suffix
+            ),
+        },
+    )?;
+    Ok(database)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                style_windows_title_bar(&window);
+            }
+
             let base = app.path().local_data_dir()?;
             let path = database_path(&base);
             fs::create_dir_all(path.parent().expect("database path parent"))?;
-            let database = tauri::async_runtime::block_on(TimeDatabase::open(path))
-                .map_err(std::io::Error::other)?;
+            let database =
+                open_database_with_pending_restore(path).map_err(std::io::Error::other)?;
             app.manage(database);
             Ok(())
         })
@@ -278,6 +486,11 @@ pub fn run() {
             db_execute,
             fetch_sessions,
             backup_database,
+            list_database_backups,
+            inspect_database_backup,
+            choose_database_backup_file,
+            restore_database,
+            take_restore_notice,
             erase_history,
             preview_activity_delete,
             delete_activity,

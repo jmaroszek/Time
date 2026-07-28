@@ -22,11 +22,13 @@ const categories: Category[] = [
   { id: 1, name: "Focus", color: "#000", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 1 },
   { id: 2, name: "Media", color: "#000", isProductive: false, isNeutral: false, isIgnored: false, sortOrder: 2 },
   { id: 3, name: "Hidden", color: "#000", isProductive: false, isNeutral: true, isIgnored: true, sortOrder: 3 },
+  { id: 4, name: "System", color: "#000", isProductive: false, isNeutral: true, isIgnored: false, sortOrder: 4 },
 ];
 const rules: Rule[] = [
   { id: 1, matchType: "process", pattern: "code.exe", categoryId: 1, priority: 3 },
   { id: 2, matchType: "process", pattern: "video.exe", categoryId: 2, priority: 3 },
   { id: 3, matchType: "process", pattern: "hidden.exe", categoryId: 3, priority: 3 },
+  { id: 4, matchType: "process", pattern: "explorer.exe", categoryId: 4, priority: 3 },
 ];
 const classifier = buildClassifier(categories, rules, new Set());
 const range: Range = { start: new Date(2026, 5, 8), end: new Date(2026, 5, 11) };
@@ -93,6 +95,23 @@ describe("aggregateInsightsSessions", () => {
     const actual = aggregateInsightsSessions(shuffled, range, classifier, 120, "Sunday");
     expect(actual.current).toEqual(expected.current);
     expect(actual.kpis).toEqual(expected.kpis);
+  });
+
+  it("preserves range and daily focus chains through neutral activity", () => {
+    const focusSessions = [
+      make(20, at(8, 9), at(8, 10), "code.exe"),
+      make(21, at(8, 10), at(8, 10, 30), "explorer.exe"),
+      make(22, at(8, 10, 30), at(8, 11, 30), "code.exe"),
+    ];
+    const actual = aggregateInsightsSessions(
+      focusSessions,
+      { start: new Date(2026, 5, 8), end: new Date(2026, 5, 9) },
+      classifier,
+      60,
+      "Sunday",
+    );
+    expect(actual.kpis.longestFocusSec).toBe(2 * 3600);
+    expect(actual.historyDays[actual.historyDays.length - 1]?.longestFocusSeconds).toBe(2 * 3600);
   });
 });
 

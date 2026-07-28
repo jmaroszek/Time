@@ -10,7 +10,7 @@ This tab focuses on your recent behavior. The date picker in the top-right corne
 | --- | --- |
 | **Average productivity per day** | Productive time in the range divided by its calendar days. |
 | **Productivity percent** | Share of non-AFK time spent in categories marked productive. |
-| **Longest focus** | The longest unbroken chain of productive sessions. Switching between productive apps keeps the chain alive (gaps up to the "Focus chain max gap" setting, 2 minutes by default, are forgiven); going AFK or drifting to a non-productive app breaks it. |
+| **Longest focus** | The longest unbroken chain of productive sessions. Neutral and uncategorized activity preserve a chain without adding to its duration; unproductive activity or AFK time breaks it. Short untracked gaps up to the "Focus chain max gap" setting are forgiven. |
 | **Goal pace** | Productive hours in the range against the weekly goal prorated to the range's length - a trailing measure, deliberately not a catch-up rate. |
 
 ## Timeline

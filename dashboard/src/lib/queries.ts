@@ -2,6 +2,7 @@
 // categories/rules/settings (the tracker owns session writes).
 
 import {
+  DEFAULT_RULE_PRIORITY,
   normalizeRulePattern,
   type Category,
   type CategoryState,
@@ -159,8 +160,10 @@ export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
   min_app_seconds_per_day: "0",
   activity_noise_filter: "utilities",
   activity_noise_max_seconds: "120",
-  activity_noise_max_sessions: "3",
-  focus_chain_max_gap_seconds: "120",
+  activity_noise_max_sessions: "1",
+  color_palette: "slate",
+  productivity_style: "vivid",
+  focus_chain_max_gap_seconds: "300",
   day_start_hour: "0",
   day_end_hour: "24",
   tracking_paused: "0",
@@ -191,19 +194,19 @@ export async function saveProcessAliases(aliases: Record<string, string>): Promi
 
 // ---------------- rules / categories CRUD ----------------
 
-const DEFAULT_PRIORITY: Record<MatchType, number> = { domain: 1, title: 2, process: 3 };
-
 export type AddRuleOptions = Partial<Omit<TitleRuleSpec, "pattern">> & {
   priority?: number;
 };
 
-export async function addRule(
+function normalizedRuleWrite(
   matchType: MatchType,
   pattern: string,
-  categoryId: number,
   options: AddRuleOptions = {},
-): Promise<void> {
-  const db = await getDb();
+): {
+  pattern: string;
+  priority: number;
+  windowFields: string[];
+} {
   const pat = normalizeRulePattern(matchType, pattern);
   if (!pat) {
     const err = new Error(
@@ -245,14 +248,55 @@ export async function addRule(
   const priority = options.priority ??
     (matchType === "title" && titleSpec.scopeKind === "domain"
       ? 0
-      : DEFAULT_PRIORITY[matchType]);
+      : DEFAULT_RULE_PRIORITY[matchType]);
+  return { pattern: pat, priority, windowFields };
+}
+
+export async function addRule(
+  matchType: MatchType,
+  pattern: string,
+  categoryId: number,
+  options: AddRuleOptions = {},
+): Promise<void> {
+  const db = await getDb();
+  const normalized = normalizedRuleWrite(matchType, pattern, options);
   await db.execute(
     "INSERT INTO rules (match_type,pattern,category_id,priority,scope_kind,scope_value," +
       "title_match_mode,title_anchor) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)" +
       " ON CONFLICT(match_type,pattern,scope_kind,scope_value,title_match_mode,title_anchor)" +
       " DO UPDATE SET" +
       " category_id=excluded.category_id, priority=excluded.priority",
-    [matchType, pat, categoryId, priority, ...windowFields],
+    [
+      matchType,
+      normalized.pattern,
+      categoryId,
+      normalized.priority,
+      ...normalized.windowFields,
+    ],
+  );
+}
+
+export async function updateRule(
+  ruleId: number,
+  matchType: MatchType,
+  pattern: string,
+  categoryId: number,
+  options: AddRuleOptions = {},
+): Promise<void> {
+  const db = await getDb();
+  const normalized = normalizedRuleWrite(matchType, pattern, options);
+  await db.execute(
+    "UPDATE rules SET match_type=$1, pattern=$2, category_id=$3, priority=$4," +
+      " scope_kind=$5, scope_value=$6, title_match_mode=$7, title_anchor=$8" +
+      " WHERE id=$9",
+    [
+      matchType,
+      normalized.pattern,
+      categoryId,
+      normalized.priority,
+      ...normalized.windowFields,
+      ruleId,
+    ],
   );
 }
 
@@ -525,11 +569,46 @@ export async function fetchEarliestSessionStart(): Promise<number | null> {
   return rows[0]?.first_ts ?? null;
 }
 
-/** Snapshot the DB next to the live file and return the backup's full path.
- *  Derives the directory from the DB path (works whatever the file is named)
- *  rather than assuming the production filename. */
+/** Snapshot the DB into its Backups folder and return the full path. */
 export async function backupDatabase(): Promise<string> {
   return invoke<string>("backup_database");
+}
+
+export interface DatabaseBackup {
+  path: string;
+  name: string;
+  kind: string;
+  modifiedSec: number;
+  bytes: number;
+  schemaVersion: number | null;
+  compatible: boolean;
+  issue: string | null;
+  legacyLocation: boolean;
+}
+
+export interface RestoreNotice {
+  ok: boolean;
+  message: string;
+}
+
+export async function listDatabaseBackups(): Promise<DatabaseBackup[]> {
+  return invoke<DatabaseBackup[]>("list_database_backups");
+}
+
+export async function inspectDatabaseBackup(backupPath: string): Promise<DatabaseBackup> {
+  return invoke<DatabaseBackup>("inspect_database_backup", { backupPath });
+}
+
+export async function chooseDatabaseBackupFile(): Promise<string | null> {
+  return invoke<string | null>("choose_database_backup_file");
+}
+
+export async function restoreDatabase(backupPath: string): Promise<void> {
+  await invoke("restore_database", { backupPath });
+}
+
+export async function takeRestoreNotice(): Promise<RestoreNotice | null> {
+  return invoke<RestoreNotice | null>("take_restore_notice");
 }
 
 /** Securely erase all recorded sessions, checkpoint the WAL, and compact. */

@@ -13,11 +13,50 @@ vi.mock("./historyInvalidation", () => ({ invalidateHistory }));
 
 import {
   DEFAULT_USER_SETTINGS,
+  chooseDatabaseBackupFile,
   deleteActivity,
   deleteHistoryBefore,
   eraseAllHistory,
+  inspectDatabaseBackup,
+  listDatabaseBackups,
+  restoreDatabase,
   restoreDefaultSettings,
+  takeRestoreNotice,
+  updateRule,
 } from "./queries";
+
+describe("rule updates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getDb.mockResolvedValue({ execute: dbExecute });
+    dbExecute.mockResolvedValue({ rowsAffected: 1 });
+  });
+
+  it("updates one rule by id with normalized fields and fixed precedence", async () => {
+    await updateRule(17, "title", "  Standup  ", 4, {
+      scopeKind: "domain",
+      scopeValue: "Example.com",
+      titleMatchMode: "segment",
+      titleAnchor: "first",
+    });
+
+    expect(dbExecute).toHaveBeenCalledOnce();
+    const [sql, values] = dbExecute.mock.calls[0];
+    expect(sql).toContain("UPDATE rules SET");
+    expect(sql).toContain("WHERE id=$9");
+    expect(values).toEqual([
+      "title",
+      "standup",
+      4,
+      0,
+      "domain",
+      "example.com",
+      "segment",
+      "first",
+      17,
+    ]);
+  });
+});
 
 describe("destructive history commands", () => {
   beforeEach(() => {
@@ -68,5 +107,31 @@ describe("default settings restoration", () => {
     expect(DEFAULT_USER_SETTINGS).not.toHaveProperty("privacy_onboarding_complete");
     expect(DEFAULT_USER_SETTINGS).not.toHaveProperty("process_aliases");
     expect(DEFAULT_USER_SETTINGS).not.toHaveProperty("tracker_health_heartbeat");
+    expect(DEFAULT_USER_SETTINGS.color_palette).toBe("slate");
+    expect(DEFAULT_USER_SETTINGS.productivity_style).toBe("vivid");
+    expect(DEFAULT_USER_SETTINGS.activity_noise_max_sessions).toBe("1");
+  });
+});
+
+describe("backup and restore commands", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    invoke.mockResolvedValue(null);
+  });
+
+  it("keeps backup discovery, inspection, restore, and restart notice native", async () => {
+    await listDatabaseBackups();
+    await inspectDatabaseBackup("C:\\Backups\\one.db");
+    await chooseDatabaseBackupFile();
+    await restoreDatabase("C:\\Backups\\one.db");
+    await takeRestoreNotice();
+
+    expect(invoke.mock.calls).toEqual([
+      ["list_database_backups"],
+      ["inspect_database_backup", { backupPath: "C:\\Backups\\one.db" }],
+      ["choose_database_backup_file"],
+      ["restore_database", { backupPath: "C:\\Backups\\one.db" }],
+      ["take_restore_notice"],
+    ]);
   });
 });

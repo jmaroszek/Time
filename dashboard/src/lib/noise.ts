@@ -17,7 +17,7 @@
 
 import type { ActivityEntityKind, ActivityStatus } from "./activity";
 
-export type NoiseMode = "off" | "one_off" | "utilities";
+export type NoiseMode = "off" | "one_off" | "utilities_only" | "utilities";
 export type NoiseReason = "one_off" | "utility";
 
 export interface NoisePolicy {
@@ -31,8 +31,26 @@ export interface NoisePolicy {
 export const DEFAULT_NOISE_POLICY: NoisePolicy = {
   mode: "utilities",
   maxSeconds: 120,
-  maxSessions: 3,
+  maxSessions: 1,
 };
+
+export function hidesRareItems(mode: NoiseMode): boolean {
+  return mode === "one_off" || mode === "utilities";
+}
+
+export function hidesUtilities(mode: NoiseMode): boolean {
+  return mode === "utilities_only" || mode === "utilities";
+}
+
+/** The UI presents two independent switches while the database keeps one
+ *  backwards-compatible value. `utilities` remains the historical "both"
+ *  value; only the missing utilities-only combination is new. */
+export function noiseModeFor(rare: boolean, utilities: boolean): NoiseMode {
+  if (rare && utilities) return "utilities";
+  if (rare) return "one_off";
+  if (utilities) return "utilities_only";
+  return "off";
+}
 
 /** The fields the filter looks at — a structural subset of ActivityEntitySummary. */
 export interface NoiseCandidate {
@@ -85,10 +103,15 @@ export function classifyNoise(candidate: NoiseCandidate, policy: NoisePolicy): N
   // An explicit decision outranks every heuristic below: once a rule or an
   // assignment puts an entity in a category, the user has said it matters.
   if (candidate.status !== "uncategorized") return null;
-  if (policy.mode === "utilities" && isUtilityName(candidate)) return "utility";
-  return candidate.seconds < policy.maxSeconds && candidate.sessionCount <= policy.maxSessions
-    ? "one_off"
-    : null;
+  if (hidesUtilities(policy.mode) && isUtilityName(candidate)) return "utility";
+  if (
+    hidesRareItems(policy.mode)
+    && candidate.seconds < policy.maxSeconds
+    && candidate.sessionCount <= policy.maxSessions
+  ) {
+    return "one_off";
+  }
+  return null;
 }
 
 function positiveNumber(raw: string | undefined, fallback: number): number {
@@ -100,7 +123,13 @@ function positiveNumber(raw: string | undefined, fallback: number): number {
 export function noisePolicyFromSettings(settings: Record<string, string>): NoisePolicy {
   const mode = settings.activity_noise_filter;
   return {
-    mode: mode === "off" || mode === "one_off" || mode === "utilities" ? mode : DEFAULT_NOISE_POLICY.mode,
+    mode:
+      mode === "off"
+      || mode === "one_off"
+      || mode === "utilities_only"
+      || mode === "utilities"
+        ? mode
+        : DEFAULT_NOISE_POLICY.mode,
     maxSeconds: positiveNumber(settings.activity_noise_max_seconds, DEFAULT_NOISE_POLICY.maxSeconds),
     maxSessions: positiveNumber(settings.activity_noise_max_sessions, DEFAULT_NOISE_POLICY.maxSessions),
   };

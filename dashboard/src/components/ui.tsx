@@ -300,6 +300,9 @@ export function TextInput({
 export interface MenuOption {
   value: string;
   label: string;
+  /** Optional context added only to the closed trigger. Repeating a prefix on
+   * every open-menu row makes a short choice list needlessly hard to scan. */
+  triggerLabel?: string;
   /** Draws a rule above this entry. Opt-in: only for lists where the break
    *  says something, not as decoration every few rows. */
   divider?: boolean;
@@ -527,7 +530,7 @@ export function MenuSelect({
           {current ? (
             <>
               {current.dot && <CategoryDot color={current.dot} />}
-              <span className="truncate">{current.label}</span>
+              <span className="truncate">{current.triggerLabel ?? current.label}</span>
             </>
           ) : placeholder}
         </span>

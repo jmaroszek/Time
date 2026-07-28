@@ -1,12 +1,17 @@
 import type { ActivitySource } from "./activity";
-import { buildClassifier, type Rule } from "./classify";
+import {
+  buildClassifier,
+  DEFAULT_RULE_PRIORITY,
+  normalizeRulePattern,
+  type MatchType,
+  type Rule,
+} from "./classify";
 import {
   containsVersion,
   normalizeTitleRuleSpec,
   normalizeWindowTitle,
   splitWindowTitle,
   titlePatternMatches,
-  titleRuleMatches,
   titleScopeAdmits,
   titleTokens,
   type TitleRuleAnchor,
@@ -272,23 +277,42 @@ export function suggestTitleRuleCandidates(
   return selected;
 }
 
-/** Preview the candidate through the real classifier, including precedence. */
-export function previewTitleRule(
+/**
+ * Preview a rule of any kind through the real classifier, including precedence.
+ *
+ * A session counts only when the candidate is the rule that *wins* it, not
+ * merely one that matches: a pattern already outranked everywhere claims
+ * nothing, and saying otherwise would promise a change that never arrives.
+ *
+ * Null when the pattern normalizes to nothing matchable — `addRule` rejects the
+ * same input, so the preview can say so before the button is pressed.
+ * `replaceRuleId` keeps the before-state intact while removing that rule from
+ * the proposed after-state, which is what makes an inline edit a replacement
+ * rather than a second rule competing with the one still being edited.
+ */
+export function previewRule(
   source: ActivitySource,
-  rawSpec: TitleRuleSpec,
-): TitleRulePreview {
-  const spec = normalizeTitleRuleSpec(rawSpec);
+  matchType: MatchType,
+  rawPattern: string,
+  rawSpec: Partial<Omit<TitleRuleSpec, "pattern">> = {},
+  replaceRuleId?: number,
+): TitleRulePreview | null {
+  const pattern = normalizeRulePattern(matchType, rawPattern);
+  if (!pattern) return null;
   const browsers = new Set(
     source.browserProcesses.map((process) => process.toLowerCase()),
   );
+  const spec = normalizeTitleRuleSpec({
+    pattern,
+    scopeKind: rawSpec.scopeKind ?? "any",
+    scopeValue: rawSpec.scopeValue ?? "",
+    titleMatchMode: rawSpec.titleMatchMode ?? "phrase",
+    titleAnchor: rawSpec.titleAnchor ?? "any",
+  });
   const before = buildClassifier(source.categories, source.rules, browsers);
-  const candidate: Rule = {
-    id: -1,
-    matchType: "title",
-    categoryId: -1,
-    priority: spec.scopeKind === "domain" ? 0 : 2,
-    ...spec,
-  };
+  const candidate: Rule = matchType === "title"
+    ? { id: -1, matchType, categoryId: -1, priority: DEFAULT_RULE_PRIORITY.title, ...spec }
+    : { id: -1, matchType, pattern, categoryId: -1, priority: DEFAULT_RULE_PRIORITY[matchType] };
   const after = buildClassifier(
     [
       ...source.categories,
@@ -302,7 +326,10 @@ export function previewTitleRule(
         sortOrder: null,
       },
     ],
-    [...source.rules, candidate],
+    [
+      ...source.rules.filter((rule) => rule.id !== replaceRuleId),
+      candidate,
+    ],
     browsers,
   );
   let sessions = 0;
@@ -312,13 +339,14 @@ export function previewTitleRule(
   const titles = new Set<string>();
   const entities = new Set<string>();
   for (const session of source.sessions) {
-    if (session.isAfk || !session.title || session.end <= session.start) continue;
-    if (!titleRuleMatches(spec, session, browsers)) continue;
+    if (session.isAfk || session.end <= session.start) continue;
     if (after(session)?.id !== -1) continue;
     sessions += 1;
     seconds += session.end - session.start;
     days.add(dayKey(session.start));
-    titles.add(normalizeWindowTitle(session.title));
+    // App and Website rules claim untitled sessions too, so the title count is
+    // a property of what matched rather than of every counted session.
+    if (session.title) titles.add(normalizeWindowTitle(session.title));
     entities.add(entityKey(session.process, session.domain, browsers));
     if (before(session) !== null) reclassified += 1;
   }
@@ -330,4 +358,16 @@ export function previewTitleRule(
     entities: entities.size,
     reclassified,
   };
+}
+
+/** A Window rule always has a pattern once normalized, so the dialog's caller
+ *  never has to consider the null case. */
+export function previewTitleRule(
+  source: ActivitySource,
+  rawSpec: TitleRuleSpec,
+): TitleRulePreview {
+  return (
+    previewRule(source, "title", rawSpec.pattern, rawSpec)
+    ?? { sessions: 0, seconds: 0, days: 0, titles: 0, entities: 0, reclassified: 0 }
+  );
 }

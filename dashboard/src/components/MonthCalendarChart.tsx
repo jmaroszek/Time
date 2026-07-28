@@ -16,7 +16,7 @@ import {
 } from "../lib/overview";
 import { useMeta } from "../state/meta";
 import { metricRamps } from "../lib/palettes";
-import { CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -67,6 +67,7 @@ export default function MonthCalendarChart({
 
     return {
       animation: false,
+      textStyle: { fontFamily: CHART_FONT_FAMILY },
       grid: {
         top: CHART_TOP,
         bottom: CHART_BOTTOM,

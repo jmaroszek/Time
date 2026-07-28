@@ -42,6 +42,7 @@ def test_seed_categories_and_settings_present(conn):
     raw = db.read_settings_raw(conn)
     assert raw["weekly_goal_hours"] == "0"
     assert raw["week_start"] == "auto"
+    assert raw["activity_noise_max_sessions"] == "1"
     assert raw["recording_consent"] == "0"
     assert raw["record_window_titles"] == "0"
     assert raw["privacy_onboarding_complete"] == "0"
@@ -184,7 +185,7 @@ def test_v2_database_migrates_to_v4_resetting_title_rules_and_backing_up(tmp_pat
     assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     migrated.close()
 
-    backups = list(tmp_path.glob("backup_schema2_*.db"))
+    backups = list((tmp_path / "Backups").glob("backup_schema2_*.db"))
     assert len(backups) == 1, "a table rebuild must leave a restorable copy behind"
     restored = sqlite3.connect(backups[0])
     assert restored.execute("SELECT value FROM settings WHERE key='schema_version'").fetchone()[0] == "2"
@@ -227,14 +228,14 @@ def test_v3_database_migrates_to_v4_preserving_app_and_website_rules(tmp_path):
     assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     migrated.close()
 
-    backups = list(tmp_path.glob("backup_schema3_*.db"))
+    backups = list((tmp_path / "Backups").glob("backup_schema3_*.db"))
     assert len(backups) == 1
 
 
 def test_fresh_database_is_not_backed_up(tmp_path):
     path = tmp_path / "fresh.db"
     db.open_db(path).close()
-    assert list(tmp_path.glob("backup_schema*.db")) == []
+    assert list((tmp_path / "Backups").glob("backup_schema*.db")) == []
 
 
 def test_v1_database_migrates_to_v4_in_one_pass(tmp_path):

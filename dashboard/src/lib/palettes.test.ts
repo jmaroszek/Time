@@ -4,6 +4,7 @@ import {
   DEFAULT_PALETTE_ID,
   metricRamps,
   PALETTES,
+  previewSwatches,
   PRODUCTIVITY_OPTIONS,
   resolvePalette,
   type PaletteColors,
@@ -97,6 +98,15 @@ describe("palettes", () => {
   it("gives every palette a unique id and label", () => {
     expect(new Set(PALETTES.map((p) => p.id)).size).toBe(PALETTES.length);
     expect(new Set(PALETTES.map((p) => p.label)).size).toBe(PALETTES.length);
+  });
+
+  it("sorts only the preview hues and keeps the muted neutrals last", () => {
+    for (const palette of PALETTES) {
+      const preview = previewSwatches(palette);
+      expect(new Set(preview)).toEqual(new Set(palette.swatches));
+      expect(preview.slice(8)).toEqual(palette.swatches.slice(8));
+      expect(palette.swatches).toHaveLength(10);
+    }
   });
 
   for (const palette of PALETTES) {

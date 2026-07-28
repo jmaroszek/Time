@@ -16,11 +16,20 @@ export interface Session {
   isCorrected?: boolean;
 }
 
-/** Default max gap (s) between sessions that still counts as one continuous
- *  focus chain, when a caller doesn't supply one. */
+/** Default max gap (s) of *untracked* time between productive sessions that
+ *  still counts as one continuous focus chain, when a caller doesn't supply
+ *  one. Neutral and uncategorized activity preserve an existing chain without
+ *  adding to its productive duration; unproductive or AFK time ends it. */
 // Mirrors the seeded focus_chain_max_gap_seconds default in tracker/db.py
 // DEFAULT_SETTINGS — keep the two in lockstep.
-const DEFAULT_FOCUS_CHAIN_MAX_GAP = 120;
+const DEFAULT_FOCUS_CHAIN_MAX_GAP = 300;
+
+/** A category breaks focus only when the user explicitly classified it as
+ *  unproductive. Neutral and not-yet-classified activity carry an existing
+ *  chain forward; AFK is handled separately because it has no category. */
+export function isFocusChainBreaker(category: Category | null): boolean {
+  return category !== null && !category.isProductive && !category.isNeutral;
+}
 
 export function duration(s: Session): number {
   return Math.max(0, s.end - s.start);
@@ -118,9 +127,16 @@ export function computeKpis(
       }
       chainEnd = s.end;
       longest = Math.max(longest, run);
-    } else {
+    } else if (isFocusChainBreaker(cat)) {
       run = 0;
       chainEnd = null;
+    } else if (chainEnd !== null) {
+      if (s.start - chainEnd <= focusChainMaxGapSec) {
+        chainEnd = Math.max(chainEnd, s.end);
+      } else {
+        run = 0;
+        chainEnd = null;
+      }
     }
   }
   return {

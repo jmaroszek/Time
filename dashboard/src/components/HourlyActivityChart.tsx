@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 import { fmtDuration } from "../lib/format";
 import type { HourlyActivitySummary } from "../lib/overview";
-import { CHROME, TOOLTIP_STYLE, UNCATEGORIZED_BAR } from "../lib/chartTheme";
+import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE, UNCATEGORIZED_BAR } from "../lib/chartTheme";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
 import { shouldShowUncategorized } from "./ProductiveHoursChart";
@@ -33,6 +33,7 @@ export default function HourlyActivityChart({
 
     return {
       animation: false,
+      textStyle: { fontFamily: CHART_FONT_FAMILY },
       grid: { left: 40, right: 12, top: 12, bottom: hasUncategorized ? 84 : 62 },
       tooltip: {
         trigger: "axis",

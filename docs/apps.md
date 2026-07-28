@@ -206,16 +206,29 @@ The second face of the card manages classification. Categories start collapsed;
 the chevron opens their rules. Double-click a name to rename it — Enter or
 focus-out saves and Escape cancels — and the opened category repeats **Rename**
 as a labeled button, which is what keeps renaming reachable from the keyboard.
-**Delete category…** sits beside it and confirms the rule count it will take
+**Delete category** sits beside it and confirms the rule count it will take
 with it. The built-in Ignored category can do neither.
+
+The search above the list matches rule text, rule kinds, scopes, and category
+names at once, and opens every category that has a hit — the fastest way to
+answer "where did I classify this" without remembering which category it went
+into.
+
+The two order menus beside search follow the same pattern as Activity Library.
+Categories can sort by name or group by productivity. Rules can sort by type or
+by name; the Type view sorts names within each rule kind.
 
 A category is productive, neutral, or unproductive. Ignoring is not one of
 these states: the built-in Ignored category is the single ignore mechanism.
 A category left flagged ignored by an older release keeps showing that state
 until one of the three is chosen for it.
 
-Rules are removed with a quiet ✕ on their row. Each rule's kind is marked by a
-small glyph — a square for App, a titled frame for Window, a globe for Website —
+The pencil on a rule—or a double-click on its row—loads it into the category's
+editor below the list, with the same match preview and duplicate protection used
+while adding one; **Save** updates historical and future classification, while
+**Cancel** leaves the rule untouched and returns the editor to Add mode. Rules
+are removed with a quiet ✕ on their row. Each rule's kind is marked by a small
+glyph — a monitor for App, a titled frame for Window, a globe for Website —
 because color in this app means category identity. A rule nothing has ever
 matched is tagged **unused**, which is the one case worth acting on; per-rule
 usage in context lives in each item's details, under **Rules in use**. A long
@@ -230,10 +243,17 @@ The interface uses plain rule names while keeping the same matching behavior:
 | **Window** | Words in a stored window title. Title capture is optional and off by default. |
 | **App** | The foreground executable, such as `code.exe`. |
 
-When several rules match, Website wins, then Window, then App. Rules are
-evaluated against history instead of baked into session rows, so edits
-reclassify existing and future activity — which is also why **unused** is
-measured against all of history and not the visible range.
+When several rules match, Website normally wins, then Window, then App. A Window
+rule scoped to one website is the exception: it refines that website, so it wins
+there. Rules are evaluated against history instead of baked into session rows,
+so edits reclassify existing and future activity — which is also why **unused**
+is measured against all of history and not the visible range.
+
+Because a new rule reaches backwards as well as forwards, the builder reports
+what it would claim before it is saved: how many sessions and hours across all
+of your history, and how many of those currently classify differently and would
+change. A pattern that cannot be used — a website rule with no usable domain in
+it — says so there rather than at the point of saving.
 
 ### Window rules and where they apply
 
@@ -243,17 +263,22 @@ program holding several genuinely different activities, told apart only by what
 the window says. One editor covers two unrelated projects, and only its title
 separates them.
 
-Window rules are strongest outside the browser, for exactly that reason. Inside
-one, a Website rule wins wherever both match — so a Window rule cannot carve a
-site up into parts, and words matched on a page you have already classified by
-site will not change its category. What a Window rule does do in a browser is
-catch pages whose site was never detected, which happens whenever the URL is not
-readable from the window title.
+General Window rules are strongest outside the browser, for exactly that reason.
+Inside one, a Website rule wins over a Window rule scoped to Any app, Browsers,
+or one browser app. Those broader Window rules can still catch pages whose site
+was not detected, which happens whenever the URL is not readable from the
+window title.
 
-That ordering is deliberate. A domain is parsed from a URL; a title is arbitrary
-text matched by substring, and substrings are treacherous — `mail` also occurs in
-"Gmail" and "mailing list". A rule that names a site is the more reliable claim,
-so it is the one that stands.
+A Window rule scoped to one website is different: it can carve that site into
+parts. The website boundary keeps the title match from reaching elsewhere, so
+this narrower Window rule wins over the Website rule it refines. For example, a
+Website rule can classify all of `youtube.com`, while a Window rule scoped to
+`youtube.com` classifies only pages whose stored title contains a chosen phrase.
+
+That ordering preserves the reliable claim. A detected domain is stronger than
+arbitrary title text, so a broad Window rule does not displace it. A
+website-scoped Window rule keeps that domain requirement and adds a second,
+narrower condition.
 
 Because a title says as much about work in an editor as in a browser, every
 Window rule carries a **scope** naming where it may match:
@@ -262,6 +287,8 @@ Window rule carries a **scope** naming where it may match:
 - **Browsers** — only in the browsers listed in Settings, so adding a browser
   later keeps the rule correct.
 - **One app** — only in a named executable, such as `obsidian.exe`.
+- **Website** — only on a named detected site; this is the scope that lets the
+  Window rule refine that site's Website rule.
 
 Scope exists because the same words mean different things in different programs:
 *Skill Tree* in an editor is a project, in a browser it could be anything. Two
@@ -271,14 +298,15 @@ App rule already names its executable and a Website rule only fires in browsers.
 
 The quickest way to write one is **Rule…** on any window, in search results or
 in an item's details. It fills in the words from the title, defaults the scope to
-the app that window belongs to, and — before anything is saved — reports how many
-sessions and hours the rule would claim across all of your history, and how many
-of those currently classify differently. Widening the scope is then a deliberate
-choice rather than what happens by not choosing.
+the app that window belongs to, and suggests the parts of the title worth
+matching on, ranked by how much of your history each would reach. Widening the
+scope is then a deliberate choice rather than what happens by not choosing. Both
+that dialog and the builder under Categories & Rules report the same counts
+before anything is saved.
 
 Window rules applied only to browsers before Time 0.2. On upgrade, existing ones
 become **Any app**, which can reclassify past activity whose titles happen to
 contain the same words; setting such a rule back to **Browsers** restores its
 former behaviour exactly, since rules are evaluated against history rather than
-written into session rows. The tracker backs the database up beside itself before
+written into session rows. The tracker backs the database up in its Backups folder before
 migrating.

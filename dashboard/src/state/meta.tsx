@@ -105,7 +105,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       weekStart: resolveWeekStart(settings.week_start),
       weeklyGoalHours: finiteNonNegative(settings.weekly_goal_hours),
       minAppSecondsPerDay: Math.max(0, Number(settings.min_app_seconds_per_day) || 0),
-      focusChainMaxGapSeconds: Math.max(0, Number(settings.focus_chain_max_gap_seconds) || 120),
+      focusChainMaxGapSeconds: Math.max(0, Number(settings.focus_chain_max_gap_seconds) || 300),
       noisePolicy: noisePolicyFromSettings(settings),
       ...parseDayWindow(settings.day_start_hour, settings.day_end_hour),
       loaded,

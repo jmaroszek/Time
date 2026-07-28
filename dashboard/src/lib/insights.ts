@@ -9,6 +9,7 @@ import {
 import {
   forEachDayChunk,
   goalPace,
+  isFocusChainBreaker,
   withDeltas,
   type AppUsage,
   type Kpis,
@@ -260,9 +261,16 @@ export function aggregateInsightsSessions(
               : seconds;
           focusChainEnd = inCurrent.end;
           longestFocusSec = Math.max(longestFocusSec, focusRunSec);
-        } else {
+        } else if (isFocusChainBreaker(category)) {
           focusRunSec = 0;
           focusChainEnd = null;
+        } else if (focusChainEnd !== null) {
+          if (inCurrent.start - focusChainEnd <= focusChainMaxGapSeconds) {
+            focusChainEnd = Math.max(focusChainEnd, inCurrent.end);
+          } else {
+            focusRunSec = 0;
+            focusChainEnd = null;
+          }
         }
       }
     }
@@ -306,9 +314,16 @@ export function aggregateInsightsSessions(
                 : seconds;
             day.focusChainEnd = chunk.endSec;
             day.longestFocusSeconds = Math.max(day.longestFocusSeconds, day.focusRunSeconds);
-          } else {
+          } else if (isFocusChainBreaker(category)) {
             day.focusRunSeconds = 0;
             day.focusChainEnd = null;
+          } else if (day.focusChainEnd !== null) {
+            if (chunk.startSec - day.focusChainEnd <= focusChainMaxGapSeconds) {
+              day.focusChainEnd = Math.max(day.focusChainEnd, chunk.endSec);
+            } else {
+              day.focusRunSeconds = 0;
+              day.focusChainEnd = null;
+            }
           }
         }
         if (inCurrent && currentValues) {

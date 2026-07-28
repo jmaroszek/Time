@@ -18,7 +18,7 @@ import {
 } from "../lib/time";
 import { useMeta } from "../state/meta";
 import { metricRamps } from "../lib/palettes";
-import { CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 /** Above this many week columns, "auto" cell sizing lands near square by
@@ -72,6 +72,7 @@ export default function ActivityCalendar({
 
     return {
       animation: false,
+      textStyle: { fontFamily: CHART_FONT_FAMILY },
       tooltip: {
         ...TOOLTIP_STYLE,
         formatter: (params: { data: [string, number] }) => {
