@@ -1,6 +1,7 @@
 import {
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -94,7 +95,7 @@ import {
   type TrackingExclusion,
   type TrackingExclusionKind,
 } from "../lib/queries";
-import { allTimeRange, type Range } from "../lib/time";
+import { allTimeRange, calendarDays, type Range } from "../lib/time";
 import { useBanner } from "../state/banner";
 import { useActivityModel } from "../state/useActivityModel";
 import { useMeta } from "../state/meta";
@@ -160,6 +161,13 @@ function isBuiltInIgnored(category: Category): boolean {
 const ENTITY_PAGE = 50;
 const WINDOW_PAGE = 50;
 
+/** The panel's own window list is a preview, not an archive — the searched
+ *  Windows table is where a long list belongs. Fifty rows put half a screen of
+ *  scrolling between the reader and the actions below them, for a list whose
+ *  first few entries answer "what did I do in here". */
+const PANEL_WINDOW_PAGE = 10;
+const PANEL_WINDOW_MORE = 20;
+
 type Setter<T> = (update: (current: T) => T) => void;
 
 /**
@@ -174,8 +182,14 @@ type Setter<T> = (update: (current: T) => T) => void;
  */
 type DeleteScope = {
   request: ActivityDeleteRequest;
+  /** What is being deleted, on a line of its own. */
   label: string;
-  allHistory: { request: ActivityDeleteRequest; label: string } | null;
+  /** The dates it covers, on a second line. Null for a visit selection, which
+   *  is a list of rows rather than a span. */
+  span: string | null;
+  /** Only the request and the dates change when the scope widens; what is
+   *  being deleted does not. */
+  allHistory: { request: ActivityDeleteRequest; span: string } | null;
 };
 
 /** Five swatches to a row, so the grid's width is fixed and can be used to keep
@@ -254,6 +268,24 @@ function formatShortDate(seconds: number): string {
   });
 }
 
+/**
+ * A date range on one line. The year is said once when both ends share it, and
+ * a range that starts and ends on the same date collapses to that date — a
+ * confirmation reads faster when it is not carrying the same four digits twice.
+ */
+export function formatDateSpan(startSec: number, endSec: number): string {
+  const start = new Date(startSec * 1000);
+  const end = new Date(endSec * 1000);
+  const sameYear = start.getFullYear() === end.getFullYear();
+  if (sameYear && start.getMonth() === end.getMonth() && start.getDate() === end.getDate()) {
+    return formatShortDate(endSec);
+  }
+  const from = sameYear
+    ? start.toLocaleDateString([], { month: "short", day: "numeric" })
+    : formatShortDate(startSec);
+  return `${from} – ${formatShortDate(endSec)}`;
+}
+
 /** Whole days between two instants by local calendar date, so "yesterday"
  *  means the previous date rather than 24 hours ago. */
 function calendarDaysAgo(then: Date, now: Date): number {
@@ -304,7 +336,7 @@ export default function ActivityTab({
   const [windowLimit, setWindowLimit] = useState(WINDOW_PAGE);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
-  const [detailLimit, setDetailLimit] = useState(50);
+  const [detailLimit, setDetailLimit] = useState(PANEL_WINDOW_PAGE);
   const [detailSort, setDetailSort] = useState<ActivityWindowSort>("seconds");
   const [detailDirection, setDetailDirection] = useState<ActivitySortDirection>("desc");
   const [selectedWindow, setSelectedWindow] = useState<ActivityTitleGroup | null>(null);
@@ -410,7 +442,7 @@ export default function ActivityTab({
   // panel — but none of the ones in the list beside it.
   useEffect(() => {
     setDetailSearch("");
-    setDetailLimit(50);
+    setDetailLimit(PANEL_WINDOW_PAGE);
     setPanelSessionIds(new Set());
   }, [selectedEntityId]);
 
@@ -419,7 +451,7 @@ export default function ActivityTab({
   }, [selectedWindow?.key]);
 
   useEffect(() => {
-    setDetailLimit(50);
+    setDetailLimit(PANEL_WINDOW_PAGE);
     setPanelSessionIds(new Set());
   }, [detailSearch, detailSort, detailDirection]);
 
@@ -481,11 +513,18 @@ export default function ActivityTab({
   // so that opening one cannot change the table's width. The page container
   // clips its overflow, which is why this is `fixed` and measured rather than
   // absolutely positioned inside it.
+  //
+  // Measured in a layout effect, not an ordinary one. Until the measurement
+  // lands the panel has no position and renders as an ordinary block in the
+  // column — full width, under the table — and with a plain effect the browser
+  // painted that frame before the correction arrived. It read as a flash of
+  // panel across the middle of the page every time a row was opened. A layout
+  // effect runs before paint, so the unpositioned state is never shown.
   const cardRef = useRef<HTMLDivElement>(null);
   const [dock, setDock] = useState<{ style: CSSProperties; overlap: number } | null>(null);
   const panelOpen = view === "library"
     && (currentWindow !== null || (result?.selectedEntity ?? null) !== null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = cardRef.current;
     if (!node || !panelOpen) {
       setDock(null);
@@ -602,6 +641,7 @@ export default function ActivityTab({
     setDeleteScope({
       request: { mode: "sessions", sessionIds: [...ids] },
       label: `${ids.size} selected visit${ids.size === 1 ? "" : "s"}`,
+      span: null,
       // Already an explicit list of rows, so there is no range to widen.
       allHistory: null,
     });
@@ -615,13 +655,21 @@ export default function ActivityTab({
       endSec,
       browserProcesses,
     });
-    const named = `${entity.kind === "website" ? "Website" : "App"} “${entity.displayName}” (${entity.key})`;
+    // The display name alone. The key beside it repeated the same string for
+    // every website and most apps, and a confirmation is read for its shape
+    // before its words — a doubled name costs more than the rare case where
+    // the two differ.
+    // A colon, not quotation marks. The line is a labelled field rather than a
+    // sentence quoting a name, and it reads as one now that the key that
+    // followed it is gone.
+    const named = `${entity.kind === "website" ? "Website" : "App"}: ${entity.displayName}`;
     setDeleteScope({
       request: forRange(range.start.getTime() / 1000, range.end.getTime() / 1000),
-      label: `${named} from ${formatShortDate(range.start.getTime() / 1000)} through ${formatShortDate((range.end.getTime() - 1) / 1000)}`,
+      label: named,
+      span: formatDateSpan(range.start.getTime() / 1000, (range.end.getTime() - 1) / 1000),
       allHistory: {
         request: forRange(allRange.start.getTime() / 1000, allRange.end.getTime() / 1000),
-        label: `${named}, everywhere it appears in your recorded history`,
+        span: formatDateSpan(allRange.start.getTime() / 1000, (allRange.end.getTime() - 1) / 1000),
       },
     });
   };
@@ -796,6 +844,7 @@ export default function ActivityTab({
           dock={panelStyle}
           overlapping={overlapping}
           group={currentWindow}
+          rangeDays={calendarDays(range)}
           selectedSessionIds={panelSessionIds}
           onToggleSession={togglePanelSession}
           onToggleAllSessions={toggleAllPanelSessions}
@@ -820,6 +869,7 @@ export default function ActivityTab({
           groups={result.detailGroups}
           usage={result.selectedEntityUsage}
           rangeSeconds={result.totalSeconds}
+          rangeDays={calendarDays(range)}
           hasStoredTitles={result.hasStoredTitles}
           detailSearch={detailSearch}
           onDetailSearch={setDetailSearch}
@@ -829,7 +879,7 @@ export default function ActivityTab({
             setDetailSort(nextSort);
             setDetailDirection(nextDirection);
           }}
-          onLoadMore={() => setDetailLimit((limit) => limit + 50)}
+          onLoadMore={() => setDetailLimit((limit) => limit + PANEL_WINDOW_MORE)}
           onClose={() => setSelectedEntityId(null)}
           categories={meta.categories}
           rules={meta.rules}
@@ -2003,7 +2053,7 @@ function ExcludedPanel() {
         ))}
         {items.length === 0 && (
           <p className="py-6 text-center text-[11.5px] text-ink-3">
-            Nothing is excluded. Open an app or website and choose “Do not track…” to add one.
+            Nothing is excluded. Open an app or website and choose “Do not track” to add one.
           </p>
         )}
       </div>
@@ -2181,7 +2231,15 @@ function DetailPanel({
           ✕
         </button>
       </div>
-      <div className="scroll-well min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
+      {/* The top padding belongs to the content, not the scroll box. A sticky
+          heading with `top: 0` pins to the scroll container's *content* box, so
+          a padded container parks it that far down the scrollport and leaves a
+          band above it — exactly 20px of it — through which the rows below
+          scrolled in full view. Horizontal padding is unaffected and stays
+          here, where the sticky headings' -mx-5 bleed still relies on it. */}
+      <div className="scroll-well min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+        <div className="pt-5">{children}</div>
+      </div>
     </aside>
   );
 }
@@ -2200,14 +2258,39 @@ function PanelSection({
   className?: string;
 }) {
   return (
-    <section className={`mt-5 ${className}`}>
+    // 13px, not 12: these are the panel's top-level markers and sit a step
+    // under the card titles' 14px rather than level with body copy. The gap
+    // grew with them, or the sections read as one run of text.
+    <section className={`mt-6 ${className}`}>
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-xs font-semibold">{title}</h3>
+        <h3 className="text-[13px] font-semibold">{title}</h3>
         {right}
       </div>
       {children}
     </section>
   );
+}
+
+/**
+ * The category a window row is worth labelling with.
+ *
+ * Inside one app's panel nearly every window resolves the way the app does, so
+ * printing "AI" against each of Claude's windows repeats a fact the
+ * Classification section states once, twenty rows running. Null means "same as
+ * the app, say nothing", which turns the label into a signal: it shows up only
+ * where a Window rule or a correction has pulled one window somewhere else.
+ *
+ * The baseline is null when the entity has no single category of its own, and
+ * then every row is worth labelling — that is exactly the case where they
+ * differ from each other.
+ */
+export function windowRowCategory(
+  group: Pick<ActivityTitleGroup, "mixed" | "categoryId" | "categoryName">,
+  baselineCategoryId: number | null,
+): string | null {
+  if (group.mixed) return "Mixed";
+  if (baselineCategoryId !== null && group.categoryId === baselineCategoryId) return null;
+  return group.categoryName ?? "Uncategorized";
 }
 
 /** One Window in an entity's list. Visit-level actions live in the Window
@@ -2217,19 +2300,22 @@ function PanelWindowRow({
   search,
   maxSeconds,
   totalSeconds,
+  category,
   onOpen,
 }: {
   group: ActivityTitleGroup;
   search: string;
   maxSeconds: number;
   totalSeconds: number;
+  /** Null when it matches the app's own, and so is not worth the words. */
+  category: string | null;
   onOpen: (group: ActivityTitleGroup) => void;
 }) {
   return (
     <button
       type="button"
       onClick={() => onOpen(group)}
-      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-[11px] outline-none transition-colors hover:border-edge-2 hover:bg-white/[.025] focus-visible:border-accent/60"
+      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-[11.5px] outline-none transition-colors hover:border-edge-2 hover:bg-white/[.025] focus-visible:border-accent/60"
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-ink-2">
@@ -2257,8 +2343,12 @@ function PanelWindowRow({
         <span className="tabular-nums">{fmtDuration(group.seconds)}</span>
         <span aria-hidden="true">·</span>
         <span className="tabular-nums">{countNoun(group.sessionCount, "visit")}</span>
-        <span aria-hidden="true">·</span>
-        <span className="min-w-0 truncate">{group.mixed ? "Mixed" : group.categoryName ?? "Uncategorized"}</span>
+        {category !== null && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="min-w-0 truncate">{category}</span>
+          </>
+        )}
         <span className="ml-auto shrink-0 tabular-nums">{formatLastSeen(group.lastSeen)}</span>
       </span>
     </button>
@@ -2269,6 +2359,7 @@ function WindowPanel({
   dock,
   overlapping,
   group,
+  rangeDays,
   selectedSessionIds,
   onToggleSession,
   onToggleAllSessions,
@@ -2281,6 +2372,8 @@ function WindowPanel({
   dock: CSSProperties | null;
   overlapping: boolean;
   group: ActivityTitleGroup;
+  /** Calendar days the range spans, so "days seen" has a denominator. */
+  rangeDays: number;
   selectedSessionIds: Set<number>;
   onToggleSession: (id: number) => void;
   onToggleAllSessions: (ids: number[]) => void;
@@ -2331,27 +2424,25 @@ function WindowPanel({
         <DetailMetric
           label="Time in range"
           value={fmtDuration(group.seconds)}
-          hint="Foreground time in this window, inside the selected date range."
+          hint={`Every visit to this window across the ${countNoun(rangeDays, "day")} shown, added up.`}
         />
         <DetailMetric
-          label="Visits"
-          value={String(group.sessionCount)}
-          hint="Separate spells with this window in front. Switching away and back starts another."
+          label="Average visit"
+          value={group.sessionCount > 0
+            ? fmtDuration(group.seconds / group.sessionCount)
+            : "—"}
+          hint={`Time in range divided by its ${countNoun(group.sessionCount, "visit")}.`}
         />
         <DetailMetric
           label="Days seen"
           value={String(group.daysSeen)}
-          hint="Distinct days it was open on. A habit and a binge can share a total."
+          hint={`Out of ${countNoun(rangeDays, "day")} in this range.`}
         />
-        <DetailMetric
-          label="Last seen"
-          value={formatLastSeen(group.lastSeen)}
-          hint={`First seen ${formatShortDate(group.firstSeen)}.`}
-        />
+        <DetailMetric label="Last seen" value={formatLastSeen(group.lastSeen)} />
       </div>
       <PanelSection
         title="Classification"
-        right={<span className="shrink-0"><Button onClick={() => onMakeRule(group)}>Create Window rule…</Button></span>}
+        right={<span className="shrink-0"><Button onClick={() => onMakeRule(group)}>Create Window rule</Button></span>}
       >
         <p className="mt-2 text-[11.5px] text-ink-2">{classification.label}</p>
         {exceptionalProvenance && (
@@ -2360,14 +2451,14 @@ function WindowPanel({
           </p>
         )}
       </PanelSection>
-      <section className="mt-5">
+      <section className="mt-6">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-xs font-semibold">Visits</h3>
+          <h3 className="mr-auto text-[13px] font-semibold">Visits</h3>
           <Button onClick={() => onToggleAllSessions(group.sessionIds)}>
             {allSelected ? "Clear selection" : `Select all ${group.sessionCount} visits`}
           </Button>
           {selectedSessionIds.size > 0 && (
-            <Button variant="danger" onClick={onDeleteSelected}>Delete selected…</Button>
+            <Button variant="danger" onClick={onDeleteSelected}>Delete selected</Button>
           )}
         </div>
         <div className="mt-3 rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-2.5">
@@ -2515,8 +2606,8 @@ function UsageStrip({ buckets }: { buckets: ActivityDayBucket[] }) {
     ? formatShortDate(bucket.startSec)
     : `${formatShortDate(bucket.startSec)} – ${formatShortDate(bucket.endSec - 1)}`);
   return (
-    <section className="mt-5">
-      <h3 className="text-xs font-semibold">When it was used</h3>
+    <section className="mt-6">
+      <h3 className="text-[13px] font-semibold">When it was used</h3>
       <div className="mt-2.5 flex h-10 items-end gap-px border-b border-edge/70">
         {buckets.map((bucket) => (
           <span
@@ -2562,6 +2653,7 @@ function EntityPanel({
   groups,
   usage,
   rangeSeconds,
+  rangeDays,
   hasStoredTitles,
   detailSearch,
   onDetailSearch,
@@ -2587,6 +2679,8 @@ function EntityPanel({
   usage: ActivityDayBucket[];
   /** All recorded time in the range, for the share this entity holds of it. */
   rangeSeconds: number;
+  /** Calendar days the range spans, so "days seen" has a denominator. */
+  rangeDays: number;
   hasStoredTitles: boolean;
   detailSearch: string;
   onDetailSearch: (value: string) => void;
@@ -2643,6 +2737,11 @@ function EntityPanel({
   // name them with, whatever the database holds overall.
   const untitled = groups.rows.length > 0 && groups.rows.every((group) => !group.title);
   const titlesReadable = hasStoredTitles && !untitled;
+  // Only an entity that resolves to exactly one category has a baseline its
+  // windows can be silent about.
+  const baselineCategoryId = entity.status === "single"
+    ? entity.categories[0]?.categoryId ?? null
+    : null;
 
   return (
     <DetailPanel
@@ -2710,7 +2809,11 @@ function EntityPanel({
       // symmetry for a fact that is the same one browser for almost everybody.
       subtitle={
         <>
-          <p className="truncate font-mono text-[11px] text-ink-3" title={entity.key}>{entity.key}</p>
+          {/* No title attribute: it repeated the very text it sat on. The
+              table row this panel was opened from still carries the key as its
+              own tooltip, where the visible text is the friendly name and the
+              two genuinely differ. */}
+          <p className="truncate font-mono text-[11px] text-ink-3">{entity.key}</p>
           {renaming && (
             <p className="mt-1 text-[10.5px] text-ink-3">Enter or click away to save. Leave blank to use the recorded name.</p>
           )}
@@ -2723,33 +2826,36 @@ function EntityPanel({
           which "Today, 4:46 PM" does not fit into — the tile that most wanted
           the friendlier wording was the one being truncated by it. */}
       <div className="grid grid-cols-2 gap-3">
-        {/* The share moved into the hint. As a second line under the value it
-            made this one tile taller than the three beside it, which is a loud
-            way to present the least-consulted number of the four. */}
+        {/* Each hint carries the fact its tile could not fit — a share, a
+            denominator, the arithmetic behind a derived number — and stops
+            there. No restating the label, and no sentence explaining how to
+            feel about the figure. */}
         <DetailMetric
           label="Time in range"
           value={fmtDuration(entity.seconds)}
           hint={rangeSeconds > 0
-            ? `Foreground time inside the selected date range — ${((entity.seconds / rangeSeconds) * 100).toFixed(entity.seconds / rangeSeconds < 0.1 ? 1 : 0)}% of everything recorded in it.`
-            : "Foreground time inside the selected date range."}
+            ? `${((entity.seconds / rangeSeconds) * 100).toFixed(entity.seconds / rangeSeconds < 0.1 ? 1 : 0)}% of everything recorded across the ${countNoun(rangeDays, "day")} shown.`
+            : `Measured across the ${countNoun(rangeDays, "day")} shown.`}
         />
-        {/* "Visits", not "sessions". The tab stopped handing anyone the
-            tracker's storage unit everywhere else; this tile was the holdout. */}
+        {/* A raw visit count had no scale to be read against — 359 tells you
+            nothing on its own. Dividing it into the time does: a minute means
+            something glanced at constantly, an hour something settled into.
+            The count it replaces is in the hint, where it is still checkable. */}
         <DetailMetric
-          label="Visits"
-          value={String(entity.sessionCount)}
-          hint="Separate spells in the foreground. Switching away and coming back starts another."
+          label="Average visit"
+          value={entity.sessionCount > 0
+            ? fmtDuration(entity.seconds / entity.sessionCount)
+            : "—"}
+          hint={`Time in range divided by its ${countNoun(entity.sessionCount, "visit")}.`}
         />
         <DetailMetric
           label="Days seen"
           value={String(entity.daysSeen)}
-          hint="Distinct days it appeared on. A daily habit and one long binge can share a total."
+          hint={`Out of ${countNoun(rangeDays, "day")} in this range.`}
         />
-        <DetailMetric
-          label="Last seen"
-          value={formatLastSeen(entity.lastSeen)}
-          hint={`First seen ${formatShortDate(entity.firstSeen)}.`}
-        />
+        {/* No hint. The tile is already the whole sentence, and the first-seen
+            date it used to carry answers a question nobody asked of it. */}
+        <DetailMetric label="Last seen" value={formatLastSeen(entity.lastSeen)} />
       </div>
 
       <UsageStrip buckets={usage} />
@@ -2788,13 +2894,34 @@ function EntityPanel({
             emphasised line restating the control next to it. The category
             returns as the lead only when the trigger is showing a prompt
             instead — mixed, uncategorized, or decided by some other rule. */}
-        {!exactRule && <p className="mt-2 text-[11.5px] text-ink-2">{summary.label}</p>}
-        <p className={exactRule
-          ? "mt-2 text-[11.5px] leading-snug text-ink-2"
-          : "mt-0.5 text-[11px] leading-snug text-ink-3"}
-        >
-          {summary.detail}
-        </p>
+        {!exactRule && <p className="mt-2 text-xs text-ink-2">{summary.label}</p>}
+        {/* No flex-1 on the text: letting it grow parked the remove button
+            against the panel's right edge, half a panel away from the two
+            words it acts on. Sized to its content, the button lands beside
+            them. */}
+        <div className={`flex items-center gap-1.5 ${exactRule ? "mt-2" : "mt-0.5"}`}>
+          <p className={`min-w-0 leading-snug ${
+            exactRule ? "text-xs text-ink-2" : "text-[11.5px] text-ink-3"
+          }`}
+          >
+            {summary.detail}
+          </p>
+          {/* The app's own row-level delete, sized to the one line it removes.
+              A full bordered button here was wider than the rule it offered to
+              undo, and louder than anything else in the section. */}
+          {exactRule && !confirmingRuleRemoval && (
+            // The glyph sits high in its own em box, so centring the button
+            // box still leaves the ✕ a shade above the line it belongs to. One
+            // pixel is the whole correction — two overshot it.
+            <span className="flex translate-y-px">
+              <RemoveButton
+                compact
+                label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
+                onClick={() => setConfirmingRuleRemoval(true)}
+              />
+            </span>
+          )}
+        </div>
         {entity.status === "mixed" && (
           <p className="mt-2 text-[11px] text-ink-3">Website and Window rules can override an App default.</p>
         )}
@@ -2818,33 +2945,25 @@ function EntityPanel({
             </div>
           </div>
         )}
-        {exactRule && (
-          // Deleting a standing rule used to be one click on a red word at the
+        {exactRule && confirmingRuleRemoval && (
+          // Removing a standing rule used to be one click on a red word at the
           // end of a dense section, with nothing to confirm and nothing saying
           // what it would cost.
-          <div className="mt-3">
-            {confirmingRuleRemoval ? (
-              <div className="rounded-lg border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-[11px] leading-snug text-ink-2">
-                <p>
-                  Remove the {entity.kind === "website" ? "Website" : "App"} rule
-                  {" "}<span className="font-mono">{exactRule.pattern}</span>? Time it decided becomes
-                  uncategorized unless another rule matches. Manual corrections are kept.
-                </p>
-                <div className="mt-2.5 flex justify-end gap-2">
-                  <Button onClick={() => setConfirmingRuleRemoval(false)}>Cancel</Button>
-                  <Button
-                    variant="danger"
-                    onClick={() => { setConfirmingRuleRemoval(false); void onRemoveExactRule(); }}
-                  >
-                    Remove rule
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Button variant="quiet-danger" onClick={() => setConfirmingRuleRemoval(true)}>
-                Remove {entity.kind === "website" ? "Website" : "App"} rule…
+          <div className="mt-3 rounded-lg border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-[11px] leading-snug text-ink-2">
+            <p>
+              Remove the {entity.kind === "website" ? "Website" : "App"} rule
+              {" "}<span className="font-mono">{exactRule.pattern}</span>? Time it decided becomes
+              uncategorized unless another rule matches. Manual corrections are kept.
+            </p>
+            <div className="mt-2.5 flex justify-end gap-2">
+              <Button onClick={() => setConfirmingRuleRemoval(false)}>Cancel</Button>
+              <Button
+                variant="danger"
+                onClick={() => { setConfirmingRuleRemoval(false); void onRemoveExactRule(); }}
+              >
+                Remove rule
               </Button>
-            )}
+            </div>
           </div>
         )}
       </PanelSection>
@@ -2853,14 +2972,14 @@ function EntityPanel({
           results changed: this entity's list is one app's worth of the
           same fragmentation, and "45 windows" is a thing to read where
           "1269 sessions" is not. */}
-      <section className="mt-5">
+      <section className="mt-6">
         {/* Stuck to the top of the panel's scroll, because this is the long
             list: the filter and the order are useless once they have scrolled
             away. The negative margins carry the background across the scroll
             well's padding so rows pass underneath rather than beside. */}
         <div className="sticky top-0 z-10 -mx-5 -mt-2 bg-surface px-5 pb-2.5 pt-2">
           <div className="flex items-center gap-2">
-            <h3 className="text-xs font-semibold">Windows</h3>
+            <h3 className="text-[13px] font-semibold">Windows</h3>
             {/* Labelled counts, phrased so the heading is not repeated back at
                 the reader — "Windows · 2 windows · 309 visits" was three
                 sayings of two facts. */}
@@ -2921,6 +3040,7 @@ function EntityPanel({
                   search={detailSearch}
                   maxSeconds={groups.maxSeconds}
                   totalSeconds={entity.seconds}
+                  category={windowRowCategory(group, baselineCategoryId)}
                   onOpen={onOpenWindow}
                 />
               ))}
@@ -2940,21 +3060,21 @@ function EntityPanel({
           buttons that both open a dialog stating the same thing in full. The
           sentences moved onto the buttons, where they are read by whoever is
           hesitating and by nobody else. */}
-      <section className="mt-6 border-t border-edge/60 pt-4">
+      <section className="mt-7 border-t border-edge/60 pt-5">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-xs font-semibold text-ink-2">Manage this {kindLabel}</h3>
+          <h3 className="mr-auto text-[13px] font-semibold text-ink-2">Manage this {kindLabel}</h3>
           <Button
             onClick={onExclude}
-            title={`Stops this exact ${kindLabel} from ever being recorded again. Existing history is kept unless you ask for it to go too.`}
+            title={`Never record this ${kindLabel} again. Existing history is kept.`}
           >
-            Do not track…
+            Do not track
           </Button>
           <Button
             variant="quiet-danger"
             onClick={onDeleteEntity}
-            title="Deletes complete session rows. Categories, rules, and aliases are kept."
+            title="Removes recorded visits. Categories, rules, and aliases are kept."
           >
-            Delete activity…
+            Delete activity
           </Button>
         </div>
       </section>
@@ -2979,10 +3099,15 @@ function DetailMetric({
     <div className="rounded-lg border border-edge bg-surface-2 p-3">
       <p className="text-[10px] text-ink-3">
         {hint ? (
-          // The label is repeated into the accessible name because the tooltip
-          // sets one, and a bare hint would announce the explanation of a
-          // measure without ever saying which measure it explains.
-          <FloatingTooltip text={`${label}. ${hint}`} className="cursor-help outline-none">
+          // The label joins the *accessible* name only. A screen reader has no
+          // layout telling it the tooltip belongs to the label above it, so it
+          // needs both; the visible tooltip already sits under that label and
+          // printing it again there was restating the tile to its own reader.
+          <FloatingTooltip
+            text={hint}
+            ariaLabel={`${label}. ${hint}`}
+            className="cursor-help outline-none"
+          >
             {label}
           </FloatingTooltip>
         ) : label}
@@ -3042,7 +3167,25 @@ function ActivityExportMenu({
   }, []);
   return (
     <details ref={panel} className="relative">
-      <summary className="cursor-pointer list-none rounded-lg border border-edge px-3 py-1.5 text-xs text-ink-2 hover:bg-white/[.035]">Export</summary>
+      {/* An icon, because the word sat in the card's header competing with the
+          view switcher for a control almost nobody presses. The tooltip keeps
+          the noun — "export" alone never said what came out. */}
+      {/* No border and the dimmest ink, matching the filtered-rows button it
+          sits beside. A bordered box drew a rectangle in the corner of the
+          card that outweighed everything in the header except the switcher —
+          loud framing for the control here that is pressed least. It takes its
+          definition on hover, like every other quiet control in the app. */}
+      <summary
+        title="Download CSV"
+        aria-label="Download CSV"
+        className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-white/[.05] hover:text-ink-2"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" x2="12" y1="15" y2="3" />
+        </svg>
+      </summary>
       <div className="absolute right-0 top-9 z-30 w-64 rounded-xl border border-edge bg-surface p-3 shadow-xl">
         <p className="text-[10.5px] leading-snug text-ink-3">Uses the selected date range. Search and library filters do not remove rows.</p>
         <div className="mt-3 flex flex-col gap-2">
@@ -3376,7 +3519,7 @@ function WindowRuleDialog({
           onClick={() => setAdvanced((current) => !current)}
           aria-expanded={advanced}
         >
-          {advanced ? "Hide advanced options" : "Advanced matching and scope…"}
+          {advanced ? "Hide advanced options" : "Advanced matching and scope"}
         </button>
         {advanced && (
           <div className="mt-2 rounded-lg border border-edge bg-surface-2 p-3">
@@ -3762,7 +3905,8 @@ function DeleteActivityDialog({
   // Always opens on the narrower of the two. Widening is a decision someone
   // has to make on purpose, and it is one keystroke away either way.
   const [wide, setWide] = useState(false);
-  const active = wide && scope.allHistory ? scope.allHistory : scope;
+  const widened = wide && scope.allHistory ? scope.allHistory : null;
+  const active = widened ?? scope;
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -3801,7 +3945,7 @@ function DeleteActivityDialog({
         {scope.allHistory && (
           <div className="mt-3 flex rounded-lg border border-edge bg-surface-2 p-0.5">
             {[
-              { wide: false, label: "Visible range" },
+              { wide: false, label: "Selected range" },
               { wide: true, label: "All history" },
             ].map((option) => (
               <button
@@ -3821,13 +3965,24 @@ function DeleteActivityDialog({
         )}
         {loading || !preview ? <div className="py-8"><Spinner label="Checking deletion scope…" /></div> : (
           <>
-            <p className="mt-3 text-xs text-ink-2">{active.label}</p>
+            {/* Subject on one line, dates on the next. As one sentence it ran
+                to three lines of prose that had to be read rather than
+                scanned, in the one dialog most worth scanning. */}
+            <p className="mt-3 text-xs text-ink-2">{scope.label}</p>
+            {active.span && (
+              <p className="mt-1 text-[11px] tabular-nums text-ink-3">{active.span}</p>
+            )}
             <div className="mt-3 grid grid-cols-2 gap-2">
               <DetailMetric label="Visits" value={String(preview.count)} />
               <DetailMetric label="Recorded time" value={fmtDuration(preview.seconds)} />
             </div>
-            {preview.earliestStart !== null && preview.latestEnd !== null && <p className="mt-3 text-[11px] text-ink-3">{formatDateTime(preview.earliestStart)} through {formatDateTime(preview.latestEnd)}</p>}
-            <p className="mt-3 text-[11px] leading-snug text-ink-3">Complete session rows are removed, securely compacted, and cannot be restored unless you made a backup.</p>
+            {/* The true extent of the matching sessions used to be printed
+                here. It is a near-copy of the scope line above whenever the
+                thing was used on the range's first and last day, which is the
+                ordinary case, and the tiles beside it already say how little
+                is there when it is not. Two date lines in one confirmation
+                cost more than the subtlety separating them was worth. */}
+            <p className="mt-3 text-[11px] leading-snug text-ink-3">Complete session rows are removed, securely compacted, and cannot be restored unless you have a backup.</p>
             {preview.protectedCount > 0 && <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px] text-ink-2">{preview.protectedCount} current live session is protected. Pause recording and retry after it closes if you need to remove it.</p>}
             {preview.count === 0 && <p className="mt-3 text-[11px] text-ink-3">There are no deletable sessions in this scope.</p>}
             {backupPath && <p className="mt-3 break-all text-[10.5px] text-ink-3">Backup saved to {backupPath}</p>}
@@ -4219,7 +4374,7 @@ function CategoriesAndRules({
                       title={locked ? "The built-in Ignored category cannot be deleted" : undefined}
                       onClick={() => void removeCategory(category, rules.length)}
                     >
-                      Delete category…
+                      Delete category
                     </Button>
                   </div>
                 </div>
