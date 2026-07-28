@@ -4,7 +4,7 @@ use tauri_plugin_dialog::DialogExt;
 
 #[cfg(windows)]
 use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
 };
 #[cfg(windows)]
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
@@ -24,17 +24,16 @@ const fn colorref(red: u8, green: u8, blue: u8) -> u32 {
 }
 
 #[cfg(windows)]
-fn style_windows_title_bar<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+fn style_windows_frame<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
 
-    // These mirror --color-bg and --color-ink-3 in dashboard/src/index.css.
-    // Keeping the system-drawn frame preserves Windows snap, menu, and caption
-    // behavior while making that frame part of Time's existing visual canvas.
+    // The undecorated window keeps DWM's shadow and rounded Windows 11 frame.
+    // Darkening its system border prevents that retained frame from becoming a
+    // bright seam around Time's otherwise continuous background.
     let dark_mode = 1i32;
-    let caption_color = colorref(0x0f, 0x11, 0x15);
-    let text_color = colorref(0x79, 0x80, 0x8d);
+    let border_color = colorref(0x2a, 0x2e, 0x36);
     unsafe {
         let _ = DwmSetWindowAttribute(
             hwnd,
@@ -42,19 +41,13 @@ fn style_windows_title_bar<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) 
             std::ptr::from_ref(&dark_mode).cast(),
             std::mem::size_of_val(&dark_mode) as u32,
         );
-        // Custom caption and text colors were added in Windows 11. Ignore an
-        // unsupported result so Windows 10 keeps its native dark title bar.
+        // Custom border colors were added in Windows 11. Ignore an unsupported
+        // result so older Windows versions retain their native shadow frame.
         let _ = DwmSetWindowAttribute(
             hwnd,
-            DWMWA_CAPTION_COLOR,
-            std::ptr::from_ref(&caption_color).cast(),
-            std::mem::size_of_val(&caption_color) as u32,
-        );
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_TEXT_COLOR,
-            std::ptr::from_ref(&text_color).cast(),
-            std::mem::size_of_val(&text_color) as u32,
+            DWMWA_BORDER_COLOR,
+            std::ptr::from_ref(&border_color).cast(),
+            std::mem::size_of_val(&border_color) as u32,
         );
     }
 }
@@ -469,7 +462,7 @@ pub fn run() {
         .setup(|app| {
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
-                style_windows_title_bar(&window);
+                style_windows_frame(&window);
             }
 
             let base = app.path().local_data_dir()?;
