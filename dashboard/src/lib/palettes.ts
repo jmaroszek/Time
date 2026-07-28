@@ -124,10 +124,15 @@ export const DEFAULT_PALETTE = resolvePalette(DEFAULT_PALETTE_ID);
 // The card surface an empty heatmap cell melts into (mirrors --color-surface).
 const RAMP_SURFACE = "#16181d";
 
-/** Neutral "amount" ramp for the tracked-time metric: a fixed blue, the same in
+/** Neutral "amount" peak for the tracked-time metric: a fixed blue, the same in
  *  every palette. Blue communicates volume without the productive/non-productive
  *  judgment green or red would make. */
-const TRACKED_RAMP = ["#16181d", "#123b5d", "#206fae", "#59a9ef"];
+const TRACKED_PEAK = "#59a9ef";
+
+// Keep zero flush with the card and the maximum at the full data colour, but
+// bring typical nonzero cells forward. A linear blend left most heatmap cells
+// much quieter than the bars even though their peaks matched.
+const RAMP_BLEND_STRENGTHS = [0, 0.55, 0.82, 1];
 
 function mix(from: string, to: string, t: number): string {
   const channels = [1, 3, 5].map((i) => {
@@ -138,17 +143,18 @@ function mix(from: string, to: string, t: number): string {
   return "#" + channels.map((c) => c.toString(16).padStart(2, "0")).join("");
 }
 
-/** A 4-stop sequential ramp from the card surface up to `color`, so an empty cell
- *  recedes into the tile and a hot one reaches the palette's own state colour. */
+/** A perceptually front-loaded 4-stop ramp from the card surface up to `color`,
+ *  so empty cells recede, typical activity remains legible, and the hottest cell
+ *  still reaches the palette's exact state colour. */
 function rampFrom(color: string): string[] {
-  return [RAMP_SURFACE, mix(RAMP_SURFACE, color, 0.3), mix(RAMP_SURFACE, color, 0.62), color];
+  return RAMP_BLEND_STRENGTHS.map((strength) => mix(RAMP_SURFACE, color, strength));
 }
 
 /** Heatmap ramp per shaded metric, derived from the palette's state colours.
  *  Tracked stays the fixed neutral blue. */
 export function metricRamps(palette: Palette): Record<ActivityMetric, string[]> {
   return {
-    tracked: TRACKED_RAMP,
+    tracked: rampFrom(TRACKED_PEAK),
     productive: rampFrom(palette.productive),
     unproductive: rampFrom(palette.unproductive),
     neutral: rampFrom(palette.neutral),
