@@ -22,6 +22,10 @@
   --color-bad: #d07d7d;
 }
 
+:root {
+  --window-titlebar-height: 32px;
+}
+
 @keyframes menu-pop {
   from { opacity: 0; transform: translateY(-4px) scale(.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -111,16 +115,37 @@ body,
 body {
   background: var(--color-bg);
   color: var(--color-ink);
+  overflow: hidden;
   /* Mirrored as CHART_FONT_FAMILY in lib/chartTheme.ts for the canvas charts.
      "Segoe UI Variable" is deliberately absent: Windows installs it only under
      its optical-size names (…Variable Text/Small/Display), so the bare family
      never resolved and this stack has always rendered as plain Segoe UI. */
   font-family: "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  /* Reserves the scrollbar's width so switching tabs never shifts the layout
-     sideways, without the always-on track `overflow-y: scroll` paints — a tab
-     that fits its window should show nothing to drag. */
+}
+
+#root {
+  overflow: hidden;
+}
+
+/* The frame stays fixed while every app state occupies the same viewport below
+   it. Giving that viewport the scrollbar preserves the tab-to-tab alignment
+   without putting a browser scrollbar through the caption controls. */
+.app-viewport {
+  position: fixed;
+  inset: var(--window-titlebar-height) 0 0;
+  overflow-y: auto;
   scrollbar-gutter: stable;
+}
+
+.window-titlebar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 90;
+  display: flex;
+  height: var(--window-titlebar-height);
+  user-select: none;
+  background: var(--color-bg);
 }
 
 /* Both date pickers, not just the range picker's: the session correction dialog
