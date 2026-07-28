@@ -138,6 +138,22 @@ describe("metric ramps", () => {
     for (const ramp of Object.values(ramps)) expect(ramp).toHaveLength(4);
     expect(new Set(Object.values(ramps).map((ramp) => ramp[0])).size).toBe(1);
   });
+
+  it("front-loads colour while preserving the surface and exact metric peaks", () => {
+    const palette = PALETTES[0];
+    const ramps = metricRamps(palette);
+    expect(ramps.tracked[3]).toBe("#59a9ef");
+    expect(ramps.productive[3]).toBe(palette.productive);
+    expect(ramps.neutral[3]).toBe(palette.neutral);
+    expect(ramps.unproductive[3]).toBe(palette.unproductive);
+
+    for (const ramp of Object.values(ramps)) {
+      // The first nonzero stop is already closer to the peak than the surface,
+      // keeping ordinary activity from spending most of the scale near-black.
+      expect(deltaE(ramp[1], ramp[3])).toBeLessThan(deltaE(ramp[1], ramp[0]));
+      expect(deltaE(ramp[2], ramp[3])).toBeLessThan(deltaE(ramp[1], ramp[3]));
+    }
+  });
 });
 
 describe("productivity options", () => {
