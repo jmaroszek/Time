@@ -5,6 +5,8 @@ import {
   describeCorrectionWindow,
   detailPanelBox,
   formatDateSpan,
+  formatVisitDay,
+  groupVisitsByDay,
   windowRowCategory,
   entityClassification,
   formatLastSeen,
@@ -483,5 +485,38 @@ describe("formatDateSpan", () => {
 
   it("keeps both ends when the dates differ by a day", () => {
     expect(formatDateSpan(sec(2026, 7, 18), sec(2026, 7, 19))).toBe("Jul 18 – Jul 19, 2026");
+  });
+});
+
+describe("groupVisitsByDay", () => {
+  const at = (d: number, hour: number) => ({ start: new Date(2026, 6, d, hour).getTime() / 1000 });
+
+  it("breaks only where the date changes, keeping the order given", () => {
+    const days = groupVisitsByDay([at(27, 22), at(27, 10), at(26, 23), at(24, 9)]);
+    expect(days.map((day) => day.visits.length)).toEqual([2, 1, 1]);
+    // Newest-first in, newest-first out: a heading is a break, not a re-sort.
+    expect(days[0].visits[0].start).toBeGreaterThan(days[0].visits[1].start);
+  });
+
+  it("keeps midnight-adjacent visits on their own dates", () => {
+    const days = groupVisitsByDay([at(27, 0), at(26, 23)]);
+    expect(days).toHaveLength(2);
+  });
+
+  it("has nothing to group when there are no visits", () => {
+    expect(groupVisitsByDay([])).toEqual([]);
+  });
+});
+
+describe("formatVisitDay", () => {
+  const now = new Date(2026, 6, 27, 14, 0);
+
+  it("names the two dates a reader can place without arithmetic", () => {
+    expect(formatVisitDay(new Date(2026, 6, 27, 1, 0).getTime() / 1000, now)).toBe("Today");
+    expect(formatVisitDay(new Date(2026, 6, 26, 23, 0).getTime() / 1000, now)).toBe("Yesterday");
+  });
+
+  it("falls back to the date beyond that", () => {
+    expect(formatVisitDay(new Date(2026, 6, 25, 12, 0).getTime() / 1000, now)).toMatch(/25/);
   });
 });
