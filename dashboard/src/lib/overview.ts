@@ -2,6 +2,7 @@ import { categoryKind, type Classifier } from "./classify";
 import {
   forEachClippedSession,
   forEachDayChunk,
+  isFocusChainBreaker,
   type Session,
 } from "./metrics";
 import {
@@ -295,7 +296,7 @@ export function dailyActivitySummaries(
   sessions: Session[],
   range: Range,
   classifier: Classifier,
-  focusChainMaxGapSeconds = 120,
+  focusChainMaxGapSeconds = 300,
 ): DailyActivitySummary[] {
   const days = listDays(range);
   const byKey = new Map(
@@ -351,9 +352,16 @@ export function dailyActivitySummaries(
             : seconds;
         day.focusChainEnd = chunk.endSec;
         day.longestFocusSeconds = Math.max(day.longestFocusSeconds, day.focusRunSeconds);
-      } else {
+      } else if (isFocusChainBreaker(category)) {
         day.focusRunSeconds = 0;
         day.focusChainEnd = null;
+      } else if (day.focusChainEnd !== null) {
+        if (chunk.startSec - day.focusChainEnd <= focusChainMaxGapSeconds) {
+          day.focusChainEnd = Math.max(day.focusChainEnd, chunk.endSec);
+        } else {
+          day.focusRunSeconds = 0;
+          day.focusChainEnd = null;
+        }
       }
     });
   });
@@ -394,7 +402,7 @@ export function monthlyActivitySummaries(
   sessions: Session[],
   range: Range,
   classifier: Classifier,
-  focusChainMaxGapSeconds = 120,
+  focusChainMaxGapSeconds = 300,
 ): MonthlyActivitySummary[] {
   const byKey = new Map<
     string,
@@ -456,9 +464,16 @@ export function monthlyActivitySummaries(
             : seconds;
         month.focusChainEnd = chunk.endSec;
         month.longestFocusSeconds = Math.max(month.longestFocusSeconds, month.focusRunSeconds);
-      } else {
+      } else if (isFocusChainBreaker(category)) {
         month.focusRunSeconds = 0;
         month.focusChainEnd = null;
+      } else if (month.focusChainEnd !== null) {
+        if (chunk.startSec - month.focusChainEnd <= focusChainMaxGapSeconds) {
+          month.focusChainEnd = Math.max(month.focusChainEnd, chunk.endSec);
+        } else {
+          month.focusRunSeconds = 0;
+          month.focusChainEnd = null;
+        }
       }
     });
   });

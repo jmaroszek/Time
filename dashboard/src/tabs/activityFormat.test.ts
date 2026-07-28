@@ -7,12 +7,14 @@ import {
   formatDateSpan,
   formatVisitDay,
   groupVisitsByDay,
+  showBroadMatchWarning,
   windowRowCategory,
   entityClassification,
   formatLastSeen,
   titleMatchParts,
 } from "./ActivityTab";
-import { previewTitleRule } from "../lib/titleRuleAnalysis";
+import { describeTitleRule } from "../lib/categoryRules";
+import { previewRule, previewTitleRule } from "../lib/titleRuleAnalysis";
 import type { Category, Rule, TitleRuleSpec } from "../lib/classify";
 import type { ActivityEntitySummary, ActivitySource } from "../lib/activity";
 
@@ -175,6 +177,121 @@ describe("previewTitleRule", () => {
       entities: 0,
       reclassified: 0,
     });
+  });
+});
+
+describe("previewRule", () => {
+  const categories: Category[] = [
+    { id: 1, name: "Music", color: "#111", isProductive: false, isNeutral: true, isIgnored: false, sortOrder: 1 },
+  ];
+  const source: ActivitySource = {
+    categories,
+    rules: [],
+    browserProcesses: ["chrome.exe"],
+    aliases: {},
+    sessions: [
+      // Title capture off for this one — an App rule still claims it.
+      { id: 1, start: 0, end: 60, process: "spotify.exe", title: "", domain: null, isAfk: false },
+      { id: 2, start: 60, end: 120, process: "spotify.exe", title: "Discover Weekly", domain: null, isAfk: false },
+      { id: 3, start: 120, end: 180, process: "chrome.exe", title: "Home", domain: "youtube.com", isAfk: false },
+      { id: 4, start: 180, end: 240, process: "spotify.exe", title: "Radio", domain: null, isAfk: true },
+    ],
+  };
+
+  it("counts untitled sessions for an App rule, and does not invent a title", () => {
+    const preview = previewRule(source, "process", "spotify.exe");
+    expect(preview).not.toBeNull();
+    expect(preview?.sessions).toBe(2); // the AFK row is never classified
+    expect(preview?.seconds).toBe(120);
+    expect(preview?.entities).toBe(1);
+    expect(preview?.titles).toBe(1); // only session 2 carries one
+  });
+
+  it("normalizes a pasted URL the way the saved rule will", () => {
+    const pasted = previewRule(source, "domain", "https://www.youtube.com/watch?v=abc");
+    expect(pasted?.sessions).toBe(1);
+    expect(pasted).toEqual(previewRule(source, "domain", "youtube.com"));
+  });
+
+  it("is null when the pattern normalizes to nothing addRule would accept", () => {
+    expect(previewRule(source, "domain", "https://")).toBeNull();
+    expect(previewRule(source, "process", "   ")).toBeNull();
+  });
+
+  it("does not claim what an existing higher-priority rule already wins", () => {
+    const shadowed: ActivitySource = {
+      ...source,
+      // Website outranks App, so the browser session is not the App rule's.
+      rules: [{ id: 1, matchType: "domain", pattern: "youtube.com", categoryId: 1, priority: 1 }],
+    };
+    expect(previewRule(shadowed, "process", "chrome.exe")?.sessions).toBe(0);
+    // The same rule stated the other way round does take it back.
+    expect(previewRule(source, "process", "chrome.exe")?.sessions).toBe(1);
+  });
+
+  it("separates sessions that would change category from ones merely claimed", () => {
+    const classified: ActivitySource = {
+      ...source,
+      rules: [{ id: 1, matchType: "process", pattern: "spotify.exe", categoryId: 1, priority: 3 }],
+    };
+    const preview = previewRule(classified, "domain", "youtube.com");
+    expect(preview?.sessions).toBe(1);
+    expect(preview?.reclassified).toBe(0); // session 3 had no rule before
+  });
+
+  it("previews an edit by replacing the old rule instead of competing with it", () => {
+    const classified: ActivitySource = {
+      ...source,
+      rules: [{
+        id: 9,
+        matchType: "process",
+        pattern: "spotify.exe",
+        categoryId: 1,
+        priority: 3,
+      }],
+    };
+    expect(previewRule(
+      classified,
+      "process",
+      "spotify.exe",
+      {},
+      9,
+    )?.sessions).toBe(2);
+  });
+});
+
+describe("describeTitleRule", () => {
+  it("names a saved rule with the words its builder used", () => {
+    expect(describeTitleRule({ titleMatchMode: "phrase", titleAnchor: "any" })).toBe("whole words");
+    expect(describeTitleRule({ titleMatchMode: "contains", titleAnchor: "any" })).toBe("contains");
+    expect(describeTitleRule({ titleMatchMode: "segment", titleAnchor: "any" })).toBe("exact part");
+    expect(describeTitleRule({ titleMatchMode: "segment", titleAnchor: "first" }))
+      .toBe("exact part, start of title");
+    expect(describeTitleRule({ titleMatchMode: "segment", titleAnchor: "interior" }))
+      .toBe("exact part, middle of title");
+    expect(describeTitleRule({ titleMatchMode: "segment", titleAnchor: "last" }))
+      .toBe("exact part, end of title");
+  });
+
+  it("ignores an anchor the mode cannot use", () => {
+    expect(describeTitleRule({ titleMatchMode: "phrase", titleAnchor: "last" })).toBe("whole words");
+  });
+});
+
+describe("showBroadMatchWarning", () => {
+  it("warns about Contains only while the rule is still aimed widely", () => {
+    expect(showBroadMatchWarning({ titleMatchMode: "contains", scopeKind: "any" })).toBe(true);
+    expect(showBroadMatchWarning({ titleMatchMode: "contains", scopeKind: "browsers" })).toBe(true);
+  });
+
+  it("retires once the reader has scoped it to one app or website", () => {
+    expect(showBroadMatchWarning({ titleMatchMode: "contains", scopeKind: "process" })).toBe(false);
+    expect(showBroadMatchWarning({ titleMatchMode: "contains", scopeKind: "domain" })).toBe(false);
+  });
+
+  it("stays quiet for the modes that do not match inside words", () => {
+    expect(showBroadMatchWarning({ titleMatchMode: "phrase", scopeKind: "any" })).toBe(false);
+    expect(showBroadMatchWarning({ titleMatchMode: "segment", scopeKind: "any" })).toBe(false);
   });
 });
 

@@ -42,12 +42,39 @@ describe("estimateLegendRows", () => {
 });
 
 describe("legendContentWidth", () => {
-  it("subtracts ECharts legend padding and a safety margin from the 92% band", () => {
-    // 500 * 0.92 = 460, minus 10px padding and 6px safety.
-    expect(legendContentWidth(500)).toBe(444);
+  it("subtracts a safety margin from the 92% band", () => {
+    // 500 * 0.92 = 460, minus the 8px safety margin. ECharts wraps on the
+    // declared width itself, so its 5px padding is not deducted here.
+    expect(legendContentWidth(500)).toBe(452);
   });
 
   it("goes non-positive for an unmeasured container, tripping the fallback", () => {
     expect(legendContentWidth(0)).toBeLessThanOrEqual(0);
+  });
+});
+
+describe("the productivity legend at the app's minimum width", () => {
+  // Text widths ECharts actually renders these labels at, measured off the live
+  // chart at 11px in CHART_FONT_FAMILY. The full row needs 374.3px: the four
+  // items (each 19px of icon plus its text) and three 14px gaps.
+  const RENDERED_TEXT_WIDTH: Record<string, number> = {
+    Productive: 51.6,
+    Neutral: 36,
+    Unproductive: 65.7,
+    "7-day productive avg": 103,
+  };
+  const measure = (text: string) => RENDERED_TEXT_WIDTH[text];
+  const labels = Object.keys(RENDERED_TEXT_WIDTH);
+
+  it("keeps the row intact at the narrowest window the app allows", () => {
+    // A 1000px window leaves this card's chart about 426px wide, for a 383.9px
+    // legend band — 9.6px more than the row needs.
+    expect(estimateLegendRows(labels, legendContentWidth(426), measure)).toBe(1);
+  });
+
+  it("predicts the second row rather than letting it overrun the x-axis", () => {
+    // Below ~416px the row genuinely does not fit. Under-reserving here is what
+    // let the legend ride up into the x-axis labels.
+    expect(estimateLegendRows(labels, legendContentWidth(400), measure)).toBe(2);
   });
 });

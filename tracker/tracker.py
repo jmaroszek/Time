@@ -11,6 +11,7 @@ from __future__ import annotations
 import atexit
 import ctypes
 import logging
+import os
 import platform
 import sys
 import threading
@@ -162,6 +163,13 @@ def run() -> None:
     )
     raw_settings = db.read_settings_raw(conn)
     log_database_state(raw_settings)
+    if os.environ.get("TIME_MIGRATE_ONLY") == "1":
+        # Restore runs this packaged tracker once before the dashboard reopens
+        # an older snapshot. The tracker remains the sole migration owner, but
+        # no tray, probe, or recording loop should survive this maintenance run.
+        conn.close()
+        logging.info("Database migration check complete; exiting.")
+        return
     if (
         raw_settings.get("privacy_onboarding_complete") != "1"
         and raw_settings.get("recording_consent") != "1"

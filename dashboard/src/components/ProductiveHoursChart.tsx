@@ -23,6 +23,7 @@ import EChart, { type EChartsOption } from "./EChart";
 import { useMeta } from "../state/meta";
 import {
   ANNOTATION,
+  CHART_FONT_FAMILY,
   CHROME,
   TOOLTIP_STYLE,
   UNCATEGORIZED,
@@ -99,22 +100,26 @@ export function visibleAverageHours(value: number | null | undefined): number | 
 }
 
 // Legend geometry, mirrored from the `legend` option below so the row estimate
-// matches what ECharts actually lays out.
-const LEGEND_FONT = "11px sans-serif";
+// matches what ECharts actually lays out. The font FAMILY has to match too, not
+// just the size: measure in a narrower face than the chart renders and every
+// entry is under-counted, which is how a legend ends up wrapping into a row
+// nobody reserved for it. Both sides read CHART_FONT_FAMILY, so a missing-font
+// fallback resolves identically for the measurement and the render.
+const LEGEND_FONT = `11px ${CHART_FONT_FAMILY}`;
 const LEGEND_ITEM_WIDTH = 14; // legend.itemWidth
 const LEGEND_ICON_GAP = 5; // fixed icon-to-text spacing ECharts inserts
 const LEGEND_ITEM_GAP = 14; // legend.itemGap between entries
-const LEGEND_H_PADDING = 10; // legend.padding default (5px) on each side
-// Trim a hair more off the usable width so we round toward wrapping: an
+// Trim a little off the usable width so we round toward wrapping: an
 // unpredicted extra row collides with the x-axis, while a spare predicted row
 // only pads the (invisible) top margin.
-const LEGEND_WIDTH_SAFETY = 6;
+const LEGEND_WIDTH_SAFETY = 8;
 const LEGEND_ITEMS_PER_ROW_FALLBACK = 6; // used until the container is measured
 
 /** Usable legend width for a chart of `chartWidth` px, matching the `legend`
- *  option below (`width: "92%"`) minus ECharts' padding and a safety margin. */
+ *  option below (`width: "92%"`) less a safety margin. ECharts wraps on the
+ *  declared width itself — its 5px padding does not eat into the row. */
 export function legendContentWidth(chartWidth: number): number {
-  return chartWidth * 0.92 - LEGEND_H_PADDING - LEGEND_WIDTH_SAFETY;
+  return chartWidth * 0.92 - LEGEND_WIDTH_SAFETY;
 }
 
 let measureCanvas: HTMLCanvasElement | null = null;
@@ -305,12 +310,13 @@ export default function ProductiveHoursChart({
     // row next to a one-row legend), reserve exactly what THIS view needs at the
     // bottom and park the leftover worst-case slack on top. Same grid height,
     // but the freed space goes where it doesn't show.
-    // ECharts' real per-row pitch for an 11px legend. This must match what it
-    // actually draws: reserve too little and a wrapped legend creeps upward into
-    // the bars, and the shortfall compounds with each row (a two-row legend
-    // overshoots by 2×). Matching it keeps the gap above the top row constant
-    // whether the legend is one row or two.
-    const LEGEND_ROW_H = 22;
+    // ECharts' real per-row pitch for an 11px legend: an 11px text box plus the
+    // `itemGap` it reuses as the row gap. This must match what it actually
+    // draws: reserve too little and a wrapped legend creeps upward into the
+    // x-axis labels, and the shortfall compounds with each row (a two-row
+    // legend overshoots by 2×). Matching it keeps the gap above the top row
+    // constant whether the legend is one row or two.
+    const LEGEND_ROW_H = 25;
     const AXIS_BAND = 40; // x-axis labels + baseline gap below the plot
     const GRID_TOP = 12;
     const legendData = showProductiveAverage ? [...stackNames, averageLegend] : stackNames;
@@ -334,6 +340,7 @@ export default function ProductiveHoursChart({
 
     return {
       animation: false,
+      textStyle: { fontFamily: CHART_FONT_FAMILY },
       grid: { left: 36, right: 12, top: topPad, bottom: bottomPad },
       tooltip,
       legend: {

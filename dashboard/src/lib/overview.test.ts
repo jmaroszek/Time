@@ -74,6 +74,22 @@ describe("chart visibility thresholds", () => {
 });
 
 describe("dailyActivitySummaries", () => {
+  it("preserves focus through neutral activity without adding its duration", () => {
+    const start = new Date(2026, 5, 8);
+    const t0 = start.getTime() / 1000;
+    const day = dailyActivitySummaries(
+      [
+        session(t0 + 9 * 3600, t0 + 10 * 3600, "code.exe"),
+        session(t0 + 10 * 3600, t0 + 10.5 * 3600, "chat.exe"),
+        session(t0 + 10.5 * 3600, t0 + 11.5 * 3600, "code.exe"),
+      ],
+      rangeFrom(start, 1),
+      classify,
+      60,
+    )[0];
+    expect(day.longestFocusSeconds).toBe(2 * 3600);
+  });
+
   it("zero-fills days, splits midnight, excludes AFK and ignored, and finds the top app", () => {
     const start = new Date(2026, 5, 8);
     const t0 = start.getTime() / 1000;
@@ -160,6 +176,20 @@ describe("monthlyActivitySummaries", () => {
     classify,
   );
   const month = (key: string) => summaries.find((m) => m.key === key)!;
+
+  it("preserves monthly focus through neutral activity without adding its duration", () => {
+    const focus = monthlyActivitySummaries(
+      [
+        session(at(2025, 10, 3, 9), at(2025, 10, 3, 10), "code.exe"),
+        session(at(2025, 10, 3, 10), at(2025, 10, 3, 11), "chat.exe"),
+        session(at(2025, 10, 3, 11), at(2025, 10, 3, 12), "code.exe"),
+      ],
+      range,
+      classify,
+      60,
+    );
+    expect(focus.find((entry) => entry.key === "2025-11")?.longestFocusSeconds).toBe(2 * 3600);
+  });
 
   it("zero-fills every month in range with year and month indices", () => {
     expect(summaries.map((m) => m.key)).toEqual(["2025-11", "2025-12", "2026-01"]);

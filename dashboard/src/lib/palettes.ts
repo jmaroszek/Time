@@ -37,7 +37,7 @@ export const PALETTES: Palette[] = [
   {
     id: "slate",
     label: "Slate",
-    description: "Muted and editorial — calm, sophisticated. The steadiest on either ground.",
+    description: "Muted, balanced colors with a calm, understated feel.",
     swatches: ["#6056b2", "#826001", "#498adc", "#a03879", "#cf6924", "#b075d2", "#769729", "#0a837e", "#9da5b0", "#947a6a"],
     productive: "#0cb68b",
     neutral: "#6c7680",
@@ -52,7 +52,7 @@ export const PALETTES: Palette[] = [
   {
     id: "ember",
     label: "Ember",
-    description: "Warm — embers, ambers and roses lead; cool hues lean warm.",
+    description: "Warm ambers, oranges, and roses with softer cool tones.",
     swatches: ["#6b8cee", "#796503", "#744dae", "#d77500", "#b21672", "#c964cc", "#879f03", "#0a908d", "#9ba6b1", "#947a6e"],
     productive: "#08b785",
     neutral: "#6c7680",
@@ -67,7 +67,7 @@ export const PALETTES: Palette[] = [
   {
     id: "tide",
     label: "Tide",
-    description: "Cool — teals, blues and violets lead; warms recede.",
+    description: "Cool teals, blues, and violets with subdued warm tones.",
     swatches: ["#ae4388", "#2b97ef", "#05747e", "#a473ee", "#59800a", "#4d57c5", "#0ea995", "#9b4e01", "#95a8b2", "#827e8b"],
     productive: "#2e9e52",
     neutral: "#6c7680",
@@ -82,7 +82,7 @@ export const PALETTES: Palette[] = [
   {
     id: "jewel",
     label: "Jewel",
-    description: "Deep and moody jewel tones, rich saturation.",
+    description: "Deep, moody jewel tones with rich saturation.",
     swatches: ["#087974", "#3584e0", "#a41b76", "#6f910d", "#5b4cb6", "#7a5b01", "#ae59c7", "#cb600a", "#9da5b4", "#877c86"],
     productive: "#0cb68b",
     neutral: "#6c7680",
@@ -97,7 +97,7 @@ export const PALETTES: Palette[] = [
   {
     id: "terra",
     label: "Terra",
-    description: "Earthen — terracotta, ochre, olive, denim, plum.",
+    description: "Earthy terracotta, ochre, olive, denim, and plum.",
     swatches: ["#db6395", "#5d6f03", "#9773d0", "#a34702", "#973d8c", "#b08000", "#3169a0", "#229d92", "#ba9f89", "#6f786a"],
     productive: "#49b567",
     neutral: "#6c7680",
@@ -120,6 +120,35 @@ export function resolvePalette(id: string | undefined): Palette {
 }
 
 export const DEFAULT_PALETTE = resolvePalette(DEFAULT_PALETTE_ID);
+
+const srgbToLinear = (channel: number) =>
+  channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+
+/** OKLCH hue gives unlike palettes a common visual order. The fixed 35° start
+ *  begins near orange and walks through green, teal, blue, violet, and rose;
+ *  muted neutrals stay in their deliberate final two slots. */
+function perceptualHue(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((index) =>
+    srgbToLinear(parseInt(hex.slice(index, index + 2), 16) / 255),
+  );
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const labB = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  const hue = (Math.atan2(labB, a) * 180) / Math.PI;
+  return (hue - 35 + 720) % 360;
+}
+
+/** Display order only. Palette array order still owns new-category assignment. */
+export function previewSwatches(palette: Palette): string[] {
+  return [
+    ...[...palette.swatches.slice(0, 8)].sort(
+      (left, right) => perceptualHue(left) - perceptualHue(right),
+    ),
+    ...palette.swatches.slice(8),
+  ];
+}
 
 // The card surface an empty heatmap cell melts into (mirrors --color-surface).
 const RAMP_SURFACE = "#16181d";
@@ -182,12 +211,12 @@ export const PRODUCTIVITY_OPTIONS: ProductivityOption[] = [
   // touch above the green so it reads vivid rather than muddy.
   { id: "vivid", label: "Vivid", productive: "#04995d", unproductive: "#dc4849",
     light: { productive: "#04693f", unproductive: "#a1302d" } },
-  // Colourblind-safe: separates good from bad on the blue↔yellow axis (which
+  // Colorblind: separates good from bad on the blue↔yellow axis (which
   // red-green CVD preserves) instead of the red↔green axis (which it destroys) —
   // a blue-teal "productive" against a red "unproductive". The two stay distinct
   // under protanopia/deuteranopia, where Vivid's green/red nearly merge
   // (palettes.test.ts holds both facts).
-  { id: "cvd", label: "Colourblind-safe", productive: "#048db3", unproductive: "#d02a3a",
+  { id: "cvd", label: "Colorblind", productive: "#048db3", unproductive: "#d02a3a",
     light: { productive: "#03718f", unproductive: "#b11729" } },
 ];
 

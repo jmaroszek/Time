@@ -21,11 +21,13 @@ import { dayKey } from "./time";
 const CATS: Category[] = [
   { id: 1, name: "Dev", color: "#378ADD", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 1 },
   { id: 2, name: "Gaming", color: "#D85A30", isProductive: false, isNeutral: false, isIgnored: false, sortOrder: 2 },
+  { id: 3, name: "Music", color: "#8A8F98", isProductive: false, isNeutral: true, isIgnored: false, sortOrder: 3 },
 ];
 const RULES: Rule[] = [
   { id: 1, matchType: "process", pattern: "code.exe", categoryId: 1, priority: 100 },
   { id: 2, matchType: "process", pattern: "obsidian.exe", categoryId: 1, priority: 100 },
   { id: 3, matchType: "process", pattern: "apex.exe", categoryId: 2, priority: 100 },
+  { id: 4, matchType: "process", pattern: "spotify.exe", categoryId: 3, priority: 100 },
 ];
 const classify = buildClassifier(CATS, RULES, new Set());
 
@@ -88,14 +90,40 @@ describe("computeKpis", () => {
     expect(k.longestFocusSec).toBe(3600);
   });
 
-  it("focus chain broken by a gap over the default 120s", () => {
-    const k = computeKpis([sess(0, 3600), sess(3730, 5000)], classify);
+  it("focus chain broken by a gap over the default 300s", () => {
+    const k = computeKpis([sess(0, 3600), sess(3910, 5000)], classify);
     expect(k.longestFocusSec).toBe(3600);
   });
 
-  it("focus chain survives a gap under the default 120s", () => {
-    const k = computeKpis([sess(0, 3600), sess(3690, 5000)], classify);
-    expect(k.longestFocusSec).toBe(3600 + 1310);
+  it("focus chain survives a gap under the default 300s", () => {
+    const k = computeKpis([sess(0, 3600), sess(3890, 5000)], classify);
+    expect(k.longestFocusSec).toBe(3600 + 1110);
+  });
+
+  it("only explicitly unproductive activity and AFK end the chain", () => {
+    const gap = 600;
+    for (const [what, interruption] of [
+      ["unproductive", sess(3600, 3605, "apex.exe")],
+      ["afk", sess(3600, 3605, "afk", true)],
+    ] as const) {
+      const k = computeKpis([sess(0, 3600), interruption, sess(3605, 6000)], classify, gap);
+      expect(k.longestFocusSec, `${what} must end the chain`).toBe(3600);
+    }
+  });
+
+  it("neutral and uncategorized activity preserve a chain without adding duration", () => {
+    for (const [what, interruption] of [
+      ["neutral", sess(3600, 4800, "spotify.exe")],
+      ["uncategorized", sess(3600, 4800, "unknown.exe")],
+    ] as const) {
+      const k = computeKpis([sess(0, 3600), interruption, sess(4800, 6000)], classify, 60);
+      expect(k.longestFocusSec, `${what} must preserve the chain`).toBe(4800);
+    }
+  });
+
+  it("the same five seconds of nothing recorded is bridged instead", () => {
+    const k = computeKpis([sess(0, 3600), sess(3605, 6000)], classify, 600);
+    expect(k.longestFocusSec).toBe(3600 + 2395);
   });
 
   it("honors a custom max-gap: a 90s gap breaks a 60s threshold", () => {
@@ -104,10 +132,13 @@ describe("computeKpis", () => {
     expect(computeKpis(sessions, classify, 120).longestFocusSec).toBe(3600 + 1310); // 120s bridges it
   });
 
-  it("uncategorized sessions break the chain but count toward total", () => {
-    const k = computeKpis([sess(0, 3600), sess(3600, 4000, "mystery.exe")], classify);
-    expect(k.totalSec).toBe(4000);
-    expect(k.longestFocusSec).toBe(3600);
+  it("uncategorized sessions count toward total and preserve existing focus", () => {
+    const k = computeKpis(
+      [sess(0, 3600), sess(3600, 4000, "mystery.exe"), sess(4000, 5000)],
+      classify,
+    );
+    expect(k.totalSec).toBe(5000);
+    expect(k.longestFocusSec).toBe(4600);
   });
 });
 

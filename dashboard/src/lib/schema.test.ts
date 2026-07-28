@@ -25,7 +25,7 @@ describe("schema version declarations agree", () => {
   });
 
   it("matches the Rust constant and the version it bootstraps", () => {
-    const constant = /^const SCHEMA_VERSION: i64 = (\d+);$/m.exec(rustSource);
+    const constant = /^(?:pub\(crate\) )?const SCHEMA_VERSION: i64 = (\d+);$/m.exec(rustSource);
     expect(constant?.[1]).toBe(String(SUPPORTED_SCHEMA_VERSION));
     expect(rustSource).toContain(`('schema_version','${SUPPORTED_SCHEMA_VERSION}')`);
   });

@@ -158,11 +158,13 @@ DEFAULT_SETTINGS = {
     ),
     "min_app_seconds_per_day": "0",
     # Activity Library noise filtering (dashboard-only; the tracker records
-    # everything regardless). off | one_off | utilities.
+    # everything regardless). off | one_off | utilities_only | utilities.
     "activity_noise_filter": "utilities",
     "activity_noise_max_seconds": "120",
-    "activity_noise_max_sessions": "3",
-    "focus_chain_max_gap_seconds": "120",
+    "activity_noise_max_sessions": "1",
+    "color_palette": "slate",
+    "productivity_style": "vivid",
+    "focus_chain_max_gap_seconds": "300",
     "day_start_hour": "0",
     "day_end_hour": "24",
     # Pause state (written by the tray / dashboard, read by the tracker):
@@ -275,13 +277,15 @@ def _read_schema_version(conn: sqlite3.Connection) -> int:
 
 
 def _backup_before_migration(conn: sqlite3.Connection, path: Path, version: int) -> str:
-    """Snapshot the database beside itself and return the path written.
+    """Snapshot the database in its Backups folder and return the path written.
 
     VACUUM INTO rather than a file copy: it takes a consistent snapshot of a
     WAL database without having to reason about the -wal and -shm sidecars, and
     it is the same mechanism the dashboard's manual backup uses.
     """
-    target = path.with_name(f"backup_schema{version}_{int(time.time())}.db")
+    backup_dir = path.parent / "Backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    target = backup_dir / f"backup_schema{version}_{int(time.time())}.db"
     if target.exists():  # same-second retry; the older copy is the useful one
         return str(target)
     conn.execute("VACUUM INTO ?", (str(target),))

@@ -6,13 +6,13 @@ import { Checkbox, Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
 import { currentHistoryRevision, subscribeHistoryInvalidation } from "./lib/historyInvalidation";
-import { deleteCategory, fetchEarliestSessionStart, fetchTrackerStatus, updateSetting, type TrackerStatus } from "./lib/queries";
+import { deleteCategory, fetchEarliestSessionStart, fetchTrackerStatus, takeRestoreNotice, updateSetting, type TrackerStatus } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
 import { allTimeRange, isRollingPreset, rangeForCalendarPreset, rangeForPreset, type Range } from "./lib/time";
-import { BannerProvider } from "./state/banner";
+import { BannerProvider, useBanner } from "./state/banner";
 import { MetaProvider, useMeta } from "./state/meta";
 import { useInsightsView } from "./state/useInsightsView";
-import ActivityTab from "./tabs/ActivityTab";
+import ActivityTab, { type ActivityView } from "./tabs/ActivityTab";
 import OverviewTab from "./tabs/OverviewTab";
 import SettingsTab from "./tabs/SettingsTab";
 
@@ -36,7 +36,16 @@ export default function App() {
 
 function Shell() {
   const meta = useMeta();
+  const banner = useBanner();
   const [tab, setTab] = useState<Tab>("insights");
+  // This view also decides whether the global date picker is relevant. Keeping
+  // it above the tab switch prevents the picker flashing back while Activity
+  // remounts, and preserves the reader's place when they briefly visit Settings.
+  const [activityView, setActivityView] = useState<ActivityView>("library");
+  // A one-shot handoff, not lifted filter state: Settings' exclusion count can
+  // send the reader to the list that owns exclusions, and Activity clears the
+  // request once it has mounted with it so a later tab switch lands normally.
+  const [openExclusions, setOpenExclusions] = useState(false);
   const [preset, setPreset] = useState<PresetOrCustom>("last7");
   const [rolling, setRolling] = useState(true);
   const [customRange, setCustomRange] = useState<Range | null>(null);
@@ -46,6 +55,16 @@ function Shell() {
   // Insights view controls live here, above the tab switch, so a change made on
   // the Insights tab survives leaving for another tab and coming back.
   const insightsView = useInsightsView();
+
+  useEffect(() => {
+    void takeRestoreNotice()
+      .then((notice) => {
+        if (!notice) return;
+        if (notice.ok) banner.show(notice.message);
+        else banner.report(new Error(notice.message));
+      })
+      .catch(() => {});
+  }, [banner]);
 
   const range = useMemo<Range>(() => {
     if (preset === "custom") return customRange ?? rangeForPreset("last7");
@@ -110,7 +129,8 @@ function Shell() {
   if (meta.error) return <DbErrorScreen error={meta.error} />;
   if (meta.settings.privacy_onboarding_complete !== "1") return <PrivacyOnboarding />;
 
-  const showRange = tab === "insights" || tab === "activity";
+  const showRange =
+    tab === "insights" || (tab === "activity" && activityView === "library");
 
   // Activity bounds its own scroll wells, and a percentage of an auto height
   // resolves to auto: without a definite height here, its "fill the leftover
@@ -158,14 +178,31 @@ function Shell() {
         )}
         {tab === "activity" && (
           <ActivityTab
+            view={activityView}
+            onViewChange={setActivityView}
             range={range}
             firstSessionSec={firstSessionSec}
             historyRevision={historyRevision}
             isAllTime={preset === "alltime"}
             onTryAllTime={() => setPreset("alltime")}
+            openExclusions={openExclusions}
+            onExclusionsOpened={() => setOpenExclusions(false)}
           />
         )}
-        {tab === "settings" && <SettingsTab />}
+        {tab === "settings" && (
+          <SettingsTab
+            onManageExclusions={() => {
+              setActivityView("library");
+              setOpenExclusions(true);
+              setTab("activity");
+            }}
+            onManageCategories={() => {
+              setOpenExclusions(false);
+              setActivityView("rules");
+              setTab("activity");
+            }}
+          />
+        )}
       </main>
     </div>
   );

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyNoise,
+  hidesRareItems,
+  hidesUtilities,
   isUtilityName,
+  noiseModeFor,
   noisePolicyFromSettings,
   DEFAULT_NOISE_POLICY,
   type NoiseCandidate,
@@ -75,6 +78,26 @@ describe("noise filtering", () => {
     expect(classifyNoise(entity({ seconds: 3, sessionCount: 1 }), { ...policy, mode: "off" })).toBeNull();
   });
 
+  it("supports utilities without hiding rare applications", () => {
+    const utilitiesOnly = { ...policy, mode: "utilities_only" as const };
+    expect(
+      classifyNoise(
+        entity({ key: "googledrivesetup.exe", seconds: 3600, sessionCount: 5 }),
+        utilitiesOnly,
+      ),
+    ).toBe("utility");
+    expect(classifyNoise(entity({ seconds: 3, sessionCount: 1 }), utilitiesOnly)).toBeNull();
+  });
+
+  it("maps the independent switches onto all four stored modes", () => {
+    expect(noiseModeFor(false, false)).toBe("off");
+    expect(noiseModeFor(true, false)).toBe("one_off");
+    expect(noiseModeFor(false, true)).toBe("utilities_only");
+    expect(noiseModeFor(true, true)).toBe("utilities");
+    expect(hidesRareItems("utilities")).toBe(true);
+    expect(hidesUtilities("utilities_only")).toBe(true);
+  });
+
   it("matches utility names on aliased entities through their source processes", () => {
     expect(isUtilityName(entity({ key: "codex installer", sourceProcesses: [] }))).toBe(true);
     expect(isUtilityName(entity({ key: "app", sourceProcesses: ["Vendor_Driver_Bundle.exe"] }))).toBe(true);
@@ -82,14 +105,15 @@ describe("noise filtering", () => {
 
   it("falls back per-field on missing or unparseable settings", () => {
     expect(noisePolicyFromSettings({})).toEqual(DEFAULT_NOISE_POLICY);
+    expect(DEFAULT_NOISE_POLICY.maxSessions).toBe(1);
     expect(noisePolicyFromSettings({ activity_noise_filter: "nonsense" }).mode).toBe("utilities");
     expect(noisePolicyFromSettings({ activity_noise_max_seconds: "-5" }).maxSeconds).toBe(120);
     expect(
       noisePolicyFromSettings({
-        activity_noise_filter: "one_off",
+        activity_noise_filter: "utilities_only",
         activity_noise_max_seconds: "300",
         activity_noise_max_sessions: "5",
       }),
-    ).toEqual({ mode: "one_off", maxSeconds: 300, maxSessions: 5 });
+    ).toEqual({ mode: "utilities_only", maxSeconds: 300, maxSessions: 5 });
   });
 });

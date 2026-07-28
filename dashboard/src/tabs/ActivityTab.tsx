@@ -55,6 +55,7 @@ import {
   type TitleRuleSpec,
 } from "../lib/classify";
 import {
+  previewRule,
   previewTitleRule,
   suggestTitleRuleCandidates,
   type TitleRuleCandidate,
@@ -66,6 +67,18 @@ import {
   splitWindowTitle,
 } from "../lib/titleRules";
 import { UNCATEGORIZED } from "../lib/chartTheme";
+import {
+  describeTitleRule,
+  findDuplicateRule,
+  isBuiltInIgnored,
+  NEW_CATEGORY_DEFAULT_STATE,
+  ruleMatchesSearch,
+  sortCategoriesForRules,
+  sortRulesForCategory,
+  titleRuleScopeLabel,
+  type CategoryListOrder,
+  type RuleListOrder,
+} from "../lib/categoryRules";
 import type { Palette } from "../lib/palettes";
 import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
 import { fmtDuration } from "../lib/format";
@@ -89,6 +102,7 @@ import {
   saveProcessAliases,
   updateSetting,
   updateCategory,
+  updateRule,
   type ActivityDeletePreview,
   type ActivityDeleteRequest,
   type SessionCorrection,
@@ -101,7 +115,7 @@ import { useActivityModel } from "../state/useActivityModel";
 import { useMeta } from "../state/meta";
 import { useSessions } from "../state/useSessions";
 
-type ActivityView = "library" | "rules";
+export type ActivityView = "library" | "rules";
 
 /** "Excluded" is a view of the pre-capture exclusion list, not a property of a
  *  recorded entity — the classification dropdown is only its entry point. */
@@ -131,29 +145,219 @@ const RULE_LABELS: Record<MatchType, string> = {
 };
 
 const RULE_HELP: Record<MatchType, string> = {
-  domain: "Matches a site such as github.com. Page paths and searches are not stored.",
+  domain: "Matches a website such as youtube.com. Page paths and searches are not stored.",
   title: "Matches normalized text in a stored window title, inside the scope you choose.",
-  process: "Matches the foreground executable, such as code.exe.",
+  process: "Matches time spent in an app, such as Spotify (spotify.exe).",
 };
+
+/** Both places a Window rule can be written offer the same four positions, in
+ *  the same words. A reader who learns them in one builder should not have to
+ *  re-learn them in the other. */
+const TITLE_ANCHOR_OPTIONS = [
+  { value: "any", label: "Anywhere" },
+  { value: "first", label: "Start of title" },
+  { value: "interior", label: "Middle of title" },
+  { value: "last", label: "End of title" },
+];
+
+/** Contains is the one match mode that reaches into unrelated titles and inside
+ *  longer words. Naming a single app or website is the fix the warning asks
+ *  for, so the warning retires once the reader has applied it — a caution that
+ *  survives being heeded teaches the reader to stop reading cautions. */
+export function showBroadMatchWarning(
+  spec: Pick<TitleRuleSpec, "titleMatchMode" | "scopeKind">,
+): boolean {
+  return (
+    spec.titleMatchMode === "contains"
+    && spec.scopeKind !== "process"
+    && spec.scopeKind !== "domain"
+  );
+}
+
+function BroadMatchWarning({ className = "" }: { className?: string }) {
+  return (
+    <p className={`text-[10.5px] leading-snug text-ink-3 ${className}`}>
+      <span className="font-medium text-ink-2">Broad match:</span> this can also
+      match unrelated titles or text inside longer words. Limit it to one app or
+      website when possible.
+    </p>
+  );
+}
+
+/**
+ * What a rule would take, in the two places a rule is written.
+ *
+ * Counted over all history rather than the range on screen, because that is the
+ * scope a rule actually has. Null while the count is still running; the caller
+ * decides what an unusable or empty pattern says, since only it knows which
+ * field is blank.
+ */
+function RulePreviewText({ preview }: { preview: TitleRulePreview | null }) {
+  if (preview === null) return <>Counting what this would match…</>;
+  if (preview.sessions === 0) return null;
+  return (
+    <>
+      Claims <span className="text-ink-2">{preview.sessions}</span> session
+      {preview.sessions === 1 ? "" : "s"}
+      {preview.titles > 0 && (
+        <> with <span className="text-ink-2">{preview.titles}</span> distinct title
+          {preview.titles === 1 ? "" : "s"}</>
+      )}{" "}
+      across <span className="text-ink-2">{preview.days}</span> active{" "}
+      {preview.days === 1 ? "day" : "days"} —{" "}
+      <span className="text-ink-2">{fmtDuration(preview.seconds)}</span> of all
+      recorded time.
+      {preview.reclassified > 0 && (
+        <> <span className="text-ink-2">{preview.reclassified}</span> of them
+        currently classify differently and would change.</>
+      )}
+    </>
+  );
+}
 
 /** Rule kinds are told apart by shape, not hue: color in this app means
  *  category identity, so a colored chip per kind would overload it. */
 function RuleKindGlyph({ matchType }: { matchType: MatchType }) {
   return (
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-      {matchType === "process" && <rect x="4" y="4" width="16" height="16" rx="3" />}
+      {matchType === "process" && <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M12 17v4M8 21h8" /></>}
       {matchType === "title" && <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></>}
       {matchType === "domain" && <><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 3.6 9 14 14 0 0 1-3.6 9 14 14 0 0 1-3.6-9A14 14 0 0 1 12 3Z" /></>}
     </svg>
   );
 }
 
-/** The built-in Ignored row, told apart from a category a previous release let
- *  the user flag ignored. Names are unique, and an ignored category could never
- *  be renamed, so the seeded name still identifies it. Legacy flagged
- *  categories stay editable so they have a way back out of that state. */
-function isBuiltInIgnored(category: Category): boolean {
-  return category.isIgnored && category.name === "Ignored";
+type CategoryRuleDraft = {
+  type: MatchType;
+  pattern: string;
+  scopeKind: TitleRuleScopeKind;
+  scopeValue: string;
+  titleMatchMode: TitleRuleMatchMode;
+  titleAnchor: TitleRuleAnchor;
+};
+
+type RuleConflict = {
+  categoryId: number;
+  existingRule: Rule;
+  existingCategoryName: string;
+  draft: CategoryRuleDraft;
+};
+
+type RuleEditState = {
+  ruleId: number;
+  categoryId: number;
+  draft: CategoryRuleDraft;
+  conflict: string | null;
+};
+
+function draftFromRule(rule: Rule): CategoryRuleDraft {
+  const isWindow = rule.matchType === "title";
+  return {
+    type: rule.matchType,
+    pattern: rule.pattern,
+    scopeKind: isWindow
+      ? rule.scopeKind ?? "any"
+      : rule.matchType === "domain" ? "domain" : "process",
+    scopeValue: isWindow ? rule.scopeValue ?? "" : rule.pattern,
+    titleMatchMode: rule.titleMatchMode ?? "phrase",
+    titleAnchor: rule.titleAnchor ?? "any",
+  };
+}
+
+function EditRuleButton({
+  rule,
+  onClick,
+}: {
+  rule: Rule;
+  onClick: () => void;
+}) {
+  const label = `Edit ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`;
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-white/[.05] hover:text-ink-2"
+    >
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="h-3.5 w-3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+      </svg>
+    </button>
+  );
+}
+
+/** The rule-kind choice is frequent enough to deserve the same spatial
+ * continuity as the primary tabs. One measured pill follows unequal labels
+ * without assuming a fixed button width. */
+function RuleTypeSelector({
+  value,
+  onChange,
+}: {
+  value: MatchType;
+  onChange: (value: MatchType) => void;
+}) {
+  const listRef = useRef<HTMLSpanElement | null>(null);
+  const buttonRefs = useRef(new Map<MatchType, HTMLButtonElement>());
+  const [pill, setPill] = useState<{ left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const list = listRef.current;
+      const button = buttonRefs.current.get(value);
+      if (!list || !button) return;
+      setPill({ left: button.offsetLeft, width: button.offsetWidth });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (listRef.current) observer.observe(listRef.current);
+    for (const button of buttonRefs.current.values()) observer.observe(button);
+    return () => observer.disconnect();
+  }, [value]);
+
+  return (
+    <span
+      ref={listRef}
+      role="group"
+      aria-label="Rule type"
+      className="relative flex rounded-lg border border-edge bg-surface p-0.5"
+    >
+      {pill && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute top-0.5 bottom-0.5 rounded-md bg-surface-3 transition-[transform,width] duration-200 ease-out motion-reduce:transition-none"
+          style={{ width: pill.width, transform: `translateX(${pill.left}px)`, left: 0 }}
+        />
+      )}
+      {(["domain", "title", "process"] as MatchType[]).map((type) => (
+        <button
+          key={type}
+          ref={(node) => {
+            if (node) buttonRefs.current.set(type, node);
+            else buttonRefs.current.delete(type);
+          }}
+          type="button"
+          aria-pressed={value === type}
+          className={`relative rounded-md px-2 py-1 text-[10.5px] transition-colors ${
+            value === type ? "text-ink-2" : "text-ink-3 hover:text-ink-2"
+          }`}
+          onClick={() => onChange(type)}
+        >
+          {RULE_LABELS[type]}
+        </button>
+      ))}
+    </span>
+  );
 }
 
 /** Small pages keep the scroll well shallow: "load more" should deepen it a
@@ -313,25 +517,35 @@ export function formatLastSeen(seconds: number, now = new Date()): string {
 }
 
 export default function ActivityTab({
+  view,
+  onViewChange,
   range,
   firstSessionSec,
   historyRevision,
   isAllTime,
   onTryAllTime,
+  openExclusions = false,
+  onExclusionsOpened,
 }: {
+  view: ActivityView;
+  onViewChange: (view: ActivityView) => void;
   range: Range;
   firstSessionSec: number | null;
   historyRevision: number;
   isAllTime: boolean;
   onTryAllTime: () => void;
+  /** Settings asked for the exclusion list; honored once, on mount. */
+  openExclusions?: boolean;
+  onExclusionsOpened?: () => void;
 }) {
   const meta = useMeta();
   const banner = useBanner();
-  const [view, setView] = useState<ActivityView>("library");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [typeFilter, setTypeFilter] = useState<ActivityTypeFilter>("all");
-  const [classificationFilter, setClassificationFilter] = useState<LibraryFilter>("all");
+  const [classificationFilter, setClassificationFilter] = useState<LibraryFilter>(
+    openExclusions ? "excluded" : "all",
+  );
   const [sort, setSort] = useState<ActivitySort>("seconds");
   const [direction, setDirection] = useState<ActivitySortDirection>("desc");
   const [windowSort, setWindowSort] = useState<ActivityWindowSort>("seconds");
@@ -358,6 +572,13 @@ export default function ActivityTab({
   } | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [ruleDraft, setRuleDraft] = useState<ActivityTitleGroup | null>(null);
+
+  // The request was consumed by the initial filter above. Retiring it here —
+  // rather than where it was raised — keeps a later visit to this tab from
+  // silently reopening a filter the reader did not ask for again.
+  useEffect(() => {
+    if (openExclusions) onExclusionsOpened?.();
+  }, []);
 
   const allRange = useMemo(() => allTimeRange(firstSessionSec), [firstSessionSec, historyRevision]);
   const sessionData = useSessions(
@@ -704,7 +925,7 @@ export default function ActivityTab({
   // The panel describes a row in the Library. Carrying it across to Categories
   // & Rules left it beside a list that could not have opened it.
   const switchView = (next: ActivityView) => {
-    setView(next);
+    onViewChange(next);
     setPanelSessionIds(new Set());
     setSelectedWindow(null);
     setSelectedEntityId(null);
@@ -845,7 +1066,11 @@ export default function ActivityTab({
             )}
           </>
         ) : (
-          <CategoriesAndRules appliedRuleIds={result?.appliedRuleIds ?? null} onChanged={refreshMeta} />
+          <CategoriesAndRules
+            source={source}
+            appliedRuleIds={result?.appliedRuleIds ?? null}
+            onChanged={refreshMeta}
+          />
         )}
       </Card>
       </div>
@@ -3651,8 +3876,8 @@ function WindowRuleDialog({
               <span className="mt-1 flex w-fit rounded-lg border border-edge bg-surface p-0.5">
                 {([
                   ["phrase", "Whole words"],
-                  ["segment", "Exact title part"],
-                  ["contains", "Contains text"],
+                  ["segment", "Exact part"],
+                  ["contains", "Contains"],
                 ] as Array<[TitleRuleMatchMode, string]>).map(([mode, label]) => (
                   <button
                     key={mode}
@@ -3668,12 +3893,7 @@ function WindowRuleDialog({
                   </button>
                 ))}
               </span>
-              {spec.titleMatchMode === "contains" && (
-                <p className="mt-1.5 text-[10px] leading-snug text-ink-3">
-                  Broadest option: it can also match inside longer words. Prefer a
-                  suggested whole-word or exact-part rule when one is available.
-                </p>
-              )}
+              {showBroadMatchWarning(spec) && <BroadMatchWarning className="mt-1.5" />}
             </div>
             {spec.titleMatchMode === "segment" && (
               <div className="mt-3 text-[10.5px] text-ink-3">
@@ -3684,17 +3904,12 @@ function WindowRuleDialog({
                   value={spec.titleAnchor}
                   onChange={(value) => changeSpec({ titleAnchor: value as TitleRuleAnchor })}
                   label="Title-part position"
-                  options={[
-                    { value: "any", label: "Anywhere in the title" },
-                    { value: "first", label: "First title part" },
-                    { value: "interior", label: "Middle title part" },
-                    { value: "last", label: "Last title part" },
-                  ]}
+                  options={TITLE_ANCHOR_OPTIONS}
                 />
               </div>
             )}
             <div className="mt-3 text-[10.5px] text-ink-3">
-              <span>Where it applies</span>
+              <span>Applies to</span>
               <MenuSelect
                 size="field"
                 className="mt-1 w-full"
@@ -3711,32 +3926,18 @@ function WindowRuleDialog({
         )}
 
         {/* The safety net for a pattern aimed too widely: say what it takes
-            before it takes it, counted over all history rather than the range
-            on screen, because that is the scope a rule actually has. */}
-        <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px] leading-snug text-ink-3">
-          {!spec.pattern.trim()
-            ? "Enter text this rule should match."
-            : preview === null
-              ? "Counting what this would match…"
-              : preview.sessions === 0
-                ? "Nothing in your history matches this yet. It will still apply to future activity."
-                : (
-                  <>
-                    Claims <span className="text-ink-2">{preview.sessions}</span> session
-                    {preview.sessions === 1 ? "" : "s"} with{" "}
-                    <span className="text-ink-2">{preview.titles}</span> distinct title
-                    {preview.titles === 1 ? "" : "s"} across{" "}
-                    <span className="text-ink-2">{preview.days}</span> active{" "}
-                    {preview.days === 1 ? "day" : "days"} —{" "}
-                    <span className="text-ink-2">{fmtDuration(preview.seconds)}</span> of all
-                    recorded time.
-                    {preview.reclassified > 0 && (
-                      <> <span className="text-ink-2">{preview.reclassified}</span> of them
-                      currently classify differently and would change.</>
-                    )}
-                  </>
-                )}
-        </p>
+            before it takes it. */}
+        {(
+          !spec.pattern.trim()
+          || preview === null
+          || preview.sessions > 0
+        ) && (
+          <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px] leading-snug text-ink-3">
+            {!spec.pattern.trim()
+              ? "Enter text this rule should match."
+              : <RulePreviewText preview={preview} />}
+          </p>
+        )}
 
         <div className="mt-5 flex justify-end gap-2">
           <Button
@@ -3849,25 +4050,6 @@ function ruleSpecFromCandidate(candidate: TitleRuleCandidate): TitleRuleSpec {
     titleMatchMode: candidate.titleMatchMode,
     titleAnchor: candidate.titleAnchor,
   };
-}
-
-function describeTitleRule(
-  spec: Pick<TitleRuleSpec, "titleMatchMode" | "titleAnchor">,
-): string {
-  if (spec.titleMatchMode === "phrase") return "whole words";
-  if (spec.titleMatchMode === "contains") return "contains text";
-  if (spec.titleAnchor === "any") return "exact title part";
-  if (spec.titleAnchor === "interior") return "exact middle part";
-  return `exact ${spec.titleAnchor} part`;
-}
-
-function titleRuleScopeLabel(
-  rule: Pick<Rule, "scopeKind" | "scopeValue">,
-): string {
-  if (rule.scopeKind === "domain") return rule.scopeValue ?? "one website";
-  if (rule.scopeKind === "process") return rule.scopeValue ?? "one app";
-  if (rule.scopeKind === "browsers") return "browsers";
-  return "any app";
 }
 
 function SessionCorrectionDialog({
@@ -4113,10 +4295,265 @@ function DeleteActivityDialog({
   );
 }
 
+/**
+ * The match preview under one category's rule draft.
+ *
+ * A component per draft rather than one shared count, so the effect's only
+ * dependency is that draft's own object: typing in one category cannot re-run
+ * the pass over history that another category's half-written rule started.
+ */
+function RuleDraftPreview({
+  source,
+  draft,
+  replacingRuleId,
+}: {
+  source: ActivitySource | null;
+  draft: CategoryRuleDraft;
+  replacingRuleId?: number;
+}) {
+  // Null while counting, "unusable" when the pattern normalizes to nothing —
+  // the same rejection addRule would raise, said before the button is pressed.
+  const [result, setResult] = useState<TitleRulePreview | "unusable" | null>(null);
+  const deferred = useDeferredValue(draft);
+
+  useEffect(() => {
+    setResult(null);
+    if (!source) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const next = previewRule(
+        source,
+        deferred.type,
+        deferred.pattern,
+        deferred.type === "title" ? deferred : {},
+        replacingRuleId,
+      );
+      if (!cancelled) setResult(next ?? "unusable");
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [source, deferred, replacingRuleId]);
+
+  if (result !== null && result !== "unusable" && result.sessions === 0) {
+    return null;
+  }
+
+  return (
+    <p className="mt-2 rounded-lg border border-edge/60 bg-surface/45 px-3 py-2 text-[10.5px] leading-snug text-ink-3">
+      {result === "unusable"
+        ? deferred.type === "domain"
+          ? "That is not a usable website domain — enter one like example.com."
+          : "Enter text this rule should match."
+        : <RulePreviewText preview={result} />}
+    </p>
+  );
+}
+
+/** One field set for adding and editing keeps the saved-row editor from
+ * quietly acquiring different Window meanings than the builder beneath it. */
+function CategoryRuleForm({
+  draft,
+  onChange,
+  onSubmit,
+  submitLabel,
+  onCancel,
+  source,
+  windowTitleCaptureEnabled,
+  autoFocus = false,
+  replacingRuleId,
+}: {
+  draft: CategoryRuleDraft;
+  onChange: (patch: Partial<CategoryRuleDraft>) => void;
+  onSubmit: () => void;
+  submitLabel: string;
+  onCancel?: () => void;
+  source: ActivitySource | null;
+  windowTitleCaptureEnabled: boolean;
+  autoFocus?: boolean;
+  replacingRuleId?: number;
+}) {
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <RuleTypeSelector
+          value={draft.type}
+          onChange={(type) => onChange({ type })}
+        />
+        <input
+          autoFocus={autoFocus}
+          value={draft.pattern}
+          onChange={(event) => onChange({ pattern: event.target.value })}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onSubmit();
+            else if (event.key === "Escape") onCancel?.();
+          }}
+          placeholder={draft.type === "domain"
+            ? "example.com"
+            : draft.type === "title" ? "words to match…" : "example.exe"}
+          className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60"
+        />
+        {onCancel && <Button onClick={onCancel}>Cancel</Button>}
+        <Button
+          variant="primary"
+          disabled={!draft.pattern.trim() || !ruleDraftReady(draft)}
+          onClick={onSubmit}
+        >
+          {submitLabel}
+        </Button>
+      </div>
+      {draft.type === "title" && (
+        <div className="mt-2 rounded-lg border border-edge/60 bg-surface/45 p-2.5">
+          <div className="flex items-center gap-2">
+            <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Match as</span>
+            <span className="flex rounded-lg border border-edge bg-surface p-0.5">
+              {([
+                ["phrase", "Whole words"],
+                ["segment", "Exact part"],
+                ["contains", "Contains"],
+              ] as Array<[TitleRuleMatchMode, string]>).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`rounded-md px-2 py-1 text-[10.5px] ${
+                    draft.titleMatchMode === mode
+                      ? "bg-surface-3 text-ink-2"
+                      : "text-ink-3 hover:text-ink-2"
+                  }`}
+                  onClick={() => onChange({
+                    titleMatchMode: mode,
+                    titleAnchor: mode === "segment" ? draft.titleAnchor : "any",
+                  })}
+                >
+                  {label}
+                </button>
+              ))}
+            </span>
+          </div>
+          {draft.titleMatchMode === "segment" && (
+            <div className="mt-2 flex items-center gap-2">
+              <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Position</span>
+              <MenuSelect
+                size="compact"
+                className="w-44"
+                value={draft.titleAnchor}
+                onChange={(value) => onChange({
+                  titleAnchor: value as TitleRuleAnchor,
+                })}
+                label="Title-part position"
+                options={TITLE_ANCHOR_OPTIONS}
+              />
+            </div>
+          )}
+          <div className="mt-2 flex items-center gap-2">
+            <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Applies to</span>
+            <span className="flex rounded-lg border border-edge bg-surface p-0.5">
+              {([
+                [ANY_APP, "Any app"],
+                [BROWSER_SCOPE, "Browsers"],
+                ["process", "One app"],
+                ["domain", "Website"],
+              ] as Array<[TitleRuleScopeKind, string]>).map(([kind, label]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={`rounded-md px-2 py-1 text-[10.5px] ${
+                    draft.scopeKind === kind
+                      ? "bg-surface-3 text-ink-2"
+                      : "text-ink-3 hover:text-ink-2"
+                  }`}
+                  onClick={() => onChange({
+                    scopeKind: kind,
+                    scopeValue:
+                      kind === "any" || kind === "browsers"
+                        ? ""
+                        : draft.scopeValue,
+                  })}
+                >
+                  {label}
+                </button>
+              ))}
+            </span>
+            {(draft.scopeKind === "process" || draft.scopeKind === "domain") && (
+              <input
+                value={draft.scopeValue}
+                onChange={(event) => onChange({
+                  scopeValue: event.target.value,
+                })}
+                placeholder={draft.scopeKind === "process"
+                  ? "example.exe"
+                  : "example.com"}
+                className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60"
+              />
+            )}
+          </div>
+        </div>
+      )}
+      <p className="mt-2 text-[10.5px] text-ink-3">
+        {draft.type === "title" && draft.titleMatchMode === "segment"
+          ? "Matches one complete section of a title, such as “Grocery list” in “Grocery list — Notepad”."
+          : RULE_HELP[draft.type]}
+        {draft.type === "domain"
+          && " Website rules require a supported browser and detected website information."}
+        {draft.type === "title" && !windowTitleCaptureEnabled
+          && " Future window title capture is off; existing stored titles can still match."}
+      </p>
+      {draft.type === "title" && showBroadMatchWarning(draft) && (
+        <BroadMatchWarning className="mt-1.5" />
+      )}
+      {draft.pattern.trim() !== "" && ruleDraftReady(draft) && (
+        <RuleDraftPreview
+          source={source}
+          draft={draft}
+          replacingRuleId={replacingRuleId}
+        />
+      )}
+    </>
+  );
+}
+
+const CATEGORY_ORDER_STORAGE_KEY = "time.categories-and-rules.category-order";
+const RULE_ORDER_STORAGE_KEY = "time.categories-and-rules.rule-order";
+
+function readCategoryListOrder(): CategoryListOrder {
+  if (typeof window === "undefined") return "name";
+  try {
+    const stored = window.localStorage.getItem(CATEGORY_ORDER_STORAGE_KEY);
+    return stored === "productivity" ? stored : "name";
+  } catch {
+    return "name";
+  }
+}
+
+function readRuleListOrder(): RuleListOrder {
+  if (typeof window === "undefined") return "type-name";
+  try {
+    return window.localStorage.getItem(RULE_ORDER_STORAGE_KEY) === "name"
+      ? "name"
+      : "type-name";
+  } catch {
+    return "type-name";
+  }
+}
+
+function storeListOrder(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // A blocked WebView store should not make an otherwise local view control
+    // unusable; the selection simply lasts for this mount.
+  }
+}
+
 function CategoriesAndRules({
+  source,
   appliedRuleIds,
   onChanged,
 }: {
+  /** All of history, for the match preview under the rule being written. Null
+   *  until the sessions have loaded. */
+  source: ActivitySource | null;
   /** null while history is still being read — no rule is "unused" until we
    *  have looked, and a tag that flashes on and off is worse than none. */
   appliedRuleIds: number[] | null;
@@ -4132,18 +4569,19 @@ function CategoriesAndRules({
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [newName, setNewName] = useState("");
-  type RuleDraft = {
-    type: MatchType;
-    pattern: string;
-    scopeKind: TitleRuleScopeKind;
-    scopeValue: string;
-    titleMatchMode: TitleRuleMatchMode;
-    titleAnchor: TitleRuleAnchor;
-  };
-  const [drafts, setDrafts] = useState<Record<number, RuleDraft>>({});
+  const [ruleSearch, setRuleSearch] = useState("");
+  const deferredRuleSearch = useDeferredValue(ruleSearch.trim());
+  const [categoryOrder, setCategoryOrder] = useState<CategoryListOrder>(
+    readCategoryListOrder,
+  );
+  const [ruleOrder, setRuleOrder] = useState<RuleListOrder>(readRuleListOrder);
+  const [drafts, setDrafts] = useState<Record<number, CategoryRuleDraft>>({});
+  const [ruleConflict, setRuleConflict] = useState<RuleConflict | null>(null);
+  const [editingRule, setEditingRule] = useState<RuleEditState | null>(null);
+  const categoryEditorRefs = useRef(new Map<number, HTMLDivElement>());
   const applied = appliedRuleIds === null ? null : new Set(appliedRuleIds);
 
-  const draftFor = (id: number): RuleDraft =>
+  const draftFor = (id: number): CategoryRuleDraft =>
     drafts[id] ?? {
       type: "domain" as const,
       pattern: "",
@@ -4152,15 +4590,16 @@ function CategoriesAndRules({
       titleMatchMode: "phrase",
       titleAnchor: "any",
     };
-  const setDraft = (id: number, patch: Partial<RuleDraft>) =>
+  const setDraft = (id: number, patch: Partial<CategoryRuleDraft>) => {
+    setRuleConflict((current) => current?.categoryId === id ? null : current);
     setDrafts((current) => ({ ...current, [id]: { ...draftFor(id), ...patch } }));
+  };
   const toggle = (id: number) => setExpanded((current) => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const submitRule = async (categoryId: number) => {
-    const draft = draftFor(categoryId);
+  const commitRule = async (categoryId: number, draft: CategoryRuleDraft) => {
     if (!draft.pattern.trim() || !ruleDraftReady(draft)) return;
     try {
       await addRule(
@@ -4170,7 +4609,94 @@ function CategoriesAndRules({
         draft.type === "title" ? draft : {},
       );
       setDraft(categoryId, { pattern: "" });
+      setRuleConflict(null);
       await onChanged();
+      banner.show(`${RULE_LABELS[draft.type]} rule “${draft.pattern.trim()}” added.`);
+    } catch (error) {
+      banner.report(error, "rule");
+    }
+  };
+  const submitRule = async (categoryId: number) => {
+    const draft = draftFor(categoryId);
+    if (!draft.pattern.trim() || !ruleDraftReady(draft)) return;
+    const existingRule = findDuplicateRule(
+      meta.rules,
+      draft.type,
+      draft.pattern,
+      draft.type === "title" ? draft : {},
+    );
+    if (existingRule) {
+      setRuleConflict({
+        categoryId,
+        existingRule,
+        existingCategoryName:
+          meta.categories.find((category) => category.id === existingRule.categoryId)?.name
+          ?? "another category",
+        draft: { ...draft },
+      });
+      return;
+    }
+    await commitRule(categoryId, draft);
+  };
+  const beginRuleEdit = (rule: Rule) => {
+    setEditingRule({
+      ruleId: rule.id,
+      categoryId: rule.categoryId,
+      draft: draftFromRule(rule),
+      conflict: null,
+    });
+    window.requestAnimationFrame(() => {
+      categoryEditorRefs.current.get(rule.categoryId)?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "nearest",
+      });
+    });
+  };
+  const changeRuleEdit = (patch: Partial<CategoryRuleDraft>) => {
+    setEditingRule((current) => current
+      ? {
+          ...current,
+          draft: { ...current.draft, ...patch },
+          conflict: null,
+        }
+      : null);
+  };
+  const saveRuleEdit = async () => {
+    if (
+      !editingRule
+      || !editingRule.draft.pattern.trim()
+      || !ruleDraftReady(editingRule.draft)
+    ) return;
+    const { draft } = editingRule;
+    const duplicate = findDuplicateRule(
+      meta.rules.filter((rule) => rule.id !== editingRule.ruleId),
+      draft.type,
+      draft.pattern,
+      draft.type === "title" ? draft : {},
+    );
+    if (duplicate) {
+      const categoryName =
+        meta.categories.find((category) => category.id === duplicate.categoryId)?.name
+        ?? "another category";
+      setEditingRule({
+        ...editingRule,
+        conflict: `This rule already exists in ${categoryName}.`,
+      });
+      return;
+    }
+    try {
+      await updateRule(
+        editingRule.ruleId,
+        draft.type,
+        draft.pattern,
+        editingRule.categoryId,
+        draft.type === "title" ? draft : {},
+      );
+      setEditingRule(null);
+      await onChanged();
+      banner.show(`${RULE_LABELS[draft.type]} rule “${draft.pattern.trim()}” updated.`);
     } catch (error) {
       banner.report(error, "rule");
     }
@@ -4181,7 +4707,7 @@ function CategoriesAndRules({
     const swatches = meta.palette.swatches;
     const color = swatches.find((swatch) => !used.has(swatch)) ?? swatches[meta.categories.length % swatches.length];
     try {
-      const id = await addCategory(newName, color, "unproductive");
+      const id = await addCategory(newName, color, NEW_CATEGORY_DEFAULT_STATE);
       setNewName("");
       setExpanded((current) => new Set(current).add(id));
       await onChanged();
@@ -4228,6 +4754,40 @@ function CategoriesAndRules({
       banner.report(error, "Window rule notice");
     }
   };
+  const chooseCategoryOrder = (next: CategoryListOrder) => {
+    setCategoryOrder(next);
+    storeListOrder(CATEGORY_ORDER_STORAGE_KEY, next);
+  };
+  const chooseRuleOrder = (next: RuleListOrder) => {
+    setRuleOrder(next);
+    storeListOrder(RULE_ORDER_STORAGE_KEY, next);
+  };
+  const normalizedRuleSearch = deferredRuleSearch.toLocaleLowerCase();
+  const orderedCategories = sortCategoriesForRules(
+    meta.categories,
+    categoryOrder,
+  );
+  const categoryRows = orderedCategories.map((category) => {
+    const allRules = sortRulesForCategory(
+      meta.rules.filter((rule) => rule.categoryId === category.id),
+      ruleOrder,
+    );
+    const categoryMatches =
+      normalizedRuleSearch !== ""
+      && category.name.toLocaleLowerCase().includes(normalizedRuleSearch);
+    const visibleRules = normalizedRuleSearch === "" || categoryMatches
+      ? allRules
+      : allRules.filter((rule) => ruleMatchesSearch(rule, normalizedRuleSearch));
+    return { category, allRules, visibleRules };
+  }).filter(({ visibleRules, category }) =>
+    normalizedRuleSearch === ""
+    || visibleRules.length > 0
+    || category.name.toLocaleLowerCase().includes(normalizedRuleSearch)
+  );
+  const matchingRuleCount = categoryRows.reduce(
+    (count, { visibleRules }) => count + visibleRules.length,
+    0,
+  );
 
   return (
     // Scrolls itself rather than the page once enough categories are open. The
@@ -4252,24 +4812,71 @@ function CategoriesAndRules({
           </button>
         </div>
       )}
-      <p className="mb-4 text-[11px] leading-relaxed text-ink-3">
-        Rules classify matching historical and future activity. A Website rule beats a
-        general Window rule; a Window rule limited to one website can refine it. Window
-        rules beat App rules.
+      <p className="mb-3 text-[11px] leading-relaxed text-ink-3">
+        Rules classify matching historical and future activity. Website rules normally
+        take priority over Window rules, and Window rules take priority over App rules. A
+        Window rule scoped to one website can refine that website.
       </p>
+      <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 border-b border-edge/50 pb-4">
+        <ClearableInput
+          value={ruleSearch}
+          onChange={setRuleSearch}
+          label="Search rules"
+          placeholder="Search rules, types, and categories…"
+          leadingIcon
+          className="min-w-[240px] flex-1"
+        />
+        <MenuSelect
+          size="field"
+          variant="resting"
+          label="Category order"
+          value={categoryOrder}
+          onChange={(value) => chooseCategoryOrder(value as CategoryListOrder)}
+          options={[
+            { value: "name", label: "Name", triggerLabel: "Categories by Name" },
+            { value: "productivity", label: "Productivity", triggerLabel: "Categories by Productivity" },
+          ]}
+        />
+        <MenuSelect
+          size="field"
+          variant="resting"
+          label="Rule order"
+          value={ruleOrder}
+          onChange={(value) => chooseRuleOrder(value as RuleListOrder)}
+          options={[
+            { value: "type-name", label: "Type", triggerLabel: "Rules by Type" },
+            { value: "name", label: "Name", triggerLabel: "Rules by Name" },
+          ]}
+        />
+        {normalizedRuleSearch !== "" && (
+          <span className="shrink-0 text-[10.5px] text-ink-3">
+            {matchingRuleCount} matching {matchingRuleCount === 1 ? "rule" : "rules"}
+          </span>
+        )}
+      </div>
       <div className="flex flex-col gap-2">
-        {meta.categories.map((category) => {
-          const open = expanded.has(category.id);
+        {categoryRows.map(({ category, allRules, visibleRules }) => {
+          const open = normalizedRuleSearch !== "" || expanded.has(category.id);
           const state = categoryState(category);
           const stateColorMap = stateColors(meta.palette);
           const locked = isBuiltInIgnored(category);
-          const rules = meta.rules.filter((rule) => rule.categoryId === category.id);
           const draft = draftFor(category.id);
+          const activeEdit =
+            editingRule?.categoryId === category.id ? editingRule : null;
           const beginRename = () => { setRenaming(category.id); setRenameDraft(category.name); };
           return (
-            <div key={category.id} className="overflow-hidden rounded-[11px] border border-edge bg-surface-2">
+            <div
+              key={category.id}
+              className="overflow-hidden rounded-[11px] border border-edge bg-surface-2"
+            >
               <div className="flex items-center gap-2.5 px-3 py-3 text-xs">
-                <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-[10px] text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span></button>
+                {normalizedRuleSearch !== "" ? (
+                  <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center text-[10px] text-ink-3">
+                    <span className="rotate-90">▶</span>
+                  </span>
+                ) : (
+                  <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-[10px] text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span></button>
+                )}
                 <button
                   type="button"
                   title="Change color"
@@ -4310,8 +4917,8 @@ function CategoriesAndRules({
                     value={state}
                     onChange={(option) => void setCategoryState(category, option as Productivity)}
                     disabled={locked}
-                    title={locked ? "The built-in Ignored category is the one ignore mechanism" : `Set how ${category.name} counts`}
-                    label={`How ${category.name} counts`}
+                    title={locked ? "The built-in Ignored category is the one ignore mechanism" : `Set the productivity of ${category.name}`}
+                    label={`Productivity of ${category.name}`}
                     // A category left over from when "ignored" was a state here
                     // keeps showing it, via the placeholder, until one of the
                     // three assignable states is chosen.
@@ -4324,7 +4931,14 @@ function CategoriesAndRules({
                     }))}
                   />
                 </span>
-                <span className="w-[64px] text-right text-[10.5px] text-ink-3">{rules.length} {rules.length === 1 ? "rule" : "rules"}</span>
+                <span className="w-[76px] text-right text-[10.5px] text-ink-3">
+                  {normalizedRuleSearch !== "" && visibleRules.length !== allRules.length
+                    ? `${visibleRules.length} of ${allRules.length}`
+                    : allRules.length}{" "}
+                  {(normalizedRuleSearch !== "" ? visibleRules.length : allRules.length) === 1
+                    ? "rule"
+                    : "rules"}
+                </span>
               </div>
               {open && (
                 <div id={`category-rules-${category.id}`} className="ml-[46px] border-t border-edge/50 px-3 py-3">
@@ -4332,13 +4946,33 @@ function CategoriesAndRules({
                       below it off the screen: past a few rows the list becomes
                       its own quiet scroll well. */}
                   <div className="scroll-well flex max-h-[220px] flex-col gap-1.5 overflow-y-auto pr-2">
-                    {rules.map((rule) => (
-                      <div key={rule.id} className="-mx-2 flex items-center gap-2 rounded-lg px-2 py-1 text-[11.5px] hover:bg-white/[.028]">
+                    {visibleRules.map((rule) => (
+                      <div
+                        key={rule.id}
+                        onDoubleClick={(event) => {
+                          if (
+                            activeEdit?.ruleId === rule.id
+                            || (event.target as HTMLElement).closest("button")
+                          ) return;
+                          event.preventDefault();
+                          beginRuleEdit(rule);
+                        }}
+                        className={`-mx-2 flex items-center gap-2 rounded-lg px-2 py-1 text-[11.5px] ${
+                          activeEdit?.ruleId === rule.id
+                            ? "bg-accent/[.06]"
+                            : "hover:bg-white/[.028]"
+                        }`}
+                      >
                         <span className="flex w-[74px] shrink-0 items-center gap-1.5 text-[9.5px] uppercase tracking-[.04em] text-ink-3">
                           <RuleKindGlyph matchType={rule.matchType} />
                           {RULE_LABELS[rule.matchType]}
                         </span>
-                        <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
+                        <span
+                          className="min-w-0 flex-1 cursor-text truncate font-mono"
+                          title="Double-click to edit"
+                        >
+                          {rule.pattern}
+                        </span>
                         {rule.matchType === "title" && (
                           <>
                             <span
@@ -4358,119 +4992,69 @@ function CategoriesAndRules({
                             </span>
                           </>
                         )}
-                        {applied !== null && !applied.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3" title="Nothing in your history has ever matched this rule.">unused</span>}
+                        {applied !== null && !applied.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3" title="This rule has not been the winning rule for any stored activity.">unused</span>}
+                        <EditRuleButton rule={rule} onClick={() => beginRuleEdit(rule)} />
                         <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
                       </div>
                     ))}
-                    {rules.length === 0 && <p className="py-1 text-[11px] italic text-ink-3">No rules yet — add one below.</p>}
+                    {visibleRules.length === 0 && (
+                      <p className="py-1 text-[11px] italic text-ink-3">
+                        {normalizedRuleSearch === ""
+                          ? "No rules yet — add one below."
+                          : "No rules in this category match the search."}
+                      </p>
+                    )}
                   </div>
-                  <div className="mt-3 border-t border-edge/40 pt-3">
-                    <div className="flex items-center gap-2">
-                      <span className="flex rounded-lg border border-edge bg-surface p-0.5">{(["domain", "title", "process"] as MatchType[]).map((type) => <button key={type} type="button" className={`rounded-md px-2 py-1 text-[10.5px] ${draft.type === type ? "bg-surface-3 text-ink-2" : "text-ink-3 hover:text-ink-2"}`} onClick={() => setDraft(category.id, { type })}>{RULE_LABELS[type]}</button>)}</span>
-                      <input value={draft.pattern} onChange={(event) => setDraft(category.id, { pattern: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") void submitRule(category.id); }} placeholder={draft.type === "domain" ? "example.com" : draft.type === "title" ? "words to match…" : "example.exe"} className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60" />
-                      <Button variant="primary" disabled={!draft.pattern.trim() || !ruleDraftReady(draft)} onClick={() => void submitRule(category.id)}>Add rule</Button>
-                    </div>
-                    {draft.type === "title" && (
-                      <div className="mt-2 rounded-lg border border-edge/60 bg-surface/45 p-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Match as</span>
-                          <span className="flex rounded-lg border border-edge bg-surface p-0.5">
-                            {([
-                              ["phrase", "Whole words"],
-                              ["segment", "Exact part"],
-                              ["contains", "Contains"],
-                            ] as Array<[TitleRuleMatchMode, string]>).map(([mode, label]) => (
-                              <button
-                                key={mode}
-                                type="button"
-                                className={`rounded-md px-2 py-1 text-[10.5px] ${
-                                  draft.titleMatchMode === mode
-                                    ? "bg-surface-3 text-ink-2"
-                                    : "text-ink-3 hover:text-ink-2"
-                                }`}
-                                onClick={() => setDraft(category.id, {
-                                  titleMatchMode: mode,
-                                  titleAnchor: mode === "segment" ? draft.titleAnchor : "any",
-                                })}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </span>
-                        </div>
-                        {draft.titleMatchMode === "segment" && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Position</span>
-                            <MenuSelect
-                              size="compact"
-                              className="w-44"
-                              value={draft.titleAnchor}
-                              onChange={(value) => setDraft(category.id, {
-                                titleAnchor: value as TitleRuleAnchor,
-                              })}
-                              label="Title-part position"
-                              options={[
-                                { value: "any", label: "Anywhere" },
-                                { value: "first", label: "First part" },
-                                { value: "interior", label: "Middle part" },
-                                { value: "last", label: "Last part" },
-                              ]}
-                            />
-                          </div>
+                  <div
+                    ref={(node) => {
+                      if (node) categoryEditorRefs.current.set(category.id, node);
+                      else categoryEditorRefs.current.delete(category.id);
+                    }}
+                    className="mt-3 border-t border-edge/40 pt-3"
+                  >
+                    <CategoryRuleForm
+                      key={activeEdit ? `edit-${activeEdit.ruleId}` : "add"}
+                      draft={activeEdit?.draft ?? draft}
+                      onChange={activeEdit
+                        ? changeRuleEdit
+                        : (patch) => setDraft(category.id, patch)}
+                      onSubmit={activeEdit
+                        ? () => void saveRuleEdit()
+                        : () => void submitRule(category.id)}
+                      submitLabel={activeEdit ? "Save" : "Add rule"}
+                      onCancel={activeEdit ? () => setEditingRule(null) : undefined}
+                      source={source}
+                      windowTitleCaptureEnabled={
+                        meta.settings.record_window_titles === "1"
+                      }
+                      autoFocus={activeEdit !== null}
+                      replacingRuleId={activeEdit?.ruleId}
+                    />
+                    {activeEdit?.conflict && (
+                      <p className="mt-2 rounded-lg border border-edge/60 bg-surface px-3 py-2 text-[10.5px] text-ink-2">
+                        {activeEdit.conflict}
+                      </p>
+                    )}
+                    {!activeEdit && ruleConflict?.categoryId === category.id && (
+                      <div className="mt-2 flex items-center gap-3 rounded-lg border border-edge/60 bg-surface/45 px-3 py-2 text-[10.5px] text-ink-2">
+                        <span className="min-w-0 flex-1">
+                          {ruleConflict.existingRule.categoryId === category.id
+                            ? `This rule already exists in ${category.name}.`
+                            : `This rule belongs to ${ruleConflict.existingCategoryName}. Move it to ${category.name}?`}
+                        </span>
+                        <Button onClick={() => setRuleConflict(null)}>
+                          {ruleConflict.existingRule.categoryId === category.id ? "Dismiss" : "Cancel"}
+                        </Button>
+                        {ruleConflict.existingRule.categoryId !== category.id && (
+                          <Button
+                            variant="primary"
+                            onClick={() => void commitRule(category.id, ruleConflict.draft)}
+                          >
+                            Move rule
+                          </Button>
                         )}
-                        <div className="mt-2 flex items-center gap-2">
-                          <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Applies to</span>
-                          <span className="flex rounded-lg border border-edge bg-surface p-0.5">
-                            {([
-                              [ANY_APP, "Any app"],
-                              [BROWSER_SCOPE, "Browsers"],
-                              ["process", "One app"],
-                              ["domain", "Website"],
-                            ] as Array<[TitleRuleScopeKind, string]>).map(([kind, label]) => (
-                            <button
-                              key={kind}
-                              type="button"
-                              className={`rounded-md px-2 py-1 text-[10.5px] ${
-                                draft.scopeKind === kind
-                                  ? "bg-surface-3 text-ink-2"
-                                  : "text-ink-3 hover:text-ink-2"
-                              }`}
-                              onClick={() => setDraft(category.id, {
-                                scopeKind: kind,
-                                scopeValue:
-                                  kind === "any" || kind === "browsers"
-                                    ? ""
-                                    : draft.scopeValue,
-                              })}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                          </span>
-                          {(draft.scopeKind === "process" || draft.scopeKind === "domain") && (
-                            <input
-                              value={draft.scopeValue}
-                              onChange={(event) => setDraft(category.id, {
-                                scopeValue: event.target.value,
-                              })}
-                              placeholder={
-                                draft.scopeKind === "process"
-                                  ? "obsidian.exe"
-                                  : "github.com"
-                              }
-                              className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60"
-                            />
-                          )}
-                        </div>
                       </div>
                     )}
-                    <p className="mt-2 text-[10.5px] text-ink-3">
-                      {RULE_HELP[draft.type]}
-                      {draft.type === "domain" && " Website rules require a supported browser and detected website information."}
-                      {draft.type === "title" && (meta.settings.record_window_titles === "1"
-                        ? " Window title capture is enabled."
-                        : " Future window title capture is off; existing stored titles can still match.")}
-                    </p>
                   </div>
                   {/* Deleting a category cascades over its rules, so it gets
                       words rather than an icon — destructive weight should
@@ -4484,10 +5068,10 @@ function CategoriesAndRules({
                       Rename
                     </Button>
                     <Button
-                      variant="danger"
+                      variant="quiet-danger"
                       disabled={locked}
                       title={locked ? "The built-in Ignored category cannot be deleted" : undefined}
-                      onClick={() => void removeCategory(category, rules.length)}
+                      onClick={() => void removeCategory(category, allRules.length)}
                     >
                       Delete category
                     </Button>
@@ -4497,6 +5081,11 @@ function CategoriesAndRules({
             </div>
           );
         })}
+        {categoryRows.length === 0 && (
+          <p className="py-8 text-center text-xs text-ink-3">
+            No rules or categories match “{deferredRuleSearch}”.
+          </p>
+        )}
       </div>
       <div className="mt-4 flex items-center gap-2 border-t border-edge/50 pt-4"><input value={newName} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submitCategory(); }} placeholder="New category name" className="w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" /><Button variant="primary" disabled={!newName.trim()} onClick={() => void submitCategory()}>+ Add category</Button></div>
       {colorMenu !== null && createPortal(

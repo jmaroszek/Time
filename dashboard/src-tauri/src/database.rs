@@ -18,11 +18,12 @@ use sqlx::{
 };
 use std::{
     collections::HashSet,
+    fs,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA_VERSION: i64 = 4;
+pub(crate) const SCHEMA_VERSION: i64 = 4;
 const MAX_SESSION_SPAN_SEC: i64 = 7 * 86_400;
 const BOOTSTRAP_SQL: &str = r#"
 BEGIN IMMEDIATE;
@@ -147,7 +148,12 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('week_start','auto'),
     ('browser_processes','chrome.exe,msedge.exe,firefox.exe,brave.exe,opera.exe,vivaldi.exe,arc.exe,chromium.exe'),
     ('min_app_seconds_per_day','0'),
-    ('focus_chain_max_gap_seconds','120'),
+    ('activity_noise_filter','utilities'),
+    ('activity_noise_max_seconds','120'),
+    ('activity_noise_max_sessions','1'),
+    ('color_palette','slate'),
+    ('productivity_style','vivid'),
+    ('focus_chain_max_gap_seconds','300'),
     ('day_start_hour','0'),
     ('day_end_hour','24'),
     ('tracking_paused','0'),
@@ -163,6 +169,44 @@ pub struct TimeDatabase {
     pool: SqlitePool,
     path: PathBuf,
     schema_version: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseBackup {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub modified_sec: i64,
+    pub bytes: u64,
+    pub schema_version: Option<i64>,
+    pub compatible: bool,
+    pub issue: Option<String>,
+    pub legacy_location: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingRestore {
+    pub source_name: String,
+    pub safety_backup_path: String,
+    pub schema_version: i64,
+    pub recording_consent: bool,
+    pub launch_at_login: bool,
+}
+
+pub struct RestoreSwap {
+    pub pending: PendingRestore,
+    rollback_path: PathBuf,
+    marker_path: PathBuf,
+    database_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreNotice {
+    pub ok: bool,
+    pub message: String,
 }
 
 #[derive(Serialize)]
@@ -552,7 +596,7 @@ impl TimeDatabase {
         };
         let allowed = match words.first().map(String::as_str) {
             Some("INSERT") => ["SETTINGS", "RULES", "CATEGORIES"].contains(&target),
-            Some("UPDATE") => ["CATEGORIES"].contains(&target),
+            Some("UPDATE") => ["RULES", "CATEGORIES"].contains(&target),
             Some("DELETE") => ["RULES", "CATEGORIES"].contains(&target),
             _ => false,
         };
@@ -1160,20 +1204,398 @@ impl TimeDatabase {
         Ok(result.rows_affected())
     }
 
-    pub async fn backup(&self) -> Result<String, String> {
+    pub fn backups_dir(&self) -> Result<PathBuf, String> {
+        let parent = self.path.parent().ok_or("database path has no parent")?;
+        let directory = parent.join("Backups");
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        Ok(directory)
+    }
+
+    async fn backup_named(&self, prefix: &str) -> Result<String, String> {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|e| e.to_string())?
-            .as_secs();
-        let target = self
-            .path
-            .with_file_name(format!("backup_manual_{stamp}.db"));
+            .as_millis();
+        let target = self.backups_dir()?.join(format!("{prefix}_{stamp}.db"));
         let escaped = target.to_string_lossy().replace("'", "''");
         sqlx::query(&format!("VACUUM INTO '{escaped}'"))
             .execute(&self.pool)
             .await
             .map_err(|e| e.to_string())?;
         Ok(target.to_string_lossy().into_owned())
+    }
+
+    pub async fn backup(&self) -> Result<String, String> {
+        self.backup_named("backup_manual").await
+    }
+
+    async fn read_restore_settings(
+        path: &Path,
+        integrity: bool,
+    ) -> Result<(i64, bool, bool), String> {
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .read_only(true)
+            .create_if_missing(false)
+            .foreign_keys(true)
+            .busy_timeout(Duration::from_secs(10));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .map_err(|error| format!("Could not open backup: {error}"))?;
+        let result = async {
+            let settings_exists: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='settings'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map_err(|error| error.to_string())?;
+            if settings_exists == 0 {
+                return Err("This file is not a versioned Time database".to_owned());
+            }
+            let raw_version = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='schema_version'",
+            )
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "This backup has no schema version".to_owned())?;
+            let schema_version = raw_version
+                .parse::<i64>()
+                .map_err(|_| "This backup has an invalid schema version".to_owned())?;
+            if schema_version < 1 {
+                return Err("This backup predates supported Time databases".to_owned());
+            }
+            if integrity {
+                let checks: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check")
+                    .fetch_all(&pool)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if checks.as_slice() != ["ok"] {
+                    return Err(format!(
+                        "Backup integrity check failed: {}",
+                        checks.join("; ")
+                    ));
+                }
+                let foreign_key_errors: i64 =
+                    sqlx::query_scalar("SELECT COUNT(*) FROM pragma_foreign_key_check")
+                        .fetch_one(&pool)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                if foreign_key_errors > 0 {
+                    return Err(format!(
+                        "Backup has {foreign_key_errors} foreign-key integrity errors"
+                    ));
+                }
+            }
+            let recording_consent = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='recording_consent'",
+            )
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| error.to_string())?
+            .as_deref()
+                == Some("1");
+            let launch_at_login = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE key='launch_at_login'",
+            )
+            .fetch_optional(&pool)
+            .await
+            .map_err(|error| error.to_string())?
+            .as_deref()
+                == Some("1");
+            Ok((schema_version, recording_consent, launch_at_login))
+        }
+        .await;
+        pool.close().await;
+        result
+    }
+
+    fn backup_kind(name: &str) -> String {
+        if name.starts_with("backup_manual_") {
+            "Manual".to_owned()
+        } else if name.starts_with("backup_schema") {
+            "Before update".to_owned()
+        } else if name.starts_with("backup_pre_restore_") {
+            "Before restore".to_owned()
+        } else {
+            "Backup".to_owned()
+        }
+    }
+
+    async fn inspect_backup_path(
+        path: PathBuf,
+        legacy_location: bool,
+    ) -> Result<DatabaseBackup, String> {
+        let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+        if !metadata.is_file() {
+            return Err("Backup path is not a file".into());
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or("Backup filename is not valid Unicode")?
+            .to_owned();
+        let modified_sec = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(0);
+        let inspected = Self::read_restore_settings(&path, false).await;
+        let (schema_version, compatible, issue) = match inspected {
+            Ok((version, _, _)) if version > SCHEMA_VERSION => (
+                Some(version),
+                false,
+                Some(format!(
+                    "Created by a newer Time database (schema {version}; this version supports {SCHEMA_VERSION})"
+                )),
+            ),
+            Ok((version, _, _)) => (Some(version), true, None),
+            Err(error) => (None, false, Some(error)),
+        };
+        Ok(DatabaseBackup {
+            path: path.to_string_lossy().into_owned(),
+            name: name.clone(),
+            kind: Self::backup_kind(&name),
+            modified_sec,
+            bytes: metadata.len(),
+            schema_version,
+            compatible,
+            issue,
+            legacy_location,
+        })
+    }
+
+    pub async fn inspect_backup(&self, path: PathBuf) -> Result<DatabaseBackup, String> {
+        let backup_dir = self.backups_dir()?;
+        let legacy_location = path.parent() != Some(backup_dir.as_path());
+        Self::inspect_backup_path(path, legacy_location).await
+    }
+
+    pub async fn list_backups(&self) -> Result<Vec<DatabaseBackup>, String> {
+        let parent = self.path.parent().ok_or("database path has no parent")?;
+        let backup_dir = self.backups_dir()?;
+        let mut paths = Vec::new();
+        for (directory, legacy) in [(backup_dir, false), (parent.to_path_buf(), true)] {
+            let entries = fs::read_dir(directory).map_err(|error| error.to_string())?;
+            for entry in entries {
+                let path = entry.map_err(|error| error.to_string())?.path();
+                let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                    continue;
+                };
+                if name.starts_with("backup_")
+                    && path.extension().and_then(|value| value.to_str()) == Some("db")
+                {
+                    paths.push((path, legacy));
+                }
+            }
+        }
+        let mut backups = Vec::with_capacity(paths.len());
+        for (path, legacy) in paths {
+            if let Ok(backup) = Self::inspect_backup_path(path, legacy).await {
+                backups.push(backup);
+            }
+        }
+        backups.sort_by(|left, right| right.modified_sec.cmp(&left.modified_sec));
+        Ok(backups)
+    }
+
+    fn pending_database_path(database_path: &Path) -> Result<PathBuf, String> {
+        Ok(database_path
+            .parent()
+            .ok_or("database path has no parent")?
+            .join("restore_pending.db"))
+    }
+
+    fn pending_marker_path(database_path: &Path) -> Result<PathBuf, String> {
+        Ok(database_path
+            .parent()
+            .ok_or("database path has no parent")?
+            .join("restore_pending.json"))
+    }
+
+    fn restore_notice_path(database_path: &Path) -> Result<PathBuf, String> {
+        Ok(database_path
+            .parent()
+            .ok_or("database path has no parent")?
+            .join("restore_notice.json"))
+    }
+
+    fn rollback_path(database_path: &Path) -> Result<PathBuf, String> {
+        Ok(database_path
+            .parent()
+            .ok_or("database path has no parent")?
+            .join("restore_previous.db"))
+    }
+
+    fn remove_if_exists(path: &Path) -> Result<(), String> {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn remove_database_sidecars(path: &Path) -> Result<(), String> {
+        Self::remove_if_exists(&path.with_extension("db-wal"))?;
+        Self::remove_if_exists(&path.with_extension("db-shm"))
+    }
+
+    fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+        let temporary = path.with_extension("json.tmp");
+        let bytes = serde_json::to_vec(value).map_err(|error| error.to_string())?;
+        fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
+        Self::remove_if_exists(path)?;
+        fs::rename(&temporary, path).map_err(|error| error.to_string())
+    }
+
+    pub async fn prepare_restore(&self, source: PathBuf) -> Result<PendingRestore, String> {
+        let source = fs::canonicalize(&source).map_err(|error| error.to_string())?;
+        let live = fs::canonicalize(&self.path).map_err(|error| error.to_string())?;
+        if source == live {
+            return Err("Choose a backup, not the live Time database".into());
+        }
+        let (schema_version, recording_consent, launch_at_login) =
+            Self::read_restore_settings(&source, true).await?;
+        if schema_version > SCHEMA_VERSION {
+            return Err(format!(
+                "This backup uses schema {schema_version}; this Time version supports {SCHEMA_VERSION}"
+            ));
+        }
+        let safety_backup_path = self.backup_named("backup_pre_restore").await?;
+        let pending_path = Self::pending_database_path(&self.path)?;
+        let marker_path = Self::pending_marker_path(&self.path)?;
+        let temporary_path = pending_path.with_extension("db.tmp");
+        Self::remove_if_exists(&temporary_path)?;
+        fs::copy(&source, &temporary_path).map_err(|error| error.to_string())?;
+        let copied_settings = Self::read_restore_settings(&temporary_path, true).await?;
+        if copied_settings.0 != schema_version {
+            Self::remove_if_exists(&temporary_path)?;
+            return Err("The staged backup changed during validation".into());
+        }
+        Self::remove_if_exists(&pending_path)?;
+        fs::rename(&temporary_path, &pending_path).map_err(|error| error.to_string())?;
+        let pending = PendingRestore {
+            source_name: source
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("selected backup")
+                .to_owned(),
+            safety_backup_path,
+            schema_version,
+            recording_consent,
+            launch_at_login,
+        };
+        if let Err(error) = Self::write_json_atomic(&marker_path, &pending) {
+            let _ = Self::remove_if_exists(&pending_path);
+            return Err(error);
+        }
+        Ok(pending)
+    }
+
+    pub async fn recording_consent(&self) -> Result<bool, String> {
+        Ok(sqlx::query_scalar::<_, String>(
+            "SELECT value FROM settings WHERE key='recording_consent'",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?
+        .as_deref()
+            == Some("1"))
+    }
+
+    pub async fn refresh_pending_safety_backup(
+        &self,
+        pending: &mut PendingRestore,
+    ) -> Result<(), String> {
+        let previous = PathBuf::from(&pending.safety_backup_path);
+        let current = self.backup_named("backup_pre_restore").await?;
+        pending.safety_backup_path = current;
+        Self::write_json_atomic(&Self::pending_marker_path(&self.path)?, pending)?;
+        // The first snapshot protected the validation/staging phase. Once the
+        // stopped-tracker snapshot is durably named in the marker, only that
+        // later copy is needed.
+        let _ = Self::remove_if_exists(&previous);
+        Ok(())
+    }
+
+    pub fn cancel_pending_restore(&self) -> Result<(), String> {
+        Self::remove_if_exists(&Self::pending_database_path(&self.path)?)?;
+        Self::remove_if_exists(&Self::pending_marker_path(&self.path)?)
+    }
+
+    pub async fn begin_pending_restore(
+        database_path: &Path,
+    ) -> Result<Option<RestoreSwap>, String> {
+        let marker_path = Self::pending_marker_path(database_path)?;
+        if !marker_path.exists() {
+            return Ok(None);
+        }
+        let pending_path = Self::pending_database_path(database_path)?;
+        let rollback_path = Self::rollback_path(database_path)?;
+        let pending: PendingRestore =
+            serde_json::from_slice(&fs::read(&marker_path).map_err(|error| error.to_string())?)
+                .map_err(|error| format!("Could not read pending restore: {error}"))?;
+
+        // A process exit between the two renames leaves the old database in the
+        // rollback slot. Put it back before retrying the staged swap.
+        if rollback_path.exists() && !database_path.exists() && pending_path.exists() {
+            fs::rename(&rollback_path, database_path).map_err(|error| error.to_string())?;
+        }
+        if rollback_path.exists() && database_path.exists() && !pending_path.exists() {
+            let restored = Self::read_restore_settings(database_path, true).await?;
+            if restored.0 != pending.schema_version {
+                return Err("Restored database does not match its pending marker".into());
+            }
+            return Ok(Some(RestoreSwap {
+                pending,
+                rollback_path,
+                marker_path,
+                database_path: database_path.to_path_buf(),
+            }));
+        }
+        if rollback_path.exists() {
+            return Err("A previous database restore did not finish cleanly".into());
+        }
+        let staged = Self::read_restore_settings(&pending_path, true).await?;
+        if staged.0 != pending.schema_version {
+            return Err("Staged database does not match its pending marker".into());
+        }
+        Self::remove_database_sidecars(database_path)?;
+        fs::rename(database_path, &rollback_path).map_err(|error| error.to_string())?;
+        if let Err(error) = fs::rename(&pending_path, database_path) {
+            let _ = fs::rename(&rollback_path, database_path);
+            return Err(error.to_string());
+        }
+        Ok(Some(RestoreSwap {
+            pending,
+            rollback_path,
+            marker_path,
+            database_path: database_path.to_path_buf(),
+        }))
+    }
+
+    pub fn discard_pending_restore(database_path: &Path, message: String) -> Result<(), String> {
+        Self::remove_if_exists(&Self::pending_database_path(database_path)?)?;
+        Self::remove_if_exists(&Self::pending_marker_path(database_path)?)?;
+        Self::write_restore_notice(database_path, RestoreNotice { ok: false, message })
+    }
+
+    pub fn write_restore_notice(database_path: &Path, notice: RestoreNotice) -> Result<(), String> {
+        Self::write_json_atomic(&Self::restore_notice_path(database_path)?, &notice)
+    }
+
+    pub fn take_restore_notice(database_path: &Path) -> Result<Option<RestoreNotice>, String> {
+        let path = Self::restore_notice_path(database_path)?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        let notice = serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+        Self::remove_if_exists(&path)?;
+        Ok(Some(notice))
     }
 
     pub async fn erase_history(&self) -> Result<u64, String> {
@@ -1211,6 +1633,31 @@ impl TimeDatabase {
             ));
         }
         Ok(())
+    }
+}
+
+impl RestoreSwap {
+    pub fn commit(self) -> Result<(), String> {
+        TimeDatabase::remove_if_exists(&self.marker_path)?;
+        TimeDatabase::remove_if_exists(&self.rollback_path)
+    }
+
+    pub fn rollback(self) -> Result<(), String> {
+        TimeDatabase::remove_database_sidecars(&self.database_path)?;
+        let failed_path = self
+            .database_path
+            .parent()
+            .ok_or("database path has no parent")?
+            .join("restore_failed.db");
+        TimeDatabase::remove_if_exists(&failed_path)?;
+        fs::rename(&self.database_path, &failed_path).map_err(|error| error.to_string())?;
+        if let Err(error) = fs::rename(&self.rollback_path, &self.database_path) {
+            let _ = fs::rename(&failed_path, &self.database_path);
+            return Err(error.to_string());
+        }
+        TimeDatabase::remove_if_exists(&failed_path)?;
+        TimeDatabase::remove_if_exists(&self.marker_path)?;
+        TimeDatabase::remove_if_exists(&TimeDatabase::pending_database_path(&self.database_path)?)
     }
 }
 
@@ -1337,6 +1784,7 @@ mod tests {
         ActivityDeleteRequest, SessionCorrectionRequest, TimeDatabase, BOOTSTRAP_SQL,
         SCHEMA_VERSION,
     };
+    use std::path::PathBuf;
 
     #[test]
     fn rejects_dangerous_or_multi_statement_sql() {
@@ -1358,6 +1806,12 @@ mod tests {
         .is_ok());
         assert!(
             TimeDatabase::validate_mutation_target("DELETE FROM sessions WHERE id=$1").is_err()
+        );
+        assert!(
+            TimeDatabase::validate_mutation_target(
+                "UPDATE rules SET pattern=$1 WHERE id=$2"
+            )
+            .is_ok()
         );
         assert!(TimeDatabase::validate_mutation_target("UPDATE settings SET value='1'").is_err());
         assert!(TimeDatabase::validate_mutation_target("DELETE FROM settings").is_err());
@@ -1426,10 +1880,19 @@ mod tests {
 
     #[test]
     fn app_exclusions_supply_the_extension_sessions_are_stored_with() {
-        assert_eq!(super::normalize_exclusion("app", " Code ").unwrap(), "code.exe");
-        assert_eq!(super::normalize_exclusion("app", "CODE.EXE").unwrap(), "code.exe");
+        assert_eq!(
+            super::normalize_exclusion("app", " Code ").unwrap(),
+            "code.exe"
+        );
+        assert_eq!(
+            super::normalize_exclusion("app", "CODE.EXE").unwrap(),
+            "code.exe"
+        );
         // A dotted name is already specific enough to match on its own.
-        assert_eq!(super::normalize_exclusion("app", "vim.bat").unwrap(), "vim.bat");
+        assert_eq!(
+            super::normalize_exclusion("app", "vim.bat").unwrap(),
+            "vim.bat"
+        );
         assert!(super::normalize_exclusion("app", "C:\\apps\\code.exe").is_err());
     }
 
@@ -1534,6 +1997,60 @@ mod tests {
             BOOTSTRAP_SQL.contains(&seeded),
             "BOOTSTRAP_SQL must seed schema_version {SCHEMA_VERSION}",
         );
+    }
+
+    #[test]
+    fn backup_folder_and_staged_restore_preserve_a_rollback_until_reopen() {
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("database-restore-test");
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("time_log.db");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path.clone()).await.unwrap();
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process) VALUES (1,10,20,'code.exe')",
+            )
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            let backup_path = PathBuf::from(database.backup().await.unwrap());
+            assert_eq!(
+                backup_path.parent().unwrap().file_name().unwrap(),
+                "Backups"
+            );
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process) VALUES (2,20,30,'mail.exe')",
+            )
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            let pending = database.prepare_restore(backup_path).await.unwrap();
+            assert_eq!(pending.schema_version, SCHEMA_VERSION);
+            database.pool.close().await;
+            drop(database);
+
+            let swap = TimeDatabase::begin_pending_restore(&path)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(root.join("restore_previous.db").exists());
+            let restored = TimeDatabase::open(path.clone()).await.unwrap();
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+                .fetch_one(&restored.pool)
+                .await
+                .unwrap();
+            assert_eq!(count, 1);
+            restored.pool.close().await;
+            drop(restored);
+            swap.commit().unwrap();
+            assert!(!root.join("restore_previous.db").exists());
+            assert!(!root.join("restore_pending.json").exists());
+        });
     }
 
     #[test]

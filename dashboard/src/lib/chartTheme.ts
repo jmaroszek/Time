@@ -7,6 +7,16 @@ import { DEFAULT_PALETTE, metricRamps } from "./palettes";
 // annotated with the index.css token it mirrors. Hex literals in components
 // should route through this module, palettes.ts, or the CSS tokens — nowhere else.
 
+/**
+ * The UI typeface, mirrored for canvas. Charts must set this explicitly: left
+ * alone, ECharts' global default is "Microsoft YaHei" on any Windows machine
+ * (a `navigator.platform` sniff in echarts/lib/model/globalDefault.js), which
+ * set every axis, legend, and tooltip ~9% wider than the rest of the app and in
+ * visibly different shapes. Keep in step with `body` in index.css — layout code
+ * that measures text (see ProductiveHoursChart's legend) assumes they match.
+ */
+export const CHART_FONT_FAMILY = '"Segoe UI", system-ui, sans-serif';
+
 /** Chrome shared by every chart: axis labels, gridlines, tooltip surface. */
 export const CHROME = {
   axisLabel: "#9aa0a8", // --color-ink-2

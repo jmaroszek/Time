@@ -74,6 +74,16 @@ export function categoryStateFlags(
 
 export type MatchType = "process" | "domain" | "title";
 
+/** The priority a rule is stored with when nothing overrides it: Website beats
+ *  Window beats App. Shared with the rule preview so a previewed rule contends
+ *  on exactly the terms the saved one will. `effectivePriority` below still
+ *  demotes a website-scoped Window rule past all three at match time. */
+export const DEFAULT_RULE_PRIORITY: Record<MatchType, number> = {
+  domain: 1,
+  title: 2,
+  process: 3,
+};
+
 export interface Rule {
   id: number;
   matchType: MatchType;

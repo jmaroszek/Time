@@ -13,7 +13,7 @@ import { dayKey, listDays, type Range } from "../lib/time";
 import { fmtClock, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
-import { CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 
 const AFK_COLOR = "#33363d";
 const UNCATEGORIZED_COLOR = "#5b616b";
@@ -109,6 +109,7 @@ export default function TimelineChart({
   const option = useMemo<EChartsOption>(
     () => ({
       animation: false,
+      textStyle: { fontFamily: CHART_FONT_FAMILY },
       grid: { left: 70, right: 16, top: 8, bottom: 24 },
       xAxis: {
         type: "value",
