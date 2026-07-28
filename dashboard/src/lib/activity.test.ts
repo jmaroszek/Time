@@ -905,3 +905,84 @@ describe("window list ordering in the entity panel", () => {
     );
   });
 });
+
+describe("visits carried for the inspected window", () => {
+  /** One window, returned to far more often than a group's summary sample. */
+  const many = buildActivityIndex({
+    categories,
+    browserProcesses: [],
+    aliases: {},
+    rules: [],
+    sessions: Array.from({ length: 60 }, (_, i) => ({
+      id: 100 + i,
+      start: i * 10,
+      end: i * 10 + 5,
+      process: "editor.exe",
+      title: "Notes - Editor",
+      domain: null,
+      isAfk: false,
+    })),
+  });
+  const selected: ActivityQuery = {
+    ...baseQuery,
+    endSec: 10_000,
+    selectedEntityId: "app:editor.exe",
+  };
+  const windowKey = () =>
+    queryActivityIndex(many, selected).detailGroups.rows[0].key;
+
+  it("still samples every other group, so the payload stays bounded", () => {
+    const group = queryActivityIndex(many, selected).detailGroups.rows[0];
+    expect(group.sessionCount).toBe(60);
+    expect(group.sessions).toHaveLength(GROUP_SESSION_SAMPLE);
+  });
+
+  it("hands the inspected window as many visits as it asks for", () => {
+    const group = queryActivityIndex(many, {
+      ...selected,
+      selectedWindowKey: windowKey(),
+      selectedWindowSessionLimit: 45,
+    }).detailGroups.rows[0];
+    expect(group.sessions).toHaveLength(45);
+    // Newest first, so paging deeper reaches steadily older visits — the ones
+    // that could not be ticked or corrected at all before.
+    expect(group.sessions[0].start).toBeGreaterThan(group.sessions[44].start);
+  });
+
+  it("never hands back more than the window actually has", () => {
+    const group = queryActivityIndex(many, {
+      ...selected,
+      selectedWindowKey: windowKey(),
+      selectedWindowSessionLimit: 500,
+    }).detailGroups.rows[0];
+    expect(group.sessions).toHaveLength(60);
+  });
+
+  it("leaves the other groups sampled when one is inspected", () => {
+    const mixed = buildActivityIndex({
+      categories,
+      browserProcesses: [],
+      aliases: {},
+      rules: [],
+      sessions: [
+        ...Array.from({ length: 40 }, (_, i) => ({
+          id: 200 + i, start: i * 10, end: i * 10 + 5,
+          process: "editor.exe", title: "First - Editor", domain: null, isAfk: false,
+        })),
+        ...Array.from({ length: 40 }, (_, i) => ({
+          id: 300 + i, start: 1000 + i * 10, end: 1000 + i * 10 + 4,
+          process: "editor.exe", title: "Second - Editor", domain: null, isAfk: false,
+        })),
+      ],
+    });
+    const query = { ...baseQuery, endSec: 10_000, selectedEntityId: "app:editor.exe" };
+    const rows = queryActivityIndex(mixed, query).detailGroups.rows;
+    const inspected = queryActivityIndex(mixed, {
+      ...query,
+      selectedWindowKey: rows[0].key,
+      selectedWindowSessionLimit: 40,
+    }).detailGroups.rows;
+    expect(inspected[0].sessions).toHaveLength(40);
+    expect(inspected[1].sessions).toHaveLength(GROUP_SESSION_SAMPLE);
+  });
+});

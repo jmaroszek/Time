@@ -23,10 +23,10 @@ import {
 } from "../components/ui";
 import { withAlias } from "../lib/aliases";
 import {
+  GROUP_SESSION_SAMPLE,
   type ActivityClassificationFilter,
   type ActivityDayBucket,
   type ActivityEntityPage,
-  type ActivityEntityRuleSlice,
   type ActivityEntitySummary,
   type ActivityQuery,
   type ActivityQueryResult,
@@ -167,6 +167,11 @@ const WINDOW_PAGE = 50;
  *  first few entries answer "what did I do in here". */
 const PANEL_WINDOW_PAGE = 10;
 const PANEL_WINDOW_MORE = 20;
+
+/** Visits shown for the one window under inspection, and how many more each
+ *  press adds. The first page matches the sample every group already carries,
+ *  so opening a window costs no extra work. */
+const WINDOW_VISIT_MORE = 50;
 
 type Setter<T> = (update: (current: T) => T) => void;
 
@@ -337,6 +342,7 @@ export default function ActivityTab({
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
   const [detailLimit, setDetailLimit] = useState(PANEL_WINDOW_PAGE);
+  const [windowVisitLimit, setWindowVisitLimit] = useState(GROUP_SESSION_SAMPLE);
   const [detailSort, setDetailSort] = useState<ActivityWindowSort>("seconds");
   const [detailDirection, setDetailDirection] = useState<ActivitySortDirection>("desc");
   const [selectedWindow, setSelectedWindow] = useState<ActivityTitleGroup | null>(null);
@@ -393,6 +399,8 @@ export default function ActivityTab({
     detailLimit,
     detailSort,
     detailDirection,
+    selectedWindowKey: selectedWindow?.key ?? null,
+    selectedWindowSessionLimit: windowVisitLimit,
   }), [
     range.start,
     range.end,
@@ -412,6 +420,8 @@ export default function ActivityTab({
     detailLimit,
     detailSort,
     detailDirection,
+    selectedWindow?.key,
+    windowVisitLimit,
   ]);
   const analyzed = useActivityModel(source, query);
   const result = analyzed.result;
@@ -448,6 +458,7 @@ export default function ActivityTab({
 
   useEffect(() => {
     setPanelSessionIds(new Set());
+    setWindowVisitLimit(GROUP_SESSION_SAMPLE);
   }, [selectedWindow?.key]);
 
   useEffect(() => {
@@ -844,7 +855,9 @@ export default function ActivityTab({
           dock={panelStyle}
           overlapping={overlapping}
           group={currentWindow}
+          usage={result?.selectedWindowUsage ?? []}
           rangeDays={calendarDays(range)}
+          onLoadMoreVisits={() => setWindowVisitLimit((limit) => limit + WINDOW_VISIT_MORE)}
           selectedSessionIds={panelSessionIds}
           onToggleSession={togglePanelSession}
           onToggleAllSessions={toggleAllPanelSessions}
@@ -1795,7 +1808,7 @@ function windowGroupClassification(group: ActivityTitleGroup): { label: string; 
   if (group.winningRuleType && group.winningRulePattern) {
     return {
       label,
-      detail: `${RULE_LABELS[group.winningRuleType]} rule · ${group.winningRulePattern}`,
+      detail: describeRuleSource(group.winningRuleType, group.winningRulePattern, group.entityKey),
     };
   }
   return { label, detail: "No matching rule" };
@@ -1883,6 +1896,36 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
+/**
+ * Consecutive visits that fall on the same local date, in the order given.
+ *
+ * The list arrives newest-first and stays that way, so a single pass is enough
+ * and no visit ever moves relative to its neighbours — a day heading is only a
+ * break inserted where the date changes.
+ */
+export function groupVisitsByDay<T extends { start: number }>(
+  visits: T[],
+): { key: number; visits: T[] }[] {
+  const days: { key: number; visits: T[] }[] = [];
+  for (const visit of visits) {
+    const at = new Date(visit.start * 1000);
+    const key = at.getFullYear() * 10000 + (at.getMonth() + 1) * 100 + at.getDate();
+    const open = days[days.length - 1];
+    if (open && open.key === key) open.visits.push(visit);
+    else days.push({ key, visits: [visit] });
+  }
+  return days;
+}
+
+/** A day heading for the visit list. Names today and yesterday, since those are
+ *  the two a reader can place without doing arithmetic. */
+export function formatVisitDay(seconds: number, now = new Date()): string {
+  const days = calendarDaysAgo(new Date(seconds * 1000), now);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return formatShortDate(seconds);
+}
+
 /** The intervals behind one window, for the rare case that needs them: which
  *  exact visit to correct, or proof of when something actually happened. */
 function GroupSessions({
@@ -1890,42 +1933,62 @@ function GroupSessions({
   selected,
   onToggle,
   onEdit,
+  onLoadMore,
 }: {
   group: ActivityTitleGroup;
   selected: Set<number>;
   onToggle: (id: number) => void;
   onEdit: (id: number) => void;
+  onLoadMore: () => void;
 }) {
   return (
     <div className="flex flex-col gap-1">
-      {group.sessions.map((session) => (
-        <div key={session.id} className="flex items-center gap-2 text-[11px]">
-          <Checkbox
-            checked={selected.has(session.id)}
-            onChange={() => onToggle(session.id)}
-            label={`Select the visit starting ${formatDateTime(session.start)}`}
-          />
-          <span className="tabular-nums text-ink-2">{formatDateTime(session.start)}</span>
-          <span className="tabular-nums text-ink-3">{fmtDuration(session.seconds)}</span>
-          {session.isCorrected && (
-            <span className="rounded-full bg-accent/10 px-1.5 py-[1px] text-[9px] text-accent">Corrected</span>
-          )}
-          <button
-            type="button"
-            onClick={() => onEdit(session.id)}
-            className="ml-auto rounded px-1.5 py-0.5 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
-          >
-            Edit
-          </button>
+      {/* A date per row put "Jul 27, 2026" down the column twenty times over,
+          and the times — the only part that differed — were the last thing the
+          eye reached. The date is said once and the rows carry clocks. */}
+      {/* The margin belongs to the day, not its heading: on the heading,
+          `first:` matched every time — a heading is always the first child of
+          its own group — so the rule that was meant to separate the days never
+          applied to any of them. */}
+      {groupVisitsByDay(group.sessions).map((day) => (
+        <div key={day.key} className="mt-4 flex flex-col gap-1 first:mt-0">
+          <p className="text-[10px] uppercase tracking-[.04em] text-ink-3">
+            {formatVisitDay(day.visits[0].start)}
+          </p>
+          {day.visits.map((session) => (
+            <div key={session.id} className="flex items-center gap-2 text-[11px]">
+              <Checkbox
+                checked={selected.has(session.id)}
+                onChange={() => onToggle(session.id)}
+                label={`Select the visit starting ${formatDateTime(session.start)}`}
+              />
+              <span className="w-[62px] shrink-0 tabular-nums text-ink-2">
+                {new Date(session.start * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </span>
+              <span className="tabular-nums text-ink-3">{fmtDuration(session.seconds)}</span>
+              {session.isCorrected && (
+                <span className="rounded-full bg-accent/10 px-1.5 py-[1px] text-[9px] text-accent">Corrected</span>
+              )}
+              <button
+                type="button"
+                onClick={() => onEdit(session.id)}
+                className="ml-auto rounded px-1.5 py-0.5 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
+              >
+                Edit
+              </button>
+            </div>
+          ))}
         </div>
       ))}
       {group.sessionCount > group.sessions.length && (
-        // Never silently truncated: the count above says how many visits there
-        // were, so the difference has to be accounted for.
-        <span className="pt-1 text-[10.5px] text-ink-3">
-          Showing the {group.sessions.length} most recent of {group.sessionCount} visits.
-          Select all visits includes the complete group.
-        </span>
+        // Never silently truncated, and no longer a dead end: the older visits
+        // used to be unreachable one at a time, so a correction to anything
+        // but the newest twenty-five was impossible to aim.
+        <LoadMore
+          shown={group.sessions.length}
+          total={group.sessionCount}
+          onClick={onLoadMore}
+        />
       )}
     </div>
   );
@@ -2203,33 +2266,50 @@ function DetailPanel({
       }`}
     >
       <div className="flex shrink-0 items-start gap-3 border-b border-edge px-5 py-4">
-        {onBack && (
-          <button
-            type="button"
-            onClick={onBack}
-            title={backLabel}
-            aria-label={backLabel}
-            className="mt-0.5 rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink"
-          >
-            ←
-          </button>
-        )}
         <div className="min-w-0 flex-1">
+          {/* Nothing precedes the eyebrow, so both panels' headers start on the
+              same pixel. Anything that led this block indented the title and
+              the line beneath it past every other thing in the panel. */}
           <div className="flex min-w-0 items-center gap-1.5 text-[10.5px] uppercase tracking-[.05em] text-ink-3">
             {eyebrow}
           </div>
           {heading}
           {subtitle}
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          title={`${closeLabel} (Esc)`}
-          aria-label={closeLabel}
-          className="rounded-md px-2 py-1 text-ink-3 hover:bg-surface-3 hover:text-ink"
-        >
-          ✕
-        </button>
+        {/* Both ways out of the view, together. Back is conventionally on the
+            left, but the left of this header belongs to what the panel is
+            about, and these two are the same kind of act. */}
+        {/* Two SVGs, never a glyph and an SVG. A text ✕ is centred on its own
+            baseline inside an em box, an icon on the geometry of its viewBox,
+            and the two systems disagree by a pixel or so — an offset that
+            cannot be nudged away, because it moves with font and DPI scaling.
+            Matched viewBox, size, and stroke line up by construction. */}
+        <span className="flex shrink-0 items-center gap-1">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              title={backLabel}
+              aria-label={backLabel}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M19 12H5m7-7-7 7 7 7" />
+              </svg>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            title={`${closeLabel} (Esc)`}
+            aria-label={closeLabel}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </span>
       </div>
       {/* The top padding belongs to the content, not the scroll box. A sticky
           heading with `top: 0` pins to the scroll container's *content* box, so
@@ -2359,7 +2439,9 @@ function WindowPanel({
   dock,
   overlapping,
   group,
+  usage,
   rangeDays,
+  onLoadMoreVisits,
   selectedSessionIds,
   onToggleSession,
   onToggleAllSessions,
@@ -2372,8 +2454,10 @@ function WindowPanel({
   dock: CSSProperties | null;
   overlapping: boolean;
   group: ActivityTitleGroup;
+  usage: ActivityDayBucket[];
   /** Calendar days the range spans, so "days seen" has a denominator. */
   rangeDays: number;
+  onLoadMoreVisits: () => void;
   selectedSessionIds: Set<number>;
   onToggleSession: (id: number) => void;
   onToggleAllSessions: (ids: number[]) => void;
@@ -2385,10 +2469,6 @@ function WindowPanel({
 }) {
   const classification = windowGroupClassification(group);
   const allSelected = group.sessionIds.every((id) => selectedSessionIds.has(id));
-  const exceptionalProvenance = group.mixed
-    || group.provenanceMixed
-    || group.classificationSource === "session_override"
-    || group.winningRuleType === "title";
   return (
     <DetailPanel
       dock={dock}
@@ -2408,8 +2488,18 @@ function WindowPanel({
         </h2>
       }
       subtitle={
+        // The parent is already named here, so it may as well be the way back
+        // to it — the shortest path in the panel, for anyone who spots it.
         <p className="truncate text-[11px] text-ink-3" title={group.entityKey}>
-          {group.displayName} · {group.entityKind === "website" ? "Website" : "App"} · <span className="font-mono">{group.entityKey}</span>
+          <button
+            type="button"
+            onClick={onBack}
+            title={`Back to ${group.displayName} details`}
+            className="rounded-sm underline-offset-2 outline-none transition-colors hover:text-ink-2 hover:underline focus-visible:text-ink-2 focus-visible:underline"
+          >
+            {group.displayName}
+          </button>
+          {" · "}{group.entityKind === "website" ? "Website" : "App"} · <span className="font-mono">{group.entityKey}</span>
         </p>
       }
       onBack={onBack}
@@ -2440,16 +2530,20 @@ function WindowPanel({
         />
         <DetailMetric label="Last seen" value={formatLastSeen(group.lastSeen)} />
       </div>
+
+      <UsageStrip buckets={usage} />
+
       <PanelSection
         title="Classification"
         right={<span className="shrink-0"><Button onClick={() => onMakeRule(group)}>Create Window rule</Button></span>}
       >
-        <p className="mt-2 text-[11.5px] text-ink-2">{classification.label}</p>
-        {exceptionalProvenance && (
-          <p className="mt-1 truncate text-[10.5px] text-ink-3" title={classification.detail}>
-            {classification.detail}
-          </p>
-        )}
+        {/* Both lines, always. The provenance used to appear only when it was
+            "exceptional", so a window decided by an ordinary App rule said its
+            category and nothing about where that came from — which is the one
+            question this section exists to answer. Nothing else in this panel
+            names the category, so unlike the entity panel it keeps its label. */}
+        <p className="mt-2 text-xs text-ink-2">{classification.label}</p>
+        <p className="mt-0.5 text-[11.5px] leading-snug text-ink-3">{classification.detail}</p>
       </PanelSection>
       <section className="mt-6">
         <div className="flex flex-wrap items-center gap-2">
@@ -2467,6 +2561,7 @@ function WindowPanel({
             selected={selectedSessionIds}
             onToggle={onToggleSession}
             onEdit={onEditSession}
+            onLoadMore={onLoadMoreVisits}
           />
         </div>
       </section>
@@ -2520,7 +2615,7 @@ export function entityClassification(entity: ActivityEntitySummary): {
     return { label, detail: "Set by manual corrections — no rule matches." };
   }
   const source = entity.rules.length === 1
-    ? describeRuleSource(entity.rules[0], entity.key)
+    ? describeRuleSource(entity.rules[0].matchType, entity.rules[0].pattern, entity.key)
     : `${entity.rules.length} rules, led by ${entity.rules[0].pattern}`;
   return { label, detail: corrected ? `${source}, plus manual corrections` : source };
 }
@@ -2529,9 +2624,9 @@ export function entityClassification(entity: ActivityEntitySummary): {
  *  header has not. An App rule on `code.exe`, described inside a panel whose
  *  third line is already `code.exe`, is three words that add nothing — but a
  *  Window rule's pattern is never shown anywhere else. */
-function describeRuleSource(rule: ActivityEntityRuleSlice, entityKey: string): string {
-  const kind = `${RULE_LABELS[rule.matchType]} rule`;
-  return rule.pattern.toLowerCase() === entityKey.toLowerCase() ? kind : `${kind} · ${rule.pattern}`;
+function describeRuleSource(matchType: MatchType, pattern: string, entityKey: string): string {
+  const kind = `${RULE_LABELS[matchType]} rule`;
+  return pattern.toLowerCase() === entityKey.toLowerCase() ? kind : `${kind} · ${pattern}`;
 }
 
 /**
@@ -2607,7 +2702,9 @@ function UsageStrip({ buckets }: { buckets: ActivityDayBucket[] }) {
     : `${formatShortDate(bucket.startSec)} – ${formatShortDate(bucket.endSec - 1)}`);
   return (
     <section className="mt-6">
-      <h3 className="text-[13px] font-semibold">When it was used</h3>
+      {/* The same word Insights gives the same idea. A section heading naming
+          its own chart beats one phrased as the question the chart answers. */}
+      <h3 className="text-[13px] font-semibold">Timeline</h3>
       <div className="mt-2.5 flex h-10 items-end gap-px border-b border-edge/70">
         {buckets.map((bucket) => (
           <span
@@ -3063,19 +3160,24 @@ function EntityPanel({
       <section className="mt-7 border-t border-edge/60 pt-5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-[13px] font-semibold text-ink-2">Manage this {kindLabel}</h3>
-          <Button
-            onClick={onExclude}
-            title={`Never record this ${kindLabel} again. Existing history is kept.`}
-          >
-            Do not track
-          </Button>
-          <Button
-            variant="quiet-danger"
-            onClick={onDeleteEntity}
-            title="Removes recorded visits. Categories, rules, and aliases are kept."
-          >
-            Delete activity
-          </Button>
+          {/* The pair is one flex item, so it wraps as a pair. Left loose they
+              broke apart one at a time, and a narrow panel got the heading and
+              a lone button on one line with the second strung below it. */}
+          <span className="flex items-center gap-2">
+            <Button
+              onClick={onExclude}
+              title={`Never record this ${kindLabel} again. Existing history is kept.`}
+            >
+              Do not track
+            </Button>
+            <Button
+              variant="quiet-danger"
+              onClick={onDeleteEntity}
+              title="Removes recorded visits. Categories, rules, and aliases are kept."
+            >
+              Delete activity
+            </Button>
+          </span>
         </div>
       </section>
     </DetailPanel>
@@ -3433,9 +3535,13 @@ function WindowRuleDialog({
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="window-rule-title">
       <div className="scroll-well max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-edge bg-surface p-5 shadow-2xl">
         <h2 id="window-rule-title" className="text-base font-semibold">New Window rule</h2>
+        {/* "the other windows you mean" asked the reader to hold a set in their
+            head that nothing on screen had shown them yet. Each suggestion
+            below states its own reach, so the intro only has to say what the
+            choice is. */}
         <p className="mt-1 text-[11px] text-ink-3">
-          Choose what this window has in common with the other windows you mean.
-          The rule applies to past and future activity.
+          Choose the part of this title to match on. The rule applies to past and
+          future activity.
         </p>
 
         <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px]">
@@ -3443,6 +3549,29 @@ function WindowRuleDialog({
           <p className="mt-1 text-ink-3">
             {group.displayName} · {group.sessionCount} visit{group.sessionCount === 1 ? "" : "s"} · {fmtDuration(group.seconds)} in range
           </p>
+        </div>
+
+        {/* What the rule does, before how it matches. That also puts the two
+            matching controls next to each other, where the advanced one reads
+            as an extension of the suggestions rather than a third unrelated
+            step. */}
+        <div className="mt-4 text-[11px] text-ink-3">
+          <span>Category</span>
+          <MenuSelect
+            size="field"
+            className="mt-1 w-full"
+            value={categoryId}
+            onChange={setCategoryId}
+            label="Category"
+            options={[
+              { value: "", label: "Choose a category…" },
+              ...categories.map((category, i) => ({
+                value: String(category.id),
+                label: category.name,
+                divider: i === 0,
+              })),
+            ]}
+          />
         </div>
 
         <div className="mt-4">
@@ -3494,32 +3623,18 @@ function WindowRuleDialog({
           )}
         </div>
 
-        <div className="mt-3 text-[11px] text-ink-3">
-          <span>Category</span>
-          <MenuSelect
-            size="field"
-            className="mt-1 w-full"
-            value={categoryId}
-            onChange={setCategoryId}
-            label="Category"
-            options={[
-              { value: "", label: "Choose a category…" },
-              ...categories.map((category, i) => ({
-                value: String(category.id),
-                label: category.name,
-                divider: i === 0,
-              })),
-            ]}
-          />
-        </div>
-
+        {/* A chevron and the ink of a control. Set in the same size and grey
+            as the "Category" and "Suggested matches" labels above it, this read
+            as a third heading — the one thing in the dialog that did something
+            looked like the two things that did not. */}
         <button
           type="button"
-          className="mt-3 text-[11px] text-ink-3 hover:text-ink-2"
+          className="mt-3 flex items-center gap-1.5 rounded-md text-[11px] text-ink-2 transition-colors hover:text-ink"
           onClick={() => setAdvanced((current) => !current)}
           aria-expanded={advanced}
         >
-          {advanced ? "Hide advanced options" : "Advanced matching and scope"}
+          <Chevron open={advanced} />
+          Advanced matching and scope
         </button>
         {advanced && (
           <div className="mt-2 rounded-lg border border-edge bg-surface-2 p-3">
@@ -3880,7 +3995,7 @@ function SessionCorrectionDialog({
                 </>
               )}
             </div>
-            <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="danger" disabled={saving} onClick={() => void reset()}>Reset corrections</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save correction"}</Button></span></div>
+            <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="danger" disabled={saving} onClick={() => void reset()}>Reset corrections</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</Button></span></div>
           </>
         )}
       </div>

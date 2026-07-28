@@ -165,16 +165,31 @@ export function Button({
   disabled?: boolean;
   title?: string;
 }) {
+  /**
+   * One resting shape for every variant — `border-edge` over a fill — with hue
+   * carried by the fill and the text alone.
+   *
+   * Two things were wrong before. The border was `edge-2`, the brightest edge
+   * the app has and the only place it appeared at rest; MenuSelect reserves
+   * that same value for *hover*, so a button sat permanently as bright as a
+   * dropdown under the pointer. And with no fill, that border carried the
+   * entire signal.
+   *
+   * Adopting MenuSelect's `border-edge + bg-surface-2` makes buttons and
+   * dropdowns one family. Keeping the border neutral on the tinted variants
+   * matters as much: a red border *and* a red fill made the danger button
+   * differ from its neighbours on two axes at once, which is what made it
+   * shout. Now only the hue changes, and `edge-2` means hover again.
+   */
   const styles = {
-    default: "border-edge-2 bg-transparent hover:bg-white/[.035] text-ink-2 hover:text-ink",
-    primary: "border-accent/30 bg-transparent hover:bg-accent/15 text-accent",
-    danger: "border-bad/30 bg-transparent hover:bg-bad/15 text-bad",
+    default: "border-edge bg-surface-2 text-ink-2 hover:border-edge-2 hover:text-ink",
+    primary: "border-edge bg-accent/10 text-accent hover:border-accent/40 hover:bg-accent/[.18]",
+    danger: "border-edge bg-bad/10 text-bad hover:border-bad/40 hover:bg-bad/[.18]",
     // For a button that *opens* a destructive flow rather than performing one.
-    // The ellipsis in its label already says a dialog is coming, and that
-    // dialog does the shouting — so at rest this reads as an ordinary control
-    // and only takes the warning colour once the pointer is on it. Reserve the
-    // plain `danger` for the button that actually commits.
-    "quiet-danger": "border-edge-2 bg-transparent text-ink-2 hover:border-bad/40 hover:bg-bad/10 hover:text-bad",
+    // It rests exactly as an ordinary control does and takes the warning colour
+    // only once the pointer is on it — the dialog it raises does the shouting.
+    // Reserve the plain `danger` for the button that actually commits.
+    "quiet-danger": "border-edge bg-surface-2 text-ink-2 hover:border-bad/40 hover:bg-bad/10 hover:text-bad",
   }[variant];
   return (
     <button

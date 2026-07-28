@@ -125,6 +125,10 @@ export interface ActivityQuery {
    *  was used for, the other a reader scanning matches across everything. */
   detailSort?: ActivityWindowSort;
   detailDirection?: ActivitySortDirection;
+  /** The one window being inspected, which is allowed more of its own visits
+   *  than the summary sample every other group carries. */
+  selectedWindowKey?: string | null;
+  selectedWindowSessionLimit?: number;
 }
 
 export interface ActivityEntityPage {
@@ -396,6 +400,8 @@ export interface ActivityQueryResult {
    *  the window filter: typing in it narrows which windows are listed, not
    *  when the app itself was open. Empty when nothing is selected. */
   selectedEntityUsage: ActivityDayBucket[];
+  /** The same, for the one window being inspected. Empty when none is. */
+  selectedWindowUsage: ActivityDayBucket[];
   hasStoredTitles: boolean;
   appliedRuleIds: number[];
 }
@@ -924,6 +930,26 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     query.detailSort ?? "seconds",
     query.detailDirection ?? "desc",
   ));
+  // GROUP_SESSION_SAMPLE keeps the payload sane across hundreds of groups, but
+  // it also decided that a visit older than the newest twenty-five could not be
+  // ticked, corrected, or deleted on its own — only as part of "all visits".
+  // One group at a time is cheap, so the one being inspected pages properly.
+  let selectedWindowUsage: ActivityDayBucket[] = [];
+  if (query.selectedWindowKey) {
+    const inspected = detailGrouped.find((group) => group.key === query.selectedWindowKey);
+    if (inspected) {
+      const visits = detailRows.filter(
+        (session) => titleGroupKey(session) === query.selectedWindowKey,
+      );
+      inspected.sessions = visits.slice(
+        0,
+        query.selectedWindowSessionLimit ?? GROUP_SESSION_SAMPLE,
+      );
+      // Every visit, not the page of them carried for the list: a strip drawn
+      // from the first twenty-five would redraw itself on "load more".
+      selectedWindowUsage = bucketDailyUsage(visits, query.startSec, query.endSec);
+    }
+  }
 
   return {
     catalog,
@@ -943,6 +969,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
       maxSeconds: detailGrouped.reduce((most, group) => Math.max(most, group.seconds), 0),
     },
     selectedEntityUsage,
+    selectedWindowUsage,
     detailTotal: detailRows.length,
     hasStoredTitles: index.hasStoredTitles,
     appliedRuleIds: index.appliedRuleIds,
