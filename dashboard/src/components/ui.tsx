@@ -77,10 +77,17 @@ function InfoHint({ text }: { text: string }) {
  * overflow or be clipped by the content it describes. */
 export function FloatingTooltip({
   text,
+  ariaLabel,
   children,
   className = "",
 }: {
   text: string;
+  /** Accessible name, when it has to differ from the visible tooltip. A label
+   *  and its explanation read as one phrase to a screen reader, which has no
+   *  layout to tell it they are two things — but folding the label into `text`
+   *  to achieve that would print it back onto a tooltip already sitting under
+   *  the label it names. */
+  ariaLabel?: string;
   children: ReactNode;
   className?: string;
 }) {
@@ -118,7 +125,7 @@ export function FloatingTooltip({
     <span
       ref={triggerRef}
       tabIndex={0}
-      aria-label={text}
+      aria-label={ariaLabel ?? text}
       className={className}
       onMouseEnter={scheduleShow}
       onMouseLeave={hide}
@@ -215,14 +222,26 @@ export function TrashButton({
 /** Row-level delete. A trash can carries the weight of a destructive command;
  *  removing one line from a list it sits in does not, so the quiet ✕ only picks
  *  up the danger tint on hover. Deletes with real blast radius keep words. */
-export function RemoveButton({ label, onClick }: { label: string; onClick: () => void }) {
+export function RemoveButton({
+  label,
+  compact = false,
+  onClick,
+}: {
+  label: string;
+  /** For a ✕ that sits inline with small text rather than at the end of a row
+   *  of its own. At the default size it outweighs a 12px line beside it. */
+  compact?: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       title={label}
       aria-label={label}
       onClick={onClick}
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sm leading-none text-ink-3 transition-colors hover:bg-bad/10 hover:text-bad"
+      className={`flex shrink-0 items-center justify-center rounded-md leading-none text-ink-3 transition-colors hover:bg-bad/10 hover:text-bad ${
+        compact ? "h-5 w-5 text-[10.5px]" : "h-6 w-6 text-sm"
+      }`}
     >
       ✕
     </button>

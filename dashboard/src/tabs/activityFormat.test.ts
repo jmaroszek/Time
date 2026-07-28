@@ -4,6 +4,8 @@ import {
   defaultRulePattern,
   describeCorrectionWindow,
   detailPanelBox,
+  formatDateSpan,
+  windowRowCategory,
   entityClassification,
   formatLastSeen,
   titleMatchParts,
@@ -422,5 +424,64 @@ describe("detail panel docking", () => {
     // subpixel either way.
     expect(box(1830).overlap).toBe(1);
     expect(box(1831).overlap).toBeGreaterThan(0);
+  });
+});
+
+describe("windowRowCategory", () => {
+  const group = (over: Partial<Parameters<typeof windowRowCategory>[0]> = {}) => ({
+    mixed: false,
+    categoryId: 1 as number | null,
+    categoryName: "AI" as string | null,
+    ...over,
+  });
+
+  it("says nothing when the window resolves the way its app does", () => {
+    // Twenty of Claude's windows all reading "AI" repeats what the
+    // Classification section says once, twenty rows running.
+    expect(windowRowCategory(group(), 1)).toBeNull();
+  });
+
+  it("speaks up when a window has been pulled somewhere else", () => {
+    // A Window rule or a correction is the only way this happens, and it is
+    // the one thing worth reading in the column.
+    expect(windowRowCategory(group({ categoryId: 2, categoryName: "Dev" }), 1)).toBe("Dev");
+  });
+
+  it("labels every row when the app has no single category to be silent about", () => {
+    expect(windowRowCategory(group(), null)).toBe("AI");
+    expect(windowRowCategory(group({ categoryId: null, categoryName: null }), null))
+      .toBe("Uncategorized");
+  });
+
+  it("always marks a window whose own visits disagree", () => {
+    expect(windowRowCategory(group({ mixed: true }), 1)).toBe("Mixed");
+  });
+
+  it("marks an uncategorized window inside a categorized app", () => {
+    expect(windowRowCategory(group({ categoryId: null, categoryName: null }), 1))
+      .toBe("Uncategorized");
+  });
+});
+
+describe("formatDateSpan", () => {
+  const sec = (y: number, m: number, d: number, hour = 0) =>
+    new Date(y, m - 1, d, hour).getTime() / 1000;
+
+  it("says the year once when both ends share it", () => {
+    expect(formatDateSpan(sec(2026, 6, 28), sec(2026, 7, 27))).toBe("Jun 28 – Jul 27, 2026");
+  });
+
+  it("says it twice when they do not", () => {
+    expect(formatDateSpan(sec(2025, 12, 30), sec(2026, 1, 2)))
+      .toBe("Dec 30, 2025 – Jan 2, 2026");
+  });
+
+  it("collapses a range that starts and ends on one date", () => {
+    // A day-long range said as "Jul 18 – Jul 18, 2026" reads as a mistake.
+    expect(formatDateSpan(sec(2026, 7, 18), sec(2026, 7, 18, 23))).toBe("Jul 18, 2026");
+  });
+
+  it("keeps both ends when the dates differ by a day", () => {
+    expect(formatDateSpan(sec(2026, 7, 18), sec(2026, 7, 19))).toBe("Jul 18 – Jul 19, 2026");
   });
 });

@@ -478,7 +478,7 @@ function RestoreDefaultsSection({ onRestored }: { onRestored: () => void }) {
             onClick={() => void restore()}
             className="rounded-[8px] border border-edge px-3 py-1.5 text-[11.5px] font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:text-ink disabled:cursor-wait disabled:opacity-50"
           >
-            {restoring ? "Restoring…" : restored ? "Defaults restored" : "Restore defaults…"}
+            {restoring ? "Restoring…" : restored ? "Defaults restored" : "Restore defaults"}
           </button>
         }
       />
@@ -638,7 +638,7 @@ function DataSection() {
             className="shrink-0 text-xs font-semibold text-bad transition-colors hover:text-bad/80"
             onClick={() => void eraseEverything()}
           >
-            Erase all…
+            Erase all
           </button>
         </div>
         {message && <p className="border-t border-surface-2 px-4 py-3 text-[11.5px] text-ink-2">{message}</p>}
