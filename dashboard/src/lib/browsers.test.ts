@@ -25,6 +25,14 @@ describe("normalizeBrowserProcesses", () => {
     expect(normalizeBrowserProcesses(" chrome.exe , ,CHROME, ")).toEqual(["chrome.exe"]);
   });
 
+  it("accepts several processes pasted on separate lines", () => {
+    expect(normalizeBrowserProcesses("chrome\nfirefox.exe\r\nmsedge")).toEqual([
+      "chrome.exe",
+      "firefox.exe",
+      "msedge.exe",
+    ]);
+  });
+
   it("presents executable names without leaking the internal suffix", () => {
     expect(displayBrowserProcesses("chrome.exe, Firefox, Safari.app")).toBe(
       "chrome, firefox, safari.app",

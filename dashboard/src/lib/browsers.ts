@@ -28,7 +28,7 @@ export function normalizeBrowserProcess(raw: string): string {
  *  back the way it was typed. */
 export function normalizeBrowserProcesses(raw: string): string[] {
   const names = new Set<string>();
-  for (const part of raw.split(",")) {
+  for (const part of raw.split(/[,\r\n]+/)) {
     const name = normalizeBrowserProcess(part);
     if (name) names.add(name);
   }
