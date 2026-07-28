@@ -3,8 +3,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type ChangeEventHandler,
-  type FocusEventHandler,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -316,25 +314,22 @@ export default function SettingsTab({
     const fallback = Number(displayValue(spec, meta.settings[spec.key])) || spec.min;
     saveNumeric(spec, (Number.isFinite(current) ? current : fallback) + direction * (spec.step ?? 1));
   };
-  const saveText = (key: string, normalize?: (raw: string) => string) => {
-    const value = normalize ? normalize(drafts[key] ?? "") : (drafts[key] ?? "").trim();
-    if (!value) {
-      const fallback = key === "browser_processes"
-        ? displayBrowserProcesses(meta.settings[key] ?? "")
-        : (meta.settings[key] ?? "");
-      setDrafts((current) => ({ ...current, [key]: fallback }));
-      return;
-    }
-    const draftValue = settingDraftValue(key, { [key]: value });
-    const pendingDraft = optimisticDraftsRef.current.get(key);
+  const saveBrowserProcesses = (processes: string[]) => {
+    const storedValue = normalizeBrowserProcesses(processes.join(",")).join(",");
+    if (!storedValue) return;
+    const draftValue = displayBrowserProcesses(storedValue);
+    const pendingDraft = optimisticDraftsRef.current.get("browser_processes");
     if (
       pendingDraft === draftValue
-      || (pendingDraft === undefined && value === (meta.settings[key] ?? ""))
+      || (
+        pendingDraft === undefined
+        && storedValue === (meta.settings.browser_processes ?? "")
+      )
     ) {
-      setDrafts((current) => ({ ...current, [key]: draftValue }));
+      setDrafts((current) => ({ ...current, browser_processes: draftValue }));
       return;
     }
-    queueSetting(key, value, draftValue);
+    queueSetting("browser_processes", storedValue, draftValue);
   };
   const selectSetting = (key: string, value: string) => {
     const pendingDraft = optimisticDraftsRef.current.get(key);
@@ -653,13 +648,13 @@ export default function SettingsTab({
         />
         <Row label="Heartbeat interval" help="How often the current session is saved; a crash can lose up to this much recent activity." control={numberControl(SPECS.heartbeat, "Heartbeat interval", "s")} />
         <Row
+          stacked
           label="Browser processes"
-          help="Comma-separated processes treated as browsers for Website detection and Website or Window rules."
+          help="Processes treated as browsers for Website detection and Website or Window rules."
           control={
-            <AutoGrowTextarea
+            <BrowserProcessEditor
               value={drafts.browser_processes ?? ""}
-              onChange={(event) => setDrafts((current) => ({ ...current, browser_processes: event.target.value }))}
-              onBlur={() => void saveText("browser_processes", (raw) => normalizeBrowserProcesses(raw).join(","))}
+              onChange={saveBrowserProcesses}
             />
           }
         />
@@ -1254,6 +1249,7 @@ function Row({
   control,
   bare = false,
   compact = false,
+  stacked = false,
 }: {
   label: string;
   help: string;
@@ -1262,10 +1258,12 @@ function Row({
   bare?: boolean;
   /** One step down in weight, for a row that qualifies the one above it. */
   compact?: boolean;
+  /** Places a wide control below its description instead of in the right rail. */
+  stacked?: boolean;
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-4 ${
+      className={`${stacked ? "" : "flex items-center justify-between gap-4"} ${
         bare ? "" : "border-t border-surface-2 px-4 py-[15px] first:border-t-0"
       }`}
     >
@@ -1279,42 +1277,132 @@ function Row({
           {help}
         </p>
       </div>
-      <div className="shrink-0">{control}</div>
+      <div className={stacked ? "mt-3" : "shrink-0"}>{control}</div>
     </div>
   );
 }
 
-function AutoGrowTextarea({
+function BrowserProcessEditor({
   value,
   onChange,
-  onBlur,
 }: {
   value: string;
-  onChange: ChangeEventHandler<HTMLTextAreaElement>;
-  onBlur: FocusEventHandler<HTMLTextAreaElement>;
+  onChange: (processes: string[]) => void;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    const field = ref.current;
-    if (!field) return;
-    const minHeight = 36;
-    const maxHeight = 94;
-    field.style.height = "auto";
-    field.style.height = `${Math.min(Math.max(field.scrollHeight, minHeight), maxHeight)}px`;
-    field.style.overflowY = field.scrollHeight > maxHeight ? "auto" : "hidden";
-  }, [value]);
+  const processes = normalizeBrowserProcesses(value);
+  const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const chipRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const instructionsId = "browser-process-instructions";
+
+  const commit = (raw = input) => {
+    const additions = normalizeBrowserProcesses(raw);
+    if (additions.length > 0) {
+      const next = [...processes];
+      for (const process of additions) {
+        if (!next.includes(process)) next.push(process);
+      }
+      if (next.length !== processes.length) onChange(next);
+    }
+    setInput("");
+  };
+
+  const remove = (index: number) => {
+    if (processes.length <= 1) return;
+    onChange(processes.filter((_, processIndex) => processIndex !== index));
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const focusChip = (index: number) => {
+    chipRefs.current[index]?.focus();
+  };
 
   return (
-    <textarea
-      ref={ref}
-      rows={1}
+    <div
+      className="flex min-h-[42px] flex-wrap items-center gap-2 rounded-[10px] border border-edge bg-surface-2 px-2.5 py-2 transition-colors focus-within:border-accent/60"
+      role="group"
       aria-label="Browser processes"
-      spellCheck={false}
-      value={value}
-      onChange={onChange}
-      onBlur={onBlur}
-      className="w-[172px] resize-none rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 font-mono text-xs leading-relaxed text-ink outline-none focus:border-accent/60"
-    />
+      aria-describedby={instructionsId}
+    >
+      {processes.map((process, index) => {
+        const label = process.replace(/\.exe$/i, "");
+        const removable = processes.length > 1;
+        return (
+          <button
+            key={process}
+            ref={(element) => {
+              chipRefs.current[index] = element;
+            }}
+            type="button"
+            tabIndex={-1}
+            aria-label={
+              removable
+                ? `Remove ${label} from browser processes`
+                : `${label}; at least one browser process is required`
+            }
+            aria-disabled={!removable}
+            title={removable ? `Remove ${label}` : "At least one browser process is required"}
+            onClick={() => remove(index)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                focusChip(Math.max(0, index - 1));
+              } else if (event.key === "ArrowRight") {
+                event.preventDefault();
+                if (index === processes.length - 1) inputRef.current?.focus();
+                else focusChip(index + 1);
+              } else if (event.key === "Delete" || event.key === "Backspace") {
+                event.preventDefault();
+                remove(index);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                inputRef.current?.focus();
+              }
+            }}
+            className={`flex h-7 items-center gap-1.5 rounded-[8px] border border-edge bg-surface-3 px-2.5 font-mono text-[11.5px] text-ink transition-colors ${
+              removable ? "hover:border-edge-2 hover:bg-white/[.055]" : "cursor-default"
+            }`}
+          >
+            <span>{label}</span>
+            <span aria-hidden="true" className={removable ? "text-ink-3" : "text-ink-3/40"}>×</span>
+          </button>
+        );
+      })}
+      <input
+        ref={inputRef}
+        type="text"
+        spellCheck={false}
+        autoComplete="off"
+        value={input}
+        aria-label="Add a browser process"
+        placeholder="Add a browser process…"
+        onChange={(event) => setInput(event.target.value)}
+        onPaste={(event) => {
+          const pasted = event.clipboardData.getData("text");
+          if (input.trim() || !/[\r\n,]/.test(pasted)) return;
+          event.preventDefault();
+          commit(pasted);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === ",") {
+            event.preventDefault();
+            commit();
+          } else if (
+            event.key === "ArrowLeft"
+            && input.length === 0
+            && event.currentTarget.selectionStart === 0
+            && processes.length > 0
+          ) {
+            event.preventDefault();
+            focusChip(processes.length - 1);
+          }
+        }}
+        className="h-7 min-w-[168px] flex-1 bg-transparent px-1 font-mono text-xs text-ink outline-none placeholder:font-sans placeholder:text-ink-3"
+      />
+      <span id={instructionsId} className="sr-only">
+        Press Enter or comma to add. From the empty input, press Left Arrow to manage existing processes, then Delete to remove one.
+      </span>
+    </div>
   );
 }
 

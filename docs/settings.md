@@ -36,12 +36,14 @@ to the other per-item curation.
 | **Rare-item time limit** / **Rare-item session limit** | An item counts as rare only when its all-history time is under the time limit *and* its all-history session count is at or under the session limit. The result does not change with the visible date range. |
 | **Minimum app time** | A rate: apps averaging less than this per tracked day are hidden only from Insights' Top Apps. Because it scales with the days that recorded activity, the same apps clear the bar on Today and on Year. Activity always shows the complete catalog. |
 | **Heartbeat interval** | How often the open session's end time is flushed to disk; this is the upper bound on data lost in a crash. |
-| **Browser processes** | Which apps can be split into Websites and use Website or Window rules. Common browsers ship in the list without `.exe` suffixes. Names with or without the suffix, and pasted install paths, are normalized internally. |
+| **Browser processes** | Which apps can be split into Websites and use Website or Window rules. Each process appears as a removable chip; type or paste a name or installation path and press Enter to add another. Several comma-separated or line-separated names can be pasted at once. Common browsers ship without `.exe` suffixes, while matching keeps canonical executable names internally. |
 
-Switches and selectors save immediately; numeric and text fields save on Enter
-or focus-out. A small status at the top confirms when writes finish, and a
-failed write restores the database value instead of leaving a false selection
-on screen. The tracker re-reads its settings within one second.
+Switches, selectors, and browser-process removals save immediately; numeric
+fields save on Enter or focus-out. A browser process is added with Enter or a
+comma, and multi-value paste adds its entries together. A small status at the
+top confirms when writes finish, and a failed write restores the database value
+instead of leaving a false selection on screen. The tracker re-reads its
+settings within one second.
 
 ### What ends a focus chain
 
