@@ -327,7 +327,9 @@ function PrivacyOnboarding() {
             <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
               Time stores the foreground app name, start and end time, and idle or lock periods.
               Browser domains are derived in memory when an optional URL-in-title extension is
-              present; URL paths, queries, fragments, and credentials are never stored.
+              present; URL paths, queries, fragments, and credentials are never stored. Awake AFK
+              periods retain the foreground app and available domain, but never the window title.
+              Locked periods retain no foreground identity, and sleep is not recorded.
             </p>
           </div>
           {meta.settings.starter_categories_pending === "1" && (

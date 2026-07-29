@@ -21,6 +21,7 @@ const UNCATEGORIZED_COLOR = "#5b616b";
 export interface TimelineSegment {
   process: string;
   title: string;
+  domain?: string | null;
   categoryName: string;
   color: string;
   startSec: number;
@@ -94,6 +95,7 @@ export default function TimelineChart({
           seg: {
             process: s.process,
             title: s.title,
+            domain: s.domain,
             categoryName,
             color,
             startSec: chunk.startSec,
@@ -186,7 +188,10 @@ export default function TimelineChart({
     : chart;
 }
 
-function formatTooltip(seg: TimelineSegment, aliases?: Record<string, string>): string {
+export function formatTooltip(
+  seg: TimelineSegment,
+  aliases?: Record<string, string>,
+): string {
   const window = `${fmtClock(seg.startSec)}–${fmtClock(seg.endSec)}`;
   if (seg.breakdown) {
     if (seg.isAfk) return `AFK · ${window}`;
@@ -199,8 +204,15 @@ function formatTooltip(seg: TimelineSegment, aliases?: Record<string, string>): 
       .join("");
     return `<b>${escapeHtml(seg.categoryName)}</b> · ${window}<div>${fmtDuration(seg.activeSec ?? 0)} active</div>${apps}`;
   }
+  const retainedAfkIdentity =
+    seg.isAfk && seg.process !== "afk"
+      ? seg.domain || cleanProcessName(seg.process, aliases)
+      : "";
+  const retainedAfkLine = retainedAfkIdentity
+    ? ` · <b>${escapeHtml(retainedAfkIdentity)}</b>`
+    : "";
   const head = seg.isAfk
-    ? `AFK (${seg.title || "idle"})`
+    ? `AFK (${seg.title || "idle"})${retainedAfkLine}`
     : `<b>${escapeHtml(cleanProcessName(seg.process, aliases))}</b> · ${escapeHtml(seg.categoryName)}`;
   const titleLine =
     !seg.isAfk && seg.title

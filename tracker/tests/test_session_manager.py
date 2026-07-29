@@ -45,8 +45,14 @@ def manager(store):
     )
 
 
-def active(now, process="code.exe", title="main.py", idle=0.0):
-    return Snapshot(now=now, idle_seconds=idle, process=process, title=title)
+def active(now, process="code.exe", title="main.py", idle=0.0, media=False):
+    return Snapshot(
+        now=now,
+        idle_seconds=idle,
+        process=process,
+        title=title,
+        media_playing=media,
+    )
 
 
 def drive(manager, t0, seconds, **kwargs):
@@ -135,7 +141,7 @@ def test_idle_threshold_backdates_to_last_input(manager, store):
     # session must end at last input: 1180 - 180 = 1000
     assert store.closed[1] == 1000.0
     sid, start, proc, title, domain, is_afk = store.opened[1]
-    assert (start, proc, title, is_afk) == (1000.0, AFK_PROCESS, "idle", True)
+    assert (start, proc, title, is_afk) == (1000.0, "code.exe", "idle", True)
 
 
 def test_backdate_never_precedes_session_start(manager, store):
@@ -172,7 +178,144 @@ def test_resume_from_afk_opens_fresh_session(manager, store):
 
 def test_afk_while_no_session_opens_afk(manager, store):
     manager.tick(Snapshot(now=1000.0, idle_seconds=500.0, process="code.exe", title="x"))
-    assert store.opened[0][2] == AFK_PROCESS
+    assert store.opened[0][2:4] == ("code.exe", "idle")
+
+
+def test_playing_foreground_media_remains_active_past_idle_threshold(manager, store):
+    manager.tick(active(1000.0, process="spotify.exe", title="Spotify"))
+    manager.tick(
+        active(
+            1300.0,
+            process="spotify.exe",
+            title="Spotify",
+            idle=300.0,
+            media=True,
+        )
+    )
+    assert len(store.opened) == 1
+    assert store.opened[0][5] is False
+
+
+def test_media_stop_begins_afk_at_stop_instead_of_last_input(manager, store):
+    manager.tick(active(1000.0, process="spotify.exe", title="Spotify"))
+    manager.tick(
+        active(
+            1180.0,
+            process="spotify.exe",
+            title="Spotify",
+            idle=180.0,
+            media=True,
+        )
+    )
+    manager.tick(
+        active(
+            1300.0,
+            process="spotify.exe",
+            title="Spotify",
+            idle=300.0,
+            media=False,
+        )
+    )
+    assert store.closed[1] == 1300.0
+    assert store.opened[1][1:6] == (1300.0, "spotify.exe", "idle", None, True)
+
+
+def test_media_start_while_afk_opens_active_at_detection_time(manager, store):
+    manager.tick(active(1000.0, process="spotify.exe", idle=180.0))
+    manager.tick(
+        active(
+            1010.0,
+            process="spotify.exe",
+            idle=190.0,
+            media=True,
+        )
+    )
+    assert store.closed[1] == 1010.0
+    assert store.opened[1][1:3] == (1010.0, "spotify.exe")
+    assert store.opened[1][5] is False
+
+
+def test_lock_overrides_media_and_discards_foreground_identity(manager, store):
+    manager.tick(active(1000.0, process="spotify.exe", title="Spotify"))
+    manager.tick(
+        active(
+            1010.0,
+            process="lockapp.exe",
+            title="Lock",
+            idle=10.0,
+            media=True,
+        )
+    )
+    assert store.opened[1][2:6] == (AFK_PROCESS, "locked", None, True)
+
+
+def test_awake_afk_retains_browser_domain_but_not_window_title(manager, store):
+    title = "Private video - https://youtube.com/watch?v=secret - Google Chrome"
+    manager.tick(active(1000.0, process="chrome.exe", title=title))
+    manager.tick(active(1180.0, process="chrome.exe", title=title, idle=180.0))
+    assert store.opened[1][2:6] == ("chrome.exe", "idle", "youtube.com", True)
+
+
+def test_awake_afk_does_not_retain_an_excluded_identity(store):
+    manager = SessionManager(
+        store=store,
+        settings=Settings(
+            idle_threshold_seconds=IDLE_THRESHOLD,
+            excluded_processes=frozenset({"spotify.exe"}),
+        ),
+    )
+    manager.tick(active(1000.0, process="spotify.exe", title="Spotify"))
+    manager.tick(active(1180.0, process="spotify.exe", title="Spotify", idle=180.0))
+    assert store.opened[0][2:6] == (AFK_PROCESS, "idle", None, True)
+
+
+# ---------------- system power ----------------
+
+
+def test_suspend_closes_active_session_and_ignores_sleep_ticks(manager, store):
+    manager.tick(active(1000.0))
+    manager.system_suspended(1100.0)
+    manager.tick(active(4600.0, idle=3600.0))
+    assert store.closed[1] == 1100.0
+    assert len(store.opened) == 1
+
+
+def test_resume_opens_fresh_active_session_after_sleep(manager, store):
+    manager.tick(active(1000.0))
+    manager.system_suspended(1100.0)
+    manager.system_resumed(4600.0)
+    manager.tick(active(4601.0, idle=0.0))
+    assert store.closed[1] == 1100.0
+    assert store.opened[1][1] == 4601.0
+
+
+def test_post_resume_idle_never_backdates_into_sleep(manager, store):
+    manager.tick(active(1000.0))
+    manager.system_suspended(1100.0)
+    manager.system_resumed(4600.0)
+    manager.tick(active(4601.0, idle=3601.0))
+    assert store.opened[1][1] == 4600.0
+    assert store.opened[1][2:4] == ("code.exe", "idle")
+
+
+def test_suspend_closes_existing_afk_before_sleep(manager, store):
+    manager.tick(active(1000.0))
+    manager.tick(active(1180.0, idle=180.0))
+    afk_id = store.opened[1][0]
+    manager.system_suspended(1300.0)
+    manager.system_resumed(4600.0)
+    manager.tick(active(4601.0))
+    assert store.closed[afk_id] == 1300.0
+    assert store.opened[2][1] == 4601.0
+
+
+def test_unpaired_resume_ends_at_last_observed_tick(manager, store):
+    manager.tick(active(1000.0))
+    manager.tick(active(1005.0))
+    manager.system_resumed(4600.0)
+    manager.tick(active(4601.0))
+    assert store.closed[1] == 1005.0
+    assert store.opened[1][1] == 4601.0
 
 
 # ---------------- heartbeat ----------------

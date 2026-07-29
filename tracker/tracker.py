@@ -17,12 +17,14 @@ import sys
 import threading
 import time
 import traceback
+from dataclasses import replace
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tracker import config, db, tray, win32_probe
+from tracker import config, db, media_playback, power_events, tray, win32_probe
+from tracker.domains import parse_domain
 from tracker.session_manager import SessionManager
 
 _ERROR_ALREADY_EXISTS = 183
@@ -180,9 +182,13 @@ def run() -> None:
         logging.info("Database initialized; waiting for first-run privacy choice.")
         return
     manager = SessionManager(store=db.SqliteStore(conn), settings=db.get_settings(conn))
+    media_monitor = media_playback.start_media_playback_monitor()
+    power_monitor = power_events.start_power_event_monitor()
 
     def _shutdown(*_args) -> bool:
         try:
+            if power_monitor is not None:
+                power_monitor.close()
             manager.shutdown(time.time())
             stamp_tracker_health(conn, 0)
             conn.close()
@@ -202,7 +208,13 @@ def run() -> None:
     stop_event = threading.Event()
     has_tray = tray.start_tray(config.DB_PATH, stop_event)
 
-    logging.info("Tracker started | tray=%s | poll=%ss", has_tray, config.POLL_SECONDS)
+    logging.info(
+        "Tracker started | tray=%s | power_events=%s | media_playback=%s | poll=%ss",
+        has_tray,
+        power_monitor is not None,
+        media_monitor is not None,
+        config.POLL_SECONDS,
+    )
     poll = config.POLL_SECONDS
     next_tick = time.monotonic()
     last_settings_refresh = 0.0
@@ -211,6 +223,18 @@ def run() -> None:
 
     while not stop_event.is_set():
         try:
+            if power_monitor is not None:
+                for event in power_monitor.drain():
+                    if event.kind == "suspend":
+                        manager.system_suspended(event.at)
+                        logging.info("System suspend detected; recording gap started.")
+                    else:
+                        manager.system_resumed(event.at)
+                        logging.info(
+                            "System resume detected; recording gap ended |"
+                            " suspend_observed=%s",
+                            event.suspend_observed,
+                        )
             now = time.time()
             # Consent, pause, and title-privacy switches take effect within one
             # poll instead of waiting for the database heartbeat interval.
@@ -222,6 +246,25 @@ def run() -> None:
                 stamp_tracker_health(conn, now)
                 last_health_publish = monotonic_now
             snap = win32_probe.snapshot(now)
+            if (
+                media_monitor is not None
+                and snap.process != "lockapp.exe"
+                and snap.idle_seconds >= manager.settings.idle_threshold_seconds
+            ):
+                is_browser = (
+                    snap.process is not None
+                    and snap.process in manager.settings.browser_processes
+                )
+                domain = parse_domain(snap.title) if is_browser else None
+                snap = replace(
+                    snap,
+                    media_playing=media_monitor.is_foreground_playing(
+                        process=snap.process,
+                        app_user_model_id=snap.app_user_model_id,
+                        domain=domain,
+                        browser_processes=manager.settings.browser_processes,
+                    ),
+                )
             manager.tick(snap)
         except Exception as exc:
             failures.record("tick failed", exc, time.monotonic())

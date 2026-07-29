@@ -6,7 +6,7 @@ a temp DB, then asserts the global invariants the dashboard relies on:
 
   1. end_ts >= start_ts for every row (negative durations are silently dropped
      by the dashboard's clipSessions — they must never be written).
-  2. AFK rows never carry a domain.
+  2. AFK rows carry a domain only with a retained foreground process.
   3. Non-AFK rows never overlap each other (half-open interval semantics).
 
 Deterministic: fixed seeds, no wall clock. This test caught the open-path
@@ -84,10 +84,13 @@ def _assert_invariants(conn, *, check_overlaps: bool) -> None:
     ).fetchone()[0]
     assert negative == 0, f"{negative} negative-duration rows written"
 
-    afk_domains = conn.execute(
-        "SELECT COUNT(*) FROM sessions WHERE is_afk = 1 AND domain IS NOT NULL"
+    orphaned_afk_domains = conn.execute(
+        "SELECT COUNT(*) FROM sessions"
+        " WHERE is_afk = 1 AND domain IS NOT NULL AND process = 'afk'"
     ).fetchone()[0]
-    assert afk_domains == 0, f"{afk_domains} AFK rows carry a domain"
+    assert orphaned_afk_domains == 0, (
+        f"{orphaned_afk_domains} identity-free AFK rows carry a domain"
+    )
 
     if check_overlaps:
         overlaps = conn.execute(

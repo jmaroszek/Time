@@ -20,14 +20,19 @@ how that is changing over time.
   session — what it was, when it started, when it ended —
   so any day can be replayed block by block. App switches register within a
   second.
-- **Honest about breaks.** Step away and the time doesn't count: after 3
-  minutes of no input you're marked away, and the away period is back-dated
-  to your last keystroke so idle minutes never pad the stats. Locking the
-  screen counts as away immediately.
+- **Honest about breaks.** Step away and the time doesn't count: after the
+  idle threshold with no input you're marked away, and the period is back-dated
+  to your last keystroke so idle minutes never pad the stats. Supported
+  foreground media stays active while Windows reports it as playing; pausing
+  begins away time at that moment. Locking the screen counts as away
+  immediately, and sleep records no timeline block. Awake away rows retain the
+  foreground app/site identity for inspection, but replace the window title
+  with the away reason; locked rows retain no foreground identity.
 - **Optional site-level browser time.** Domains can be derived from browser
   titles produced by a third-party URL-title extension. URL paths, queries,
   fragments, and credentials are stripped before storage. No extension is
-  required for app-level browser tracking.
+  required for app-level browser tracking. The same domain signal lets Time
+  distinguish foreground browser playback from media in a background tab.
 - **Your own definition of productive.** Apps and websites are grouped into
   custom categories and simple rules, all edited in the dashboard. New installs
   contain no personal categories or classification rules. Changes apply to all history, and the tracker
@@ -89,7 +94,7 @@ before shipping an artifact. Invited testers should receive the
 
 During a beta soak, run the anomaly checker weekly against an explicit database
 path (or, more conservatively, a fresh backup). It opens SQLite read-only, runs
-`integrity_check`, and reports duration, overlap, AFK/domain, rule, foreign-key,
+`integrity_check`, and reports duration, AFK-identity, overlap, rule, foreign-key,
 and schema-contract violations. Exit code 0 means every check passed; `--json`
 produces machine-readable output.
 

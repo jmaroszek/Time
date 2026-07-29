@@ -69,7 +69,7 @@ def test_detects_legacy_anomalies_without_repairing_them(tmp_path: Path):
         "negative_duration_sessions",
         "stale_zero_duration_sessions",
         "overlapping_sessions",
-        "afk_sessions_with_domains",
+        "identity_free_afk_sessions_with_domains",
         "invalid_afk_flags",
         "empty_process_names",
         "duplicate_rules",

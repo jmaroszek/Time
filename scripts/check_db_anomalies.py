@@ -120,8 +120,9 @@ def check_database(db_path: str | Path, *, now: float | None = None) -> list[dic
                 (),
             ),
             (
-                "afk_sessions_with_domains",
-                "SELECT COUNT(*) FROM sessions WHERE is_afk != 0 AND domain IS NOT NULL",
+                "identity_free_afk_sessions_with_domains",
+                "SELECT COUNT(*) FROM sessions"
+                " WHERE is_afk != 0 AND domain IS NOT NULL AND lower(process) = 'afk'",
                 (),
             ),
             (

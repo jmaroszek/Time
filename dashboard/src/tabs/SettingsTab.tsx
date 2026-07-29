@@ -490,7 +490,7 @@ export default function SettingsTab({
       </Section>
 
       <Section title="Focus & idle">
-        <Row label="AFK idle threshold" help="No input for this long marks you as Away From Keyboard (AFK). AFK time is not classified and does not count towards computer use." control={numberControl(SPECS.idle, "AFK idle threshold", "min")} />
+        <Row label="AFK idle threshold" help="No input for this long marks you as Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use." control={numberControl(SPECS.idle, "AFK idle threshold", "min")} />
         <Row label="Focus chain max gap" help="Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration; unproductive or AFK time ends it immediately." control={numberControl(SPECS.focus, "Focus chain max gap", "min")} />
       </Section>
 

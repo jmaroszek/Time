@@ -9,9 +9,14 @@ Behavior spec:
   (prevents "Updating..." flicker rows); the split is back-dated to when the
   new title first appeared.
 - Idle >= threshold finalizes the active session back-dated to the last input
-  (now - idle_seconds) and opens an AFK session from that point.
+  (now - idle_seconds) and opens an AFK session from that point, unless a
+  foreground media session is actively playing.
+- Awake idle retains the foreground process/domain but remains `is_afk=1`;
+  window content is replaced by the reason. Lock remains identity-free AFK.
 - Lock screen (lockapp.exe foreground) becomes AFK immediately, no threshold.
 - Unknown foreground (None process) never splits; the current session persists.
+- System suspend closes the current session; resume starts a fresh recording
+  boundary so idle backdating can never cover the sleeping interval.
 - An open session's end_ts is pushed forward by heartbeat so a crash loses at
   most `heartbeat_seconds`.
 """
@@ -33,6 +38,8 @@ class Snapshot:
     idle_seconds: float
     process: str | None  # lowercased exe name; None when foreground is unknown
     title: str
+    app_user_model_id: str | None = None
+    media_playing: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,6 +94,9 @@ class SessionManager:
     _pending_first_ts: float = 0.0
     _pending_count: int = 0
     _last_heartbeat: float = 0.0
+    _last_observed_ts: float = 0.0
+    _system_suspended: bool = False
+    _media_protected_idle: bool = False
     # Highest end_ts this run has written via close. Opens clamp to it so a
     # wall clock stepped backwards while no session is current (post-pause,
     # post-AFK-unknown) cannot open a row overlapping an already-closed one
@@ -96,6 +106,9 @@ class SessionManager:
     # ---------- public API ----------
 
     def tick(self, snap: Snapshot) -> None:
+        if self._system_suspended:
+            return
+        self._last_observed_ts = snap.now
         if self.settings.tracking_paused or not self.settings.recording_consent:
             # Pause = finalize the open session and open nothing new. Resuming
             # simply lets the next tick open a fresh session.
@@ -103,15 +116,43 @@ class SessionManager:
                 self._close(self._current.id, max(snap.now, self._current.start_ts))
                 self._current = None
             self._reset_pending()
+            self._media_protected_idle = False
             return
 
         locked = snap.process == LOCK_PROCESS
         idle = snap.idle_seconds >= self.settings.idle_threshold_seconds
-        if locked or idle:
+        media_protected = idle and not locked and snap.media_playing
+        if locked or (idle and not media_protected):
             self._tick_afk(snap, locked)
         else:
             self._tick_active(snap)
+        self._media_protected_idle = media_protected
         self._maybe_heartbeat(snap.now)
+
+    def system_suspended(self, now: float) -> None:
+        """End the awake interval without inventing a session during sleep."""
+        if self._system_suspended:
+            return
+        if self._current is not None:
+            self._close(self._current.id, max(now, self._current.start_ts))
+            self._current = None
+        self._reset_pending()
+        self._media_protected_idle = False
+        self._system_suspended = True
+
+    def system_resumed(self, now: float) -> None:
+        """Start a new awake interval and forbid pre-resume backdating."""
+        if not self._system_suspended and self._current is not None:
+            # A critical or otherwise unpaired resume means Windows did not
+            # deliver suspend to this process. Preserve only the time actually
+            # observed by the tracker rather than stretching the row to wake.
+            boundary = max(self._last_observed_ts, self._current.start_ts)
+            self._close(self._current.id, boundary)
+            self._current = None
+        self._system_suspended = False
+        self._floor_ts = max(self._floor_ts, now)
+        self._reset_pending()
+        self._media_protected_idle = False
 
     def shutdown(self, now: float) -> None:
         """Finalize the open session (process exit, ctrl-c, logoff)."""
@@ -127,14 +168,29 @@ class SessionManager:
 
         reason = "locked" if locked else "idle"
         # Lock is detected the moment it happens; idle is detected late, so the
-        # boundary is back-dated to the last real input.
-        boundary = snap.now if locked else snap.now - snap.idle_seconds
+        # boundary is normally back-dated to the last real input. If playback
+        # was protecting an already-idle session, stopping playback is the new
+        # observed boundary; backdating would erase the media time just counted.
+        boundary = (
+            snap.now
+            if locked or self._media_protected_idle
+            else snap.now - snap.idle_seconds
+        )
+        if locked:
+            retained_process, retained_domain = AFK_PROCESS, None
+        else:
+            retained_process, retained_domain = self._retained_afk_identity(snap)
         if self._current is not None:
             boundary = max(boundary, self._current.start_ts)
             self._close(self._current.id, boundary)
         else:
             boundary = max(boundary, 0.0)
-        self._open(boundary, AFK_PROCESS, reason, is_afk=True)
+        self._open_afk(
+            boundary,
+            retained_process,
+            reason,
+            retained_domain,
+        )
         self._reset_pending()
 
     # ---------- active ----------
@@ -205,15 +261,35 @@ class SessionManager:
         self.store.close_session(session_id, end_ts)
         self._floor_ts = max(self._floor_ts, end_ts)
 
-    def _open(self, start_ts: float, process: str, title: str, is_afk: bool = False) -> None:
+    def _open(self, start_ts: float, process: str, title: str) -> None:
+        stored_title, domain = self._privacy_fields(process, title)
+        self._open_stored(start_ts, process, stored_title, domain, is_afk=False)
+
+    def _open_afk(
+        self,
+        start_ts: float,
+        process: str,
+        reason: str,
+        domain: str | None,
+    ) -> None:
+        # Never persist the foreground title while the user is away. The reason
+        # remains in the existing title column, avoiding a schema migration
+        # while process/domain preserve enough identity for later inspection.
+        self._open_stored(start_ts, process, reason, domain, is_afk=True)
+
+    def _open_stored(
+        self,
+        start_ts: float,
+        process: str,
+        stored_title: str,
+        domain: str | None,
+        *,
+        is_afk: bool,
+    ) -> None:
         # Clamp against _floor_ts: a no-op while the clock is monotonic (every
         # open follows its close at the same boundary), it only engages when a
         # set-back would start this row before an already-written end.
         start_ts = max(start_ts, self._floor_ts)
-        if is_afk:
-            stored_title, domain = title, None
-        else:
-            stored_title, domain = self._privacy_fields(process, title)
         session_id = self.store.open_session(
             start_ts, process, stored_title, domain, is_afk
         )
@@ -223,6 +299,22 @@ class SessionManager:
         self._current = _Current(
             session_id, start_ts, process, stored_title, domain, is_afk
         )
+
+    def _retained_afk_identity(self, snap: Snapshot) -> tuple[str, str | None]:
+        if self._current is not None and not self._current.is_afk:
+            process = self._current.process
+            domain = self._current.domain
+        elif snap.process is not None:
+            process = snap.process
+            _, domain = self._privacy_fields(process, snap.title)
+        else:
+            return AFK_PROCESS, None
+
+        # An exclusion is a promise not to store the identity at all, including
+        # after that app or website becomes idle.
+        if self._is_excluded(process, domain):
+            return AFK_PROCESS, None
+        return process, domain
 
     def _is_excluded(self, process: str, domain: str | None) -> bool:
         normalized_process = process.lower()
