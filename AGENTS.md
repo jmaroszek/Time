@@ -28,9 +28,12 @@ cd dashboard && npx tsc --noEmit    # typecheck
 cd dashboard/src-tauri && cargo test  # Rust backend     (4 tests)
 ```
 
-CI runs the first three (the dashboard suite twice, under two timezones,
-because date handling is timezone-sensitive). **It does not run `cargo test`** —
-run it locally when you touch `src-tauri/`.
+CI runs all four (the dashboard suite twice, under two timezones, because date
+handling is timezone-sensitive; `cargo test` and the native Windows suite on a
+Windows runner). **Any cargo command builds the tracker sidecar first**: the
+Tauri build script fails if `externalBin` — `src-tauri/binaries/` — is missing,
+so CI runs `scripts/build_tracker.py` before the Rust steps, and locally you
+need it built once too.
 
 ## Branches
 
