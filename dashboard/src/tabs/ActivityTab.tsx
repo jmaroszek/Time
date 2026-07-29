@@ -137,6 +137,10 @@ function stateColors(palette: Palette): Record<CategoryState, string> {
  *  them: the built-in Ignored category is the one ignore mechanism, so the flag
  *  is no longer something an ordinary category can be put into. */
 const ASSIGNABLE_STATES: Productivity[] = ["productive", "neutral", "unproductive"];
+/** The states are stored lowercase, and the trigger title-cases them with a
+ *  `capitalize` class. The menu renders through a portal, so that class never
+ *  reaches it — the label has to arrive already capitalized. */
+const stateLabel = (state: Productivity) => state[0].toUpperCase() + state.slice(1);
 
 const RULE_LABELS: Record<MatchType, string> = {
   domain: "Website",
@@ -956,7 +960,21 @@ export default function ActivityTab({
       {/* The card is measured, not shrunk. The panel docks against its right
           edge from outside the page container, so opening one leaves the table
           exactly the width it has on every other tab. */}
-      <div ref={cardRef} className={`flex min-h-0 ${view === "library" ? "flex-1" : ""}`}>
+      <div
+        ref={cardRef}
+        className={`flex min-h-0 ${
+          view === "library"
+            ? "flex-1"
+            // Categories & Rules is a settings surface, not a data surface: a
+            // name, a state and a count, with half a screen of air between them
+            // at full width. The floor is the Window-rule composer — its
+            // "Applies to" row plus a scope input, inside the rule indent — so
+            // 840 is the narrowest width that still lays that row out flat.
+            // mr-auto, not mx-auto: centring would slide the view switcher out
+            // from under the cursor that just clicked it.
+            : "mr-auto w-full max-w-[840px]"
+        }`}
+      >
       {/* One card, whose title is the switcher: a floating control row above it
           left the page reading as two stacked chromes instead of "date picker
           up top, one card below". */}
@@ -4926,7 +4944,7 @@ function CategoriesAndRules({
                     header={state === "ignored" ? "Ignored is no longer a category state. Pick one to bring this category back into Insights." : undefined}
                     options={ASSIGNABLE_STATES.map((option) => ({
                       value: option,
-                      label: option,
+                      label: stateLabel(option),
                       dot: stateColorMap[option],
                     }))}
                   />
