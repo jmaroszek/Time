@@ -112,7 +112,7 @@ const LEGEND_ITEM_GAP = 14; // legend.itemGap between entries
 // Trim a little off the usable width so we round toward wrapping: an
 // unpredicted extra row collides with the x-axis, while a spare predicted row
 // only pads the (invisible) top margin.
-const LEGEND_WIDTH_SAFETY = 8;
+const LEGEND_WIDTH_SAFETY = 16;
 const LEGEND_ITEMS_PER_ROW_FALLBACK = 6; // used until the container is measured
 
 /** Usable legend width for a chart of `chartWidth` px, matching the `legend`

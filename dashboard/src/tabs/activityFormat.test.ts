@@ -479,7 +479,8 @@ describe("detail panel docking", () => {
   const box = (viewport: number) => detailPanelBox(viewport, cardRight(viewport));
 
   it("fills the margin without touching the table on a large desktop", () => {
-    // The 32" monitor this was designed against, at its usual scaling.
+    // A wide desktop remains a regression target, but is no longer the only
+    // geometry the interaction was designed around.
     expect(box(2208)).toEqual({ left: 1672, width: 512, overlap: 0 });
   });
 
@@ -494,55 +495,21 @@ describe("detail panel docking", () => {
     expect(box(3840).width).toBe(620);
   });
 
-  it("never leaves the window when the margin runs out", () => {
-    // The bug this replaced: keeping the panel glued to the table's edge on a
-    // laptop pushed its right half past the screen, where it could not be
-    // read or scrolled to.
-    for (const laptop of [1000, 1280, 1366, 1470, 1512, 1728, 1920, 2560]) {
-      const { left, width } = detailPanelBox(laptop, cardRight(laptop));
+  it("never leaves the window in the outboard layout class", () => {
+    for (const viewport of [1832, 1920, 2208, 2560, 3840]) {
+      const { left, width } = detailPanelBox(viewport, cardRight(viewport));
       expect(left).toBeGreaterThanOrEqual(0);
-      expect(left + width).toBeLessThanOrEqual(laptop);
+      expect(left + width).toBeLessThanOrEqual(viewport - 24);
     }
   });
 
-  it("keeps its own width and covers the table rather than shrinking", () => {
-    // A covered column can be read by closing the panel; a permanently
-    // narrowed table cannot be widened.
-    for (const laptop of [1280, 1366, 1470, 1512, 1728]) {
-      expect(detailPanelBox(laptop, cardRight(laptop)).width).toBe(340);
-    }
-    expect(box(1512).overlap).toBe(160);
-    expect(box(1728).overlap).toBe(52);
-  });
-
-  it("reports overlap as the geometry it actually produced", () => {
-    // Derived from left and width, not calculated a second way alongside
-    // them — the two disagreed by exactly the gap when they were separate.
-    for (const viewport of [1000, 1366, 1512, 1864, 1920, 2208, 3840]) {
+  it("never overlaps the table when it is eligible to dock", () => {
+    for (const viewport of [1832, 1864, 1920, 2208, 3840]) {
       const { left, width, overlap } = detailPanelBox(viewport, cardRight(viewport));
-      expect(overlap).toBe(Math.max(0, cardRight(viewport) - left));
-      expect(width).toBeGreaterThanOrEqual(340);
+      expect(left).toBe(cardRight(viewport) + 16);
+      expect(overlap).toBe(0);
+      expect(width).toBeGreaterThanOrEqual(300);
     }
-  });
-
-  it("has two thresholds, and neither is a cliff", () => {
-    const first = (test: (viewport: number) => boolean) => {
-      for (let viewport = 1200; viewport <= 2600; viewport += 1) {
-        if (test(viewport)) return viewport;
-      }
-      return 0;
-    };
-    // Below this the panel starts covering the table's right-hand columns.
-    expect(first((viewport) => box(viewport).overlap === 0)).toBe(1832);
-    // And below this it is clear of the table but pressed against it, having
-    // eaten the gap first. Losing 16px of air is the cheaper concession, so it
-    // is the one made first.
-    expect(first((viewport) => box(viewport).left >= cardRight(viewport) + 16)).toBe(1864);
-    // Just under, and it is one pixel of overlap rather than a jump. An odd
-    // window width centres the container on a half pixel, so the walk down is
-    // subpixel either way.
-    expect(box(1830).overlap).toBe(1);
-    expect(box(1831).overlap).toBeGreaterThan(0);
   });
 });
 

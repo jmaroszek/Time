@@ -16,10 +16,28 @@ export default function EChart({
   const chartRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
-    const chart = echarts.init(containerRef.current!, undefined, { renderer: "canvas" });
+    const container = containerRef.current!;
+    const chart = echarts.init(container, undefined, { renderer: "canvas" });
     chartRef.current = chart;
-    const ro = new ResizeObserver(() => chart.resize());
-    ro.observe(containerRef.current!);
+    let resizeFrame = 0;
+    const resize = () => {
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        const bounds = container.getBoundingClientRect();
+        if (bounds.width <= 0 || bounds.height <= 0) return;
+        // WebView2 can deliver several intermediate window sizes while the
+        // native edge is being dragged. Passing the settled content box
+        // explicitly prevents ECharts from retaining an earlier canvas width.
+        chart.resize({
+          width: Math.floor(bounds.width),
+          height: Math.floor(bounds.height),
+        });
+      });
+    };
+    const ro = new ResizeObserver(resize);
+    ro.observe(container);
+    window.addEventListener("resize", resize);
+    resize();
 
     // ECharts 6.1 does not clear its delayed-show timer on globalout. Cancel
     // that one private timer at the chart boundary while leaving native item
@@ -48,6 +66,8 @@ export default function EChart({
       cancelPendingTooltip();
       chart.getZr().off("globalout", cancelPendingTooltip);
       ro.disconnect();
+      window.removeEventListener("resize", resize);
+      window.cancelAnimationFrame(resizeFrame);
       chart.dispose();
       chartRef.current = null;
     };
@@ -64,5 +84,11 @@ export default function EChart({
     if (onClick) chart.on("click", onClick);
   }, [onClick, option]);
 
-  return <div ref={containerRef} style={{ height, width: "100%" }} />;
+  return (
+    <div
+      ref={containerRef}
+      className="min-w-0 max-w-full"
+      style={{ height, width: "100%" }}
+    />
+  );
 }

@@ -389,10 +389,10 @@ export default function SettingsTab({
     // the next time a setting is added. Length is the only thing that grows here.
     <div className="settings-panel mr-auto flex w-full max-w-[600px] flex-col gap-[26px] pt-2">
       <section>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <SectionLabel>Tracker status</SectionLabel>
           <p
-            className={`mb-3 min-h-4 text-[10.5px] ${
+            className={`mb-3 min-h-4 text-xs ${
               savingKeys.size > 0
                 ? "text-ink-2"
                 : saveOutcome === "failed"
@@ -412,13 +412,13 @@ export default function SettingsTab({
               : ""}
           </p>
         </div>
-        <div className="flex items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-[18px] py-4">
+        <div className="flex flex-wrap items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-4 py-4 sm:px-[18px]">
           <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-good-data" : "alert-pulse bg-bad"}`} />
           <div>
             <p className="text-[13px] font-semibold text-ink">
               {!trackingEnabled ? "Tracking disabled" : pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
             </p>
-            <p className="mt-[3px] text-[11.5px] text-ink-3">
+            <p className="mt-[3px] text-xs text-ink-3">
               {!trackingEnabled
                 ? "No new activity is being recorded"
                 : pause.paused
@@ -432,7 +432,7 @@ export default function SettingsTab({
                     : `No tracker heartbeat for ${fmtDuration(Math.max(heartbeatAge, 0))}`}
             </p>
           </div>
-          {heartbeatAge !== null && <span className="ml-auto text-[11.5px] tabular-nums text-ink-3">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
+          {heartbeatAge !== null && <span className="basis-full text-xs tabular-nums text-ink-3 sm:ml-auto sm:basis-auto">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
         </div>
       </section>
 
@@ -457,7 +457,7 @@ export default function SettingsTab({
           label="Start at Windows sign-in"
           help="Start the tracker when you sign into this Windows account."
           control={
-            <span className="flex flex-col items-end gap-1">
+            <span className="inline-flex flex-col items-start gap-1">
               <PrivacyToggle
                 label="Start at Windows sign-in"
                 enabled={meta.settings.launch_at_login === "1"}
@@ -465,7 +465,7 @@ export default function SettingsTab({
                 onChange={(enabled) => void setStartAtLogin(enabled)}
               />
               {!trackingEnabled && (
-                <span className="text-[10px] text-ink-3">
+                <span className="text-xs text-ink-3">
                   Enable Record activity first
                 </span>
               )}
@@ -499,7 +499,7 @@ export default function SettingsTab({
         intro="Category and productivity colors across every chart. Switching palettes changes the swatches offered for new categories."
       >
         <div className="px-4 pb-4">
-          <p id="category-palette-label" className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+          <p id="category-palette-label" className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">
             Category palette
           </p>
           <div className="flex flex-col gap-2" role="radiogroup" aria-labelledby="category-palette-label">
@@ -526,7 +526,7 @@ export default function SettingsTab({
                   </span>
                   <span className="min-w-0">
                     <span className="block text-[13px] font-semibold text-ink">{option.label}</span>
-                    <span className="block text-[11px] leading-snug text-ink-3">{option.description}</span>
+                    <span className="block text-xs leading-snug text-ink-3">{option.description}</span>
                   </span>
                   <span className={`ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${selected ? "border-accent" : "border-edge-2"}`}>
                     {selected && <span className="h-2 w-2 rounded-full bg-accent" />}
@@ -537,7 +537,7 @@ export default function SettingsTab({
           </div>
         </div>
         <div className="border-t border-surface-2 px-4 py-4">
-          <p id="productivity-colors-label" className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+          <p id="productivity-colors-label" className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">
             Productivity colors
           </p>
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="productivity-colors-label">
@@ -569,18 +569,18 @@ export default function SettingsTab({
               );
             })}
           </div>
-          <p className="mt-2 text-[10.5px] leading-snug text-ink-3">
+          <p className="mt-2 text-xs leading-snug text-ink-3">
             Colorblind uses blue and red to distinguish the states for common red–green color vision differences.
           </p>
         </div>
-        <div className="flex items-center justify-between gap-4 border-t border-surface-2 px-4 py-3">
-          <p className="text-[11px] leading-snug text-ink-3">
+        <div className="flex flex-col items-start gap-2 border-t border-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <p className="text-xs leading-snug text-ink-3">
             Existing categories keep their saved colors.
           </p>
           <button
             type="button"
             onClick={onManageCategories}
-            className="shrink-0 text-[11.5px] font-medium text-ink-3 transition-colors hover:text-ink-2"
+            className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink-2"
           >
             Open Categories &amp; Rules
           </button>
@@ -691,7 +691,7 @@ function ExclusionSummary({ onManage }: { onManage: () => void }) {
     `${counts.website} website${counts.website === 1 ? "" : "s"}`,
   ];
   return (
-    <div className="flex items-center justify-between gap-4 border-t border-surface-2 px-4 py-[13px]">
+    <div className="flex flex-col items-start gap-2 border-t border-surface-2 px-4 py-[13px] sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <p className="min-w-0 text-xs leading-snug text-ink-3">
         {total === 0
           ? "Nothing is excluded from tracking — mark an app or website “Do not track” in Activity."
@@ -701,7 +701,7 @@ function ExclusionSummary({ onManage }: { onManage: () => void }) {
         <button
           type="button"
           onClick={onManage}
-          className="shrink-0 text-[11.5px] font-semibold text-accent transition-colors hover:text-accent/80"
+          className="shrink-0 text-xs font-semibold text-accent transition-colors hover:text-accent/80"
         >
           View and manage
         </button>
@@ -721,7 +721,7 @@ function VersionsLine({ trackerVersion }: { trackerVersion: string | undefined }
       .catch(() => {});
   }, []);
   return (
-    <p className="mt-2 text-[11px] text-ink-3">
+    <p className="mt-2 text-xs text-ink-3">
       Dashboard {appVersion ?? "—"} · Tracker {trackerVersion ?? "not stamped yet"}
     </p>
   );
@@ -774,7 +774,7 @@ function RestoreDefaultsSection({
             disabled={disabled || restoring}
             title={disabled ? "Wait for settings to finish saving" : undefined}
             onClick={() => void restore()}
-            className="rounded-[8px] border border-edge px-3 py-1.5 text-[11.5px] font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:text-ink disabled:cursor-wait disabled:opacity-50"
+            className="rounded-[8px] border border-edge px-3 py-1.5 text-xs font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:text-ink disabled:cursor-wait disabled:opacity-50"
           >
             {restoring ? "Restoring…" : restored ? "Defaults restored" : "Restore defaults"}
           </button>
@@ -884,19 +884,19 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
       <SectionLabel>Data management</SectionLabel>
       <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
         <div className="p-4">
-          <p className="mb-[9px] text-[11.5px] text-ink-3">Database path</p>
+          <p className="mb-[9px] text-xs text-ink-3">Database path</p>
           <div className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface-2 p-[9px] pl-[13px]">
             <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2" title={getDbPath()}>{getDbPath()}</span>
             <button
               type="button"
-              className="rounded-[7px] border border-edge px-2.5 py-[5px] text-[11px] text-ink-2 transition-colors hover:border-edge-2 hover:text-ink"
+              className="rounded-[7px] border border-edge px-2.5 py-[5px] text-xs text-ink-2 transition-colors hover:border-edge-2 hover:text-ink"
               onClick={copyPath}
             >
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
 
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
               disabled={backingUp}
@@ -926,14 +926,14 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
           </div>
           {backupDetail && (
             <p
-              className={`mt-2 break-all text-[11px] ${backupDetail.ok ? "text-ink-3" : "text-bad"}`}
+              className={`mt-2 break-all text-xs ${backupDetail.ok ? "text-ink-3" : "text-bad"}`}
               role={backupDetail.ok ? "status" : "alert"}
               aria-live={backupDetail.ok ? "polite" : "assertive"}
             >
               {backupDetail.text}
             </p>
           )}
-          <p className="mt-3 text-[11px] leading-snug text-ink-3">
+          <p className="mt-3 text-xs leading-snug text-ink-3">
             Backups are stored in a Backups folder beside this database. Everything stays on your machine.
           </p>
           <VersionsLine trackerVersion={meta.settings.tracker_version} />
@@ -942,7 +942,7 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
           label="Delete history older than"
           help="Removes everything recorded before the cutoff. Categories and rules are kept."
           control={
-            <span className="flex items-center gap-2">
+            <span className="flex flex-wrap items-center gap-2">
               <input
                 type="number"
                 min={1}
@@ -951,12 +951,12 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
                 onChange={(event) => setOlderDays(event.target.value)}
                 className="w-[64px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 text-right text-xs text-ink outline-none focus:border-accent/60"
               />
-              <span className="text-[11px] text-ink-3">days</span>
+              <span className="text-xs text-ink-3">days</span>
               <TrashButton label="Delete older history" onClick={() => void deleteOlder()} />
             </span>
           }
         />
-        <div className="flex items-center justify-between gap-4 border-t border-surface-2 bg-bad/[.03] px-4 py-[13px]">
+        <div className="flex flex-col items-start gap-2 border-t border-surface-2 bg-bad/[.03] px-4 py-[13px] sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <p className="text-xs text-ink-3">Securely erase all recorded history</p>
           <button
             type="button"
@@ -966,7 +966,7 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
             Erase all
           </button>
         </div>
-        {message && <p className="border-t border-surface-2 px-4 py-3 text-[11.5px] text-ink-2">{message}</p>}
+        {message && <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-2">{message}</p>}
       </div>
       {restoreOpen && createPortal(
         <RestoreBackupDialog onClose={closeRestore} />,
@@ -1055,7 +1055,7 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
   const paths = backups.map((backup) => backup.path);
 
   return (
-    <div className="settings-dialog fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+    <div className="settings-dialog fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2 sm:p-4">
       <div
         ref={dialogRef}
         role="dialog"
@@ -1064,14 +1064,14 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
         aria-describedby="restore-backup-description"
         tabIndex={-1}
         onKeyDown={trapModalFocus}
-        className="w-full max-w-lg rounded-[14px] border border-edge-2 bg-surface p-5 shadow-2xl outline-none"
+        className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-[14px] border border-edge-2 bg-surface p-4 shadow-2xl outline-none sm:max-h-[calc(100dvh-2rem)] sm:p-5"
       >
         <div className="flex items-start gap-4">
           <div className="min-w-0 flex-1">
             <h2 id="restore-backup-title" className="text-[15px] font-semibold text-ink">
               Restore backup
             </h2>
-            <p id="restore-backup-description" className="mt-1 text-[11.5px] leading-relaxed text-ink-3">
+            <p id="restore-backup-description" className="mt-1 text-xs leading-relaxed text-ink-3">
               Choose a snapshot to replace history, categories, rules, and settings. Time creates a safety backup first, then restarts automatically.
             </p>
           </div>
@@ -1118,13 +1118,13 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
                         {backupPrimaryLabel(backup)}
                       </span>
                     </span>
-                    <span className="mt-1 block truncate text-[10.5px] text-ink-3" title={backup.path}>
+                    <span className="mt-1 block truncate text-xs text-ink-3" title={backup.path}>
                       {backup.name} · {formatBackupSize(backup.bytes)}
                       {backup.schemaVersion !== null && ` · Schema ${backup.schemaVersion}`}
                       {backup.legacyLocation && " · Legacy location"}
                     </span>
                     {backup.issue && (
-                      <span className="mt-1 block text-[10.5px] leading-snug text-bad">
+                      <span className="mt-1 block text-xs leading-snug text-bad">
                         {backup.issue}
                       </span>
                     )}
@@ -1139,12 +1139,12 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
           type="button"
           disabled={restoring}
           onClick={() => void chooseAnother()}
-          className="mt-3 text-[11.5px] font-semibold text-accent hover:text-accent/80 disabled:opacity-40"
+          className="mt-3 text-xs font-semibold text-accent hover:text-accent/80 disabled:opacity-40"
         >
           Choose another file…
         </button>
 
-        <div className="mt-4 rounded-[10px] border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-[11px] leading-relaxed text-ink-3">
+        <div className="mt-4 rounded-[10px] border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-xs leading-relaxed text-ink-3">
           Activity recorded after the selected backup will no longer appear. The automatic safety backup lets you restore the current state again if needed.
         </div>
         <div className="mt-4 flex justify-end gap-2">
@@ -1152,7 +1152,7 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
             type="button"
             disabled={restoring}
             onClick={onClose}
-            className="rounded-[8px] border border-edge px-3 py-1.5 text-[11.5px] font-semibold text-ink-2 hover:border-edge-2 hover:text-ink disabled:opacity-40"
+            className="rounded-[8px] border border-edge px-3 py-1.5 text-xs font-semibold text-ink-2 hover:border-edge-2 hover:text-ink disabled:opacity-40"
           >
             Cancel
           </button>
@@ -1160,7 +1160,7 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
             type="button"
             disabled={!selected?.compatible || restoring}
             onClick={() => void restore()}
-            className="rounded-[8px] border border-accent/50 bg-accent/15 px-3 py-1.5 text-[11.5px] font-semibold text-accent hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-[8px] border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {restoring ? "Restoring…" : "Restore and restart"}
           </button>
@@ -1208,7 +1208,7 @@ function PrivacyToggle({
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
-  return <p className="mb-3 pl-0.5 text-[11px] font-bold uppercase tracking-[.09em] text-ink-2">{children}</p>;
+  return <p className="mb-3 pl-0.5 text-xs font-bold uppercase tracking-[.09em] text-ink-2">{children}</p>;
 }
 
 /** `intro` carries the rationale a whole section shares, so its rows can keep
@@ -1218,7 +1218,7 @@ function Section({ title, intro, children }: { title: string; intro?: string; ch
     <section>
       <SectionLabel>{title}</SectionLabel>
       <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
-        {intro && <p className="px-4 pb-3 pt-4 text-[11px] leading-snug text-ink-3">{intro}</p>}
+        {intro && <p className="px-4 pb-3 pt-4 text-xs leading-snug text-ink-3">{intro}</p>}
         {children}
       </div>
     </section>
@@ -1263,7 +1263,7 @@ function Row({
 }) {
   return (
     <div
-      className={`${stacked ? "" : "flex items-center justify-between gap-4"} ${
+      className={`${stacked ? "" : "flex items-center justify-between gap-4 max-sm:block"} ${
         bare ? "" : "border-t border-surface-2 px-4 py-[15px] first:border-t-0"
       }`}
     >
@@ -1271,13 +1271,13 @@ function Row({
         <p className={`font-medium text-ink ${compact ? "text-[12.5px]" : "text-[13px]"}`}>{label}</p>
         <p
           className={`mt-[5px] max-w-[400px] leading-snug text-ink-3 ${
-            compact ? "text-[11.5px]" : "text-xs"
+            compact ? "text-xs" : "text-xs"
           }`}
         >
           {help}
         </p>
       </div>
-      <div className={stacked ? "mt-3" : "shrink-0"}>{control}</div>
+      <div className={stacked ? "mt-3" : "shrink-0 max-sm:mt-3"}>{control}</div>
     </div>
   );
 }
@@ -1359,7 +1359,7 @@ function BrowserProcessEditor({
                 inputRef.current?.focus();
               }
             }}
-            className={`flex h-7 items-center gap-1.5 rounded-[8px] border border-edge bg-surface-3 px-2.5 font-mono text-[11.5px] text-ink transition-colors ${
+            className={`flex h-7 items-center gap-1.5 rounded-[8px] border border-edge bg-surface-3 px-2.5 font-mono text-xs text-ink transition-colors ${
               removable ? "hover:border-edge-2 hover:bg-white/[.055]" : "cursor-default"
             }`}
           >
@@ -1397,7 +1397,7 @@ function BrowserProcessEditor({
             focusChip(processes.length - 1);
           }
         }}
-        className="h-7 min-w-[168px] flex-1 bg-transparent px-1 font-mono text-xs text-ink outline-none placeholder:font-sans placeholder:text-ink-3"
+        className="h-7 min-w-0 flex-1 basis-full bg-transparent px-1 font-mono text-xs text-ink outline-none placeholder:font-sans placeholder:text-ink-3 sm:min-w-[168px] sm:basis-auto"
       />
       <span id={instructionsId} className="sr-only">
         Press Enter or comma to add. From the empty input, press Left Arrow to manage existing processes, then Delete to remove one.
@@ -1428,7 +1428,7 @@ function NumberStepper({
   onPlus: () => void;
 }) {
   return (
-    <div className="flex items-center rounded-[10px] border border-edge bg-surface-2 p-[3px] transition-colors focus-within:border-accent/60">
+    <div className="inline-flex items-center rounded-[10px] border border-edge bg-surface-2 p-[3px] transition-colors focus-within:border-accent/60">
       <button type="button" aria-label={`Decrease ${label}`} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-base text-ink-2 hover:bg-white/5 hover:text-ink" onClick={onMinus}>−</button>
       <div className={`flex items-baseline justify-center ${display ? "w-[46px]" : unit ? "min-w-[34px] gap-1" : "min-w-[34px]"}`}>
         <input
@@ -1442,7 +1442,7 @@ function NumberStepper({
           onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
           className={`${unit ? "text-right" : "w-full text-center"} bg-transparent text-[13px] font-semibold tabular-nums text-ink outline-none`}
         />
-        {unit && <span className="text-[11px] text-ink-3">{unit}</span>}
+        {unit && <span className="text-xs text-ink-3">{unit}</span>}
       </div>
       <button type="button" aria-label={`Increase ${label}`} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-base text-ink-2 hover:bg-white/5 hover:text-ink" onClick={onPlus}>+</button>
     </div>
@@ -1451,7 +1451,7 @@ function NumberStepper({
 
 function Segmented({ label, options, value, onChange, labels }: { label: string; options: string[]; value: string; onChange: (value: string) => void; labels?: Record<string, string> }) {
   return (
-    <div className="flex rounded-[10px] border border-edge bg-surface-2 p-[3px]" role="radiogroup" aria-label={label}>
+    <div className="inline-flex rounded-[10px] border border-edge bg-surface-2 p-[3px]" role="radiogroup" aria-label={label}>
       {options.map((option, index) => (
         <button
           type="button"
@@ -1459,7 +1459,7 @@ function Segmented({ label, options, value, onChange, labels }: { label: string;
           role="radio"
           aria-checked={value === option}
           tabIndex={value === option ? 0 : -1}
-          className={`rounded-[7px] px-[13px] py-1.5 text-[11.5px] transition-colors ${value === option ? "bg-accent/15 font-semibold text-accent" : "text-ink-3 hover:text-ink-2"}`}
+          className={`rounded-[7px] px-[13px] py-1.5 text-xs transition-colors ${value === option ? "bg-accent/15 font-semibold text-accent" : "text-ink-3 hover:text-ink-2"}`}
           onClick={() => onChange(option)}
           onKeyDown={(event) => handleRadioKey(event, options, index, onChange)}
         >

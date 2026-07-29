@@ -1,6 +1,7 @@
 use std::{fs, path::PathBuf, process::Command};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 #[cfg(windows)]
 use windows::Win32::Graphics::Dwm::{
@@ -10,6 +11,11 @@ use windows::Win32::Graphics::Dwm::{
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 mod database;
+mod window_state;
+
+fn saved_window_state_flags() -> StateFlags {
+    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
+}
 
 use database::{
     database_path, ActivityDeletePreview, ActivityDeleteRequest, ActivityDeleteResult,
@@ -459,10 +465,33 @@ fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, Str
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                // Visibility, decorations, and fullscreen are application
+                // policy rather than user layout. Saving only these three
+                // fields also prevents an interrupted startup from persisting
+                // the intentionally hidden pre-restore window.
+                .with_state_flags(saved_window_state_flags())
+                .build(),
+        )
         .setup(|app| {
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
                 style_windows_frame(&window);
+                // The window-state plugin has already restored while the
+                // window is hidden. Validate the result before React shows it.
+                window_state::validate_restored_window(&window)?;
+
+                // Persist while the native window still exists. The plugin
+                // also saves on RunEvent::Exit, but automation and some
+                // Windows shutdown paths can tear down the WebView session
+                // before that final event reaches the application.
+                let app_handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                        let _ = app_handle.save_window_state(saved_window_state_flags());
+                    }
+                });
             }
 
             let base = app.path().local_data_dir()?;

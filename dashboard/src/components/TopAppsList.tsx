@@ -49,11 +49,14 @@ export default function TopAppsList({
   return (
     <div>
       <div
-        className={`scroll-well flex flex-col gap-2.5 overflow-y-auto pr-4 ${hiddenAppCount > 0 ? "max-h-[231px]" : "max-h-[250px]"}`}
+        className={`scroll-well flex flex-col gap-2.5 overflow-y-auto pr-2 sm:pr-4 ${hiddenAppCount > 0 ? "max-h-[231px]" : "max-h-[250px]"}`}
       >
         {apps.map((app) => (
-          <div key={app.process} className="flex items-center gap-3 text-xs">
-            <span className="flex w-36 shrink-0 items-center gap-2 truncate">
+          <div
+            key={app.process}
+            className="top-app-row grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1.5 text-xs sm:flex sm:gap-y-0"
+          >
+            <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-2 truncate sm:w-36 sm:shrink-0">
               <CategoryDot
                 color={app.category?.color ?? "#5b616b"}
                 label={app.category?.name ?? "Uncategorized"}
@@ -82,7 +85,7 @@ export default function TopAppsList({
                 </span>
               )}
             </span>
-            <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
+            <div className="col-span-3 row-start-2 h-2 min-w-0 overflow-hidden rounded-full bg-surface-2 sm:col-auto sm:row-auto sm:flex-1">
               {/* One accent fill for every bar: the dot already carries the
                   category, and hues of unequal visual weight made equal-length
                   bars read unequal — length is the only thing the bar encodes. */}
@@ -91,7 +94,9 @@ export default function TopAppsList({
                 style={{ width: `${Math.max((app.seconds / max) * 100, 1.5)}%` }}
               />
             </div>
-            <span className="w-14 shrink-0 text-right text-ink-2">{fmtDuration(app.seconds)}</span>
+            <span className="top-app-duration col-start-2 row-start-1 w-14 shrink-0 text-right text-ink-2">
+              {fmtDuration(app.seconds)}
+            </span>
             <DeltaBadge
               app={app}
               comparisonDays={comparisonDays}
@@ -104,7 +109,7 @@ export default function TopAppsList({
       </div>
       {hiddenAppCount > 0 && (
         <div className="mt-2 flex h-[15px] items-center">
-          <p className="translate-y-px text-[11px] text-ink-3">
+          <p className="translate-y-px text-xs text-ink-3">
             {hiddenAppCount} {hiddenAppCount === 1 ? "app" : "apps"} under {fmtDuration(minAppSecondsPerDay)}/day hidden
           </p>
         </div>
@@ -145,7 +150,7 @@ function DeltaBadge({
     return (
       <FloatingTooltip
         text={tooltip}
-        className="w-14 shrink-0 text-right text-[11px] font-normal tracking-tight text-ink-3 outline-none"
+        className="top-app-change col-start-3 row-start-1 w-14 shrink-0 text-right text-xs font-normal tracking-tight text-ink-3 outline-none"
       >
         <span aria-hidden="true">new</span>
       </FloatingTooltip>
@@ -169,7 +174,7 @@ function DeltaBadge({
   return (
     <FloatingTooltip
       text={tooltip}
-      className={`w-14 shrink-0 text-right text-[11px] font-normal tracking-tight tabular-nums outline-none ${cls}`}
+      className={`top-app-change col-start-3 row-start-1 w-14 shrink-0 text-right text-xs font-normal tracking-tight tabular-nums outline-none ${cls}`}
     >
       <span aria-hidden="true">{text}</span>
     </FloatingTooltip>

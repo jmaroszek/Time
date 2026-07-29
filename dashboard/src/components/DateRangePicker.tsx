@@ -48,10 +48,10 @@ export default function DateRangePicker({
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex w-16 justify-end">
+    <div className="ml-auto flex w-full items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
+      <div className="flex shrink-0 justify-end sm:w-16">
         {supportsRolling && (
-          <Checkbox checked={rolling} onChange={onRollingChange} className="text-[11px] text-ink-3">
+          <Checkbox checked={rolling} onChange={onRollingChange} className="text-xs text-ink-3">
             Rolling
           </Checkbox>
         )}
@@ -61,24 +61,26 @@ export default function DateRangePicker({
         onChange={(v) => onPreset(v as PresetOrCustom)}
         options={PRESETS}
         label="Date range preset"
-        className="w-32"
+        className="w-24 sm:w-32"
       />
-      {/* min/max keep start <= end selectable in the native picker; typed
-          inverted ranges still no-op in commitCustom. */}
+      {/* Compact controls are deliberately narrower than their desktop
+          counterparts so the complete range stays on one line at the minimum
+          supported viewport, instead of waiting for the shared 640px layout
+          transition even when the row already has enough measured space. */}
       <TextInput
         type="date"
         value={toInputValue(range.start)}
         max={toInputValue(lastDay)}
         onChange={(v) => commitCustom(v, toInputValue(lastDay))}
-        className="w-36"
+        className="min-w-0 w-32 sm:w-36"
       />
-      <span className="text-xs text-ink-3">to</span>
+      <span className="shrink-0 text-xs text-ink-3">to</span>
       <TextInput
         type="date"
         value={toInputValue(lastDay)}
         min={toInputValue(range.start)}
         onChange={(v) => commitCustom(toInputValue(range.start), v)}
-        className="w-36"
+        className="min-w-0 w-32 sm:w-36"
       />
     </div>
   );

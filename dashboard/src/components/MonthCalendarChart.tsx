@@ -86,7 +86,7 @@ export default function MonthCalendarChart({
         type: "category",
         position: "top",
         data: MONTH_NAMES,
-        axisLabel: { color: CHROME.axisLabel, fontSize: 10 },
+        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
         axisTick: { show: false },
         axisLine: { show: false },
         splitArea: { show: false },
