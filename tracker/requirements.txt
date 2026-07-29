@@ -3,3 +3,9 @@ psutil==7.0.0
 pywin32==311
 pystray==0.19.5
 pillow==12.3.0
+winrt-runtime==3.2.1
+winrt-Windows-Foundation==3.2.1
+winrt-Windows-Foundation-Collections==3.2.1
+winrt-Windows-Media==3.2.1
+winrt-Windows-Media-Control==3.2.1
+winrt-Windows-Storage-Streams==3.2.1

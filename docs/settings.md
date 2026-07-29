@@ -29,7 +29,7 @@ to the other per-item curation.
 | **Weekly productive goal** | The target the Insights goal-pace card measures against. |
 | **Day starts/ends at** | The hour window drawn on the Timeline and Hour-of-Day plots. Activity outside the window still counts in all totals. |
 | **Week starts on** | Affects weekly presets, bucketing, and goal pacing. |
-| **AFK idle threshold** | No input for this long marks you as Away From Keyboard (AFK). AFK time is not classified and does not count towards computer use. |
+| **AFK idle threshold** | No input for this long marks you as Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use. |
 | **Focus chain max gap** | Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration; unproductive or AFK time ends it immediately. |
 | **Hide system utilities** | Hides uncategorized installers, drivers, and temporary files. |
 | **Hide rare items** | Hides uncategorized items only when their all-history time and session count are both below the configured limits. Grouped in Settings with the two limits that define "rare", since neither reads correctly alone. |
