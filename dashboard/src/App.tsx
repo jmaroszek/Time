@@ -146,9 +146,13 @@ function Shell() {
   // differently moved that control when the reader switched between them.
   // Activity's detail panel docks in the margin beside this container instead
   // of taking width from it — see the panel's own note.
+  // Top padding is smaller than the rest because the custom title bar already
+  // sits above in the page's own background colour, so its 32px reads as
+  // padding rather than chrome. It is not zero: on a min-width window the range
+  // picker's right edge lands under the caption controls and needs clearance.
   return (
     <div
-      className={`mx-auto flex max-w-6xl flex-col gap-4 px-6 py-5 ${bounded ? "h-full overflow-hidden" : "min-h-full"}`}
+      className={`mx-auto flex max-w-6xl flex-col gap-4 px-6 pt-2 pb-5 ${bounded ? "h-full overflow-hidden" : "min-h-full"}`}
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
         <TabBar tab={tab} onTab={setTab} />

@@ -968,11 +968,11 @@ export default function ActivityTab({
             // Categories & Rules is a settings surface, not a data surface: a
             // name, a state and a count, with half a screen of air between them
             // at full width. The floor is the Window-rule composer — its
-            // "Applies to" row plus a scope input, inside the rule indent — so
-            // 840 is the narrowest width that still lays that row out flat.
+            // "Applies to" row plus a scope input, inside the rule indent. An
+            // 800px cap keeps that row flat without stretching the folded list.
             // mr-auto, not mx-auto: centring would slide the view switcher out
             // from under the cursor that just clicked it.
-            : "mr-auto w-full max-w-[840px]"
+            : "mr-auto w-full max-w-[800px]"
         }`}
       >
       {/* One card, whose title is the switcher: a floating control row above it
