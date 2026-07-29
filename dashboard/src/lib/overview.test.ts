@@ -285,19 +285,20 @@ describe("activity metrics", () => {
 
 describe("calendarGrid", () => {
   // Sun Jun 21 2026 is a week start, so these counts are exact.
-  const from = (days: number) => calendarGrid(rangeFrom(new Date(2026, 5, 21), days), "Sunday");
+  const from = (days: number, width = 440) =>
+    calendarGrid(rangeFrom(new Date(2026, 5, 21), days), "Sunday", width);
 
   it("counts week columns from the aligned week containing the range start", () => {
     expect(from(30).weekColumns).toBe(5);
     expect(from(90).weekColumns).toBe(13);
     expect(from(365).weekColumns).toBe(53);
     // A range starting mid-week still owns the whole column it falls in.
-    expect(calendarGrid(rangeFrom(new Date(2026, 5, 24), 7), "Sunday").weekColumns).toBe(2);
+    expect(calendarGrid(rangeFrom(new Date(2026, 5, 24), 7), "Sunday", 440).weekColumns).toBe(2);
   });
 
   it("sizes short ranges squarely instead of letting cells stretch", () => {
     expect(from(30).cellPx).toBe(40);
-    expect(from(90).cellPx).toBe(40);
+    expect(from(90).cellPx).toBe(29);
   });
 
   it("puts weekdays across the top only for short calendars", () => {
@@ -312,10 +313,15 @@ describe("calendarGrid", () => {
   });
 
   it("shrinks cells rather than overflowing as columns approach the threshold", () => {
-    const wide = calendarGrid(rangeFrom(new Date(2026, 5, 21), 30 * 7), "Sunday");
+    const wide = calendarGrid(rangeFrom(new Date(2026, 5, 21), 30 * 7), "Sunday", 440);
     expect(wide.weekColumns).toBe(30);
-    expect(wide.cellPx).toBe(29);
-    expect(wide.cellPx! * wide.weekColumns).toBeLessThanOrEqual(880);
+    expect(wide.cellPx).toBe(12);
+    expect(wide.cellPx! * wide.weekColumns).toBeLessThanOrEqual(440);
+  });
+
+  it("uses the measured card width rather than a monitor-sized constant", () => {
+    expect(from(90, 440).cellPx).toBe(29);
+    expect(from(90, 820).cellPx).toBe(40);
   });
 
   it("counts whole weeks across a DST boundary", () => {

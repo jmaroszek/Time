@@ -10,6 +10,7 @@ export type TitleBarWindow = Pick<
   | "minimize"
   | "onFocusChanged"
   | "onResized"
+  | "show"
   | "startDragging"
   | "toggleMaximize"
 >;
@@ -133,9 +134,14 @@ export default function WindowTitleBar({
 }) {
   const [appWindow] = useState<TitleBarWindow>(() => suppliedWindow ?? getCurrentWindow());
   const [focused, setFocused] = useState(true);
-  const [maximized, setMaximized] = useState(true);
+  const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
+    // The native window starts hidden so the state plugin can restore size and
+    // position without flashing the first-launch geometry. Showing from the
+    // mounted titlebar keeps visibility an application policy rather than a
+    // persisted window-state field.
+    void appWindow.show().catch(reportWindowError);
     const subscription = subscribeToTitleBarState(appWindow, {
       onFocusChange: setFocused,
       onMaximizedChange: setMaximized,

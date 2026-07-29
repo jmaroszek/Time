@@ -152,9 +152,9 @@ function Shell() {
   // picker's right edge lands under the caption controls and needs clearance.
   return (
     <div
-      className={`mx-auto flex max-w-6xl flex-col gap-4 px-6 pt-2 pb-5 ${bounded ? "h-full overflow-hidden" : "min-h-full"}`}
+      className={`time-shell mx-auto flex max-w-6xl flex-col gap-4 px-3 pt-2 pb-5 sm:px-6 ${bounded ? "h-full overflow-hidden" : "min-h-full"}`}
     >
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <TabBar tab={tab} onTab={setTab} />
         {showRange && (
           <DateRangePicker
@@ -312,9 +312,9 @@ function PrivacyOnboarding() {
   };
 
   return (
-    <div className="flex min-h-full items-center justify-center p-8">
-      <section className="w-full max-w-2xl rounded-[18px] border border-edge bg-surface px-7 py-6 shadow-2xl shadow-black/20">
-        <p className="text-[11px] font-bold uppercase tracking-[.12em] text-accent">Private by design</p>
+    <div className="flex min-h-full items-center justify-center p-3 sm:p-8">
+      <section className="scroll-well max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-[18px] border border-edge bg-surface px-4 py-5 shadow-2xl shadow-black/20 sm:max-h-[calc(100dvh-4rem)] sm:px-7 sm:py-6">
+        <p className="text-xs font-bold uppercase tracking-[.12em] text-accent">Private by design</p>
         <h1 className="mt-2 text-xl font-semibold text-ink">Choose what Time may record</h1>
         <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-2">
           Time has no account, server, analytics, or telemetry. Activity is written only to your
@@ -373,7 +373,7 @@ function PrivacyOnboarding() {
             Not now
           </button>
         </div>
-        <p className="mt-4 text-[11px] leading-relaxed text-ink-3">
+        <p className="mt-4 text-xs leading-relaxed text-ink-3">
           Choosing “Not now” opens the dashboard without starting or registering the tracker.
         </p>
       </section>
@@ -422,7 +422,7 @@ function FirstRunPanel({ status }: { status: TrackerStatus }) {
         browser URLs are stripped before anything reaches the database. Everything stays in a
         local file and nothing is uploaded.
       </p>
-      <p className="mt-2 flex items-center gap-2">
+      <p className="mt-2 flex flex-wrap items-center gap-2">
         <span className={`h-2 w-2 rounded-full ${trackerLive ? "bg-good-data" : "bg-bad"}`} />
         {trackerLive ? (
           <span className="text-ink-2">
@@ -455,7 +455,7 @@ function WaitingForTracker() {
           Time&apos;s tracker creates the database the first time it runs. Start the tracker and
           this screen will update by itself within a few seconds.
         </p>
-        <p className="mt-4 break-all font-mono text-[11px] text-ink-3">{getDbPath()}</p>
+        <p className="mt-4 break-all font-mono text-xs text-ink-3">{getDbPath()}</p>
       </div>
     </div>
   );
@@ -470,7 +470,7 @@ function NewerDatabaseScreen() {
         Your data was created by a newer Time release than this dashboard supports. Update Time
         and open it again. This version has not changed the database.
       </p>
-      <p className="mt-3 break-all font-mono text-[11px] text-ink-3">{getDbPath()}</p>
+      <p className="mt-3 break-all font-mono text-xs text-ink-3">{getDbPath()}</p>
     </div>
   );
 }
@@ -486,7 +486,7 @@ function DbErrorScreen({ error }: { error: string }) {
         If you just installed, make sure the tracker has started — it creates the database on
         first run. Otherwise the file below may be locked or unreadable.
       </p>
-      <p className="mt-3 break-all font-mono text-[11px] text-ink-3">{getDbPath()}</p>
+      <p className="mt-3 break-all font-mono text-xs text-ink-3">{getDbPath()}</p>
       <button
         type="button"
         className="mt-4 rounded-lg border border-edge-2 px-3 py-1.5 text-xs text-ink-2 transition-colors hover:bg-white/[.035] hover:text-ink"
@@ -500,7 +500,7 @@ function DbErrorScreen({ error }: { error: string }) {
         {copied ? "Copied" : "Copy error details"}
       </button>
       {import.meta.env.DEV && (
-        <p className="mt-4 max-w-xl break-all text-[11px] text-ink-3">
+        <p className="mt-4 max-w-xl break-all text-xs text-ink-3">
           {error} — check TIME_DB_PATH / src/lib/db.ts (debug-only hint).
         </p>
       )}

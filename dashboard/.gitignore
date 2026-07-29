@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 .vite
+/test-results/
+/playwright-report/
 
 # local Vite-only overrides (release database paths are fixed by Rust)
 .env

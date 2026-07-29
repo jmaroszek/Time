@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import {
@@ -20,6 +20,7 @@ import { useMeta } from "../state/meta";
 import { metricRamps } from "../lib/palettes";
 import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
+import { useElementWidth } from "../lib/responsive";
 
 /** Above this many week columns, "auto" cell sizing lands near square by
  *  itself; below it the cells must be sized explicitly. */
@@ -55,6 +56,8 @@ export default function ActivityCalendar({
   metric?: ActivityMetric;
 }) {
   const { aliases, weekStart, palette } = useMeta();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const availableWidth = useElementWidth(containerRef, 440);
   const option = useMemo<EChartsOption>(() => {
     const byKey = new Map(summaries.map((day) => [day.key, day]));
     const shaded = (day: DailyActivitySummary) => metricSeconds(day, metric);
@@ -67,7 +70,7 @@ export default function ActivityCalendar({
     // wide bar instead of a day. Below it, size the cells squarely and center
     // the grid; the box must be given an explicit width/height rather than
     // left+right+top+bottom, because a fully constrained box overrides cellSize.
-    const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart);
+    const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart, availableWidth);
     const vertical = orientation === "vertical";
 
     return {
@@ -110,12 +113,12 @@ export default function ActivityCalendar({
           firstDay: weekStart === "Monday" ? 1 : 0,
           nameMap: DAY_NAMES,
           color: CHROME.axisLabel,
-          fontSize: 10,
+          fontSize: 11,
           margin: 8,
         },
         monthLabel: {
           color: CHROME.axisLabel,
-          fontSize: 10,
+          fontSize: 11,
           margin: 8,
         },
         yearLabel: { show: false },
@@ -128,11 +131,15 @@ export default function ActivityCalendar({
         },
       ],
     };
-  }, [summaries, metric, aliases, weekStart, range, palette]);
+  }, [summaries, metric, aliases, weekStart, range, palette, availableWidth]);
 
-  const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart);
+  const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart, availableWidth);
   const rows = orientation === "vertical" ? weekColumns : 7;
-  return <EChart option={option} height={cellPx === null ? 220 : cellPx * rows + 56} />;
+  return (
+    <div ref={containerRef} className="min-w-0 overflow-hidden">
+      <EChart option={option} height={cellPx === null ? 220 : cellPx * rows + 56} />
+    </div>
+  );
 }
 
 /**
@@ -146,20 +153,26 @@ export default function ActivityCalendar({
 export function calendarGrid(
   range: Range,
   weekStart: WeekStart,
+  availableWidth: number,
 ): { weekColumns: number; cellPx: number | null; orientation: "horizontal" | "vertical" } {
   // calendarDays, not raw ms — a range spanning a DST boundary is off by an
   // hour, which rounds up into a phantom extra column.
   const weekColumns = Math.ceil(
     calendarDays({ start: startOfWeek(range.start, weekStart), end: range.end }) / 7,
   );
-  const cellPx =
-    weekColumns <= NARROW_WEEK_COLUMNS
-      ? Math.max(18, Math.min(40, Math.floor(880 / weekColumns)))
-      : null;
+  const orientation = weekColumns <= VERTICAL_MAX_WEEKS ? "vertical" : "horizontal";
+  // Reserve label and card breathing room before sizing the square grid. A
+  // long calendar may use 12px cells at the minimum window, but it never makes
+  // the document wider than the card that owns it.
+  const gridColumns = orientation === "vertical" ? 7 : weekColumns;
+  const usableWidth = Math.max(1, availableWidth - (orientation === "vertical" ? 12 : 60));
+  const cellPx = weekColumns <= NARROW_WEEK_COLUMNS
+    ? Math.max(12, Math.min(40, Math.floor(usableWidth / gridColumns)))
+    : null;
   return {
     weekColumns,
     cellPx,
-    orientation: weekColumns <= VERTICAL_MAX_WEEKS ? "vertical" : "horizontal",
+    orientation,
   };
 }
 

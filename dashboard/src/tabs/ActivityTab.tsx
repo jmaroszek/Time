@@ -84,6 +84,13 @@ import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/doma
 import { fmtDuration } from "../lib/format";
 import { clipSessions } from "../lib/metrics";
 import {
+  activityDetailMode,
+  activityRowAccessibleLabel,
+  activitySummaryColumns,
+  WIDE_DETAIL_MIN,
+  useViewportWidth,
+} from "../lib/responsive";
+import {
   addCategory,
   addRule,
   addTrackingExclusion,
@@ -180,7 +187,7 @@ export function showBroadMatchWarning(
 
 function BroadMatchWarning({ className = "" }: { className?: string }) {
   return (
-    <p className={`text-[10.5px] leading-snug text-ink-3 ${className}`}>
+    <p className={`text-xs leading-snug text-ink-3 ${className}`}>
       <span className="font-medium text-ink-2">Broad match:</span> this can also
       match unrelated titles or text inside longer words. Limit it to one app or
       website when possible.
@@ -352,7 +359,7 @@ function RuleTypeSelector({
           }}
           type="button"
           aria-pressed={value === type}
-          className={`relative rounded-md px-2 py-1 text-[10.5px] transition-colors ${
+          className={`relative rounded-md px-2 py-1 text-xs transition-colors ${
             value === type ? "text-ink-2" : "text-ink-3 hover:text-ink-2"
           }`}
           onClick={() => onChange(type)}
@@ -415,6 +422,10 @@ function entityRowDomId(entityId: string): string {
   return `activity-row-${entityId}`;
 }
 
+function entityRowTriggerDomId(entityId: string): string {
+  return `${entityRowDomId(entityId)}-trigger`;
+}
+
 /**
  * Where the detail panel goes.
  *
@@ -424,27 +435,19 @@ function entityRowDomId(entityId: string): string {
  * and the date picker above stays where Insights puts it, which is the whole
  * reason the container is not simply widened.
  *
- * It gives ground in that order as the window narrows: below 1864px the gap
- * between panel and table closes, and below 1832px the panel begins covering
- * the table's right-hand columns rather than squeezing them. That is the
- * deliberate trade — a covered column can be read by closing the panel, while a
- * permanently narrowed table cannot be widened. Laptop-class windows are all in
- * the overlapping band; 1080p and larger desktops are not.
- *
- * `MIN` is the width below which the panel's own content starts wrapping badly;
- * `MAX` is where a line of window title gets too long to scan comfortably.
+ * Below WIDE_DETAIL_MIN the panel does not dock at all: it becomes the card's
+ * drill-in face. At and above it, this calculation consumes only the real
+ * right margin, so the inspector can never cover a table column.
  */
-const PANEL_MIN_WIDTH = 340;
+const PANEL_MIN_WIDTH = 300;
 const PANEL_MAX_WIDTH = 620;
 /** Between the table and the panel, and between the panel and the window edge. */
 const PANEL_GAP = 16;
 const PANEL_EDGE = 24;
 
 /**
- * Position and width together, so the two cannot disagree about whether the
- * panel is clear of the table. `overlap` is the measured result of the other
- * two rather than a second calculation of it, and is what decides the shadow —
- * a panel that casts one while floating over nothing reads as a stray sheet.
+ * Position and width together, so the two cannot disagree about the available
+ * margin. Callers use this only in the outboard layout class.
  */
 export function detailPanelBox(viewportWidth: number, cardRight: number): {
   left: number;
@@ -453,15 +456,9 @@ export function detailPanelBox(viewportWidth: number, cardRight: number): {
 } {
   const margin = viewportWidth - (cardRight + PANEL_GAP) - PANEL_EDGE;
   const width = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, margin));
-  // Pinned to the window edge as soon as the margin stops being wide enough,
-  // so a panel that no longer fits grows back over the table instead of off
-  // the side of the screen.
-  const left = Math.min(cardRight + PANEL_GAP, viewportWidth - width - PANEL_EDGE);
-  return { left, width, overlap: Math.max(0, cardRight - left) };
+  const left = cardRight + PANEL_GAP;
+  return { left, width, overlap: 0 };
 }
-
-/** The panel stacks under the table below this, as it always has. */
-const PANEL_DOCK_MIN_VIEWPORT = 768;
 
 function formatDateTime(seconds: number): string {
   return new Date(seconds * 1000).toLocaleString([], {
@@ -544,6 +541,8 @@ export default function ActivityTab({
 }) {
   const meta = useMeta();
   const banner = useBanner();
+  const viewportWidth = useViewportWidth();
+  const detailMode = activityDetailMode(viewportWidth);
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [typeFilter, setTypeFilter] = useState<ActivityTypeFilter>("all");
@@ -696,6 +695,18 @@ export default function ActivityTab({
     || ruleDraft !== null
     || editingSessionId !== null;
   const catalogRows = result?.catalog.rows;
+  const closeActivityDetail = () => {
+    const entityId = selectedEntityId;
+    setPanelSessionIds(new Set());
+    setSelectedWindow(null);
+    setSelectedEntityId(null);
+    if (entityId) {
+      requestAnimationFrame(() => {
+        document.getElementById(entityRowTriggerDomId(entityId))?.focus();
+        document.getElementById(entityRowDomId(entityId))?.scrollIntoView({ block: "nearest" });
+      });
+    }
+  };
 
   /**
    * The detail panel is an inspector, not a dialog, so the list behind it stays
@@ -719,7 +730,7 @@ export default function ActivityTab({
         event.preventDefault();
         setPanelSessionIds(new Set());
         if (selectedWindow) setSelectedWindow(null);
-        else setSelectedEntityId(null);
+        else closeActivityDetail();
         return;
       }
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -757,31 +768,30 @@ export default function ActivityTab({
   // panel across the middle of the page every time a row was opened. A layout
   // effect runs before paint, so the unpositioned state is never shown.
   const cardRef = useRef<HTMLDivElement>(null);
-  const [dock, setDock] = useState<{ style: CSSProperties; overlap: number } | null>(null);
+  const [dock, setDock] = useState<CSSProperties | null>(null);
   const panelOpen = view === "library"
     && (currentWindow !== null || (result?.selectedEntity ?? null) !== null);
   useLayoutEffect(() => {
     const node = cardRef.current;
-    if (!node || !panelOpen) {
+    if (!node || !panelOpen || detailMode !== "outboard") {
       setDock(null);
       return;
     }
     const measure = () => {
-      if (window.innerWidth < PANEL_DOCK_MIN_VIEWPORT) {
+      if (window.innerWidth < WIDE_DETAIL_MIN) {
         setDock(null);
         return;
       }
       const card = node.getBoundingClientRect();
       const box = detailPanelBox(window.innerWidth, card.right);
+      const top = Math.max(card.top, 40);
+      const bottom = Math.min(card.bottom, window.innerHeight - 16);
       setDock({
-        style: {
-          position: "fixed",
-          top: card.top,
-          height: card.height,
-          left: box.left,
-          width: box.width,
-        },
-        overlap: box.overlap,
+        position: "fixed",
+        top,
+        height: Math.max(240, bottom - top),
+        left: box.left,
+        width: box.width,
       });
     };
     measure();
@@ -794,9 +804,8 @@ export default function ActivityTab({
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [panelOpen]);
-  const panelStyle = dock?.style ?? null;
-  const overlapping = (dock?.overlap ?? 0) > 0;
+  }, [panelOpen, detailMode]);
+  const panelStyle = dock;
 
   const showDomainHint = useMemo(() => {
     if (!sessionData.ready) return false;
@@ -945,13 +954,69 @@ export default function ActivityTab({
     setTypeFilter("all");
     setClassificationFilter("all");
   };
+  const detailPanel = currentWindow ? (
+    <WindowPanel
+      dock={detailMode === "outboard" ? panelStyle : null}
+      overlapping={false}
+      group={currentWindow}
+      usage={result?.selectedWindowUsage ?? []}
+      rangeDays={calendarDays(range)}
+      onLoadMoreVisits={() => setWindowVisitLimit((limit) => limit + WINDOW_VISIT_MORE)}
+      selectedSessionIds={panelSessionIds}
+      onToggleSession={togglePanelSession}
+      onToggleAllSessions={toggleAllPanelSessions}
+      onDeleteSelected={() => requestSessionDeletion(panelSessionIds)}
+      onEditSession={setEditingSessionId}
+      onMakeRule={setRuleDraft}
+      onBack={() => {
+        setPanelSessionIds(new Set());
+        setSelectedWindow(null);
+      }}
+      onClose={closeActivityDetail}
+    />
+  ) : result?.selectedEntity ? (
+    <EntityPanel
+      dock={detailMode === "outboard" ? panelStyle : null}
+      overlapping={false}
+      entity={result.selectedEntity}
+      groups={result.detailGroups}
+      usage={result.selectedEntityUsage}
+      rangeSeconds={result.totalSeconds}
+      rangeDays={calendarDays(range)}
+      hasStoredTitles={result.hasStoredTitles}
+      detailSearch={detailSearch}
+      onDetailSearch={setDetailSearch}
+      detailSort={detailSort}
+      detailDirection={detailDirection}
+      onDetailSort={(nextSort, nextDirection) => {
+        setDetailSort(nextSort);
+        setDetailDirection(nextDirection);
+      }}
+      onLoadMore={() => setDetailLimit((limit) => limit + PANEL_WINDOW_MORE)}
+      onBack={detailMode === "drill-in" ? closeActivityDetail : undefined}
+      onClose={closeActivityDetail}
+      categories={meta.categories}
+      rules={meta.rules}
+      aliases={meta.aliases}
+      onDeleteEntity={() => requestEntityDeletion(result.selectedEntity!)}
+      onExclude={() => setExcludeScope({
+        kind: result.selectedEntity!.kind === "app" ? "app" : "website",
+        pattern: result.selectedEntity!.key,
+        label: result.selectedEntity!.displayName,
+      })}
+      onOpenWindow={openWindow}
+      onAssign={(categoryId) => assignEntity(result.selectedEntity!, categoryId)}
+      onSaveAlias={(alias) => saveAlias(result.selectedEntity!.key, alias)}
+      onRemoveExactRule={() => removeExactRules(result.selectedEntity!)}
+    />
+  ) : null;
   return (
     <div
       className="relative flex min-h-0 flex-1 flex-col gap-4"
       aria-busy={analyzed.refreshing || sessionData.refreshing}
     >
       {view === "library" && showDomainHint && (
-        <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-[11.5px] text-ink-2">
+        <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2">
           Browser time is not being split by website. Install the third-party &quot;URL in title&quot;
           extension so Time can read websites from browser window titles.
         </section>
@@ -975,6 +1040,8 @@ export default function ActivityTab({
             : "mr-auto w-full max-w-[800px]"
         }`}
       >
+      {detailMode === "drill-in" && panelOpen ? detailPanel : (
+      <>
       {/* One card, whose title is the switcher: a floating control row above it
           left the page reading as two stacked chromes instead of "date picker
           up top, one card below". */}
@@ -987,7 +1054,7 @@ export default function ActivityTab({
         className="flex min-h-0 min-w-0 flex-1 flex-col"
         title={<ViewSwitcher view={view} onView={switchView} />}
         right={view === "library" ? (
-          <span className="flex items-center gap-3 text-[11px] text-ink-3">
+          <span className="flex flex-wrap items-center gap-3 text-xs text-ink-3">
             {/* Muted, not accent: this is about rows nobody asked to see, and
                 it was the loudest thing in the header while being the least
                 consequential. The row count it used to sit beside is gone —
@@ -1014,7 +1081,7 @@ export default function ActivityTab({
             )}
           </span>
         ) : (
-          <span className="text-[11px] text-ink-3">{meta.categories.length} categories · {meta.rules.length} rules</span>
+          <span className="text-xs text-ink-3">{meta.categories.length} categories · {meta.rules.length} rules</span>
         )}
       >
         {view === "library" ? (
@@ -1091,67 +1158,11 @@ export default function ActivityTab({
           />
         )}
       </Card>
+      </>
+      )}
       </div>
 
-      {currentWindow ? (
-        <WindowPanel
-          dock={panelStyle}
-          overlapping={overlapping}
-          group={currentWindow}
-          usage={result?.selectedWindowUsage ?? []}
-          rangeDays={calendarDays(range)}
-          onLoadMoreVisits={() => setWindowVisitLimit((limit) => limit + WINDOW_VISIT_MORE)}
-          selectedSessionIds={panelSessionIds}
-          onToggleSession={togglePanelSession}
-          onToggleAllSessions={toggleAllPanelSessions}
-          onDeleteSelected={() => requestSessionDeletion(panelSessionIds)}
-          onEditSession={setEditingSessionId}
-          onMakeRule={setRuleDraft}
-          onBack={() => {
-            setPanelSessionIds(new Set());
-            setSelectedWindow(null);
-          }}
-          onClose={() => {
-            setPanelSessionIds(new Set());
-            setSelectedWindow(null);
-            setSelectedEntityId(null);
-          }}
-        />
-      ) : result?.selectedEntity ? (
-        <EntityPanel
-          dock={panelStyle}
-          overlapping={overlapping}
-          entity={result.selectedEntity}
-          groups={result.detailGroups}
-          usage={result.selectedEntityUsage}
-          rangeSeconds={result.totalSeconds}
-          rangeDays={calendarDays(range)}
-          hasStoredTitles={result.hasStoredTitles}
-          detailSearch={detailSearch}
-          onDetailSearch={setDetailSearch}
-          detailSort={detailSort}
-          detailDirection={detailDirection}
-          onDetailSort={(nextSort, nextDirection) => {
-            setDetailSort(nextSort);
-            setDetailDirection(nextDirection);
-          }}
-          onLoadMore={() => setDetailLimit((limit) => limit + PANEL_WINDOW_MORE)}
-          onClose={() => setSelectedEntityId(null)}
-          categories={meta.categories}
-          rules={meta.rules}
-          aliases={meta.aliases}
-          onDeleteEntity={() => requestEntityDeletion(result.selectedEntity!)}
-          onExclude={() => setExcludeScope({
-            kind: result.selectedEntity!.kind === "app" ? "app" : "website",
-            pattern: result.selectedEntity!.key,
-            label: result.selectedEntity!.displayName,
-          })}
-          onOpenWindow={openWindow}
-          onAssign={(categoryId) => assignEntity(result.selectedEntity!, categoryId)}
-          onSaveAlias={(alias) => saveAlias(result.selectedEntity!.key, alias)}
-          onRemoveExactRule={() => removeExactRules(result.selectedEntity!)}
-        />
-      ) : null}
+      {detailMode === "outboard" ? detailPanel : null}
 
       {deleteScope && (
         <DeleteActivityDialog
@@ -1204,7 +1215,7 @@ export default function ActivityTab({
  *  rather than a control row floating above it. */
 function ViewSwitcher({ view, onView }: { view: ActivityView; onView: (view: ActivityView) => void }) {
   return (
-    <span className="flex items-center gap-2.5">
+    <span className="flex flex-wrap items-center gap-2.5">
       <ViewButton active={view === "library"} onClick={() => onView("library")}>Activity Library</ViewButton>
       <span aria-hidden="true" className="text-edge-2">|</span>
       <ViewButton active={view === "rules"} onClick={() => onView("rules")}>Categories &amp; Rules</ViewButton>
@@ -1239,7 +1250,7 @@ function TableRegion({ children }: { children: ReactNode }) {
   // pr-4 is the scrollbar's gutter: the last column is right-aligned, so
   // without it the dates sit against the scrollbar.
   return (
-    <div className="scroll-well min-h-[240px] flex-1 overflow-auto pr-4">{children}</div>
+    <div className="scroll-well min-h-0 flex-1 overflow-auto pr-1 sm:min-h-[240px] sm:pr-4">{children}</div>
   );
 }
 
@@ -1369,12 +1380,13 @@ function LibraryControls({
             label="Search activity"
             placeholder="Search apps, websites, and windows…"
             leadingIcon
-            className="min-w-[240px] flex-1"
+            className="min-w-0 basis-full sm:min-w-[240px] sm:basis-auto sm:flex-1"
           />
           <MenuSelect
             size="field"
             variant={typeFilter === "all" ? "resting" : "engaged"}
             label="Activity type"
+            className="min-w-0 flex-1 sm:flex-none"
             value={typeFilter}
             onChange={(value) => onTypeFilter(value as ActivityTypeFilter)}
             options={[
@@ -1385,7 +1397,7 @@ function LibraryControls({
           />
         </>
       ) : (
-        <span className="min-w-[240px] flex-1 text-[11.5px] text-ink-3">
+        <span className="min-w-0 basis-full text-xs text-ink-3 sm:min-w-[240px] sm:basis-auto sm:flex-1">
           Apps and websites Time is not allowed to record.
         </span>
       )}
@@ -1393,6 +1405,7 @@ function LibraryControls({
         size="field"
         variant={classificationFilter === "all" ? "resting" : "engaged"}
         label="Classification filter"
+        className="min-w-0 flex-1 sm:flex-none"
         value={classificationFilter}
         onChange={(value) => onClassificationFilter(value as LibraryFilter)}
         options={classificationOptions(categories, uncategorizedCount)}
@@ -1521,50 +1534,55 @@ function SummaryTable({
   onSort: (field: SummaryTableSort) => void;
   headOffset?: string;
 }) {
+  const compactColumns = activitySummaryColumns(useViewportWidth()).length === 3;
   return (
-    <table aria-label={tableLabel} className="w-full min-w-[680px] table-fixed text-xs">
+    <table aria-label={tableLabel} className="w-full table-fixed text-xs">
       {/* Sticky via a shadow, not a border: a collapsed table's borders do not
           travel with a stuck header row. */}
       <StickyHead offset={headOffset}>
-        <tr className="text-left text-[10.5px] text-ink-3">
+        <tr className="text-left text-xs text-ink-3">
           <SummarySortHeading
             label="Name"
             field="label"
             active={sort === "label"}
             direction={direction}
             onSort={onSort}
-            className="w-[27%] text-left"
+            className="w-[27%] text-left max-md:w-[52%]"
           />
           {/* The bar draws what Time already sorts, so it has no independent
               heading or sort state. */}
-          <th scope="col" className="w-[37%] pb-2">
-            <span className="sr-only">Time relative to the busiest result</span>
-          </th>
+          {!compactColumns && (
+            <th scope="col" className="w-[37%] pb-2">
+              <span className="sr-only">Time relative to the busiest result</span>
+            </th>
+          )}
           <SummarySortHeading
             label="Time"
             field="seconds"
             active={sort === "seconds"}
             direction={direction}
             onSort={onSort}
-            className="w-[9%] text-right"
+            className="w-[9%] text-right max-md:w-[20%]"
           />
           {/* Centering keeps a one- or two-digit count from clinging to either
               adjacent measure. The offset balances Last seen's right edge. */}
-          <SummarySortHeading
-            label="Days seen"
-            field="days"
-            active={sort === "days"}
-            direction={direction}
-            onSort={onSort}
-            className="w-[15%] pl-8 text-center"
-          />
+          {!compactColumns && (
+            <SummarySortHeading
+              label="Days seen"
+              field="days"
+              active={sort === "days"}
+              direction={direction}
+              onSort={onSort}
+              className="w-[15%] pl-8 text-center"
+            />
+          )}
           <SummarySortHeading
             label="Last seen"
             field="lastSeen"
             active={sort === "lastSeen"}
             direction={direction}
             onSort={onSort}
-            className="w-[12%] text-right"
+            className="w-[12%] text-right max-md:w-[28%]"
           />
         </tr>
       </StickyHead>
@@ -1587,8 +1605,18 @@ function SummaryTable({
                       a real control to land on. */}
                   <button
                     type="button"
+                    id={row.anchorId ? `${row.anchorId}-trigger` : undefined}
                     title={row.primaryTitle}
-                    aria-label={`${row.primaryLabel} — ${row.openLabel}`}
+                    aria-label={activityRowAccessibleLabel({
+                      name: row.primaryLabel,
+                      time: fmtDuration(row.seconds),
+                      comparison: `${((scale.totalSeconds > 0 ? row.seconds / scale.totalSeconds : 0) * 100).toFixed(
+                        scale.totalSeconds > 0 && row.seconds / scale.totalSeconds < 0.1 ? 1 : 0,
+                      )}% of recorded time in range`,
+                      daysSeen: row.daysSeen,
+                      lastSeen: formatLastSeen(row.lastSeen),
+                      action: row.openLabel,
+                    })}
                     onClick={(event) => {
                       event.stopPropagation();
                       row.onOpen();
@@ -1603,16 +1631,20 @@ function SummaryTable({
                     </RowTag>
                   ))}
                 </span>
-                <span className="flex min-w-0 items-center gap-[5px] text-[10px] leading-[1.4] text-ink-3">
+                <span className="flex min-w-0 items-center gap-[5px] text-xs leading-[1.4] text-ink-3">
                   {row.metadata}
                 </span>
               </span>
             </td>
-            <td className="py-2.5 pr-4">
-              <ShareBar seconds={row.seconds} maxSeconds={scale.maxSeconds} totalSeconds={scale.totalSeconds} />
-            </td>
+            {!compactColumns && (
+              <td className="py-2.5 pr-4">
+                <ShareBar seconds={row.seconds} maxSeconds={scale.maxSeconds} totalSeconds={scale.totalSeconds} />
+              </td>
+            )}
             <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(row.seconds)}</td>
-            <td className="py-2.5 pl-8 text-center tabular-nums text-ink-3">{row.daysSeen}</td>
+            {!compactColumns && (
+              <td className="py-2.5 pl-8 text-center tabular-nums text-ink-3">{row.daysSeen}</td>
+            )}
             <td className="py-2.5 text-right tabular-nums text-ink-3">{formatLastSeen(row.lastSeen)}</td>
           </tr>
         ))}
@@ -1819,7 +1851,7 @@ function ResultGroup({
       <div className="sticky top-0 z-20 flex h-12 items-center bg-surface">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-ink-1">{title}</h3>
-          <div className="mt-0.5 flex items-center gap-2 text-[10.5px] tabular-nums leading-[1.4] text-ink-3">
+          <div className="mt-0.5 flex items-center gap-2 text-xs tabular-nums leading-[1.4] text-ink-3">
             <span>{summary}</span>
           </div>
         </div>
@@ -1940,7 +1972,7 @@ function RowTag({
     <span
       // normal-case is defended, not decorative: the panel's eyebrow row is
       // uppercase, and a tag inheriting that loses the sentence case above.
-      className={`shrink-0 rounded-full px-1.5 py-[1px] text-[9.5px] font-medium normal-case leading-[1.4] ${styles}`}
+      className={`shrink-0 rounded-full px-1.5 py-[1px] text-xs font-medium normal-case leading-[1.4] ${styles}`}
       title={title}
     >
       {children}
@@ -2195,11 +2227,11 @@ function GroupSessions({
           applied to any of them. */}
       {groupVisitsByDay(group.sessions).map((day) => (
         <div key={day.key} className="mt-4 flex flex-col gap-1 first:mt-0">
-          <p className="text-[10px] uppercase tracking-[.04em] text-ink-3">
+          <p className="text-xs uppercase tracking-[.04em] text-ink-3">
             {formatVisitDay(day.visits[0].start)}
           </p>
           {day.visits.map((session) => (
-            <div key={session.id} className="flex items-center gap-2 text-[11px]">
+            <div key={session.id} className="flex items-center gap-2 text-xs">
               <Checkbox
                 checked={selected.has(session.id)}
                 onChange={() => onToggle(session.id)}
@@ -2210,12 +2242,12 @@ function GroupSessions({
               </span>
               <span className="tabular-nums text-ink-3">{fmtDuration(session.seconds)}</span>
               {session.isCorrected && (
-                <span className="rounded-full bg-accent/10 px-1.5 py-[1px] text-[9px] text-accent">Corrected</span>
+                <span className="rounded-full bg-accent/10 px-1.5 py-[1px] text-xs text-accent">Corrected</span>
               )}
               <button
                 type="button"
                 onClick={() => onEdit(session.id)}
-                className="ml-auto rounded px-1.5 py-0.5 text-[10.5px] text-ink-3 hover:bg-accent/10 hover:text-accent"
+                className="ml-auto rounded px-1.5 py-0.5 text-xs text-ink-3 hover:bg-accent/10 hover:text-accent"
               >
                 Edit
               </button>
@@ -2342,7 +2374,7 @@ function ExcludedPanel() {
   if (items === null) return <Spinner />;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <p className="shrink-0 text-[11px] leading-snug text-ink-3">
+      <p className="shrink-0 text-xs leading-snug text-ink-3">
         Exact exclusions stop matching apps or detected websites from ever being stored, whenever
         recording is enabled. Lifting one resumes tracking from now on; history deleted with the
         exclusion is not restored.
@@ -2351,14 +2383,14 @@ function ExcludedPanel() {
         {items.map((item) => (
           <div key={`${item.kind}:${item.pattern}`} className="flex items-center gap-2.5 rounded-lg border border-edge/60 bg-surface-2 px-3 py-2">
             <RuleKindGlyph matchType={item.kind === "app" ? "process" : "domain"} />
-            <span className="w-[70px] shrink-0 text-[10px] uppercase tracking-[.04em] text-ink-3">{item.kind === "app" ? "App" : "Website"}</span>
-            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-2" title={item.pattern}>{item.pattern}</span>
-            <span className="shrink-0 text-[10.5px] text-ink-3">since {formatShortDate(item.createdTs)}</span>
+            <span className="w-[70px] shrink-0 text-xs uppercase tracking-[.04em] text-ink-3">{item.kind === "app" ? "App" : "Website"}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2" title={item.pattern}>{item.pattern}</span>
+            <span className="shrink-0 text-xs text-ink-3">since {formatShortDate(item.createdTs)}</span>
             <RemoveButton label={`Allow ${item.pattern} to be tracked again`} onClick={() => void lift(item)} />
           </div>
         ))}
         {items.length === 0 && (
-          <p className="py-6 text-center text-[11.5px] text-ink-3">
+          <p className="py-6 text-center text-xs text-ink-3">
             Nothing is excluded. Open an app or website and choose “Do not track” to add one.
           </p>
         )}
@@ -2370,7 +2402,7 @@ function ExcludedPanel() {
               <button
                 key={option}
                 type="button"
-                className={`rounded-md px-2.5 py-1 text-[10.5px] ${kind === option ? "bg-surface-3 text-ink-2" : "text-ink-3 hover:text-ink-2"}`}
+                className={`rounded-md px-2.5 py-1 text-xs ${kind === option ? "bg-surface-3 text-ink-2" : "text-ink-3 hover:text-ink-2"}`}
                 onClick={() => setKind(option)}
               >
                 {option === "app" ? "App" : "Website"}
@@ -2387,11 +2419,11 @@ function ExcludedPanel() {
           />
           <Button variant="primary" disabled={saving || !draft.trim()} onClick={() => void add()}>Do not track</Button>
         </div>
-        <Checkbox checked={deleteHistory} onChange={setDeleteHistory} className="mt-2 text-[10.5px] text-ink-3">
+        <Checkbox checked={deleteHistory} onChange={setDeleteHistory} className="mt-2 text-xs text-ink-3">
           Also delete matching history, after a count preview
         </Checkbox>
         {kind === "website" && (
-          <p className="mt-1 text-[10px] text-ink-3">
+          <p className="mt-1 text-xs text-ink-3">
             Website exclusions need a detected browser domain; otherwise exclude the whole browser as an App.
           </p>
         )}
@@ -2447,7 +2479,7 @@ function NoResults({
 
 function LoadMore({ shown, total, onClick }: { shown: number; total: number; onClick: () => void }) {
   return (
-    <div className="mt-3 flex items-center justify-center gap-2 text-[11px] text-ink-3">
+    <div className="mt-3 flex items-center justify-center gap-2 text-xs text-ink-3">
       <span>{shown} of {total}</span>
       <button type="button" onClick={onClick} className="rounded-md px-2 py-1 text-accent hover:bg-accent/10">Load more</button>
     </div>
@@ -2505,15 +2537,15 @@ function DetailPanel({
       className={`panel-in flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-edge bg-surface ${
         dock
           ? `z-30 ${overlapping ? "shadow-[0_18px_48px_rgba(0,0,0,.5)]" : ""}`
-          : "max-h-[60vh] w-full shrink-0"
+          : "h-full w-full flex-1"
       }`}
     >
-      <div className="flex shrink-0 items-start gap-3 border-b border-edge px-5 py-4">
+      <div className="flex shrink-0 items-start gap-3 border-b border-edge px-4 py-4 sm:px-5">
         <div className="min-w-0 flex-1">
           {/* Nothing precedes the eyebrow, so both panels' headers start on the
               same pixel. Anything that led this block indented the title and
               the line beneath it past every other thing in the panel. */}
-          <div className="flex min-w-0 items-center gap-1.5 text-[10.5px] uppercase tracking-[.05em] text-ink-3">
+          <div className="flex min-w-0 items-center gap-1.5 text-xs uppercase tracking-[.05em] text-ink-3">
             {eyebrow}
           </div>
           {heading}
@@ -2560,7 +2592,7 @@ function DetailPanel({
           band above it — exactly 20px of it — through which the rows below
           scrolled in full view. Horizontal padding is unaffected and stays
           here, where the sticky headings' -mx-5 bleed still relies on it. */}
-      <div className="scroll-well min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+      <div className="scroll-well min-h-0 flex-1 overflow-y-auto px-4 pb-5 sm:px-5">
         <div className="pt-5">{children}</div>
       </div>
     </aside>
@@ -2638,7 +2670,7 @@ function PanelWindowRow({
     <button
       type="button"
       onClick={() => onOpen(group)}
-      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-[11.5px] outline-none transition-colors hover:border-edge-2 hover:bg-white/[.025] focus-visible:border-accent/60"
+      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-xs outline-none transition-colors hover:border-edge-2 hover:bg-white/[.025] focus-visible:border-accent/60"
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-ink-2">
@@ -2733,7 +2765,7 @@ function WindowPanel({
       subtitle={
         // The parent is already named here, so it may as well be the way back
         // to it — the shortest path in the panel, for anyone who spots it.
-        <p className="truncate text-[11px] text-ink-3" title={group.entityKey}>
+        <p className="truncate text-xs text-ink-3" title={group.entityKey}>
           <button
             type="button"
             onClick={onBack}
@@ -2786,7 +2818,7 @@ function WindowPanel({
             question this section exists to answer. Nothing else in this panel
             names the category, so unlike the entity panel it keeps its label. */}
         <p className="mt-2 text-xs text-ink-2">{classification.label}</p>
-        <p className="mt-0.5 text-[11.5px] leading-snug text-ink-3">{classification.detail}</p>
+        <p className="mt-0.5 text-xs leading-snug text-ink-3">{classification.detail}</p>
       </PanelSection>
       <section className="mt-6">
         <div className="flex flex-wrap items-center gap-2">
@@ -2917,7 +2949,7 @@ function CategorySplit({ entity }: { entity: ActivityEntitySummary }) {
       </span>
       <div className="mt-3 flex flex-col gap-2">
         {slices.map((slice) => (
-          <div key={slice.key} className="flex items-center gap-2 text-[11.5px]">
+          <div key={slice.key} className="flex items-center gap-2 text-xs">
             <CategoryDot color={slice.color} />
             <span className="min-w-0 flex-1 truncate">{slice.name}</span>
             <span className="tabular-nums text-ink-3">{fmtDuration(slice.seconds)}</span>
@@ -2968,7 +3000,7 @@ function UsageStrip({ buckets }: { buckets: ActivityDayBucket[] }) {
           </span>
         ))}
       </div>
-      <div className="mt-1 flex justify-between text-[10px] tabular-nums text-ink-3">
+      <div className="mt-1 flex justify-between text-xs tabular-nums text-ink-3">
         <span>{formatShortDate(buckets[0].startSec)}</span>
         <span>{fmtDuration(peak)} on the busiest {buckets[0].days === 1 ? "day" : "column"}</span>
         <span>{formatShortDate(buckets[buckets.length - 1].endSec - 1)}</span>
@@ -3001,6 +3033,7 @@ function EntityPanel({
   detailDirection,
   onDetailSort,
   onLoadMore,
+  onBack,
   onClose,
   categories,
   rules,
@@ -3028,6 +3061,7 @@ function EntityPanel({
   detailDirection: ActivitySortDirection;
   onDetailSort: (sort: ActivityWindowSort, direction: ActivitySortDirection) => void;
   onLoadMore: () => void;
+  onBack?: () => void;
   onClose: () => void;
   categories: Category[];
   rules: Rule[];
@@ -3153,12 +3187,14 @@ function EntityPanel({
               table row this panel was opened from still carries the key as its
               own tooltip, where the visible text is the friendly name and the
               two genuinely differ. */}
-          <p className="truncate font-mono text-[11px] text-ink-3">{entity.key}</p>
+          <p className="truncate font-mono text-xs text-ink-3">{entity.key}</p>
           {renaming && (
-            <p className="mt-1 text-[10.5px] text-ink-3">Enter or click away to save. Leave blank to use the recorded name.</p>
+            <p className="mt-1 text-xs text-ink-3">Enter or click away to save. Leave blank to use the recorded name.</p>
           )}
         </>
       }
+      onBack={onBack}
+      backLabel="Back to Activity list"
       onClose={onClose}
       closeLabel="Close activity details"
     >
@@ -3241,7 +3277,7 @@ function EntityPanel({
             them. */}
         <div className={`flex items-center gap-1.5 ${exactRule ? "mt-2" : "mt-0.5"}`}>
           <p className={`min-w-0 leading-snug ${
-            exactRule ? "text-xs text-ink-2" : "text-[11.5px] text-ink-3"
+            exactRule ? "text-xs text-ink-2" : "text-xs text-ink-3"
           }`}
           >
             {summary.detail}
@@ -3263,7 +3299,7 @@ function EntityPanel({
           )}
         </div>
         {entity.status === "mixed" && (
-          <p className="mt-2 text-[11px] text-ink-3">Website and Window rules can override an App default.</p>
+          <p className="mt-2 text-xs text-ink-3">Website and Window rules can override an App default.</p>
         )}
         <CategorySplit entity={entity} />
         {/* Only when there is something to compare. A single rule is already
@@ -3271,10 +3307,10 @@ function EntityPanel({
             two different facts about the same thing. */}
         {entity.rules.length > 1 && (
           <div className="mt-4 rounded-lg border border-edge/70 bg-surface-2 px-3 py-2.5">
-            <p className="mb-2 text-[10.5px] font-medium text-ink-2">Rules in use</p>
+            <p className="mb-2 text-xs font-medium text-ink-2">Rules in use</p>
             <div className="flex flex-col gap-2">
               {entity.rules.map((rule) => (
-                <div key={rule.ruleId} className="flex items-center gap-2 text-[10.5px]">
+                <div key={rule.ruleId} className="flex items-center gap-2 text-xs">
                   <span className="w-14 shrink-0 text-ink-3">{RULE_LABELS[rule.matchType]}</span>
                   <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
                   <CategoryDot color={rule.categoryColor} />
@@ -3289,7 +3325,7 @@ function EntityPanel({
           // Removing a standing rule used to be one click on a red word at the
           // end of a dense section, with nothing to confirm and nothing saying
           // what it would cost.
-          <div className="mt-3 rounded-lg border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-[11px] leading-snug text-ink-2">
+          <div className="mt-3 rounded-lg border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-xs leading-snug text-ink-2">
             <p>
               Remove the {entity.kind === "website" ? "Website" : "App"} rule
               {" "}<span className="font-mono">{exactRule.pattern}</span>? Time it decided becomes
@@ -3323,7 +3359,7 @@ function EntityPanel({
             {/* Labelled counts, phrased so the heading is not repeated back at
                 the reader — "Windows · 2 windows · 309 visits" was three
                 sayings of two facts. */}
-            <span className="min-w-0 truncate text-[10.5px] tabular-nums text-ink-3">
+            <span className="min-w-0 truncate text-xs tabular-nums text-ink-3">
               {groups.sessionTotal > groups.total
                 ? `${countNoun(groups.sessionTotal, "visit")} in ${countNoun(groups.total, "window")}`
                 : countNoun(groups.total, "window")}
@@ -3365,7 +3401,7 @@ function EntityPanel({
         {!titlesReadable ? (
           // A list of identical "—" rows, one per entity, is what this used to
           // render when nothing had a title to group by.
-          <p className="rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-4 text-[11px] leading-snug text-ink-3">
+          <p className="rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-4 text-xs leading-snug text-ink-3">
             No window titles were recorded for this {kindLabel}, so its{" "}
             {countNoun(groups.sessionTotal, "visit")} cannot be broken down. Title capture is off by
             default; Settings can turn it on for what is recorded from now on.
@@ -3385,7 +3421,7 @@ function EntityPanel({
                 />
               ))}
               {groups.rows.length === 0 && (
-                <p className="py-5 text-center text-[11px] text-ink-3">No windows match this filter.</p>
+                <p className="py-5 text-center text-xs text-ink-3">No windows match this filter.</p>
               )}
             </div>
             {groups.rows.length < groups.total && (
@@ -3442,7 +3478,7 @@ function DetailMetric({
 }) {
   return (
     <div className="rounded-lg border border-edge bg-surface-2 p-3">
-      <p className="text-[10px] text-ink-3">
+      <p className="text-xs text-ink-3">
         {hint ? (
           // The label joins the *accessible* name only. A screen reader has no
           // layout telling it the tooltip belongs to the label above it, so it
@@ -3532,7 +3568,7 @@ function ActivityExportMenu({
         </svg>
       </summary>
       <div className="absolute right-0 top-9 z-30 w-64 rounded-xl border border-edge bg-surface p-3 shadow-xl">
-        <p className="text-[10.5px] leading-snug text-ink-3">Uses the selected date range. Search and library filters do not remove rows.</p>
+        <p className="text-xs leading-snug text-ink-3">Uses the selected date range. Search and library filters do not remove rows.</p>
         <div className="mt-3 flex flex-col gap-2">
           <Button disabled={exporting !== null} onClick={() => void run("summary")}>{exporting === "summary" ? "Preparing…" : "Activity summary CSV"}</Button>
           <Button disabled={exporting !== null} onClick={() => void run("sessions")}>{exporting === "sessions" ? "Preparing…" : "Session details CSV"}</Button>
@@ -3542,7 +3578,7 @@ function ActivityExportMenu({
             checked={includeTitles}
             onChange={setIncludeTitles}
             align="start"
-            className="mt-3 text-[10.5px] leading-snug text-ink-3"
+            className="mt-3 text-xs leading-snug text-ink-3"
           >
             Include stored window titles. They may contain private data.
           </Checkbox>
@@ -3589,17 +3625,17 @@ function TrackingExclusionDialog({
     }
   };
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="exclude-title">
-      <div className="w-full max-w-md rounded-2xl border border-edge bg-surface p-5 shadow-2xl">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="exclude-title">
+      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:p-5">
         <h2 id="exclude-title" className="text-base font-semibold">Do not track {scope.label}</h2>
-        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">This exact {scope.kind === "website" ? "website" : "app"} identity will be excluded whenever recording is enabled.</p>
-        <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 font-mono text-[11px] text-ink-2">{preview?.normalizedPattern ?? scope.pattern}</p>
-        {scope.kind === "website" && <p className="mt-2 text-[10.5px] text-ink-3">Website exclusions work only when Time can detect the browser domain.</p>}
+        <p className="mt-2 text-xs leading-relaxed text-ink-3">This exact {scope.kind === "website" ? "website" : "app"} identity will be excluded whenever recording is enabled.</p>
+        <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 font-mono text-xs text-ink-2">{preview?.normalizedPattern ?? scope.pattern}</p>
+        {scope.kind === "website" && <p className="mt-2 text-xs text-ink-3">Website exclusions work only when Time can detect the browser domain.</p>}
         <Checkbox
           checked={deleteHistory}
           onChange={setDeleteHistory}
           align="start"
-          className="mt-4 rounded-lg border border-bad/20 bg-bad/[.035] p-3 text-[11px] leading-snug text-ink-2"
+          className="mt-4 rounded-lg border border-bad/20 bg-bad/[.035] p-3 text-xs leading-snug text-ink-2"
         >
           <span><span className="block font-medium">Also delete existing history</span>{preview ? `${preview.count} session${preview.count === 1 ? "" : "s"} · ${fmtDuration(preview.seconds)}. This cannot be undone without a backup.` : "Checking matching history…"}</span>
         </Checkbox>
@@ -3775,19 +3811,19 @@ function WindowRuleDialog({
   const encodedScope = encodeTitleScope(spec.scopeKind, spec.scopeValue);
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="window-rule-title">
-      <div className="scroll-well max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-edge bg-surface p-5 shadow-2xl">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="window-rule-title">
+      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:p-5">
         <h2 id="window-rule-title" className="text-base font-semibold">New Window rule</h2>
         {/* "the other windows you mean" asked the reader to hold a set in their
             head that nothing on screen had shown them yet. Each suggestion
             below states its own reach, so the intro only has to say what the
             choice is. */}
-        <p className="mt-1 text-[11px] text-ink-3">
+        <p className="mt-1 text-xs text-ink-3">
           Choose the part of this title to match on. The rule applies to past and
           future activity.
         </p>
 
-        <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px]">
+        <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs">
           <p className="truncate font-medium" title={group.title}>{group.title}</p>
           <p className="mt-1 text-ink-3">
             {group.displayName} · {group.sessionCount} visit{group.sessionCount === 1 ? "" : "s"} · {fmtDuration(group.seconds)} in range
@@ -3798,7 +3834,7 @@ function WindowRuleDialog({
             matching controls next to each other, where the advanced one reads
             as an extension of the suggestions rather than a third unrelated
             step. */}
-        <div className="mt-4 text-[11px] text-ink-3">
+        <div className="mt-4 text-xs text-ink-3">
           <span>Category</span>
           <MenuSelect
             size="field"
@@ -3818,7 +3854,7 @@ function WindowRuleDialog({
         </div>
 
         <div className="mt-4">
-          <p className="text-[11px] text-ink-3">Suggested matches</p>
+          <p className="text-xs text-ink-3">Suggested matches</p>
           {candidates === null ? (
             <div className="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-3">
               <Spinner label="Comparing with your title history…" />
@@ -3843,12 +3879,12 @@ function WindowRuleDialog({
                         {candidate.pattern}
                       </span>
                       {candidate.recommended && (
-                        <span className="rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-2">
+                        <span className="rounded-full bg-surface-3 px-1.5 py-[1px] text-xs text-ink-2">
                           recommended
                         </span>
                       )}
                     </span>
-                    <span className="mt-1 block text-[10.5px] text-ink-3">
+                    <span className="mt-1 block text-xs text-ink-3">
                       {describeTitleRule(candidate)} · {Math.round(candidate.reach * 100)}% of
                       titled windows in this scope · {candidate.days} active{" "}
                       {candidate.days === 1 ? "day" : "days"}
@@ -3858,7 +3894,7 @@ function WindowRuleDialog({
               })}
             </div>
           ) : (
-            <p className="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px] leading-snug text-ink-3">
+            <p className="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs leading-snug text-ink-3">
               This title has no durable, reusable part in the selected scope. Use
               an App or Website rule if all of {group.displayName} belongs together,
               or open Advanced to write a precise rule yourself.
@@ -3872,7 +3908,7 @@ function WindowRuleDialog({
             looked like the two things that did not. */}
         <button
           type="button"
-          className="mt-3 flex items-center gap-1.5 rounded-md text-[11px] text-ink-2 transition-colors hover:text-ink"
+          className="mt-3 flex items-center gap-1.5 rounded-md text-xs text-ink-2 transition-colors hover:text-ink"
           onClick={() => setAdvanced((current) => !current)}
           aria-expanded={advanced}
         >
@@ -3881,7 +3917,7 @@ function WindowRuleDialog({
         </button>
         {advanced && (
           <div className="mt-2 rounded-lg border border-edge bg-surface-2 p-3">
-            <label className="block text-[10.5px] text-ink-3">
+            <label className="block text-xs text-ink-3">
               Text to match
               <input
                 value={spec.pattern}
@@ -3890,7 +3926,7 @@ function WindowRuleDialog({
               />
             </label>
             <div className="mt-3">
-              <span className="text-[10.5px] text-ink-3">Match as</span>
+              <span className="text-xs text-ink-3">Match as</span>
               <span className="mt-1 flex w-fit rounded-lg border border-edge bg-surface p-0.5">
                 {([
                   ["phrase", "Whole words"],
@@ -3900,7 +3936,7 @@ function WindowRuleDialog({
                   <button
                     key={mode}
                     type="button"
-                    className={`rounded-md px-2 py-1 text-[10.5px] ${
+                    className={`rounded-md px-2 py-1 text-xs ${
                       spec.titleMatchMode === mode
                         ? "bg-surface-3 text-ink-2"
                         : "text-ink-3 hover:text-ink-2"
@@ -3914,7 +3950,7 @@ function WindowRuleDialog({
               {showBroadMatchWarning(spec) && <BroadMatchWarning className="mt-1.5" />}
             </div>
             {spec.titleMatchMode === "segment" && (
-              <div className="mt-3 text-[10.5px] text-ink-3">
+              <div className="mt-3 text-xs text-ink-3">
                 <span>Position</span>
                 <MenuSelect
                   size="field"
@@ -3926,7 +3962,7 @@ function WindowRuleDialog({
                 />
               </div>
             )}
-            <div className="mt-3 text-[10.5px] text-ink-3">
+            <div className="mt-3 text-xs text-ink-3">
               <span>Applies to</span>
               <MenuSelect
                 size="field"
@@ -3950,7 +3986,7 @@ function WindowRuleDialog({
           || preview === null
           || preview.sessions > 0
         ) && (
-          <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px] leading-snug text-ink-3">
+          <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs leading-snug text-ink-3">
             {!spec.pattern.trim()
               ? "Enter text this rule should match."
               : <RulePreviewText preview={preview} />}
@@ -4134,16 +4170,16 @@ function SessionCorrectionDialog({
     }
   };
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="correction-title">
-      <div className="w-full max-w-lg rounded-2xl border border-edge bg-surface p-5 shadow-2xl">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="correction-title">
+      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:p-5">
         <h2 id="correction-title" className="text-base font-semibold">Correct session</h2>
         {!session ? <div className="py-10"><Spinner /></div> : (
           <>
-            <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px]"><p className="font-medium">{session.domain ?? session.process}</p>{session.title && <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>}</div>
-            {(session.isLive || session.isAfk) && <p className="mt-3 rounded-lg border border-bad/30 bg-bad/[.04] px-3 py-2 text-[11px] text-bad">{session.isLive ? "The current live session cannot be edited." : "AFK sessions are not editable in this version."}</p>}
+            <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs"><p className="font-medium">{session.domain ?? session.process}</p>{session.title && <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>}</div>
+            {(session.isLive || session.isAfk) && <p className="mt-3 rounded-lg border border-bad/30 bg-bad/[.04] px-3 py-2 text-xs text-bad">{session.isLive ? "The current live session cannot be edited." : "AFK sessions are not editable in this version."}</p>}
             {/* Category leads: it is why this dialog is normally opened, it
                 always succeeds, and it is the app's actual subject. */}
-            <div className="mt-4 text-[11px] text-ink-3">
+            <div className="mt-4 text-xs text-ink-3">
               <span>Category</span>
               <MenuSelect
                 size="field"
@@ -4169,7 +4205,7 @@ function SessionCorrectionDialog({
                 type="button"
                 onClick={() => setEditingTimes((open) => !open)}
                 aria-expanded={editingTimes}
-                className="flex w-full items-center gap-1.5 rounded-sm text-left text-[11px] text-ink-3 outline-none hover:text-ink-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
+                className="flex w-full items-center gap-1.5 rounded-sm text-left text-xs text-ink-3 outline-none hover:text-ink-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
               >
                 <Chevron open={editingTimes} />
                 Adjust recorded times
@@ -4184,14 +4220,14 @@ function SessionCorrectionDialog({
                       is usually the session itself — meaning it can be
                       shortened but almost never extended, which is worth
                       knowing before typing a time. */}
-                  <p className="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[10.5px] leading-snug text-ink-3">
+                  <p className="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs leading-snug text-ink-3">
                     {describeCorrectionWindow(session)}
                   </p>
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <label className="text-[11px] text-ink-3">Start<input type="datetime-local" step="1" value={start} min={session.earliestStart == null ? undefined : localInputValue(session.earliestStart)} max={end} onChange={(event) => setStart(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
-                    <label className="text-[11px] text-ink-3">End<input type="datetime-local" step="1" value={end} min={start} max={session.latestEnd == null ? undefined : localInputValue(session.latestEnd)} onChange={(event) => setEnd(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
+                    <label className="text-xs text-ink-3">Start<input type="datetime-local" step="1" value={start} min={session.earliestStart == null ? undefined : localInputValue(session.earliestStart)} max={end} onChange={(event) => setStart(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
+                    <label className="text-xs text-ink-3">End<input type="datetime-local" step="1" value={end} min={start} max={session.latestEnd == null ? undefined : localInputValue(session.latestEnd)} onChange={(event) => setEnd(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
                   </div>
-                  <p className="mt-2 text-[10.5px] leading-snug text-ink-3">Times use your local timezone and cannot end in the future.</p>
+                  <p className="mt-2 text-xs leading-snug text-ink-3">Times use your local timezone and cannot end in the future.</p>
                 </>
               )}
             </div>
@@ -4251,8 +4287,8 @@ function DeleteActivityDialog({
     }
   };
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-5">
-      <div role="dialog" aria-modal="true" aria-labelledby="delete-activity-title" className="w-full max-w-md rounded-[14px] border border-edge-2 bg-surface p-5 shadow-2xl">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-2 sm:p-5">
+      <div role="dialog" aria-modal="true" aria-labelledby="delete-activity-title" className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-[14px] border border-edge-2 bg-surface p-4 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:p-5">
         <h2 id="delete-activity-title" className="text-sm font-semibold">Delete recorded activity?</h2>
         {/* The scope sits above the preview because the preview answers for
             it: every number below this row is the consequence of the choice
@@ -4269,7 +4305,7 @@ function DeleteActivityDialog({
                 disabled={deleting}
                 aria-pressed={wide === option.wide}
                 onClick={() => setWide(option.wide)}
-                className={`flex-1 rounded-md px-2.5 py-1 text-[11px] transition-colors disabled:opacity-40 ${
+                className={`flex-1 rounded-md px-2.5 py-1 text-xs transition-colors disabled:opacity-40 ${
                   wide === option.wide ? "bg-surface-3 text-ink" : "text-ink-3 hover:text-ink-2"
                 }`}
               >
@@ -4285,7 +4321,7 @@ function DeleteActivityDialog({
                 scanned, in the one dialog most worth scanning. */}
             <p className="mt-3 text-xs text-ink-2">{scope.label}</p>
             {active.span && (
-              <p className="mt-1 text-[11px] tabular-nums text-ink-3">{active.span}</p>
+              <p className="mt-1 text-xs tabular-nums text-ink-3">{active.span}</p>
             )}
             <div className="mt-3 grid grid-cols-2 gap-2">
               <DetailMetric label="Visits" value={String(preview.count)} />
@@ -4297,10 +4333,10 @@ function DeleteActivityDialog({
                 ordinary case, and the tiles beside it already say how little
                 is there when it is not. Two date lines in one confirmation
                 cost more than the subtlety separating them was worth. */}
-            <p className="mt-3 text-[11px] leading-snug text-ink-3">Complete session rows are removed, securely compacted, and cannot be restored unless you have a backup.</p>
-            {preview.protectedCount > 0 && <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-[11px] text-ink-2">{preview.protectedCount} current live session is protected. Pause recording and retry after it closes if you need to remove it.</p>}
-            {preview.count === 0 && <p className="mt-3 text-[11px] text-ink-3">There are no deletable sessions in this scope.</p>}
-            {backupPath && <p className="mt-3 break-all text-[10.5px] text-ink-3">Backup saved to {backupPath}</p>}
+            <p className="mt-3 text-xs leading-snug text-ink-3">Complete session rows are removed, securely compacted, and cannot be restored unless you have a backup.</p>
+            {preview.protectedCount > 0 && <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs text-ink-2">{preview.protectedCount} current live session is protected. Pause recording and retry after it closes if you need to remove it.</p>}
+            {preview.count === 0 && <p className="mt-3 text-xs text-ink-3">There are no deletable sessions in this scope.</p>}
+            {backupPath && <p className="mt-3 break-all text-xs text-ink-3">Backup saved to {backupPath}</p>}
             <div className="mt-5 flex items-center justify-end gap-2">
               <Button onClick={onClose}>Cancel</Button>
               <Button onClick={() => void backupDatabase().then(setBackupPath).catch((error) => banner.report(error, "backup"))}>Back up first</Button>
@@ -4359,7 +4395,7 @@ function RuleDraftPreview({
   }
 
   return (
-    <p className="mt-2 rounded-lg border border-edge/60 bg-surface/45 px-3 py-2 text-[10.5px] leading-snug text-ink-3">
+    <p className="mt-2 rounded-lg border border-edge/60 bg-surface/45 px-3 py-2 text-xs leading-snug text-ink-3">
       {result === "unusable"
         ? deferred.type === "domain"
           ? "That is not a usable website domain — enter one like example.com."
@@ -4410,7 +4446,7 @@ function CategoryRuleForm({
           placeholder={draft.type === "domain"
             ? "example.com"
             : draft.type === "title" ? "words to match…" : "example.exe"}
-          className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60"
+          className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
         />
         {onCancel && <Button onClick={onCancel}>Cancel</Button>}
         <Button
@@ -4424,7 +4460,7 @@ function CategoryRuleForm({
       {draft.type === "title" && (
         <div className="mt-2 rounded-lg border border-edge/60 bg-surface/45 p-2.5">
           <div className="flex items-center gap-2">
-            <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Match as</span>
+            <span className="w-[64px] shrink-0 text-xs text-ink-3">Match as</span>
             <span className="flex rounded-lg border border-edge bg-surface p-0.5">
               {([
                 ["phrase", "Whole words"],
@@ -4434,7 +4470,7 @@ function CategoryRuleForm({
                 <button
                   key={mode}
                   type="button"
-                  className={`rounded-md px-2 py-1 text-[10.5px] ${
+                  className={`rounded-md px-2 py-1 text-xs ${
                     draft.titleMatchMode === mode
                       ? "bg-surface-3 text-ink-2"
                       : "text-ink-3 hover:text-ink-2"
@@ -4451,7 +4487,7 @@ function CategoryRuleForm({
           </div>
           {draft.titleMatchMode === "segment" && (
             <div className="mt-2 flex items-center gap-2">
-              <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Position</span>
+              <span className="w-[64px] shrink-0 text-xs text-ink-3">Position</span>
               <MenuSelect
                 size="compact"
                 className="w-44"
@@ -4464,8 +4500,8 @@ function CategoryRuleForm({
               />
             </div>
           )}
-          <div className="mt-2 flex items-center gap-2">
-            <span className="w-[64px] shrink-0 text-[10.5px] text-ink-3">Applies to</span>
+          <div className="mt-2 flex flex-wrap items-center gap-2 sm:flex-nowrap">
+            <span className="w-[64px] shrink-0 text-xs text-ink-3">Applies to</span>
             <span className="flex rounded-lg border border-edge bg-surface p-0.5">
               {([
                 [ANY_APP, "Any app"],
@@ -4476,7 +4512,7 @@ function CategoryRuleForm({
                 <button
                   key={kind}
                   type="button"
-                  className={`rounded-md px-2 py-1 text-[10.5px] ${
+                  className={`rounded-md px-2 py-1 text-xs ${
                     draft.scopeKind === kind
                       ? "bg-surface-3 text-ink-2"
                       : "text-ink-3 hover:text-ink-2"
@@ -4502,13 +4538,13 @@ function CategoryRuleForm({
                 placeholder={draft.scopeKind === "process"
                   ? "example.exe"
                   : "example.com"}
-                className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-[11.5px] outline-none placeholder:text-ink-3 focus:border-accent/60"
+                className="min-w-0 flex-1 basis-full rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60 sm:basis-auto"
               />
             )}
           </div>
         </div>
       )}
-      <p className="mt-2 text-[10.5px] text-ink-3">
+      <p className="mt-2 text-xs text-ink-3">
         {draft.type === "title" && draft.titleMatchMode === "segment"
           ? "Matches one complete section of a title, such as “Grocery list” in “Grocery list — Notepad”."
           : RULE_HELP[draft.type]}
@@ -4814,7 +4850,7 @@ function CategoriesAndRules({
     <div className="scroll-well -mr-2 flex min-h-0 flex-col overflow-y-auto pr-2">
       {colorMenu !== null && <button type="button" aria-label="Close menu" className="fixed inset-0 z-40 cursor-default" onClick={() => setColorMenu(null)} />}
       {showResetNotice && (
-        <div className="mb-3 flex items-start gap-3 rounded-lg border border-accent/25 bg-accent/[.055] px-3 py-2.5 text-[11px] leading-relaxed text-ink-2">
+        <div className="mb-3 flex items-start gap-3 rounded-lg border border-accent/25 bg-accent/[.055] px-3 py-2.5 text-xs leading-relaxed text-ink-2">
           <p className="min-w-0 flex-1">
             Window matching was upgraded. {resetCount} older Window{" "}
             {resetCount === 1 ? "rule was" : "rules were"} removed because the old
@@ -4830,7 +4866,7 @@ function CategoriesAndRules({
           </button>
         </div>
       )}
-      <p className="mb-3 text-[11px] leading-relaxed text-ink-3">
+      <p className="mb-3 text-xs leading-relaxed text-ink-3">
         Rules classify matching historical and future activity. Website rules normally
         take priority over Window rules, and Window rules take priority over App rules. A
         Window rule scoped to one website can refine that website.
@@ -4842,12 +4878,13 @@ function CategoriesAndRules({
           label="Search rules"
           placeholder="Search rules, types, and categories…"
           leadingIcon
-          className="min-w-[240px] flex-1"
+          className="min-w-0 basis-full sm:min-w-[240px] sm:basis-auto sm:flex-1"
         />
         <MenuSelect
           size="field"
           variant="resting"
           label="Category order"
+          className="min-w-0 flex-1 sm:flex-none"
           value={categoryOrder}
           onChange={(value) => chooseCategoryOrder(value as CategoryListOrder)}
           options={[
@@ -4859,6 +4896,7 @@ function CategoriesAndRules({
           size="field"
           variant="resting"
           label="Rule order"
+          className="min-w-0 flex-1 sm:flex-none"
           value={ruleOrder}
           onChange={(value) => chooseRuleOrder(value as RuleListOrder)}
           options={[
@@ -4867,7 +4905,7 @@ function CategoriesAndRules({
           ]}
         />
         {normalizedRuleSearch !== "" && (
-          <span className="shrink-0 text-[10.5px] text-ink-3">
+          <span className="shrink-0 text-xs text-ink-3">
             {matchingRuleCount} matching {matchingRuleCount === 1 ? "rule" : "rules"}
           </span>
         )}
@@ -4887,13 +4925,13 @@ function CategoriesAndRules({
               key={category.id}
               className="overflow-hidden rounded-[11px] border border-edge bg-surface-2"
             >
-              <div className="flex items-center gap-2.5 px-3 py-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2.5 px-3 py-3 text-xs">
                 {normalizedRuleSearch !== "" ? (
-                  <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center text-[10px] text-ink-3">
+                  <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center text-xs text-ink-3">
                     <span className="rotate-90">▶</span>
                   </span>
                 ) : (
-                  <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-[10px] text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span></button>
+                  <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-xs text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span></button>
                 )}
                 <button
                   type="button"
@@ -4907,7 +4945,7 @@ function CategoriesAndRules({
                     setColorMenu({
                       id: category.id,
                       left: Math.min(rect.left, window.innerWidth - SWATCH_MENU_WIDTH - 8),
-                      top: rect.bottom + 6,
+                      top: Math.min(rect.bottom + 6, window.innerHeight - 112),
                     });
                   }}
                 />
@@ -4926,7 +4964,7 @@ function CategoriesAndRules({
                   </span>
                 )}
                 <span className="flex-1" />
-                <span className="w-[112px] shrink-0">
+                <span className="w-[112px] shrink-0 max-sm:ml-[46px]">
                   <MenuSelect
                     variant="bare"
                     size="compact"
@@ -4949,7 +4987,7 @@ function CategoriesAndRules({
                     }))}
                   />
                 </span>
-                <span className="w-[76px] text-right text-[10.5px] text-ink-3">
+                <span className="w-[76px] text-right text-xs text-ink-3">
                   {normalizedRuleSearch !== "" && visibleRules.length !== allRules.length
                     ? `${visibleRules.length} of ${allRules.length}`
                     : allRules.length}{" "}
@@ -4975,13 +5013,13 @@ function CategoriesAndRules({
                           event.preventDefault();
                           beginRuleEdit(rule);
                         }}
-                        className={`-mx-2 flex items-center gap-2 rounded-lg px-2 py-1 text-[11.5px] ${
+                        className={`-mx-2 flex flex-wrap items-center gap-2 rounded-lg px-2 py-1 text-xs ${
                           activeEdit?.ruleId === rule.id
                             ? "bg-accent/[.06]"
                             : "hover:bg-white/[.028]"
                         }`}
                       >
-                        <span className="flex w-[74px] shrink-0 items-center gap-1.5 text-[9.5px] uppercase tracking-[.04em] text-ink-3">
+                        <span className="flex w-[74px] shrink-0 items-center gap-1.5 text-xs uppercase tracking-[.04em] text-ink-3">
                           <RuleKindGlyph matchType={rule.matchType} />
                           {RULE_LABELS[rule.matchType]}
                         </span>
@@ -4994,7 +5032,7 @@ function CategoriesAndRules({
                         {rule.matchType === "title" && (
                           <>
                             <span
-                              className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3"
+                              className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-xs text-ink-3"
                               title="How the text is compared with a normalized window title."
                             >
                               {describeTitleRule({
@@ -5003,20 +5041,20 @@ function CategoriesAndRules({
                               })}
                             </span>
                             <span
-                              className="max-w-[118px] shrink-0 truncate rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3"
+                              className="max-w-[118px] shrink-0 truncate rounded-full bg-surface-3 px-1.5 py-[1px] text-xs text-ink-3"
                               title={`Only matches ${titleRuleScopeLabel(rule)}.`}
                             >
                               {titleRuleScopeLabel(rule)}
                             </span>
                           </>
                         )}
-                        {applied !== null && !applied.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-[9px] text-ink-3" title="This rule has not been the winning rule for any stored activity.">unused</span>}
+                        {applied !== null && !applied.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-xs text-ink-3" title="This rule has not been the winning rule for any stored activity.">unused</span>}
                         <EditRuleButton rule={rule} onClick={() => beginRuleEdit(rule)} />
                         <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
                       </div>
                     ))}
                     {visibleRules.length === 0 && (
-                      <p className="py-1 text-[11px] italic text-ink-3">
+                      <p className="py-1 text-xs italic text-ink-3">
                         {normalizedRuleSearch === ""
                           ? "No rules yet — add one below."
                           : "No rules in this category match the search."}
@@ -5049,12 +5087,12 @@ function CategoriesAndRules({
                       replacingRuleId={activeEdit?.ruleId}
                     />
                     {activeEdit?.conflict && (
-                      <p className="mt-2 rounded-lg border border-edge/60 bg-surface px-3 py-2 text-[10.5px] text-ink-2">
+                      <p className="mt-2 rounded-lg border border-edge/60 bg-surface px-3 py-2 text-xs text-ink-2">
                         {activeEdit.conflict}
                       </p>
                     )}
                     {!activeEdit && ruleConflict?.categoryId === category.id && (
-                      <div className="mt-2 flex items-center gap-3 rounded-lg border border-edge/60 bg-surface/45 px-3 py-2 text-[10.5px] text-ink-2">
+                      <div className="mt-2 flex items-center gap-3 rounded-lg border border-edge/60 bg-surface/45 px-3 py-2 text-xs text-ink-2">
                         <span className="min-w-0 flex-1">
                           {ruleConflict.existingRule.categoryId === category.id
                             ? `This rule already exists in ${category.name}.`
@@ -5105,7 +5143,24 @@ function CategoriesAndRules({
           </p>
         )}
       </div>
-      <div className="mt-4 flex items-center gap-2 border-t border-edge/50 pt-4"><input value={newName} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submitCategory(); }} placeholder="New category name" className="w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60" /><Button variant="primary" disabled={!newName.trim()} onClick={() => void submitCategory()}>+ Add category</Button></div>
+      <div className="mt-4 flex items-center gap-2 border-t border-edge/50 pt-4">
+        <input
+          value={newName}
+          onChange={(event) => setNewName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void submitCategory();
+          }}
+          placeholder="New category name"
+          className="min-w-0 w-56 max-w-full shrink rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
+        />
+        <Button
+          variant="primary"
+          disabled={!newName.trim()}
+          onClick={() => void submitCategory()}
+        >
+          + Add category
+        </Button>
+      </div>
       {colorMenu !== null && createPortal(
         <span
           style={{ left: colorMenu.left, top: colorMenu.top, width: SWATCH_MENU_WIDTH }}

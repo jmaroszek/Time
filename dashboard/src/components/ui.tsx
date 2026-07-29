@@ -17,11 +17,11 @@ export function Card({
   titleAlign?: "left" | "center";
 }) {
   return (
-    <div className={`rounded-[14px] border border-edge bg-surface p-5 ${className}`}>
+    <div className={`min-w-0 rounded-[14px] border border-edge bg-surface p-4 sm:p-5 ${className}`}>
       {(title || right) && (
-        <div className="mb-3 flex shrink-0 items-center justify-between">
+        <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
           <h2
-            className={`text-sm font-semibold text-ink ${titleAlign === "center" ? "w-full text-center" : ""}`}
+            className={`min-w-0 text-sm font-semibold text-ink ${titleAlign === "center" ? "w-full text-center" : ""}`}
           >
             {title}
           </h2>
@@ -66,7 +66,7 @@ function InfoHint({ text }: { text: string }) {
   return (
     <span
       role="tooltip"
-      className="pointer-events-none invisible absolute left-0 top-5 z-20 w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-[11px] font-normal leading-snug text-ink-2 opacity-0 shadow-lg transition-opacity delay-0 duration-100 group-hover:visible group-hover:opacity-100 group-hover:delay-500 group-focus:visible group-focus:opacity-100 group-focus:delay-0"
+      className="pointer-events-none invisible absolute left-0 top-5 z-20 w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs font-normal leading-snug text-ink-2 opacity-0 shadow-lg transition-opacity delay-0 duration-100 group-hover:visible group-hover:opacity-100 group-hover:delay-500 group-focus:visible group-focus:opacity-100 group-focus:delay-0"
     >
       {text}
     </span>
@@ -142,7 +142,7 @@ export function FloatingTooltip({
           style={{ left: position.left, top: position.top }}
           // Above menus, which are above dialogs: a tooltip explains whatever
           // is frontmost, so it can never be the thing that gets covered.
-          className="pointer-events-none fixed z-[85] w-52 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-left text-[11px] font-normal leading-snug text-ink-2 shadow-lg"
+          className="pointer-events-none fixed z-[85] w-52 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-left text-xs font-normal leading-snug text-ink-2 shadow-lg"
         >
           {text}
         </span>,
@@ -255,7 +255,7 @@ export function RemoveButton({
       aria-label={label}
       onClick={onClick}
       className={`flex shrink-0 items-center justify-center rounded-md leading-none text-ink-3 transition-colors hover:bg-bad/10 hover:text-bad ${
-        compact ? "h-5 w-5 text-[10.5px]" : "h-6 w-6 text-sm"
+        compact ? "h-5 w-5 text-xs" : "h-6 w-6 text-sm"
       }`}
     >
       ✕
@@ -315,7 +315,7 @@ const MENU_VIEWPORT_MARGIN = 8;
 const SIZES = {
   control: "rounded-lg px-2.5 py-1.5 text-xs",
   field: "rounded-[9px] px-2.5 py-2 text-xs",
-  compact: "rounded-md px-2 py-1 text-[10.5px]",
+  compact: "rounded-md px-2 py-1 text-xs",
 } as const;
 
 const VARIANTS = {
@@ -429,9 +429,13 @@ export function MenuSelect({
       // The menu sizes itself to its longest label (width: max-content in the
       // style below), so its width is read back rather than computed — a fixed
       // floor would leave a short list like "Top 5" stranded in dead space.
-      const menu = listRef.current?.getBoundingClientRect();
-      const width = menu?.width ?? trigger.width;
-      const height = menu?.height ?? 0;
+      const menu = listRef.current;
+      // offsetWidth/offsetHeight are the settled layout dimensions. The
+      // opening animation begins at scale(.98), so getBoundingClientRect()
+      // would under-measure the popup and let its final frame cross the
+      // viewport margin.
+      const width = menu?.offsetWidth ?? trigger.width;
+      const height = menu?.offsetHeight ?? 0;
       const below = trigger.bottom + 5;
       const fitsBelow = below + height <= window.innerHeight - MENU_VIEWPORT_MARGIN;
       const anchored = align === "end" ? trigger.right - width : trigger.left;
@@ -559,6 +563,7 @@ export function MenuSelect({
             width: "max-content",
             minWidth: box?.minWidth,
             maxWidth: `calc(100vw - ${MENU_VIEWPORT_MARGIN * 2}px)`,
+            boxSizing: "border-box",
             // Hidden for the frame between mount and measurement, so the menu
             // never flashes at the top-left corner.
             visibility: box ? "visible" : "hidden",
@@ -568,7 +573,7 @@ export function MenuSelect({
           className="menu-pop fixed z-[80] rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-[0_12px_34px_rgba(0,0,0,.5)]"
         >
           {header && (
-            <p className="px-2.5 py-1.5 text-[10px] leading-snug text-ink-3">{header}</p>
+            <p className="px-2.5 py-1.5 text-xs leading-snug text-ink-3">{header}</p>
           )}
           <div id={`${id}-list`} role="listbox" aria-label={label}>
           {options.map((option, i) => (
@@ -581,7 +586,7 @@ export function MenuSelect({
                 aria-selected={i === selected}
                 onClick={() => commit(i)}
                 onMouseEnter={() => setActive(i)}
-                className={`flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] transition-colors ${
+                className={`flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
                   i === active ? "bg-surface-3 text-ink" : "text-ink-2"
                 }`}
               >

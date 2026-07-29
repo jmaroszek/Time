@@ -1,0 +1,8 @@
+/* A bundled test-only font makes committed image baselines independent of the
+   runner's installed Windows/Linux font set. Production keeps Segoe UI. */
+body,
+button,
+input,
+textarea {
+  font-family: "Inter", sans-serif;
+}

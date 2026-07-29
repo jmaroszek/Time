@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Keep utility discovery anchored to the production source tree even when the
+   app is rendered through the device-test Vite root. */
+@source "./";
 
 @theme {
   --color-bg: #0f1115;
@@ -135,7 +138,44 @@ body {
   position: fixed;
   inset: var(--window-titlebar-height) 0 0;
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-gutter: stable;
+}
+
+@media (min-width: 640px) {
+  .app-viewport {
+    /* The narrower thumb should not recenter the established medium/desktop
+       composition. Keep the original 10px layout reservation while drawing
+       only a 6px scrollbar. Compact layouts intentionally use the extra room. */
+    padding-right: 4px;
+  }
+}
+
+.time-shell {
+  box-sizing: border-box;
+  width: auto;
+  max-width: 72rem;
+}
+
+/* Effective CSS-pixel layout contracts. These values mirror
+   lib/responsive.ts; Windows display scaling is already reflected in the
+   WebView viewport, so no physical-monitor assumptions belong here. */
+@media (max-width: 639px) {
+  .app-viewport {
+    --time-layout-class: compact;
+    /* A stable one-sided gutter centres an auto-width shell against the
+       pre-gutter box, producing a few pixels of false horizontal overflow. */
+    scrollbar-gutter: auto;
+  }
+}
+@media (min-width: 640px) and (max-width: 1007px) {
+  .app-viewport { --time-layout-class: medium; }
+}
+@media (min-width: 1008px) and (max-width: 1831px) {
+  .app-viewport { --time-layout-class: large; }
+}
+@media (min-width: 1832px) {
+  .app-viewport { --time-layout-class: wide-detail; }
 }
 
 .window-titlebar {
@@ -178,12 +218,12 @@ input[type="number"] {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-thumb {
   background: #2a2e36;
-  border-radius: 5px;
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;

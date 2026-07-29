@@ -1808,10 +1808,8 @@ mod tests {
             TimeDatabase::validate_mutation_target("DELETE FROM sessions WHERE id=$1").is_err()
         );
         assert!(
-            TimeDatabase::validate_mutation_target(
-                "UPDATE rules SET pattern=$1 WHERE id=$2"
-            )
-            .is_ok()
+            TimeDatabase::validate_mutation_target("UPDATE rules SET pattern=$1 WHERE id=$2")
+                .is_ok()
         );
         assert!(TimeDatabase::validate_mutation_target("UPDATE settings SET value='1'").is_err());
         assert!(TimeDatabase::validate_mutation_target("DELETE FROM settings").is_err());

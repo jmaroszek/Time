@@ -201,7 +201,7 @@ export default function OverviewTab({
     <div className="relative flex flex-col gap-4" aria-busy={refreshing}>
       {updateError && (
         <span
-          className="pointer-events-none absolute right-1 -top-3 text-[10px] text-bad"
+          className="pointer-events-none absolute right-1 -top-3 text-xs text-bad"
           title={updateError}
         >
           Update failed
@@ -246,7 +246,7 @@ export default function OverviewTab({
             ? (
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Rhythm</span>
-                  <span className="text-[11px] font-normal text-ink-3">
+                  <span className="text-xs font-normal text-ink-3">
                     {`Average ${ACTIVITY_METRIC_WORDS[metric]} time by weekday and hour`}
                   </span>
                 </span>
@@ -254,7 +254,7 @@ export default function OverviewTab({
             : (
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Calendar</span>
-                  <span className="text-[11px] font-normal text-ink-3">
+                  <span className="text-xs font-normal text-ink-3">
                     {`${ACTIVITY_METRIC_WORDS[metric].replace(/^./, (c) => c.toUpperCase())} time by ${calendarByMonth ? "month" : "day"}`}
                   </span>
                 </span>
@@ -326,7 +326,7 @@ export default function OverviewTab({
         )}
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Card
           title="Top Apps"
           className="h-[345px]"

@@ -21,6 +21,7 @@ import { useMeta } from "../state/meta";
 import { metricRamps } from "../lib/palettes";
 import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
+import { rhythmHourInterval, useViewportWidth } from "../lib/responsive";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -33,6 +34,8 @@ export default function RhythmChart({
   metric?: ActivityMetric;
 }) {
   const { aliases, weekStart, dayStartHour, dayEndHour, palette } = useMeta();
+  const viewportWidth = useViewportWidth();
+  const hourInterval = rhythmHourInterval(viewportWidth);
   const option = useMemo<EChartsOption>(() => {
     const { cells, weekdayCounts } = summary;
     const weekdayRows = weekStart === "Monday" ? [1, 2, 3, 4, 5, 6, 0] : [0, 1, 2, 3, 4, 5, 6];
@@ -68,8 +71,10 @@ export default function RhythmChart({
       },
       xAxis: {
         type: "category",
-        data: visibleHours.map(compactHour),
-        axisLabel: { color: CHROME.axisLabel, fontSize: 10 },
+        data: visibleHours.map((hour) =>
+          (hour - dayStartHour) % hourInterval === 0 ? compactHour(hour) : ""
+        ),
+        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
         axisTick: { show: false },
         axisLine: { show: false },
       },
@@ -97,7 +102,7 @@ export default function RhythmChart({
         },
       ],
     };
-  }, [summary, metric, aliases, weekStart, dayStartHour, dayEndHour, palette]);
+  }, [summary, metric, aliases, weekStart, dayStartHour, dayEndHour, palette, hourInterval]);
 
   return <EChart option={option} height={260} />;
 }

@@ -15,6 +15,7 @@ function createWindow(overrides: Partial<TitleBarWindow> = {}) {
     minimize: vi.fn().mockResolvedValue(undefined),
     onFocusChanged: vi.fn().mockResolvedValue(() => undefined),
     onResized: vi.fn().mockResolvedValue(() => undefined),
+    show: vi.fn().mockResolvedValue(undefined),
     startDragging: vi.fn().mockResolvedValue(undefined),
     toggleMaximize: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -123,7 +124,7 @@ describe("window title bar markup", () => {
 
     expect(markup.match(/<button/g)).toHaveLength(3);
     expect(markup).toContain('aria-label="Minimize"');
-    expect(markup).toContain('aria-label="Restore"');
+    expect(markup).toContain('aria-label="Maximize"');
     expect(markup).toContain('aria-label="Close"');
     expect(markup.match(/tabindex="-1"/g)).toHaveLength(3);
     expect(markup).not.toContain("Time");

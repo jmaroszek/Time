@@ -14,6 +14,7 @@ import { fmtClock, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/for
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
 import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { timelineHourInterval, useViewportWidth } from "../lib/responsive";
 
 const AFK_COLOR = "#33363d";
 const UNCATEGORIZED_COLOR = "#5b616b";
@@ -49,6 +50,8 @@ export default function TimelineChart({
   blockMinutes: number; // 0 = exact sessions
 }) {
   const { aliases, dayStartHour, dayEndHour } = useMeta();
+  const viewportWidth = useViewportWidth();
+  const hourInterval = timelineHourInterval(viewportWidth);
   const days = useMemo(() => listDays(range), [range]); // oldest on top, reads top-to-bottom
   const dayIndex = useMemo(() => new Map(days.map((d, i) => [dayKey(d), i])), [days]);
 
@@ -117,7 +120,7 @@ export default function TimelineChart({
         type: "value",
         min: dayStartHour,
         max: dayEndHour,
-        interval: 3,
+        interval: hourInterval,
         axisLabel: {
           color: CHROME.axisLabel,
           fontSize: 11,
@@ -177,7 +180,7 @@ export default function TimelineChart({
         },
       ],
     }),
-    [segments, days, aliases, dayStartHour, dayEndHour],
+    [segments, days, aliases, dayStartHour, dayEndHour, hourInterval],
   );
 
   const chart = (

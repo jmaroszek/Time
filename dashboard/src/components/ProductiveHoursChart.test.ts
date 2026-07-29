@@ -43,9 +43,9 @@ describe("estimateLegendRows", () => {
 
 describe("legendContentWidth", () => {
   it("subtracts a safety margin from the 92% band", () => {
-    // 500 * 0.92 = 460, minus the 8px safety margin. ECharts wraps on the
+    // 500 * 0.92 = 460, minus the 16px safety margin. ECharts wraps on the
     // declared width itself, so its 5px padding is not deducted here.
-    expect(legendContentWidth(500)).toBe(452);
+    expect(legendContentWidth(500)).toBe(444);
   });
 
   it("goes non-positive for an unmeasured container, tripping the fallback", () => {
@@ -67,13 +67,13 @@ describe("the productivity legend at the app's minimum width", () => {
   const labels = Object.keys(RENDERED_TEXT_WIDTH);
 
   it("keeps the row intact at the narrowest window the app allows", () => {
-    // A 1000px window leaves this card's chart about 426px wide, for a 383.9px
-    // legend band — 9.6px more than the row needs.
+    // A two-column 1000px window leaves this card's chart about 426px wide,
+    // for a 375.9px legend band — still just more than the row needs.
     expect(estimateLegendRows(labels, legendContentWidth(426), measure)).toBe(1);
   });
 
   it("predicts the second row rather than letting it overrun the x-axis", () => {
-    // Below ~416px the row genuinely does not fit. Under-reserving here is what
+    // Below ~425px the row genuinely does not fit. Under-reserving here is what
     // let the legend ride up into the x-axis labels.
     expect(estimateLegendRows(labels, legendContentWidth(400), measure)).toBe(2);
   });

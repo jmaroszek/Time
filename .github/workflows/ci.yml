@@ -45,3 +45,76 @@ jobs:
         run: npx tsc --noEmit
       - name: Run vitest
         run: npx vitest run
+      - name: Check patch whitespace
+        run: git diff --check
+
+  renderer-compatibility:
+    name: renderer compatibility
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run device renderer suite
+        run: npm run test:device
+      - name: Upload renderer failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renderer-compatibility-artifacts
+          path: |
+            dashboard/playwright-report
+            dashboard/test-results/device
+          if-no-files-found: ignore
+
+  native-windows:
+    name: native Windows compatibility
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dashboard/src-tauri
+      - name: Install dependencies
+        run: npm ci
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Build isolated debug application
+        run: npm run build:native-device
+      - name: Run native Windows suite
+        run: npm run test:native
+      - name: Upload native failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-artifacts
+          path: |
+            dashboard/test-results/native
+            dashboard/src-tauri/target/debug/*.log
+          if-no-files-found: ignore
