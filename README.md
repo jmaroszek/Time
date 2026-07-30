@@ -99,6 +99,21 @@ npm run test:native:doctor            # refuses live/production state
 npm run test:native
 ```
 
+The builder starts the bundle once against a scratch profile and fails rather
+than emitting a sidecar that cannot run. A conda interpreter keeps the DLLs its
+extension modules link against in `Library\bin` instead of beside the modules,
+so the build puts that directory on PATH; without it the bundle builds cleanly
+and then dies on its first `import ctypes`.
+
+The packaged sidecar has its own smoke check, which redirects `LOCALAPPDATA` and
+takes a distinct mutex so it is safe to run beside a live tracker:
+
+```powershell
+.\scripts\smoke_packaged_tracker.ps1 `
+    -TrackerExecutable .\dashboard\src-tauri\binaries\time-tracker-x86_64-pc-windows-msvc.exe `
+    -OutputDirectory "$env:TEMP\time-smoke-$(Get-Random)"
+```
+
 The release build runs PyInstaller automatically, carries its one-dir tracker
 runtime as a Tauri sidecar, and produces one current-user NSIS installer. The
 installer bootstraps the local database but records nothing and creates no

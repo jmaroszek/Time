@@ -33,11 +33,11 @@ LOG_PATH = DATA_DIR / "Logs" / "tracker.log"
 TRACKER_VERSION = "0.1.0"
 
 # The production mutex name is stable. The override exists so release packaging
-# can be smoke-tested against a scratch DB while the live tracker keeps running.
-MUTEX_NAME = (
-    "Global\\TimeTrackerSingleton"
-    if getattr(sys, "frozen", False)
-    else os.environ.get("TIME_MUTEX_NAME", "Global\\TimeTrackerSingleton")
-)
+# can be smoke-tested against a scratch DB while the live tracker keeps running,
+# which means the packaged build is the one case that has to honour it: gating
+# the override on `frozen` exempted exactly that build, and a smoke run would
+# have found the live tracker's mutex, logged "already running" and exited 0 —
+# a pass that recorded nothing.
+MUTEX_NAME = os.environ.get("TIME_MUTEX_NAME", "Global\\TimeTrackerSingleton")
 
 POLL_SECONDS = 1.0  # transition-detection cadence; not a tunable, accuracy depends on it
