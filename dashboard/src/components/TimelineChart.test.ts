@@ -37,3 +37,23 @@ describe("TimelineChart AFK tooltip", () => {
     expect(tooltip).not.toContain("<b>");
   });
 });
+
+describe("TimelineChart tooltip time", () => {
+  it("lists a shared meridiem once", () => {
+    const startSec = new Date(2026, 0, 1, 9, 15).getTime() / 1000;
+    const endSec = new Date(2026, 0, 1, 10, 30).getTime() / 1000;
+
+    expect(formatTooltip(segment({ startSec, endSec }))).toContain(
+      "9:15–10:30am",
+    );
+  });
+
+  it("lists both meridiems when the range crosses the boundary", () => {
+    const startSec = new Date(2026, 0, 1, 0, 5).getTime() / 1000;
+    const endSec = new Date(2026, 0, 1, 12, 30).getTime() / 1000;
+
+    expect(formatTooltip(segment({ startSec, endSec }))).toContain(
+      "12:05am–12:30pm",
+    );
+  });
+});

@@ -10,7 +10,7 @@ import type { Classifier } from "../lib/classify";
 import { aggregateBlocks } from "../lib/blocks";
 import { clipSessions, splitAtMidnights, type Session } from "../lib/metrics";
 import { dayKey, listDays, type Range } from "../lib/time";
-import { fmtClock, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
+import { fmtClockRange, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
 import {
@@ -205,7 +205,7 @@ export function formatTooltip(
   seg: TimelineSegment,
   aliases?: Record<string, string>,
 ): string {
-  const window = `${fmtClock(seg.startSec)}–${fmtClock(seg.endSec)}`;
+  const window = fmtClockRange(seg.startSec, seg.endSec);
   if (seg.breakdown) {
     if (seg.isAfk) return `AFK · ${window}`;
     const apps = seg.breakdown
