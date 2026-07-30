@@ -119,6 +119,20 @@ jobs:
         run: npm run build:native-device
       - name: Run native Windows suite
         run: npm run test:native
+        env:
+          WDIO_LOG_LEVEL: debug
+      # A failed WebDriver handshake leaves nothing in the job output, so echo
+      # the driver and application capture instead of only archiving it.
+      - name: Dump native suite logs
+        if: failure()
+        run: |
+          $logs = Get-ChildItem -Recurse -File test-results/native -ErrorAction SilentlyContinue
+          if (-not $logs) { Write-Host "no captured logs"; exit 0 }
+          foreach ($log in $logs) {
+            Write-Host "::group::$($log.Name)"
+            Get-Content -Raw $log.FullName
+            Write-Host "::endgroup::"
+          }
       - name: Upload native failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
