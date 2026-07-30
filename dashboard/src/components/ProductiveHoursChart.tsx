@@ -20,14 +20,16 @@ import { addDays, type Range } from "../lib/time";
 import type { WeekStart } from "../lib/time";
 import { fmtShortDate } from "../lib/format";
 import EChart, { type EChartsOption } from "./EChart";
+import type { ThemeName } from "../lib/theme";
 import { useMeta } from "../state/meta";
 import {
-  ANNOTATION,
+  annotation,
   CHART_FONT_FAMILY,
-  CHROME,
-  TOOLTIP_STYLE,
-  UNCATEGORIZED,
-  UNCATEGORIZED_BAR,
+  CHART_LABEL_SIZE,
+  chartChrome,
+  tooltipStyle,
+  uncategorizedMark,
+  uncategorizedBar,
 } from "../lib/chartTheme";
 
 export interface CategorySeries {
@@ -48,10 +50,11 @@ export interface CategorySeries {
 export function categorySeries(
   buckets: { categorySeconds: Map<string, number> }[],
   categories: Category[],
+  theme: ThemeName,
 ): CategorySeries[] {
   const ordered: { name: string; color: string }[] = [
     ...categories.filter((category) => !category.isIgnored),
-    { name: UNCATEGORIZED_LABEL, color: UNCATEGORIZED },
+    { name: UNCATEGORIZED_LABEL, color: uncategorizedMark(theme) },
   ];
   const out: Array<CategorySeries & { configuredIndex: number; totalSeconds: number }> = [];
   for (const [configuredIndex, { name, color }] of ordered.entries()) {
@@ -181,7 +184,7 @@ export default function ProductiveHoursChart({
   stackBy?: ActivityStack;
   categories?: Category[];
 }) {
-  const { palette } = useMeta();
+  const { palette, theme } = useMeta();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [chartWidth, setChartWidth] = useState(0);
   useEffect(() => {
@@ -270,21 +273,22 @@ export default function ProductiveHoursChart({
       { name: "Neutral", color: palette.neutral, hours: neutralBars },
       { name: "Unproductive", color: palette.unproductive, hours: unproductiveBars },
       ...(hasUncategorized
-        ? [{ name: "Uncategorized", color: UNCATEGORIZED_BAR, hours: uncategorizedBars }]
+        ? [{ name: "Uncategorized", color: uncategorizedBar(theme), hours: uncategorizedBars }]
         : []),
     ];
     return { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks };
-  }, [historyDays, range, labelMode, granularity, weekStart, palette]);
+  }, [historyDays, range, labelMode, granularity, weekStart, palette, theme]);
 
   const option = useMemo<EChartsOption>(() => {
+    const chrome = chartChrome(theme);
     const { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks } = agg;
-    const categoryStacks = categorySeries(visible, categories);
+    const categoryStacks = categorySeries(visible, categories, theme);
     const stacks = stackBy === "category" ? categoryStacks : stateStacks;
     const stackNames = stacks.map((stack) => stack.name);
     const showProductiveAverage = stackBy === "state";
     const tooltip = {
       trigger: "axis" as const,
-      ...TOOLTIP_STYLE,
+      ...tooltipStyle(theme),
       formatter: (params: Array<{ axisValueLabel: string; dataIndex: number; marker: string; seriesName: string; value: unknown }>) => {
         if (!params.length) return "";
         const byName = new Map(params.map((p) => [p.seriesName, p]));
@@ -349,7 +353,7 @@ export default function ProductiveHoursChart({
         left: "center",
         width: "92%",
         data: legendData,
-        textStyle: { color: CHROME.axisLabel, fontSize: 11 },
+        textStyle: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         itemWidth: 14,
         itemHeight: 8,
         itemGap: 14,
@@ -357,14 +361,14 @@ export default function ProductiveHoursChart({
       xAxis: {
         type: "category",
         data: labels,
-        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
+        axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: CHROME.axisLine } },
+        axisLine: { lineStyle: { color: chrome.axisLine } },
       },
       yAxis: {
         type: "value",
-        axisLabel: { color: CHROME.axisLabel, fontSize: 11, formatter: "{value}h" },
-        splitLine: { lineStyle: { color: CHROME.gridLine } },
+        axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE, formatter: "{value}h" },
+        splitLine: { lineStyle: { color: chrome.gridLine } },
       },
       series: [
         ...stacks.map((stack, index) => ({
@@ -385,12 +389,12 @@ export default function ProductiveHoursChart({
           data: avgLine,
           symbol: "none",
           connectNulls: false,
-          lineStyle: { color: ANNOTATION, width: 2, type: "dashed" },
-          itemStyle: { color: ANNOTATION },
+          lineStyle: { color: annotation(theme), width: 2, type: "dashed" },
+          itemStyle: { color: annotation(theme) },
         }] : []),
       ],
     };
-  }, [agg, stackBy, categories, chartWidth]);
+  }, [agg, stackBy, categories, chartWidth, theme]);
 
   return (
     <div ref={wrapRef}>

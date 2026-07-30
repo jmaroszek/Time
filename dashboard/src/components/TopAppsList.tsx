@@ -8,6 +8,7 @@ import { withAlias } from "../lib/aliases";
 import { cleanProcessName, fmtDuration } from "../lib/format";
 import { saveProcessAliases } from "../lib/queries";
 import { useBanner } from "../state/banner";
+import { uncategorizedMark } from "../lib/chartTheme";
 import { useMeta } from "../state/meta";
 import { CategoryDot, FloatingTooltip } from "./ui";
 
@@ -58,7 +59,7 @@ export default function TopAppsList({
           >
             <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-2 truncate sm:w-36 sm:shrink-0">
               <CategoryDot
-                color={app.category?.color ?? "#5b616b"}
+                color={app.category?.color ?? uncategorizedMark(meta.theme)}
                 label={app.category?.name ?? "Uncategorized"}
               />
               {editingProcess === app.process ? (
@@ -73,7 +74,7 @@ export default function TopAppsList({
                     if (event.key === "Enter") void commitRename(app.process);
                     else if (event.key === "Escape") setEditingProcess(null);
                   }}
-                  className="w-full min-w-0 rounded-md border border-edge bg-surface-2 px-1.5 py-0.5 text-xs text-ink outline-none focus:border-accent/60"
+                  className="w-full min-w-0 rounded-md border border-control-edge bg-control px-1.5 py-0.5 text-xs text-ink outline-none focus:border-accent/60"
                 />
               ) : (
                 <span

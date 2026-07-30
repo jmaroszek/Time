@@ -61,7 +61,7 @@ export default function DateRangePicker({
         onChange={(v) => onPreset(v as PresetOrCustom)}
         options={PRESETS}
         label="Date range preset"
-        className="w-24 sm:w-32"
+        className="w-24 shadow-control sm:w-32"
       />
       {/* Compact controls are deliberately narrower than their desktop
           counterparts so the complete range stays on one line at the minimum
@@ -72,7 +72,7 @@ export default function DateRangePicker({
         value={toInputValue(range.start)}
         max={toInputValue(lastDay)}
         onChange={(v) => commitCustom(v, toInputValue(lastDay))}
-        className="min-w-0 w-32 sm:w-36"
+        className="min-w-0 w-32 shadow-control sm:w-36"
       />
       <span className="shrink-0 text-xs text-ink-3">to</span>
       <TextInput
@@ -80,7 +80,7 @@ export default function DateRangePicker({
         value={toInputValue(lastDay)}
         min={toInputValue(range.start)}
         onChange={(v) => commitCustom(toInputValue(range.start), v)}
-        className="min-w-0 w-32 sm:w-36"
+        className="min-w-0 w-32 shadow-control sm:w-36"
       />
     </div>
   );

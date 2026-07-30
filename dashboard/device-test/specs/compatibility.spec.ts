@@ -272,7 +272,12 @@ test("primary screens remain usable at the effective viewport contract", async (
   await page.getByRole("button", { name: "Close menu" }).click();
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByText("Tracker status", { exact: true })).toBeVisible();
+  // Scoped to the section itself: Settings' section rail lists the same labels
+  // as anchor links, so an unscoped text match is ambiguous at the widths where
+  // the rail is shown. The assertion is unchanged — the section has rendered.
+  await expect(
+    page.locator("#settings-tracker-status").getByText("Tracker status", { exact: true }),
+  ).toBeVisible();
   await assertNoHorizontalOverflow(page);
 });
 
