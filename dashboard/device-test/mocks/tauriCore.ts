@@ -1,5 +1,22 @@
 type InvokeArgs = Record<string, unknown> | undefined;
 
+interface InvocationRecord {
+  command: string;
+  args: InvokeArgs;
+}
+
+declare global {
+  interface Window {
+    __TIME_DEVICE_TEST__: {
+      invocations: InvocationRecord[];
+      settings: Record<string, string>;
+      sessionCount: () => number;
+    };
+  }
+}
+
+const fixtureParams = new URLSearchParams(window.location.search);
+const forcedFailure = fixtureParams.get("fail");
 const now = Date.now() / 1000;
 const day = 86_400;
 const processes = [
@@ -39,7 +56,7 @@ const recentSessions = Array.from({ length: 21 * processes.length }, (_, index) 
     isCorrected: false,
   };
 });
-const sessions = [
+let sessions = [
   {
     id: 10_000,
     start: now - 500 * day,
@@ -98,10 +115,10 @@ const ruleRows = [
 ];
 
 const settings: Record<string, string> = {
-  schema_version: "1",
+  schema_version: "4",
   privacy_onboarding_complete:
-    new URLSearchParams(window.location.search).get("fixture") === "onboarding" ? "0" : "1",
-  starter_categories_pending: "0",
+    fixtureParams.get("fixture") === "onboarding" ? "0" : "1",
+  starter_categories_pending: fixtureParams.get("fixture") === "onboarding" ? "1" : "0",
   recording_consent: "1",
   record_window_titles: "1",
   launch_at_login: "1",
@@ -127,6 +144,28 @@ const settings: Record<string, string> = {
   }),
   tracker_version: "0.1.0-device-fixture",
 };
+
+const trackingExclusions: Array<{
+  kind: "app" | "website";
+  pattern: string;
+  createdTs: number;
+}> = [
+  { kind: "app", pattern: "private-app.exe", createdTs: now - day },
+  { kind: "website", pattern: "private.example", createdTs: now - day },
+];
+
+const invocations: InvocationRecord[] = [];
+window.__TIME_DEVICE_TEST__ = {
+  invocations,
+  settings,
+  sessionCount: () => sessions.length,
+};
+
+function failWhenRequested(command: string): void {
+  if (forcedFailure === command) {
+    throw new Error(`device fixture forced ${command} failure`);
+  }
+}
 
 function normalizedSql(args: InvokeArgs): string {
   return String(args?.query ?? "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -170,6 +209,8 @@ function sessionColumns(args: InvokeArgs) {
 }
 
 export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
+  invocations.push({ command, args: structuredClone(args) });
+  failWhenRequested(command);
   let result: unknown;
   switch (command) {
     case "db_path":
@@ -198,12 +239,82 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
     case "take_restore_notice":
       result = null;
       break;
-    case "list_tracking_exclusions":
-      result = [
-        { kind: "app", pattern: "private-app.exe", createdTs: now - day },
-        { kind: "website", pattern: "private.example", createdTs: now - day },
-      ];
+    case "set_launch_at_login":
+    case "start_tracker":
+    case "stop_tracker":
+    case "restore_database":
+      result = null;
       break;
+    case "backup_database":
+      result = "C:\\DeviceFixture\\Backups\\backup_manual_fixed.db";
+      break;
+    case "erase_history": {
+      const count = sessions.length;
+      sessions = [];
+      result = count;
+      break;
+    }
+    case "preview_activity_delete": {
+      const selected = sessions.filter((session) => session.process === "explorer.exe");
+      result = {
+        count: selected.length,
+        seconds: selected.reduce((total, session) => total + session.end - session.start, 0),
+        earliestStart: selected[0]?.start ?? null,
+        latestEnd: selected.at(-1)?.end ?? null,
+        protectedCount: 0,
+        snapshotMaxId: Math.max(0, ...sessions.map((session) => session.id)),
+        protectedSessionId: null,
+      };
+      break;
+    }
+    case "delete_activity": {
+      const before = sessions.length;
+      sessions = sessions.filter((session) => session.process !== "explorer.exe");
+      result = { deletedCount: before - sessions.length, protectedCount: 0 };
+      break;
+    }
+    case "list_tracking_exclusions":
+      result = trackingExclusions;
+      break;
+    case "preview_tracking_exclusion": {
+      const kind = String(args?.kind ?? "");
+      const pattern = String(args?.pattern ?? "").trim().toLowerCase();
+      const matches = sessions.filter((session) =>
+        kind === "app" ? session.process.toLowerCase() === pattern : session.domain === pattern
+      );
+      result = {
+        count: matches.length,
+        seconds: matches.reduce((total, session) => total + session.end - session.start, 0),
+        normalizedPattern: pattern,
+      };
+      break;
+    }
+    case "add_tracking_exclusion": {
+      const kind = String(args?.kind ?? "") as "app" | "website";
+      const pattern = String(args?.pattern ?? "").trim().toLowerCase();
+      const deleteHistory = args?.deleteHistory === true;
+      const before = sessions.length;
+      if (deleteHistory) {
+        sessions = sessions.filter((session) =>
+          kind === "app" ? session.process.toLowerCase() !== pattern : session.domain !== pattern
+        );
+      }
+      if (!trackingExclusions.some((item) => item.kind === kind && item.pattern === pattern)) {
+        trackingExclusions.push({ kind, pattern, createdTs: now });
+      }
+      result = { normalizedPattern: pattern, deletedCount: before - sessions.length };
+      break;
+    }
+    case "remove_tracking_exclusion": {
+      const kind = String(args?.kind ?? "");
+      const pattern = String(args?.pattern ?? "").trim().toLowerCase();
+      const index = trackingExclusions.findIndex(
+        (item) => item.kind === kind && item.pattern === pattern,
+      );
+      if (index >= 0) trackingExclusions.splice(index, 1);
+      result = index >= 0 ? 1 : 0;
+      break;
+    }
     case "list_database_backups":
       result = [
         {
@@ -212,7 +323,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
           kind: "automatic",
           modifiedSec: now - 3_600,
           bytes: 2_400_000,
-          schemaVersion: 1,
+          schemaVersion: 4,
           compatible: true,
           issue: null,
           legacyLocation: false,

@@ -4,10 +4,18 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tracker:
     # windows-latest because the tracker depends on pywin32.
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -15,12 +23,25 @@ jobs:
           python-version: "3.13"
       - name: Install dependencies
         run: pip install -r tracker/requirements-dev.txt
-      - name: Run pytest
-        run: python -m pytest tracker/tests scripts/tests
+      - name: Run pytest with branch coverage
+        run: |
+          New-Item -ItemType Directory -Force coverage/python | Out-Null
+          python -m coverage run -m pytest tracker/tests scripts/tests --junitxml=coverage/python/pytest.xml
+          python -m coverage xml
+          python -m coverage json
+          python -m coverage report
+      - name: Upload Python test and coverage results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-quality-results
+          path: coverage/python
+          if-no-files-found: error
 
   dashboard:
     name: dashboard (${{ matrix.timezone }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -43,14 +64,22 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npx tsc --noEmit
-      - name: Run vitest
-        run: npx vitest run
+      - name: Run vitest with branch coverage
+        run: npm run test:coverage
       - name: Check patch whitespace
         run: git diff --check
+      - name: Upload dashboard coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-coverage-${{ strategy.job-index }}
+          path: dashboard/coverage/vitest
+          if-no-files-found: error
 
   renderer-compatibility:
     name: renderer compatibility
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: dashboard
@@ -67,8 +96,10 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run device renderer suite
         run: npm run test:device
+      - name: Repeat deterministic renderer suite
+        run: npm run test:device
       - name: Upload renderer failure artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: renderer-compatibility-artifacts
@@ -83,6 +114,7 @@ jobs:
   windows-backend:
     name: Windows backend
     runs-on: windows-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: dashboard
@@ -114,6 +146,19 @@ jobs:
       - name: Build tracker sidecar
         run: python scripts/build_tracker.py
         working-directory: .
+      - name: Smoke packaged tracker in scratch LOCALAPPDATA
+        shell: pwsh
+        run: |
+          $tracker = Resolve-Path "src-tauri/binaries/time-tracker-x86_64-pc-windows-msvc.exe"
+          $output = Join-Path $env:RUNNER_TEMP "time-packaged-smoke-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          ../scripts/smoke_packaged_tracker.ps1 -TrackerExecutable $tracker -OutputDirectory $output
+      - name: Upload packaged tracker smoke results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-tracker-smoke
+          path: ${{ runner.temp }}/time-packaged-smoke-${{ github.run_id }}-${{ github.run_attempt }}/results
+          if-no-files-found: error
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Run Rust tests
@@ -122,3 +167,26 @@ jobs:
       # local WebDriver suite depends on from rotting between releases.
       - name: Build isolated debug application
         run: npm run build:native-device
+
+  quality-gate:
+    name: Required quality gate
+    if: always()
+    needs:
+      - tracker
+      - dashboard
+      - renderer-compatibility
+      - windows-backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every production quality job
+        env:
+          TRACKER_RESULT: ${{ needs.tracker.result }}
+          DASHBOARD_RESULT: ${{ needs.dashboard.result }}
+          RENDERER_RESULT: ${{ needs.renderer-compatibility.result }}
+          WINDOWS_RESULT: ${{ needs.windows-backend.result }}
+        run: |
+          test "$TRACKER_RESULT" = success
+          test "$DASHBOARD_RESULT" = success
+          test "$RENDERER_RESULT" = success
+          test "$WINDOWS_RESULT" = success

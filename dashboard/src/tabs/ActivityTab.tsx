@@ -2373,6 +2373,10 @@ function ExcludedPanel() {
       const preview = await previewTrackingExclusion(kind, draft);
       if (deleteHistory && preview.count > 0) {
         setPendingHistoryDelete(preview);
+        // Previewing is complete; the confirmation is a separate action. If
+        // saving stays true, the dialog's destructive button is disabled and
+        // the user can never commit the exclusion.
+        setSaving(false);
         return;
       }
       await commit();

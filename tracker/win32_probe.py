@@ -1,8 +1,8 @@
 """Win32 input layer: idle time, foreground process/title, UWP resolution.
 
 Everything here returns plain data (a Snapshot); all interpretation lives in
-session_manager. This module is intentionally not unit-tested — it is the thin
-layer the fakes stand in for.
+session_manager. Keeping this boundary small also makes the Windows calls
+replaceable in tests without weakening coverage of their edge-case handling.
 """
 
 from __future__ import annotations

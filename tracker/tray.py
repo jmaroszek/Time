@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time as _time
 from pathlib import Path
 
 _DEV_ICON_PATH = Path(__file__).resolve().parent.parent / "dashboard/src-tauri/icons/icon.ico"
@@ -79,15 +80,57 @@ def _read_pause_state(db_path: str | Path) -> tuple[bool, float]:
         until = float(rows.get("tracking_paused_until", "0"))
     except ValueError:
         until = 0.0
-    import time
-
-    paused = rows.get("tracking_paused") == "1" or time.time() < until
+    paused = rows.get("tracking_paused") == "1" or _time.time() < until
     return paused, until
 
 
 def _next_midnight() -> float:
     tomorrow = _dt.date.today() + _dt.timedelta(days=1)
     return _dt.datetime.combine(tomorrow, _dt.time.min).timestamp()
+
+
+class _TrayActions:
+    """Testable callback boundary between pystray and Time's persisted state."""
+
+    def __init__(self, db_path: str | Path, stop_event: threading.Event):
+        self.db_path = db_path
+        self.stop_event = stop_event
+
+    def status_text(self, _item) -> str:
+        paused, until = _read_pause_state(self.db_path)
+        if not paused:
+            return "Recording"
+        if until > _time.time():
+            return f"Paused until {_dt.datetime.fromtimestamp(until):%H:%M}"
+        return "Paused"
+
+    def pause_for(self, seconds: float):
+        def action(_icon, _item) -> None:
+            _write_pause(self.db_path, "0", _time.time() + seconds)
+
+        return action
+
+    def pause_until_tomorrow(self, _icon, _item) -> None:
+        _write_pause(self.db_path, "0", _next_midnight())
+
+    def pause_indefinitely(self, _icon, _item) -> None:
+        _write_pause(self.db_path, "1", 0)
+
+    def resume(self, _icon, _item) -> None:
+        _write_pause(self.db_path, "0", 0)
+
+    def open_dashboard(self, _icon, _item) -> None:
+        path = _dashboard_path()
+        if path is None:
+            return
+        try:
+            subprocess.Popen([str(path)], cwd=str(path.parent), close_fds=True)
+        except OSError:
+            logging.exception("Could not open the Time dashboard")
+
+    def quit_tracker(self, icon, _item) -> None:
+        self.stop_event.set()
+        icon.stop()
 
 
 def start_tray(db_path: str | Path, stop_event: threading.Event) -> bool:
@@ -110,64 +153,28 @@ def start_tray(db_path: str | Path, stop_event: threading.Event) -> bool:
             draw.ellipse((4, 4, 60, 60), fill=(22, 24, 29, 255), outline=(22, 185, 129, 255), width=6)
             return img
 
-    import time as _time
-
-    def status_text(_item) -> str:
-        paused, until = _read_pause_state(db_path)
-        if not paused:
-            return "Recording"
-        if until > _time.time():
-            return f"Paused until {_dt.datetime.fromtimestamp(until):%H:%M}"
-        return "Paused"
-
-    def pause_for(seconds: float):
-        def action(_icon, _item) -> None:
-            _write_pause(db_path, "0", _time.time() + seconds)
-
-        return action
-
-    def pause_until_tomorrow(_icon, _item) -> None:
-        _write_pause(db_path, "0", _next_midnight())
-
-    def pause_indefinitely(_icon, _item) -> None:
-        _write_pause(db_path, "1", 0)
-
-    def resume(_icon, _item) -> None:
-        _write_pause(db_path, "0", 0)
-
-    def open_dashboard(_icon, _item) -> None:
-        path = _dashboard_path()
-        if path is None:
-            return
-        try:
-            subprocess.Popen([str(path)], cwd=str(path.parent), close_fds=True)
-        except OSError:
-            logging.exception("Could not open the Time dashboard")
-
-    def quit_tracker(icon, _item) -> None:
-        stop_event.set()
-        icon.stop()
+    actions = _TrayActions(db_path, stop_event)
 
     menu = pystray.Menu(
-        pystray.MenuItem(status_text, None, enabled=False),
+        pystray.MenuItem(actions.status_text, None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
             "Pause tracking",
             pystray.Menu(
-                pystray.MenuItem("For 15 minutes", pause_for(15 * 60)),
-                pystray.MenuItem("For 1 hour", pause_for(60 * 60)),
-                pystray.MenuItem("Until tomorrow", pause_until_tomorrow),
-                pystray.MenuItem("Until resumed", pause_indefinitely),
+                pystray.MenuItem("For 15 minutes", actions.pause_for(15 * 60)),
+                pystray.MenuItem("For 1 hour", actions.pause_for(60 * 60)),
+                pystray.MenuItem("Until tomorrow", actions.pause_until_tomorrow),
+                pystray.MenuItem("Until resumed", actions.pause_indefinitely),
             ),
         ),
-        pystray.MenuItem("Resume tracking", resume),
+        pystray.MenuItem("Resume tracking", actions.resume),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
             "Open dashboard",
-            open_dashboard,
+            actions.open_dashboard,
             visible=lambda _item: _dashboard_path() is not None,
         ),
-        pystray.MenuItem("Quit tracker", quit_tracker),
+        pystray.MenuItem("Quit tracker", actions.quit_tracker),
     )
     icon = pystray.Icon("time-tracker", load_icon(), "Time tracker", menu)
 
