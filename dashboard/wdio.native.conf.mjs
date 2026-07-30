@@ -18,7 +18,8 @@ export const config = {
       },
     },
   ],
-  logLevel: "warn",
+  // Quiet locally; CI raises this so a failed session handshake is diagnosable.
+  logLevel: process.env.WDIO_LOG_LEVEL ?? "warn",
   bail: 0,
   waitforTimeout: 15_000,
   connectionRetryTimeout: 120_000,
