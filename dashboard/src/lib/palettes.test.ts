@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -85,13 +88,22 @@ function minAllPairs(colors: string[]): number {
   return min;
 }
 
-// WCAG contrast, for the light hue swatches. These are never drawn as text —
+// WCAG contrast, for the hue swatches. These are never drawn as text —
 // stateColors feeds CategoryDot, TopAppsList and TimelineChart fill blocks,
 // chartTheme fills series — so the applicable floor is the 3:1 graphical-object
-// one, not the 4.5:1 text floor. A one-sided minimum only pushes light values
-// darker, which is how they ended up 50-90% heavier than their dark mirror; the
-// band plus the spread cap below is what catches that regressing again.
+// one, not the 4.5:1 text floor. Light is held on the card; dark is held on the
+// lighter raised surface where a swatch has its lowest contrast. The row surface
+// owns dark's spread because category dots most often appear there.
 const LIGHT_CARD = "#ffffff";
+const DARK_THEME_CSS = readFileSync(join(__dirname, "..", "index.css"), "utf8")
+  .match(/@theme\s*{([\s\S]*?)\n}/)?.[1];
+function darkThemeToken(name: string): string {
+  const value = DARK_THEME_CSS?.match(new RegExp(`${name}\\s*:\\s*(#[0-9a-fA-F]{6})`))?.[1];
+  if (!value) throw new Error(`Missing dark theme token ${name}`);
+  return value;
+}
+const DARK_ROW = darkThemeToken("--color-surface-2");
+const DARK_RAISED = darkThemeToken("--color-surface-3");
 function wcagLuminance(hex: string): number {
   const [r, g, b] = [1, 3, 5]
     .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
@@ -192,6 +204,20 @@ describe("palettes", () => {
             const spread = Math.max(...ratios) / Math.min(...ratios);
             expect(spread).toBeLessThanOrEqual(1.7);
           });
+        } else {
+          it("keeps each hue swatch within the graphical-fill contrast band on the raised surface", () => {
+            for (const hue of hues) {
+              const ratio = wcagContrast(hue, DARK_RAISED);
+              expect(Math.round(ratio * 100) / 100, hue).toBeGreaterThanOrEqual(3.0);
+              expect(Math.round(ratio * 100) / 100, hue).toBeLessThanOrEqual(5.2);
+            }
+          });
+
+          it("keeps the eight hue swatches' row contrast tight, so the set reads as peers", () => {
+            const ratios = hues.map((hue) => wcagContrast(hue, DARK_ROW));
+            const spread = Math.max(...ratios) / Math.min(...ratios);
+            expect(spread).toBeLessThanOrEqual(1.7);
+          });
         }
       });
     }
@@ -262,6 +288,18 @@ describe("palettes", () => {
         const light = palette.light.swatches[index];
         expect(themedSwatch(themed, "light", canonical)).toBe(light);
         expect(canonicalSwatch(themed, "light", light)).toBe(canonical);
+      }
+    }
+  });
+
+  it("maps every legacy dark generation to its current slot without rewriting stored colors", () => {
+    for (const palette of PALETTES) {
+      for (const generation of palette.legacyDarkSwatches ?? []) {
+        expect(generation).toHaveLength(palette.swatches.length);
+        for (const [index, legacy] of generation.entries()) {
+          expect(themedSwatch(palette, "dark", legacy)).toBe(palette.swatches[index]);
+          expect(themedSwatch(palette, "light", legacy)).toBe(palette.light.swatches[index]);
+        }
       }
     }
   });
@@ -342,6 +380,16 @@ describe("productivity options", () => {
     for (const option of PRODUCTIVITY_OPTIONS) {
       for (const color of [option.light.productive, option.light.unproductive]) {
         const ratio = wcagContrast(color, LIGHT_CARD);
+        expect(Math.round(ratio * 100) / 100, color).toBeGreaterThanOrEqual(3.0);
+        expect(Math.round(ratio * 100) / 100, color).toBeLessThanOrEqual(5.2);
+      }
+    }
+  });
+
+  it("keeps each dark productivity colour clear on the raised surface", () => {
+    for (const option of PRODUCTIVITY_OPTIONS) {
+      for (const color of [option.productive, option.unproductive]) {
+        const ratio = wcagContrast(color, DARK_RAISED);
         expect(Math.round(ratio * 100) / 100, color).toBeGreaterThanOrEqual(3.0);
         expect(Math.round(ratio * 100) / 100, color).toBeLessThanOrEqual(5.2);
       }
