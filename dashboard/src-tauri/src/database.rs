@@ -162,7 +162,8 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('recording_consent','0'),
     ('record_window_titles','0'),
     ('privacy_onboarding_complete','0'),
-    ('launch_at_login','0');
+    ('launch_at_login','0'),
+    ('show_tray_icon','1');
 COMMIT;
 "#;
 
@@ -2192,6 +2193,11 @@ pub(crate) mod tests {
                     .fetch_one(&database.pool)
                     .await
                     .unwrap();
+            let tray_icon: String =
+                sqlx::query_scalar("SELECT value FROM settings WHERE key='show_tray_icon'")
+                    .fetch_one(&database.pool)
+                    .await
+                    .unwrap();
             let starter_pending: String = sqlx::query_scalar(
                 "SELECT value FROM settings WHERE key='starter_categories_pending'",
             )
@@ -2204,9 +2210,10 @@ pub(crate) mod tests {
                     rules,
                     consent.as_str(),
                     titles.as_str(),
+                    tray_icon.as_str(),
                     starter_pending.as_str()
                 ),
-                (6, 0, "0", "0", "1")
+                (6, 0, "0", "0", "1", "1")
             );
             database.pool.close().await;
             drop(database);

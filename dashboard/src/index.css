@@ -48,6 +48,9 @@
   --color-good: #4fb389;
   --color-good-data: #16b981;
   --color-bad: #d07d7d;
+  /* Window chrome needs the unmistakable saturated red of a close target;
+     content warnings keep the quieter --color-bad treatment above. */
+  --color-window-close: #e5484d;
   /* The third tracker state: paused is neither live nor broken. Was the one
      status colour written out as a literal, which on a white card would have
      been a pale yellow dot next to a solid green and red one. */
@@ -140,6 +143,7 @@
   --color-good: #2a7758;
   --color-good-data: #0a855b;
   --color-bad: #a94a4c;
+  --color-window-close: #d72c35;
   --color-warn: #9d6504;
   --color-hover: rgba(21, 24, 29, .04);
   --color-hover-2: rgba(21, 24, 29, .075);

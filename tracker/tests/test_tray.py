@@ -1,4 +1,7 @@
 import threading
+import time
+
+import pystray
 
 from tracker import db, tray
 
@@ -19,23 +22,27 @@ def test_tray_pause_resume_callbacks_persist_state(tmp_path, monkeypatch):
     actions = tray._TrayActions(path, stop_event)
     monkeypatch.setattr(tray._time, "time", lambda: 1_000.0)
 
-    actions.pause_for(900)(None, None)
+    class FakeIcon:
+        title = ""
+
+    icon = FakeIcon()
+    actions.pause_for(900)(icon, None)
     paused = _settings(path)
     assert paused["tracking_paused"] == "0"
     assert paused["tracking_paused_until"] == "1900"
-    assert actions.status_text(None).startswith("Paused until ")
+    assert icon.title.startswith("Time — Paused until ")
 
-    actions.pause_indefinitely(None, None)
+    actions.pause_indefinitely(icon, None)
     paused = _settings(path)
     assert paused["tracking_paused"] == "1"
     assert paused["tracking_paused_until"] == "0"
-    assert actions.status_text(None) == "Paused"
+    assert icon.title == "Time — Paused"
 
-    actions.resume(None, None)
+    actions.resume(icon, None)
     resumed = _settings(path)
     assert resumed["tracking_paused"] == "0"
     assert resumed["tracking_paused_until"] == "0"
-    assert actions.status_text(None) == "Recording"
+    assert icon.title == "Time — Recording"
 
 
 def test_tray_until_tomorrow_uses_midnight_boundary(tmp_path, monkeypatch):
@@ -45,11 +52,52 @@ def test_tray_until_tomorrow_uses_midnight_boundary(tmp_path, monkeypatch):
     actions = tray._TrayActions(path, threading.Event())
     monkeypatch.setattr(tray, "_next_midnight", lambda: 86_400.0)
 
-    actions.pause_until_tomorrow(None, None)
+    class FakeIcon:
+        title = ""
+
+    actions.pause_until_tomorrow(FakeIcon(), None)
 
     settings = _settings(path)
     assert settings["tracking_paused"] == "0"
     assert settings["tracking_paused_until"] == "86400"
+
+
+def test_tray_tooltip_distinguishes_recording_and_pause_states():
+    one_pm = tray._dt.datetime(2026, 7, 30, 13, 0).timestamp()
+    assert tray._tooltip_text(False, 0, now=1_000) == "Time — Recording"
+    assert tray._tooltip_text(True, 0, now=1_000) == "Time — Paused"
+    assert (
+        tray._tooltip_text(True, one_pm, now=one_pm - 60)
+        == "Time — Paused until 1:00 PM"
+    )
+
+
+def test_tray_menu_uses_default_dashboard_and_one_state_action(tmp_path, monkeypatch):
+    path = tmp_path / "tray.db"
+    conn = db.open_db(path)
+    conn.close()
+    dashboard = tmp_path / "Time.exe"
+    dashboard.touch()
+    monkeypatch.setattr(tray, "_dashboard_path", lambda: dashboard)
+    actions = tray._TrayActions(path, threading.Event())
+
+    menu = tray._build_menu(pystray, actions)
+    items = menu.items
+    assert [str(item.text) for item in items] == [
+        "Open dashboard",
+        "- - - -",
+        "Pause tracking",
+        "Resume tracking",
+        "- - - -",
+        "Quit tracker",
+    ]
+    assert items[0].default is True
+    assert items[2].visible is True
+    assert items[3].visible is False
+
+    tray._write_pause(path, "1", 0)
+    assert items[2].visible is False
+    assert items[3].visible is True
 
 
 def test_tray_open_dashboard_and_quit_callbacks(tmp_path, monkeypatch):
@@ -83,3 +131,90 @@ def test_tray_open_dashboard_and_quit_callbacks(tmp_path, monkeypatch):
     actions.quit_tracker(icon, None)
     assert stop_event.is_set()
     assert icon.stopped
+
+
+class _FakeMenu(tuple):
+    SEPARATOR = object()
+
+    def __new__(cls, *items):
+        return tuple.__new__(cls, items)
+
+
+class _FakeMenuItem:
+    def __init__(self, text, action, **kwargs):
+        self.text = text
+        self.action = action
+        self.kwargs = kwargs
+
+
+class _FakeIcon:
+    def __init__(self, _name, _image, title, menu):
+        self.title = title
+        self.menu = menu
+        self.visible = False
+        self.stopped = threading.Event()
+        self.menu_updates = 0
+
+    def run(self, setup):
+        setup(self)
+        self.stopped.wait(timeout=2)
+
+    def stop(self):
+        self.stopped.set()
+
+    def update_menu(self):
+        self.menu_updates += 1
+
+
+class _FakePystray:
+    Menu = _FakeMenu
+    MenuItem = _FakeMenuItem
+
+    def __init__(self):
+        self.icons = []
+
+    def Icon(self, *args):
+        icon = _FakeIcon(*args)
+        self.icons.append(icon)
+        return icon
+
+
+def test_tray_controller_hides_and_recreates_without_stopping_tracker(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "tray.db"
+    conn = db.open_db(path)
+    conn.close()
+    pystray_fake = _FakePystray()
+    monkeypatch.setattr(tray, "_load_icon", lambda *_args: object())
+    stop_event = threading.Event()
+    controller = tray.TrayController(
+        path,
+        stop_event,
+        pystray_fake,
+        object(),
+        object(),
+    )
+
+    assert controller.set_enabled(True) is True
+    first = pystray_fake.icons[0]
+    for _ in range(50):
+        if first.visible:
+            break
+        time.sleep(0.01)
+    assert first.visible is True
+    assert controller.set_enabled(True) is True
+    assert len(pystray_fake.icons) == 1
+
+    controller.sync_state(True, 0)
+    assert first.title == "Time — Paused"
+    assert first.menu_updates == 1
+
+    assert controller.set_enabled(False) is False
+    assert first.stopped.is_set()
+    assert stop_event.is_set() is False
+
+    assert controller.set_enabled(True) is True
+    assert len(pystray_fake.icons) == 2
+    controller.close()
+    assert pystray_fake.icons[1].stopped.is_set()

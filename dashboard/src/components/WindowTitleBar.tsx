@@ -198,7 +198,7 @@ export default function WindowTitleBar({
           // A literal white is correct here, and one of the few places it is:
           // the Windows close button is red with a white glyph regardless of the
           // app's theme, so the glyph must not follow --color-bg into a light one.
-          className={`${buttonBaseClass} hover:bg-bad hover:text-white active:bg-bad active:brightness-90`}
+          className={`${buttonBaseClass} hover:bg-window-close hover:text-white active:bg-window-close active:brightness-90`}
           onClick={() => perform("close")}
         >
           <CloseIcon />

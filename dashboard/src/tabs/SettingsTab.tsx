@@ -80,6 +80,17 @@ const SPECS_BY_KEY = new Map(
 
 const TRACKER_HEALTH_STALE_SECONDS = 8;
 const TRACKER_STATUS_POLL_MS = 2_000;
+const TRACKER_START_TIMEOUT_MS = 10_000;
+
+function trackerHeartbeatIsLive(status: TrackerStatus): boolean {
+  return status.lastHeartbeat !== null
+    && status.lastHeartbeat > 0
+    && Date.now() / 1000 - status.lastHeartbeat < TRACKER_HEALTH_STALE_SECONDS;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function displayValue(spec: NumericSpec, raw: string | undefined): string {
   const value = Number(raw);
@@ -160,6 +171,7 @@ export default function SettingsTab({
   const banner = useBanner();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<TrackerStatus | null>(null);
+  const [startingTracker, setStartingTracker] = useState(false);
   const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
   const [saveOutcome, setSaveOutcome] = useState<SaveOutcome>("idle");
   const writeQueueRef = useRef(new KeyedSerialQueue());
@@ -356,6 +368,24 @@ export default function SettingsTab({
     : Date.now() / 1000 - status.lastHeartbeat;
   const trackerLive = heartbeatAge !== null && heartbeatAge < TRACKER_HEALTH_STALE_SECONDS;
   const trackingEnabled = meta.settings.recording_consent === "1";
+  const trackerLabel = !trackingEnabled
+    ? "Tracking disabled"
+    : !trackerLive
+      ? "Tracker not detected"
+      : pause.paused
+        ? "Tracking paused"
+        : "Tracker is live";
+  const trackerDetail = !trackingEnabled
+    ? "No new activity is being recorded"
+    : !trackerLive
+      ? heartbeatAge === null
+        ? "Waiting for a tracker health signal"
+        : `No tracker heartbeat for ${fmtDuration(Math.max(heartbeatAge, 0))}`
+      : pause.paused
+        ? pause.until > Date.now() / 1000
+          ? `Resumes at ${new Date(pause.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — or sooner from the tray icon`
+          : "Resume from the tray icon"
+        : "Collecting activity in real time";
   const noiseMode = resolvedNoiseMode(drafts.activity_noise_filter);
   const hideRare = hidesRareItems(noiseMode);
   const hideUtilities = hidesUtilities(noiseMode);
@@ -378,6 +408,29 @@ export default function SettingsTab({
       await invoke("set_launch_at_login", { enabled });
       await updateSetting("launch_at_login", enabled ? "1" : "0");
     }, "startup preference");
+  };
+
+  const startTracker = async () => {
+    if (startingTracker) return;
+    setStartingTracker(true);
+    try {
+      await invoke("start_tracker");
+      const deadline = Date.now() + TRACKER_START_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        const next = await fetchTrackerStatus();
+        setStatus(next);
+        if (trackerHeartbeatIsLive(next)) {
+          banner.show("Tracker started");
+          return;
+        }
+        await wait(500);
+      }
+      throw new Error("The tracker started but did not report a health signal");
+    } catch (error) {
+      banner.report(error, "tracker startup");
+    } finally {
+      setStartingTracker(false);
+    }
   };
 
   const themedChoice = (choice: ProductivityOption) =>
@@ -430,26 +483,32 @@ export default function SettingsTab({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-4 py-4 sm:px-[18px]">
-          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : pause.paused ? "bg-warn" : trackerLive ? "live-pulse bg-good-data" : "alert-pulse bg-bad"}`} />
-          <div>
+          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : !trackerLive ? "alert-pulse bg-bad" : pause.paused ? "bg-warn" : "live-pulse bg-good-data"}`} />
+          <div className="min-w-0">
             <p className="text-row font-semibold text-ink">
-              {!trackingEnabled ? "Tracking disabled" : pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
+              {trackerLabel}
             </p>
             <p className="mt-[3px] text-xs text-ink-3">
-              {!trackingEnabled
-                ? "No new activity is being recorded"
-                : pause.paused
-                ? pause.until > Date.now() / 1000
-                  ? `Resumes at ${new Date(pause.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — or sooner from the tray icon`
-                  : "Resume from the tray icon"
-                : trackerLive
-                  ? "Collecting activity in real time"
-                  : heartbeatAge === null
-                    ? "Waiting for a tracker health signal"
-                    : `No tracker heartbeat for ${fmtDuration(Math.max(heartbeatAge, 0))}`}
+              {trackerDetail}
             </p>
           </div>
-          {heartbeatAge !== null && <span className="basis-full text-xs tabular-nums text-ink-3 sm:ml-auto sm:basis-auto">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
+          {!trackingEnabled || trackerLive ? (
+            heartbeatAge !== null && (
+              <span className="basis-full text-xs tabular-nums text-ink-3 sm:ml-auto sm:basis-auto">
+                last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago
+              </span>
+            )
+          ) : (
+            <div className="basis-full sm:ml-auto sm:basis-auto">
+              <Button
+                variant="primary"
+                disabled={startingTracker}
+                onClick={() => void startTracker()}
+              >
+                {startingTracker ? "Starting…" : "Start tracker"}
+              </Button>
+            </div>
+          )}
         </div>
       </SettingsSection>
 
@@ -487,6 +546,18 @@ export default function SettingsTab({
                 </span>
               )}
             </span>
+          }
+        />
+        <Row
+          label="Show tray icon"
+          help="Show tracker controls in the Windows notification area."
+          control={
+            <PrivacyToggle
+              label="Show tray icon"
+              enabled={(drafts.show_tray_icon ?? meta.settings.show_tray_icon ?? "1") !== "0"}
+              disabled={savingKeys.has("show_tray_icon")}
+              onChange={(enabled) => selectSetting("show_tray_icon", enabled ? "1" : "0")}
+            />
           }
         />
         <ExclusionSummary onManage={onManageExclusions} />

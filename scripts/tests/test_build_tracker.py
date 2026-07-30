@@ -81,6 +81,33 @@ def test_target_triple_refuses_unknown_architecture(monkeypatch):
         build_tracker._target_triple(None)
 
 
+def test_sidecar_manifest_requires_per_monitor_v2(monkeypatch, tmp_path):
+    manifest = b"""<assembly>
+      <dpiAware>true/pm</dpiAware>
+      <dpiAwareness>PerMonitorV2</dpiAwareness>
+    </assembly>"""
+    monkeypatch.setattr(build_tracker, "_read_embedded_manifest", lambda _path: manifest)
+
+    build_tracker._verify_sidecar_manifest(tmp_path / "time-tracker.exe")
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        b"<assembly><dpiAware>true/pm</dpiAware></assembly>",
+        b"<assembly><dpiAwareness>PerMonitorV2</dpiAwareness></assembly>",
+        b"<assembly><dpiAware>true</dpiAware><dpiAwareness>system</dpiAwareness></assembly>",
+    ],
+)
+def test_sidecar_manifest_rejects_missing_dpi_contract(
+    manifest, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(build_tracker, "_read_embedded_manifest", lambda _path: manifest)
+
+    with pytest.raises(SystemExit, match="manifest does not declare"):
+        build_tracker._verify_sidecar_manifest(tmp_path / "time-tracker.exe")
+
+
 def _fake_run(monkeypatch, *, returncode, write_database):
     """Stand in for launching the packaged sidecar, and record its isolation."""
     captured = {}

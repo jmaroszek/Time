@@ -96,28 +96,40 @@ class _TrayActions:
         self.db_path = db_path
         self.stop_event = stop_event
 
-    def status_text(self, _item) -> str:
+    def pause_state(self) -> tuple[bool, float]:
+        return _read_pause_state(self.db_path)
+
+    def is_paused(self, _item=None) -> bool:
+        return self.pause_state()[0]
+
+    def is_recording(self, _item=None) -> bool:
+        return not self.is_paused()
+
+    def tooltip_text(self) -> str:
         paused, until = _read_pause_state(self.db_path)
-        if not paused:
-            return "Recording"
-        if until > _time.time():
-            return f"Paused until {_dt.datetime.fromtimestamp(until):%H:%M}"
-        return "Paused"
+        return _tooltip_text(paused, until)
+
+    def _refresh_icon_title(self, icon) -> None:
+        icon.title = self.tooltip_text()
 
     def pause_for(self, seconds: float):
-        def action(_icon, _item) -> None:
+        def action(icon, _item) -> None:
             _write_pause(self.db_path, "0", _time.time() + seconds)
+            self._refresh_icon_title(icon)
 
         return action
 
-    def pause_until_tomorrow(self, _icon, _item) -> None:
+    def pause_until_tomorrow(self, icon, _item) -> None:
         _write_pause(self.db_path, "0", _next_midnight())
+        self._refresh_icon_title(icon)
 
-    def pause_indefinitely(self, _icon, _item) -> None:
+    def pause_indefinitely(self, icon, _item) -> None:
         _write_pause(self.db_path, "1", 0)
+        self._refresh_icon_title(icon)
 
-    def resume(self, _icon, _item) -> None:
+    def resume(self, icon, _item) -> None:
         _write_pause(self.db_path, "0", 0)
+        self._refresh_icon_title(icon)
 
     def open_dashboard(self, _icon, _item) -> None:
         path = _dashboard_path()
@@ -133,30 +145,25 @@ class _TrayActions:
         icon.stop()
 
 
-def start_tray(db_path: str | Path, stop_event: threading.Event) -> bool:
-    """Start the tray icon in a daemon thread. Returns False when pystray or
-    Pillow is unavailable (dev environments) — the tracker runs on regardless."""
-    try:
-        import pystray
-        from PIL import Image, ImageDraw
-    except Exception:
-        logging.info("pystray/Pillow not installed; running without a tray icon.")
-        return False
+def _tooltip_text(paused: bool, until: float, now: float | None = None) -> str:
+    if not paused:
+        return "Time — Recording"
+    current = _time.time() if now is None else now
+    if until > current:
+        short_time = _dt.datetime.fromtimestamp(until).strftime("%I:%M %p").lstrip("0")
+        return f"Time — Paused until {short_time}"
+    return "Time — Paused"
 
-    def load_icon() -> "Image.Image":
-        try:
-            return Image.open(_icon_path())
-        except Exception:
-            # Fallback: the app's dark-clock look, minus the clock.
-            img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            draw.ellipse((4, 4, 60, 60), fill=(22, 24, 29, 255), outline=(22, 185, 129, 255), width=6)
-            return img
 
-    actions = _TrayActions(db_path, stop_event)
-
-    menu = pystray.Menu(
-        pystray.MenuItem(actions.status_text, None, enabled=False),
+def _build_menu(pystray, actions: _TrayActions):
+    """Create the native menu in task order, with one state-relevant control."""
+    return pystray.Menu(
+        pystray.MenuItem(
+            "Open dashboard",
+            actions.open_dashboard,
+            default=True,
+            visible=lambda _item: _dashboard_path() is not None,
+        ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
             "Pause tracking",
@@ -166,18 +173,150 @@ def start_tray(db_path: str | Path, stop_event: threading.Event) -> bool:
                 pystray.MenuItem("Until tomorrow", actions.pause_until_tomorrow),
                 pystray.MenuItem("Until resumed", actions.pause_indefinitely),
             ),
+            visible=actions.is_recording,
         ),
-        pystray.MenuItem("Resume tracking", actions.resume),
-        pystray.Menu.SEPARATOR,
         pystray.MenuItem(
-            "Open dashboard",
-            actions.open_dashboard,
-            visible=lambda _item: _dashboard_path() is not None,
+            "Resume tracking",
+            actions.resume,
+            visible=actions.is_paused,
         ),
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit tracker", actions.quit_tracker),
     )
-    icon = pystray.Icon("time-tracker", load_icon(), "Time tracker", menu)
 
-    thread = threading.Thread(target=icon.run, name="tray", daemon=True)
-    thread.start()
-    return True
+
+def _load_icon(Image, ImageDraw):
+    try:
+        return Image.open(_icon_path())
+    except Exception:
+        # Fallback: the app's dark-clock look, minus the clock.
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse(
+            (4, 4, 60, 60),
+            fill=(22, 24, 29, 255),
+            outline=(22, 185, 129, 255),
+            width=6,
+        )
+        return img
+
+
+class TrayController:
+    """Own one recreatable pystray icon without owning the tracker process."""
+
+    def __init__(
+        self,
+        db_path: str | Path,
+        stop_event: threading.Event,
+        pystray,
+        Image,
+        ImageDraw,
+    ):
+        self._actions = _TrayActions(db_path, stop_event)
+        self._pystray = pystray
+        self._Image = Image
+        self._ImageDraw = ImageDraw
+        self._lock = threading.RLock()
+        self._enabled = False
+        self._icon = None
+        self._thread: threading.Thread | None = None
+        self._state: tuple[bool, float] | None = None
+
+    @property
+    def enabled(self) -> bool:
+        with self._lock:
+            return self._enabled
+
+    def _new_icon(self):
+        return self._pystray.Icon(
+            "time-tracker",
+            _load_icon(self._Image, self._ImageDraw),
+            self._actions.tooltip_text(),
+            _build_menu(self._pystray, self._actions),
+        )
+
+    def _run_icon(self, icon) -> None:
+        def setup(ready_icon) -> None:
+            with self._lock:
+                should_show = self._enabled and self._icon is ready_icon
+            if should_show:
+                ready_icon.visible = True
+            else:
+                ready_icon.stop()
+
+        try:
+            icon.run(setup)
+        except Exception:
+            logging.exception("Tray icon stopped unexpectedly")
+        finally:
+            with self._lock:
+                if self._icon is icon:
+                    self._icon = None
+                    self._thread = None
+
+    def set_enabled(self, enabled: bool) -> bool:
+        """Apply visibility idempotently; hiding never touches stop_event."""
+        icon_to_stop = None
+        with self._lock:
+            self._enabled = enabled
+            if not enabled:
+                icon_to_stop = self._icon
+                self._icon = None
+                self._thread = None
+            elif self._icon is not None:
+                return True
+            else:
+                try:
+                    icon = self._new_icon()
+                except Exception:
+                    logging.exception("Could not create the tray icon")
+                    self._enabled = False
+                    return False
+                thread = threading.Thread(
+                    target=self._run_icon,
+                    args=(icon,),
+                    name="tray",
+                    daemon=True,
+                )
+                self._icon = icon
+                self._thread = thread
+                thread.start()
+                return True
+        if icon_to_stop is not None:
+            icon_to_stop.stop()
+        return False
+
+    def sync_state(self, paused: bool, until: float) -> None:
+        """Refresh native state only when pause state actually changes."""
+        state = (paused, until)
+        with self._lock:
+            if self._state == state:
+                return
+            self._state = state
+            icon = self._icon
+        if icon is not None:
+            icon.title = _tooltip_text(paused, until)
+            icon.update_menu()
+
+    def close(self) -> None:
+        self.set_enabled(False)
+
+
+def create_tray_controller(
+    db_path: str | Path,
+    stop_event: threading.Event,
+) -> TrayController | None:
+    """Return no controller when optional UI packages are unavailable."""
+    try:
+        import pystray
+        from PIL import Image, ImageDraw
+    except Exception:
+        logging.info("pystray/Pillow not installed; running without a tray icon.")
+        return None
+    return TrayController(
+        db_path,
+        stop_event,
+        pystray,
+        Image,
+        ImageDraw,
+    )

@@ -7,6 +7,7 @@ from pathlib import Path
 tracker_dir = Path(SPECPATH).resolve()
 project_root = tracker_dir.parent
 icon_path = project_root / "dashboard" / "src-tauri" / "icons" / "icon.ico"
+manifest_path = tracker_dir / "time_tracker.manifest"
 target_triple = os.environ.get(
     "TIME_TRACKER_TARGET_TRIPLE", "x86_64-pc-windows-msvc"
 )
@@ -62,6 +63,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(icon_path),
+    manifest=str(manifest_path),
     contents_directory="_internal",
 )
 
