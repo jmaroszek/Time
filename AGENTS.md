@@ -30,7 +30,18 @@ cd dashboard/src-tauri && cargo test  # named Rust backend tests
 cd dashboard && npm run test:device   # renderer, Chromium
 cd dashboard && npm run build:native-device
 cd dashboard && npm run test:native:doctor && npm run test:native  # see below
+scripts/smoke_packaged_tracker.ps1 -TrackerExecutable <sidecar> -OutputDirectory <scratch>
 ```
+
+**Every gate above runs on a developer machine.** A check that only runs on the
+runner cannot be rehearsed before it is merged, and the packaged smoke shipped
+two failures in a row while it was restricted to CI. Keep it that way: give a
+new check an isolation argument rather than an environment test.
+
+`cargo test` is serialized by `RUST_TEST_THREADS` in `/.cargo/config.toml` — at
+the repository root because cargo resolves that file from the working
+directory, and CI runs cargo from `dashboard/`. The restore tests swap files
+underneath an open database; in parallel they failed about one run in six.
 
 CI runs everything except `test:native` (the dashboard suite twice, under two
 timezones, because date handling is timezone-sensitive; `cargo test`, the debug
