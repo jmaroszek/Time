@@ -300,7 +300,7 @@ test("@minimum onboarding and restore dialog fit the minimum viewport", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const switchBoxes = await Promise.all(
-    ["Record activity", "Store window titles", "Start at Windows sign-in"].map(
+    ["Record activity", "Store window titles", "Start at Windows sign-in", "Show tray icon"].map(
       (name) => page.getByRole("switch", { name }).boundingBox(),
     ),
   );

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -79,6 +80,32 @@ def _verify_sidecar_starts(executable: Path) -> None:
             )
 
 
+def _read_embedded_manifest(executable: Path) -> bytes:
+    from PyInstaller.utils.win32.winmanifest import read_manifest_from_executable
+
+    return read_manifest_from_executable(str(executable))
+
+
+def _verify_sidecar_manifest(executable: Path) -> None:
+    """Fail packaging before Windows can bitmap-scale the native tray menu."""
+    try:
+        root = ET.fromstring(_read_embedded_manifest(executable))
+    except Exception as error:
+        raise SystemExit(f"Could not inspect packaged tracker manifest: {error}") from error
+    settings = {
+        element.tag.rsplit("}", 1)[-1]: (element.text or "").strip()
+        for element in root.iter()
+    }
+    if settings.get("dpiAwareness") != "PerMonitorV2":
+        raise SystemExit(
+            "Packaged tracker manifest does not declare PerMonitorV2 DPI awareness"
+        )
+    if settings.get("dpiAware", "").lower() != "true/pm":
+        raise SystemExit(
+            "Packaged tracker manifest does not declare the true/pm DPI fallback"
+        )
+
+
 def _target_triple(explicit: str | None) -> str:
     if explicit:
         return explicit
@@ -133,6 +160,7 @@ def build(target_triple: str) -> Path:
     if not built_exe.is_file() or not (built_dir / "_internal").is_dir():
         raise SystemExit("PyInstaller did not produce the expected one-dir layout")
 
+    _verify_sidecar_manifest(built_exe)
     _verify_sidecar_starts(built_exe)
 
     if TAURI_BINARIES.exists():

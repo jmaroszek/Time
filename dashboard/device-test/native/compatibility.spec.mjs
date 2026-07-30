@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,6 +72,29 @@ async function waitForDashboard() {
   }
 }
 
+async function launchSecondDashboard() {
+  const child = spawn(appBinary, [], {
+    env: process.env,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error("second dashboard instance did not exit")),
+      5_000,
+    );
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      clearTimeout(timeout);
+      if (code === 0 && signal === null) resolve();
+      else reject(new Error(`second dashboard exited with code=${code} signal=${signal}`));
+    });
+  });
+}
+
 async function closeAndReload() {
   const clicked = await browser.execute(() => {
     const close = document.querySelector('button[aria-label="Close"]');
@@ -101,6 +124,23 @@ async function closeAndReload() {
 describe("native Windows device compatibility", () => {
   before(async () => {
     await waitForDashboard();
+  });
+
+  it("activates the existing window instead of leaving a second instance", async () => {
+    controlNativeWindow("minimize");
+    assert.equal(controlNativeWindow("state").minimized, true);
+
+    await launchSecondDashboard();
+    await browser.waitUntil(
+      () => {
+        const state = controlNativeWindow("state");
+        return state.minimized === false && state.foreground === true;
+      },
+      {
+        timeout: 5_000,
+        timeoutMsg: "second launch did not restore and focus the existing dashboard",
+      },
+    );
   });
 
   it("resizes the isolated Win32 host to snap-equivalent bounds", async () => {

@@ -126,6 +126,7 @@ describe("window title bar markup", () => {
     expect(markup).toContain('aria-label="Minimize"');
     expect(markup).toContain('aria-label="Maximize"');
     expect(markup).toContain('aria-label="Close"');
+    expect(markup).toContain("hover:bg-window-close");
     expect(markup.match(/tabindex="-1"/g)).toHaveLength(3);
     expect(markup).not.toContain("Time");
     expect(markup).not.toContain("<img");

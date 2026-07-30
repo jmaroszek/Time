@@ -45,6 +45,7 @@ def test_seed_categories_and_settings_present(conn):
     assert raw["activity_noise_max_sessions"] == "1"
     assert raw["recording_consent"] == "0"
     assert raw["record_window_titles"] == "0"
+    assert raw["show_tray_icon"] == "1"
     assert raw["privacy_onboarding_complete"] == "0"
     assert raw["starter_categories_pending"] == "1"
     assert raw["schema_version"] == str(db.SCHEMA_VERSION)
@@ -456,6 +457,13 @@ def test_tray_pause_roundtrip(tmp_path):
     tray._write_pause(path, "0", 0)
     paused, _until = tray._read_pause_state(path)
     assert paused is False
+
+
+def test_tray_visibility_defaults_on_and_parses_independently():
+    assert db.tray_icon_enabled({}) is True
+    assert db.tray_icon_enabled({"show_tray_icon": "1"}) is True
+    assert db.tray_icon_enabled({"show_tray_icon": "0"}) is False
+    assert db.is_paused({"show_tray_icon": "0"}, now=1_000) is False
 
 
 def test_tray_uses_frozen_icon(monkeypatch, tmp_path):

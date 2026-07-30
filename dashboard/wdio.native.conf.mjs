@@ -55,7 +55,7 @@ export const config = {
   outputDir: "./test-results/native",
   before: () => {
     // This hook runs only after WebdriverIO has created the Tauri/WebView2
-    // session, and before Mocha executes any of the three native assertions.
+    // session, and before Mocha executes the native assertions.
     console.log("DRIVER_HANDSHAKE_READY: WebView2 automation session established.");
   },
   afterTest: async (_test, _context, result) => {

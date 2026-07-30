@@ -92,6 +92,44 @@ test("@workflow recording changes preserve visible feedback after startup failur
   expect(await invocationNames(page)).not.toContain("stop_tracker");
 });
 
+test("@workflow missing tracker can be started from its status card", async ({ page }) => {
+  await page.goto("/?tracker=missing");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  await expect(page.getByText("Tracker not detected")).toBeVisible();
+  await page.getByRole("button", { name: "Start tracker" }).click();
+
+  await expect(page.getByText("Tracker is live")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start tracker" })).toHaveCount(0);
+  await expect.poll(() => invocationNames(page)).toContain("start_tracker");
+});
+
+test("@workflow tracker start failure stays actionable", async ({ page }) => {
+  await page.goto("/?tracker=missing&fail=start_tracker");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Start tracker" }).click();
+
+  await expect(page.getByText("device fixture forced start_tracker failure")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start tracker" })).toBeEnabled();
+});
+
+test("@workflow tray visibility changes without changing tracker lifecycle", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const trayToggle = page.getByRole("switch", { name: "Show tray icon" });
+
+  await expect(trayToggle).toBeChecked();
+  await trayToggle.click();
+  await expect.poll(async () => (await fixtureSettings(page)).show_tray_icon).toBe("0");
+
+  const names = await invocationNames(page);
+  expect(names).not.toContain("start_tracker");
+  expect(names).not.toContain("stop_tracker");
+  const settings = await fixtureSettings(page);
+  expect(settings.recording_consent).toBe("1");
+  expect(settings.launch_at_login).toBe("1");
+});
+
 test("@workflow backup and restore failures remain actionable", async ({ page }) => {
   await page.goto("/?fail=backup_database");
   await page.getByRole("button", { name: "Settings", exact: true }).click();

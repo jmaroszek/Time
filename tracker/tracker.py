@@ -121,6 +121,22 @@ def stamp_tracker_health(conn, now: float) -> None:
     )
 
 
+def _sync_tray(
+    controller: tray.TrayController | None,
+    raw_settings: dict[str, str],
+    now: float | None = None,
+) -> bool:
+    """Apply presentation settings without coupling them to session behavior."""
+    if controller is None:
+        return False
+    visible = controller.set_enabled(db.tray_icon_enabled(raw_settings))
+    controller.sync_state(
+        db.is_paused(raw_settings, now),
+        db.pause_until(raw_settings),
+    )
+    return visible
+
+
 class FailureThrottle:
     """Bounds the daily log when the same failure repeats every tick.
 
@@ -184,9 +200,15 @@ def run() -> None:
     manager = SessionManager(store=db.SqliteStore(conn), settings=db.get_settings(conn))
     media_monitor = media_playback.start_media_playback_monitor()
     power_monitor = power_events.start_power_event_monitor()
+    stop_event = threading.Event()
+    tray_controller = tray.create_tray_controller(config.DB_PATH, stop_event)
+    tray_visible = _sync_tray(tray_controller, raw_settings)
 
     def _shutdown(*_args) -> bool:
         try:
+            stop_event.set()
+            if tray_controller is not None:
+                tray_controller.close()
             if power_monitor is not None:
                 power_monitor.close()
             manager.shutdown(time.time())
@@ -205,12 +227,11 @@ def run() -> None:
     except Exception:
         pass  # pythonw has no console; atexit still covers normal interpreter exit
 
-    stop_event = threading.Event()
-    has_tray = tray.start_tray(config.DB_PATH, stop_event)
-
     logging.info(
-        "Tracker started | tray=%s | power_events=%s | media_playback=%s | poll=%ss",
-        has_tray,
+        "Tracker started | tray_available=%s | tray_visible=%s |"
+        " power_events=%s | media_playback=%s | poll=%ss",
+        tray_controller is not None,
+        tray_visible,
         power_monitor is not None,
         media_monitor is not None,
         config.POLL_SECONDS,
@@ -240,6 +261,9 @@ def run() -> None:
             # poll instead of waiting for the database heartbeat interval.
             if now - last_settings_refresh >= poll:
                 manager.settings = db.get_settings(conn)
+                if tray_controller is not None:
+                    raw_settings = db.read_settings_raw(conn)
+                    _sync_tray(tray_controller, raw_settings, now)
                 last_settings_refresh = now
             monotonic_now = time.monotonic()
             if monotonic_now - last_health_publish >= HEALTH_HEARTBEAT_SECONDS:

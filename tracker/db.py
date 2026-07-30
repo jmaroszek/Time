@@ -181,6 +181,10 @@ DEFAULT_SETTINGS = {
     "record_window_titles": "0",
     "privacy_onboarding_complete": "0",
     "launch_at_login": "0",
+    # Controls only the notification-area affordance. Recording and Windows
+    # startup remain independent so hiding the icon cannot silently change
+    # capture behavior.
+    "show_tray_icon": "1",
 }
 
 
@@ -201,15 +205,24 @@ def normalize_browser_processes(raw: str) -> frozenset[str]:
     return frozenset(names)
 
 
+def pause_until(raw: dict[str, str]) -> float:
+    """Return the persisted timed-pause boundary, or zero when malformed."""
+    try:
+        return float(raw.get("tracking_paused_until", "0"))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def is_paused(raw: dict[str, str], now: float | None = None) -> bool:
     """True when tracking is paused, either indefinitely or until a future time."""
-    if raw.get("tracking_paused") == "1":
-        return True
-    try:
-        until = float(raw.get("tracking_paused_until", "0"))
-    except (TypeError, ValueError):
-        return False
-    return (now if now is not None else time.time()) < until
+    return raw.get("tracking_paused") == "1" or (
+        (now if now is not None else time.time()) < pause_until(raw)
+    )
+
+
+def tray_icon_enabled(raw: dict[str, str]) -> bool:
+    """Missing upgrade-era values retain the historical visible-tray default."""
+    return raw.get("show_tray_icon", DEFAULT_SETTINGS["show_tray_icon"]) != "0"
 
 
 def open_db(db_path: str | Path) -> sqlite3.Connection:

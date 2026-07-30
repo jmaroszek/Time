@@ -110,6 +110,7 @@ describe("default settings restoration", () => {
     expect(DEFAULT_USER_SETTINGS.color_palette).toBe("slate");
     expect(DEFAULT_USER_SETTINGS.productivity_style).toBe("vivid");
     expect(DEFAULT_USER_SETTINGS.activity_noise_max_sessions).toBe("1");
+    expect(DEFAULT_USER_SETTINGS.show_tray_icon).toBe("1");
   });
 });
 

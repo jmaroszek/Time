@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("get", "set", "maximize", "restore")]
+    [ValidateSet("get", "set", "maximize", "minimize", "restore", "state")]
     [string]$Action,
     [Parameter(Mandatory = $true)]
     [string]$Binary,
@@ -39,6 +39,12 @@ public static class DeviceWindow {
 
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr handle, int command);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
 }
 "@
 
@@ -86,6 +92,9 @@ switch ($Action) {
         # for a first transition from a non-visible state.
         [void][DeviceWindow]::ShowWindow($handle, 3)
     }
+    "minimize" {
+        [void][DeviceWindow]::ShowWindow($handle, 6)
+    }
     "restore" {
         [void][DeviceWindow]::ShowWindow($handle, 9)
     }
@@ -101,4 +110,6 @@ if (-not [DeviceWindow]::GetWindowRect($handle, [ref]$rect)) {
     y = $rect.Top
     width = $rect.Right - $rect.Left
     height = $rect.Bottom - $rect.Top
+    minimized = [DeviceWindow]::IsIconic($handle)
+    foreground = [DeviceWindow]::GetForegroundWindow() -eq $handle
 } | ConvertTo-Json -Compress

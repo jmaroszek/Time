@@ -122,7 +122,9 @@ const settings: Record<string, string> = {
   recording_consent: "1",
   record_window_titles: "1",
   launch_at_login: "1",
-  tracker_health_heartbeat: String(now - 5),
+  show_tray_icon: "1",
+  tracker_health_heartbeat:
+    fixtureParams.get("tracker") === "missing" ? "0" : String(now - 5),
   weekly_goal_hours: "20",
   idle_threshold_seconds: "300",
   heartbeat_seconds: "15",
@@ -182,7 +184,12 @@ function selectFixture(args: InvokeArgs): unknown {
     return Object.entries(settings).map(([key, value]) => ({ key, value }));
   }
   if (query.includes("as last_hb") && query.includes("as total_n")) {
-    return [{ last_hb: now - 5, live_n: sessions.length, total_n: sessions.length }];
+    const heartbeat = Number(settings.tracker_health_heartbeat);
+    return [{
+      last_hb: Number.isFinite(heartbeat) ? heartbeat : null,
+      live_n: sessions.length,
+      total_n: sessions.length,
+    }];
   }
   if (query.includes("select min(coalesce(c.corrected_start_ts,s.start_ts)) as first_ts")) {
     return [{ first_ts: sessions[0]?.start ?? null }];
@@ -240,7 +247,12 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
       result = null;
       break;
     case "set_launch_at_login":
+      result = null;
+      break;
     case "start_tracker":
+      settings.tracker_health_heartbeat = String(Date.now() / 1000);
+      result = null;
+      break;
     case "stop_tracker":
     case "restore_database":
       result = null;
