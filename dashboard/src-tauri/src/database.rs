@@ -334,8 +334,17 @@ struct DeletionCandidate {
 }
 
 impl TimeDatabase {
+    /// Tests hand the closed file straight to a restore path, which validates it
+    /// through a read-only connection. A read-only connection cannot build the
+    /// shared-memory index a `-wal` needs, so it would read the main file alone
+    /// and report a database with no `settings` table. Fold the WAL back in
+    /// first; closing the pool alone only checkpoints on a timing the suite
+    /// does not control.
     #[cfg(test)]
     pub async fn close(self) {
+        let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&self.pool)
+            .await;
         self.pool.close().await;
     }
 

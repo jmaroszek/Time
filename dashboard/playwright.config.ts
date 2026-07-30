@@ -48,6 +48,12 @@ export default defineConfig({
     browserName: "chromium",
     colorScheme: "dark",
     locale: "en-US",
+    // Every rendered date derives from the fixed clock in the specs, but the
+    // clock is an instant: only a pinned zone maps it to the same calendar day
+    // on a local run and on the UTC CI runner. Without this the baselines
+    // capture whichever week the capturing machine's offset happened to land
+    // in, and the suite fails on the other side.
+    timezoneId: "UTC",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

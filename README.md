@@ -90,7 +90,9 @@ application through WebDriver, so it needs the sidecar, a debug build, and a
 real Windows desktop session — CI cannot run it:
 
 ```powershell
-py scripts\build_tracker.py           # only if src-tauri\binaries\ is empty
+python -m venv data\tracker-build-env
+data\tracker-build-env\Scripts\python -m pip install -r tracker\requirements-build.txt
+data\tracker-build-env\Scripts\python scripts\build_tracker.py
 cd dashboard
 npm run build:native-device           # src-tauri\target\debug\Time.exe
 npm run test:native:doctor            # refuses live/production state

@@ -52,7 +52,12 @@ state save/restore and off-screen recovery. The doctor must print
 It also builds nothing: the script prepares a demo database and starts
 WebdriverIO against `src-tauri/target/debug/Time.exe`, so
 `npm run build:native-device` has to run first (and the sidecar before that, or
-the Tauri build script stops on the missing `externalBin`).
+the Tauri build script stops on the missing `externalBin`). Build the tracker
+from the dedicated, git-ignored `data/tracker-build-env` environment described
+in the README. Reusing a broad Conda or development environment can expose
+unrelated PyInstaller hooks and native packages to the build. The builder also
+refuses mismatched runtime packages rather than producing an unreproducible
+sidecar.
 
 ## Branches
 
