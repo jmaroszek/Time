@@ -71,7 +71,7 @@ export function BannerProvider({ children }: { children: ReactNode }) {
             // Polite for a confirmation, assertive for a failure: one is worth
             // interrupting what a screen reader is saying, the other is not.
             role={banner.tone === "bad" ? "alert" : "status"}
-            className={`flex max-w-xl items-center gap-3 rounded-[11px] border bg-surface-2 px-4 py-2.5 text-xs text-ink shadow-[0_12px_34px_rgba(0,0,0,.5)] ${
+            className={`flex max-w-xl items-center gap-3 rounded-[11px] border bg-surface-2 px-4 py-2.5 text-xs text-ink shadow-menu ${
               banner.tone === "bad" ? "border-bad/40" : "border-good/40"
             }`}
           >
@@ -82,7 +82,7 @@ export function BannerProvider({ children }: { children: ReactNode }) {
             <button
               type="button"
               aria-label="Dismiss"
-              className="ml-1 shrink-0 rounded-md px-1.5 py-1 text-ink-3 transition-colors hover:bg-white/[.05] hover:text-ink"
+              className="ml-1 shrink-0 rounded-md px-1.5 py-1 text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
               onClick={() => setBanner(null)}
             >
               ✕

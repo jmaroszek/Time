@@ -40,6 +40,9 @@ export function aggregateBlocks(
   range: Range,
   classifier: Classifier,
   blockMinutes: number,
+  /** Fill for sessions no rule claimed. Passed in rather than fixed here: it is
+   *  a near-surface gray, so it follows the theme (chartTheme.uncategorizedMark). */
+  uncategorizedColor: string,
 ): TimelineBlock[] {
   const blockSecs = blockMinutes * 60;
   const dayStartByKey = new Map(listDays(range).map((d) => [dayKey(d), d.getTime() / 1000]));
@@ -70,7 +73,7 @@ export function aggregateBlocks(
         } else {
           a.apps.set(s.process, (a.apps.get(s.process) ?? 0) + secs);
           const name = cat?.name ?? "Uncategorized";
-          const entry = a.cats.get(name) ?? { color: cat?.color ?? "#5b616b", secs: 0 };
+          const entry = a.cats.get(name) ?? { color: cat?.color ?? uncategorizedColor, secs: 0 };
           entry.secs += secs;
           a.cats.set(name, entry);
         }

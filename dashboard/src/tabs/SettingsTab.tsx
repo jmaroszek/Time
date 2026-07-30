@@ -9,7 +9,7 @@ import {
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 
-import { Spinner, TrashButton } from "../components/ui";
+import { Button, ConfirmDialog, Spinner, TrashButton } from "../components/ui";
 import { displayBrowserProcesses, normalizeBrowserProcesses } from "../lib/browsers";
 import { getDbPath } from "../lib/db";
 import { explainDbError } from "../lib/dbErrors";
@@ -21,7 +21,18 @@ import {
   noiseModeFor,
   type NoiseMode,
 } from "../lib/noise";
-import { PALETTES, previewSwatches, PRODUCTIVITY_OPTIONS } from "../lib/palettes";
+import {
+  paletteForTheme,
+  PALETTES,
+  previewSwatches,
+  PRODUCTIVITY_OPTIONS,
+  type ProductivityOption,
+} from "../lib/palettes";
+import {
+  resolveThemePreference,
+  THEME_PREFERENCE_LABELS,
+  THEME_PREFERENCES,
+} from "../lib/theme";
 import {
   backupDatabase,
   chooseDatabaseBackupFile,
@@ -369,6 +380,9 @@ export default function SettingsTab({
     }, "startup preference");
   };
 
+  const themedChoice = (choice: ProductivityOption) =>
+    meta.theme === "light" ? choice.light : choice;
+
   const numberControl = (spec: NumericSpec, label: string, unit?: string, hour = false) => (
     <NumberStepper
       label={label}
@@ -384,11 +398,14 @@ export default function SettingsTab({
   );
 
   return (
-    // One column, not two. Any masonry layout re-balances whenever a section
-    // changes height, so a second column would make the page look uneven again
-    // the next time a setting is added. Length is the only thing that grows here.
-    <div className="settings-panel mr-auto flex w-full max-w-[600px] flex-col gap-[26px] pt-2">
-      <section>
+    // One column of settings, not two. Any masonry layout re-balances whenever a
+    // section changes height, so a second column would make the page look uneven
+    // again the next time a setting is added. Length is the only thing that grows
+    // here — which is what the rail beside it addresses, without taking width
+    // from the column or reflowing it.
+    <div className="settings-panel mr-auto flex w-full max-w-[774px] gap-6 pt-2">
+      <div className="flex min-w-0 w-full max-w-[600px] flex-col gap-[26px]">
+      <SettingsSection title="Tracker status">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <SectionLabel>Tracker status</SectionLabel>
           <p
@@ -413,9 +430,9 @@ export default function SettingsTab({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-4 py-4 sm:px-[18px]">
-          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : pause.paused ? "bg-[#e0a53a]" : trackerLive ? "live-pulse bg-good-data" : "alert-pulse bg-bad"}`} />
+          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : pause.paused ? "bg-warn" : trackerLive ? "live-pulse bg-good-data" : "alert-pulse bg-bad"}`} />
           <div>
-            <p className="text-[13px] font-semibold text-ink">
+            <p className="text-row font-semibold text-ink">
               {!trackingEnabled ? "Tracking disabled" : pause.paused ? "Tracking paused" : trackerLive ? "Tracker is live" : "Tracker not detected"}
             </p>
             <p className="mt-[3px] text-xs text-ink-3">
@@ -434,7 +451,7 @@ export default function SettingsTab({
           </div>
           {heartbeatAge !== null && <span className="basis-full text-xs tabular-nums text-ink-3 sm:ml-auto sm:basis-auto">last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago</span>}
         </div>
-      </section>
+      </SettingsSection>
 
       <Section title="Recording & startup">
         <Row
@@ -496,10 +513,23 @@ export default function SettingsTab({
 
       <Section
         title="Appearance"
-        intro="Category and productivity colors across every chart. Switching palettes changes the swatches offered for new categories."
+        intro="The app's theme, and the category and productivity colors used across every chart. Switching palettes changes the swatches offered for new categories."
       >
-        <div className="px-4 pb-4">
-          <p id="category-palette-label" className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">
+        <Row
+          label="Theme"
+          help="Follow system uses your Windows light or dark setting, and follows it when it changes."
+          control={
+            <Segmented
+              label="Theme"
+              options={THEME_PREFERENCES}
+              labels={THEME_PREFERENCE_LABELS}
+              value={resolveThemePreference(drafts.theme ?? meta.themePreference)}
+              onChange={(value) => selectSetting("theme", value)}
+            />
+          }
+        />
+        <div className="border-t border-surface-2 px-4 pb-4 pt-4">
+          <p id="category-palette-label" className="mb-2 text-micro font-semibold uppercase tracking-wide text-ink-3">
             Category palette
           </p>
           <div className="flex flex-col gap-2" role="radiogroup" aria-labelledby="category-palette-label">
@@ -520,12 +550,12 @@ export default function SettingsTab({
                   className={`flex items-center gap-3 rounded-[11px] border px-3 py-2.5 text-left transition-colors ${selected ? "border-accent/70 bg-surface-3" : "border-edge bg-surface-2 hover:bg-surface-3"}`}
                 >
                   <span className="flex shrink-0 gap-1" aria-hidden="true">
-                    {previewSwatches(option).map((swatch) => (
+                    {previewSwatches(paletteForTheme(option, meta.theme)).map((swatch) => (
                       <span key={swatch} className="h-4 w-4 rounded" style={{ backgroundColor: swatch }} />
                     ))}
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-[13px] font-semibold text-ink">{option.label}</span>
+                    <span className="block text-row font-semibold text-ink">{option.label}</span>
                     <span className="block text-xs leading-snug text-ink-3">{option.description}</span>
                   </span>
                   <span className={`ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${selected ? "border-accent" : "border-edge-2"}`}>
@@ -561,10 +591,10 @@ export default function SettingsTab({
                   className={`flex items-center gap-2 rounded-[10px] border px-2.5 py-1.5 transition-colors ${selected ? "border-accent/70 bg-surface-3" : "border-edge bg-surface-2 hover:bg-surface-3"}`}
                 >
                   <span className="flex gap-1" aria-hidden="true">
-                    <span className="h-4 w-4 rounded" style={{ backgroundColor: choice.productive }} />
-                    <span className="h-4 w-4 rounded" style={{ backgroundColor: choice.unproductive }} />
+                    <span className="h-4 w-4 rounded" style={{ backgroundColor: themedChoice(choice).productive }} />
+                    <span className="h-4 w-4 rounded" style={{ backgroundColor: themedChoice(choice).unproductive }} />
                   </span>
-                  <span className="text-[12px] font-medium text-ink">{choice.label}</span>
+                  <span className="text-xs font-medium text-ink">{choice.label}</span>
                 </button>
               );
             })}
@@ -665,6 +695,8 @@ export default function SettingsTab({
         onRestored={() => setPause({ paused: false, until: 0 })}
       />
       <DataSection settingsBusy={savingKeys.size > 0} />
+      </div>
+      <SectionRail />
     </div>
   );
 }
@@ -738,13 +770,9 @@ function RestoreDefaultsSection({
   const banner = useBanner();
   const [restoring, setRestoring] = useState(false);
   const [restored, setRestored] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const restore = async () => {
-    const ok = window.confirm(
-      "Restore every setting on this page to its default?\n\n" +
-        "Recording and Windows startup will be turned off. Recorded history, categories, rules, aliases, exclusions, corrections, and backups will not change.",
-    );
-    if (!ok) return;
     setRestoring(true);
     setRestored(false);
     try {
@@ -756,6 +784,7 @@ function RestoreDefaultsSection({
       onRestored();
       setRestored(true);
       setTimeout(() => setRestored(false), 2_000);
+      setConfirming(false);
     } catch (error) {
       banner.report(error, "default settings");
     } finally {
@@ -765,6 +794,21 @@ function RestoreDefaultsSection({
 
   return (
     <Section title="Defaults">
+      {confirming && (
+        <ConfirmDialog
+          title="Restore default settings?"
+          body="Every setting on this page returns to its default, including recording and Windows startup, which will be turned off."
+          note="Recorded history, categories, rules, aliases, exclusions, corrections, and backups are not touched."
+          confirmLabel="Restore defaults"
+          busyLabel="Restoring…"
+          busy={restoring}
+          // Not "danger": this resets preferences and destroys no data. The red
+          // button is reserved for the ones that remove recorded activity.
+          variant="default"
+          onConfirm={() => void restore()}
+          onClose={() => setConfirming(false)}
+        />
+      )}
       <Row
         label="Restore default settings"
         help="Resets every setting on this page without changing recorded history or organization."
@@ -773,7 +817,7 @@ function RestoreDefaultsSection({
             type="button"
             disabled={disabled || restoring}
             title={disabled ? "Wait for settings to finish saving" : undefined}
-            onClick={() => void restore()}
+            onClick={() => setConfirming(true)}
             className="rounded-[8px] border border-edge px-3 py-1.5 text-xs font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:text-ink disabled:cursor-wait disabled:opacity-50"
           >
             {restoring ? "Restoring…" : restored ? "Defaults restored" : "Restore defaults"}
@@ -798,6 +842,13 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
   const [backingUp, setBackingUp] = useState(false);
   const [backupDetail, setBackupDetail] = useState<{ ok: boolean; text: string } | null>(null);
   const [restoreOpen, setRestoreOpen] = useState(false);
+  // The retention delete carries its own counted scope, so it is held as a
+  // pending request rather than a bare open flag.
+  const [pendingOlder, setPendingOlder] = useState<
+    { days: number; cutoff: number; count: number; what: string } | null
+  >(null);
+  const [eraseOpen, setEraseOpen] = useState(false);
+  const [busyAction, setBusyAction] = useState<"older" | "erase" | null>(null);
   const restoreButtonRef = useRef<HTMLButtonElement>(null);
 
   const copyPath = () => void navigator.clipboard.writeText(getDbPath()).then(() => {
@@ -823,26 +874,8 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
     requestAnimationFrame(() => restoreButtonRef.current?.focus());
   };
 
-  const confirmAndDelete = async (
-    count: number,
-    what: string,
-    run: () => Promise<unknown>,
-  ): Promise<boolean> => {
-    if (count === 0) {
-      setMessage(`No recorded sessions ${what}.`);
-      return false;
-    }
-    const ok = window.confirm(
-      `Delete ${count} recorded session${count === 1 ? "" : "s"} ${what}?\n\n` +
-        "This cannot be undone. Consider “Back up now” first.",
-    );
-    if (!ok) return false;
-    await run();
-    setMessage(`Deleted ${count} session${count === 1 ? "" : "s"} ${what}.`);
-    await meta.refresh();
-    return true;
-  };
-
+  // Counting before asking is the point of the dialog: a native confirm could
+  // only ever say "older than 365 days", never how many sessions that is.
   const deleteOlder = async () => {
     const days = Math.floor(Number(olderDays));
     if (!Number.isFinite(days) || days < 1) {
@@ -851,21 +884,37 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
     }
     try {
       const cutoff = Date.now() / 1000 - days * 86_400;
-      const n = await countSessionsOlderThan(cutoff);
-      await confirmAndDelete(n, `older than ${days} day${days === 1 ? "" : "s"}`, () =>
-        deleteHistoryBefore(cutoff),
-      );
+      const count = await countSessionsOlderThan(cutoff);
+      const what = `older than ${days} day${days === 1 ? "" : "s"}`;
+      if (count === 0) {
+        setMessage(`No recorded sessions ${what}.`);
+        return;
+      }
+      setPendingOlder({ days, cutoff, count, what });
     } catch (e) {
       banner.report(e, "deletion");
     }
   };
 
+  const runDeleteOlder = async () => {
+    if (!pendingOlder) return;
+    setBusyAction("older");
+    try {
+      await deleteHistoryBefore(pendingOlder.cutoff);
+      setMessage(
+        `Deleted ${pendingOlder.count} session${pendingOlder.count === 1 ? "" : "s"} ${pendingOlder.what}.`,
+      );
+      setPendingOlder(null);
+      await meta.refresh();
+    } catch (e) {
+      banner.report(e, "deletion");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const eraseEverything = async () => {
-    const confirmation = window.prompt(
-      "Erase every recorded session and compact the database? Categories and settings are kept.\n\n" +
-        "This does not delete separate backup files. Type DELETE to continue.",
-    );
-    if (confirmation !== "DELETE") return;
+    setBusyAction("erase");
     try {
       await updateSetting("recording_consent", "0");
       await updateSetting("launch_at_login", "0");
@@ -873,14 +922,17 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
       await invoke("stop_tracker");
       const n = await eraseAllHistory();
       setMessage(`Securely erased ${n} recorded session${n === 1 ? "" : "s"}. Separate backups were not deleted.`);
+      setEraseOpen(false);
       await meta.refresh();
     } catch (e) {
       banner.report(e, "secure erase");
+    } finally {
+      setBusyAction(null);
     }
   };
 
   return (
-    <section>
+    <SettingsSection title="Data management">
       <SectionLabel>Data management</SectionLabel>
       <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
         <div className="p-4">
@@ -902,7 +954,7 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
               disabled={backingUp}
               aria-busy={backingUp}
               onClick={() => void backUpNow()}
-              className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-[12.5px] font-semibold text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15 disabled:cursor-wait disabled:opacity-60"
+              className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-xs font-semibold text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15 disabled:cursor-wait disabled:opacity-60"
             >
               {backingUp ? (
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" aria-hidden="true" />
@@ -919,7 +971,7 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
               disabled={settingsBusy}
               title={settingsBusy ? "Wait for settings to finish saving" : undefined}
               onClick={() => setRestoreOpen(true)}
-              className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-edge bg-surface-2 py-[11px] text-[12.5px] font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:bg-surface-3 hover:text-ink disabled:cursor-wait disabled:opacity-50"
+              className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-edge bg-surface-2 py-[11px] text-xs font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:bg-surface-3 hover:text-ink disabled:cursor-wait disabled:opacity-50"
             >
               Restore backup…
             </button>
@@ -949,7 +1001,7 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
                 value={olderDays}
                 aria-label="Days of history to keep"
                 onChange={(event) => setOlderDays(event.target.value)}
-                className="w-[64px] rounded-[9px] border border-edge bg-surface-2 px-[11px] py-2 text-right text-xs text-ink outline-none focus:border-accent/60"
+                className="w-[64px] rounded-[9px] border border-control-edge bg-control px-[11px] py-2 text-right text-xs text-ink outline-none focus:border-accent/60"
               />
               <span className="text-xs text-ink-3">days</span>
               <TrashButton label="Delete older history" onClick={() => void deleteOlder()} />
@@ -961,7 +1013,7 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
           <button
             type="button"
             className="shrink-0 text-xs font-semibold text-bad transition-colors hover:text-bad/80"
-            onClick={() => void eraseEverything()}
+            onClick={() => setEraseOpen(true)}
           >
             Erase all
           </button>
@@ -972,7 +1024,45 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
         <RestoreBackupDialog onClose={closeRestore} />,
         document.body,
       )}
-    </section>
+      {pendingOlder && (
+        <ConfirmDialog
+          title="Delete recorded activity?"
+          body={`Every session ${pendingOlder.what} will be removed.`}
+          metrics={[{ label: "Sessions", value: String(pendingOlder.count) }]}
+          note="Complete session rows are removed and securely compacted, and cannot be restored unless you have a backup. Categories and rules are kept."
+          confirmLabel="Delete"
+          busyLabel="Deleting…"
+          busy={busyAction === "older"}
+          extraAction={
+            <Button
+              onClick={() => void backupDatabase()
+                .then((target) => setBackupDetail({ ok: true, text: `Backup saved to ${target}` }))
+                .catch((error) => setBackupDetail({ ok: false, text: explainDbError(error, "backup") }))}
+            >
+              Back up first
+            </Button>
+          }
+          onConfirm={() => void runDeleteOlder()}
+          onClose={() => setPendingOlder(null)}
+        />
+      )}
+      {eraseOpen && (
+        <ConfirmDialog
+          title="Erase all recorded history?"
+          body="Every recorded session is removed and the database is compacted. Recording and Windows startup are turned off, and the tracker is stopped."
+          note="Categories, rules, and settings are kept, and separate backup files are not deleted. Nothing here can be recovered without one of those backups."
+          confirmLabel="Erase everything"
+          busyLabel="Erasing…"
+          busy={busyAction === "erase"}
+          // The typed gate the window.prompt used to impose, kept — this is the
+          // highest-stakes action in the product — but now with the consequences
+          // above the field instead of inside the sentence asking for the word.
+          requireTyped="DELETE"
+          onConfirm={() => void eraseEverything()}
+          onClose={() => setEraseOpen(false)}
+        />
+      )}
+    </SettingsSection>
   );
 }
 
@@ -1055,7 +1145,7 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
   const paths = backups.map((backup) => backup.path);
 
   return (
-    <div className="settings-dialog fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2 sm:p-4">
+    <div className="settings-dialog fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-4">
       <div
         ref={dialogRef}
         role="dialog"
@@ -1064,11 +1154,11 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
         aria-describedby="restore-backup-description"
         tabIndex={-1}
         onKeyDown={trapModalFocus}
-        className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-[14px] border border-edge-2 bg-surface p-4 shadow-2xl outline-none sm:max-h-[calc(100dvh-2rem)] sm:p-5"
+        className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-[14px] border border-edge-2 bg-surface p-4 shadow-panel outline-none sm:max-h-[calc(100dvh-2rem)] sm:p-5"
       >
         <div className="flex items-start gap-4">
           <div className="min-w-0 flex-1">
-            <h2 id="restore-backup-title" className="text-[15px] font-semibold text-ink">
+            <h2 id="restore-backup-title" className="text-sm font-semibold text-ink">
               Restore backup
             </h2>
             <p id="restore-backup-description" className="mt-1 text-xs leading-relaxed text-ink-3">
@@ -1080,7 +1170,7 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
             disabled={restoring}
             aria-label="Close restore backup dialog"
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-ink-3 hover:bg-white/[.05] hover:text-ink disabled:opacity-40"
+            className="rounded-md px-2 py-1 text-ink-3 hover:bg-hover-2 hover:text-ink disabled:opacity-40"
           >
             ✕
           </button>
@@ -1170,6 +1260,19 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/**
+ * On is a *filled* control, not a tinted one, and its knob is whatever reads on
+ * that fill — which is what --color-on-accent means. Off drops the knob to a
+ * muted ink so it recedes.
+ *
+ * The translucent accent this replaces put the same near-full-strength ink knob
+ * on both states, so off claimed as much attention as on, and the two differed
+ * only by the knob's position. It also went wrong in light: an accent at 35%
+ * over white is pale, so the ink knob landed at 10.5:1 against it where the
+ * dark theme's sat at 7.2:1 — the light knob was the heavier of the two, on the
+ * theme with less contrast to spend. Anchoring the pair to the accent fill makes
+ * both themes land together without either being tuned by hand.
+ */
 function PrivacyToggle({
   label,
   enabled,
@@ -1194,13 +1297,13 @@ function PrivacyToggle({
       <span
         aria-hidden="true"
         className={`absolute left-0 top-1.5 h-6 w-11 rounded-full border transition-colors ${
-          enabled ? "border-accent/60 bg-accent/35" : "border-edge-2 bg-surface-2"
+          enabled ? "border-accent bg-accent" : "border-edge-2 bg-surface-2"
         }`}
       />
       <span
         aria-hidden="true"
-        className={`absolute top-[10px] h-4 w-4 rounded-full bg-ink transition-all ${
-          enabled ? "left-[22px]" : "left-[3px]"
+        className={`absolute top-[10px] h-4 w-4 rounded-full transition-all ${
+          enabled ? "left-[22px] bg-on-accent" : "left-[3px] bg-ink-3"
         }`}
       />
     </button>
@@ -1208,20 +1311,144 @@ function PrivacyToggle({
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
-  return <p className="mb-3 pl-0.5 text-xs font-bold uppercase tracking-[.09em] text-ink-2">{children}</p>;
+  return <p className="mb-3 pl-0.5 text-micro font-bold uppercase tracking-[.09em] text-ink-2">{children}</p>;
 }
 
 /** `intro` carries the rationale a whole section shares, so its rows can keep
  *  the one-sentence helps that make the column read evenly. */
 function Section({ title, intro, children }: { title: string; intro?: string; children: ReactNode }) {
   return (
-    <section>
+    <SettingsSection title={title}>
       <SectionLabel>{title}</SectionLabel>
       <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
         {intro && <p className="px-4 pb-3 pt-4 text-xs leading-snug text-ink-3">{intro}</p>}
         {children}
       </div>
+    </SettingsSection>
+  );
+}
+
+/** Every section the rail can reach, in page order. The rail is built from this
+ *  list and each section takes its anchor from the same slug, so a section that
+ *  is added, renamed or reordered cannot end up missing from the rail or
+ *  pointing at nothing — the failure a hand-written list of links invites. */
+const SETTINGS_SECTIONS = [
+  "Tracker status",
+  "Recording & startup",
+  "Goals",
+  "Timeline window",
+  "Focus & idle",
+  "Appearance",
+  "Activity list",
+  "Advanced",
+  "Defaults",
+  "Data management",
+] as const;
+
+/** How far into the viewport a section has to reach before the rail calls it the
+ *  current one. Roughly one section label plus its gap. */
+const ACTIVE_SECTION_BAND = 88;
+
+function sectionSlug(title: string): string {
+  return `settings-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+}
+
+/** A section wrapper that carries its own anchor. `scroll-mt` clears the height
+ *  the label would otherwise be jammed against at the top of the viewport. */
+function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section id={sectionSlug(title)} className="scroll-mt-4">
+      {children}
     </section>
+  );
+}
+
+/**
+ * Settings is ten sections in one column, and the column was correct — any
+ * masonry layout re-balances every time a section changes height. The problem
+ * was never width, it was length: there is no way to see what is on the page
+ * without scrolling all of it.
+ *
+ * So the rail says what is here and jumps to it, and it lives in the dead space
+ * beside a 600px column rather than taking any width from it. It appears only at
+ * the app's "large" layout class and above (lib/responsive.ts), because that is
+ * where the space exists — below it the page is exactly as it was.
+ *
+ * It sits to the *right* of the column. On the left it read as a second-level
+ * tab bar competing with the real one directly above it, and it pushed the
+ * settings themselves off the left margin every other tab starts at. On the
+ * right it is unmistakably an index of the column beside it, and the column
+ * stays where the rest of the app's content does.
+ */
+function SectionRail() {
+  const [active, setActive] = useState<string>(SETTINGS_SECTIONS[0]);
+
+  useEffect(() => {
+    const sections: { title: string; node: HTMLElement }[] = [];
+    for (const title of SETTINGS_SECTIONS) {
+      const node = document.getElementById(sectionSlug(title));
+      if (node) sections.push({ title, node });
+    }
+    if (sections.length === 0) return;
+    const viewport = sections[0].node.closest<HTMLElement>(".app-viewport") ?? null;
+
+    // The last section that has started, not the first one still touching the
+    // viewport. An IntersectionObserver picking the topmost intersecting section
+    // marks the one being *left*: a card's last row is still on screen while its
+    // successor fills the rest of it, which is the reading position.
+    const measure = () => {
+      // At the end of the scroll the rule above cannot reach the last sections:
+      // nothing below the final screenful can be brought to the top of the
+      // viewport, so their tops never cross the band and the mark would stick a
+      // few sections early. At the bottom, the last section is where you are.
+      if (viewport && viewport.scrollTop >= viewport.scrollHeight - viewport.clientHeight - 2) {
+        setActive(sections[sections.length - 1].title);
+        return;
+      }
+      const band = (viewport?.getBoundingClientRect().top ?? 0) + ACTIVE_SECTION_BAND;
+      let current = sections[0].title;
+      for (const { title, node } of sections) {
+        if (node.getBoundingClientRect().top <= band) current = title;
+        else break;
+      }
+      setActive(current);
+    };
+
+    measure();
+    const target: HTMLElement | Window = viewport ?? window;
+    target.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    // Sections change height as settings expand (the rare-item limits appear and
+    // disappear), which moves every section below them without any scrolling.
+    const observer = new ResizeObserver(measure);
+    for (const { node } of sections) observer.observe(node);
+    return () => {
+      target.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+      observer.disconnect();
+    };
+  }, []);
+
+  return (
+    <nav
+      aria-label="Settings sections"
+      className="sticky top-2 hidden w-[150px] shrink-0 flex-col gap-px self-start min-[1008px]:flex"
+    >
+      {SETTINGS_SECTIONS.map((title) => (
+        <a
+          key={title}
+          href={`#${sectionSlug(title)}`}
+          aria-current={active === title ? "true" : undefined}
+          className={`truncate rounded-md px-2 py-[5px] text-xs transition-colors ${
+            active === title
+              ? "bg-surface-2 font-medium text-ink"
+              : "text-ink-3 hover:bg-hover hover:text-ink-2"
+          }`}
+        >
+          {title}
+        </a>
+      ))}
+    </nav>
   );
 }
 
@@ -1268,12 +1495,8 @@ function Row({
       }`}
     >
       <div className="min-w-0">
-        <p className={`font-medium text-ink ${compact ? "text-[12.5px]" : "text-[13px]"}`}>{label}</p>
-        <p
-          className={`mt-[5px] max-w-[400px] leading-snug text-ink-3 ${
-            compact ? "text-xs" : "text-xs"
-          }`}
-        >
+        <p className={`font-medium text-ink ${compact ? "text-xs" : "text-row"}`}>{label}</p>
+        <p className="mt-[5px] max-w-[400px] text-meta leading-snug text-ink-3">
           {help}
         </p>
       </div>
@@ -1319,7 +1542,7 @@ function BrowserProcessEditor({
 
   return (
     <div
-      className="flex min-h-[42px] flex-wrap items-center gap-2 rounded-[10px] border border-edge bg-surface-2 px-2.5 py-2 transition-colors focus-within:border-accent/60"
+      className="flex min-h-[42px] flex-wrap items-center gap-2 rounded-[10px] border border-control-edge bg-control px-2.5 py-2 transition-colors focus-within:border-accent/60"
       role="group"
       aria-label="Browser processes"
       aria-describedby={instructionsId}
@@ -1360,7 +1583,7 @@ function BrowserProcessEditor({
               }
             }}
             className={`flex h-7 items-center gap-1.5 rounded-[8px] border border-edge bg-surface-3 px-2.5 font-mono text-xs text-ink transition-colors ${
-              removable ? "hover:border-edge-2 hover:bg-white/[.055]" : "cursor-default"
+              removable ? "hover:border-edge-2 hover:bg-hover-2" : "cursor-default"
             }`}
           >
             <span>{label}</span>
@@ -1428,8 +1651,8 @@ function NumberStepper({
   onPlus: () => void;
 }) {
   return (
-    <div className="inline-flex items-center rounded-[10px] border border-edge bg-surface-2 p-[3px] transition-colors focus-within:border-accent/60">
-      <button type="button" aria-label={`Decrease ${label}`} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-base text-ink-2 hover:bg-white/5 hover:text-ink" onClick={onMinus}>−</button>
+    <div className="inline-flex items-center rounded-[10px] border border-control-edge bg-control p-[3px] transition-colors focus-within:border-accent/60">
+      <button type="button" aria-label={`Decrease ${label}`} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink" onClick={onMinus}>−</button>
       <div className={`flex items-baseline justify-center ${display ? "w-[46px]" : unit ? "min-w-[34px] gap-1" : "min-w-[34px]"}`}>
         <input
           type={readOnly ? "text" : "number"}
@@ -1440,11 +1663,11 @@ function NumberStepper({
           onChange={(event) => onChange(event.target.value)}
           onBlur={onBlur}
           onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-          className={`${unit ? "text-right" : "w-full text-center"} bg-transparent text-[13px] font-semibold tabular-nums text-ink outline-none`}
+          className={`${unit ? "text-right" : "w-full text-center"} bg-transparent text-row font-semibold tabular-nums text-ink outline-none`}
         />
         {unit && <span className="text-xs text-ink-3">{unit}</span>}
       </div>
-      <button type="button" aria-label={`Increase ${label}`} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-base text-ink-2 hover:bg-white/5 hover:text-ink" onClick={onPlus}>+</button>
+      <button type="button" aria-label={`Increase ${label}`} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink" onClick={onPlus}>+</button>
     </div>
   );
 }

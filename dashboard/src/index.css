@@ -3,6 +3,11 @@
    app is rendered through the device-test Vite root. */
 @source "./";
 
+/* Dark is the default theme: these are its values, and a theme switch overrides
+   the same names under :root[data-theme="light"] below. Every colour the app
+   draws has to reach a token here — the light theme is only correct if nothing
+   is written out as a literal. lib/chartTheme.ts holds the mirror of this set
+   that the canvas charts need, because ECharts cannot read CSS variables. */
 @theme {
   --color-bg: #0f1115;
   --color-surface: #16181d;
@@ -10,23 +15,150 @@
   --color-surface-dim: #131519;
   --color-surface-2: #1d2026;
   --color-surface-3: #23272f;
+  /* Editable fields and closed menu triggers. This deliberately aliases the
+     existing raised surface on dark, while light gives controls a white fill
+     that no longer groups them with gray record rows. */
+  --color-control: #1d2026;
   --color-edge: #2a2e36;
   --color-edge-2: #353b45;
+  --color-control-edge: #2a2e36;
   --color-ink: #e8eaed;
   --color-ink-2: #9aa0a8;
   /* 4.5:1 on --color-surface — WCAG AA at small sizes. Keep any replacement
-     at or above that ratio. */
-  --color-ink-3: #79808d;
+     at or above that ratio; themeTokens.test.ts measures it now rather than
+     trusting this comment, which was how #79808d sat here at 4.47:1. */
+  --color-ink-3: #7b828f;
+  /* The same two ranks pinned to --color-surface-3 instead, for labels sitting
+     on a raised fill: ink-3 measured against the page misses its floor by the
+     time the fill is under it. ink-2 has to be re-pinned in the same step —
+     ink-3-raised is lighter than plain ink-2 on dark, which would invert the
+     two ranks wherever they sit together. palettes.test.ts holds both floors. */
+  --color-ink-3-raised: #adb5c0;
+  --color-ink-2-raised: #c6ccd4;
   --color-accent: #6ba0da;
+  /* Text on an accent fill. Near-black is right for a light blue on dark; a
+     light theme's darker accent needs white, which is why this is a token. */
+  --color-on-accent: #081019;
   /* Two-tier green/red rule: -data for chart fills and liveness
      (things that ARE data), plain for text/dots that merely annotate. */
   --color-good: #4fb389;
   --color-good-data: #16b981;
   --color-bad: #d07d7d;
+  /* The third tracker state: paused is neither live nor broken. Was the one
+     status colour written out as a literal, which on a white card would have
+     been a pale yellow dot next to a solid green and red one. */
+  --color-warn: #e0a53a;
+
+  /* Two hover tiers, and only two. These were a dozen hand-picked white
+     opacities between .025 and .06 that no longer agreed with each other:
+     --color-hover for a row or another large surface, --color-hover-2 for a
+     small control where the same wash would not register. */
+  --color-hover: rgba(255, 255, 255, .035);
+  --color-hover-2: rgba(255, 255, 255, .06);
+
+  /* Dialog backdrop. Stays dark in both themes — a light scrim cannot say
+     "the page behind this is out of reach" — but lightens off pure black,
+     which under a white card reads as a smudge rather than a dimming. */
+  --color-scrim: rgba(0, 0, 0, .5);
+
+  /* Chrome, not content: these track --color-edge/-2 on dark but not on light,
+     where a scrollbar has to stay visible against a much lighter page. */
+  --color-scroll-thumb: #2a2e36;
+  --color-scroll-thumb-well: #353b45;
+
+  /* The type scale, and all of it. Fourteen sizes were in use — 9, 9.5, 10,
+     10.5, 11, 11.5, 12, 12.5, 13, 14, 15, 18, 20, 24 — mostly arbitrary values,
+     several pairs half a pixel apart, which is a difference nobody can see and
+     everybody has to maintain. Six steps plus the KPI figure:
+
+       text-micro  10.5px / 500   micro-labels, chips, eyebrows
+       text-meta   11.5px / 400   metadata, hints, chart axes
+       text-xs        12px / 400   body, controls, table cells
+       text-row       13px / 600   row labels, panel section headings
+       text-sm        14px / 600   card and dialog titles
+       text-lg        18px / 600   panel entity name
+       text-2xl       24px / 600   KPI figures
+
+     text-xs/-sm/-lg/-2xl are Tailwind's own steps at exactly those sizes, so
+     only the three it has no step for are declared here. Nothing goes below
+     10.5px. typeScale.test.ts holds the set closed.
+
+     Weights stay at the call site rather than riding on the size token: plenty
+     of these sit next to an explicit font-* utility, and two rules setting
+     font-weight at equal specificity would be decided by stylesheet order. */
+  --text-micro: 10.5px;
+  --text-meta: 11.5px;
+  --text-row: 13px;
+}
+
+/* Light · Cool gray — Windows-11 neutral grays over white cards. Chosen over
+   the warmer and higher-contrast candidates because it keeps the dark theme's
+   figure-ground relationship: the card is lighter than the page in both modes. */
+:root[data-theme="light"] {
+  --color-bg: #edeff3;
+  --color-surface: #ffffff;
+  --color-surface-dim: #f8f9fb;
+  --color-surface-2: #eaecf1;
+  --color-surface-3: #dfe2e9;
+  --color-control: #ffffff;
+  /* A step darker than the values the theme was drawn with (#d9dce3 / #bbc0cb).
+     A contrast ratio is a bad model for a hairline near white: the same 1.2:1
+     that reads as a lit edge against a near-black card is at the floor of what
+     the eye resolves on white. The controls that sit on the *page* rather than
+     in a card — the date range picker, its preset menu, the chart selectors —
+     were the ones that disappeared, at 1.19:1 against --color-bg where dark gets
+     1.39:1. These land the page reading at 1.43:1 and keep the edge → edge-2
+     step the same size it is on dark. themeTokens.test.ts holds the floor. */
+  --color-edge: #c4cad5;
+  --color-edge-2: #b3b9c6;
+  --color-control-edge: #b3b9c6;
+  /* Near-black made KPI figures more forceful in light than their dark-theme
+     counterparts. This keeps primary copy dark while restoring that parity. */
+  --color-ink: #24282f;
+  --color-ink-2: #515762;
+  /* Four steps darker than the value the theme was drawn with (#6b717c), which
+     cleared 4.5:1 on the card but only reached 4.26:1 on the page — and ink-3 is
+     used directly on the page by the waiting and database-error screens.
+     themeTokens.test.ts measures both surfaces now, which is what caught it. */
+  --color-ink-3: #676d78;
+  --color-ink-3-raised: #5c626c;
+  --color-ink-2-raised: #3f444d;
+  --color-accent: #2a66b0;
+  --color-on-accent: #ffffff;
+  --color-good: #2a7758;
+  --color-good-data: #0a855b;
+  --color-bad: #a94a4c;
+  --color-warn: #9d6504;
+  --color-hover: rgba(21, 24, 29, .04);
+  --color-hover-2: rgba(21, 24, 29, .075);
+  --color-scrim: rgba(20, 24, 32, .36);
+  /* Moved with the edges above only to preserve their order: a scroll thumb that
+     is lighter than a card border reads as the less substantial of the two,
+     which is backwards. */
+  --color-scroll-thumb: #bfc5d1;
+  --color-scroll-thumb-well: #adb4c2;
+  --shadow-menu: 0 10px 28px rgba(28, 38, 56, .14);
+  --shadow-panel: 0 16px 40px rgba(28, 38, 56, .16);
+  --shadow-control: 0 1px 2px rgba(28, 38, 56, .07);
 }
 
 :root {
+  /* Deliberately not in @theme: Tailwind's --shadow-* namespace resolves a
+     shadow at build time and inlines it, so the utility would carry the dark
+     value as a literal and the light override below would never apply. Held as
+     plain variables with the two classes further down as the call site. */
+  --shadow-menu: 0 12px 34px rgba(0, 0, 0, .5);
+  --shadow-panel: 0 18px 48px rgba(0, 0, 0, .5);
+  --shadow-control: none;
+
   --window-titlebar-height: 32px;
+  /* Drives the native widgets no stylesheet reaches — the date picker's popup
+     above all. Set per theme rather than pinned to dark. */
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 @keyframes menu-pop {
@@ -41,23 +173,41 @@
   to { opacity: 1; transform: translateX(0); }
 }
 
+/* color-mix rather than rgba(): a keyframe cannot interpolate a var *inside*
+   rgba(), but it can mix one, and both stops resolve to concrete colours before
+   interpolation. That keeps one pair of keyframes for both themes instead of a
+   duplicate set per theme. */
 @keyframes live-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 185, 129, .34); }
-  50% { box-shadow: 0 0 0 5px rgba(22, 185, 129, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-good-data) 34%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-good-data) 0%, transparent); }
 }
 
 @keyframes alert-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(208, 125, 125, .58);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-bad) 58%, transparent);
     filter: brightness(1);
     transform: scale(1);
   }
   48% {
-    box-shadow: 0 0 0 7px rgba(208, 125, 125, 0);
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--color-bad) 0%, transparent);
     filter: brightness(1.22);
     transform: scale(1.12);
   }
 }
+
+/* The secondary lines inside a chart tooltip — the top app, the share of tracked
+   time, a window title. ECharts renders tooltips as real DOM, so these can take
+   a class and follow the token instead of being handed a colour by the component
+   that built the string. */
+.chart-tip-muted {
+  color: var(--color-ink-2);
+}
+
+/* Popovers and panels float. The much smaller control shadow is scoped to the
+   primary date-range cluster, so ordinary fields do not all claim priority. */
+.shadow-menu { box-shadow: var(--shadow-menu); }
+.shadow-panel { box-shadow: var(--shadow-panel); }
+.shadow-control { box-shadow: var(--shadow-control); }
 
 .menu-pop { animation: menu-pop 140ms ease-out; }
 .panel-in { animation: panel-in 150ms ease-out; }
@@ -71,16 +221,21 @@
     animation: none;
   }
   .alert-pulse {
-    box-shadow: 0 0 0 2px rgba(208, 125, 125, .28);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-bad) 28%, transparent);
   }
 }
 
 /* Chart selectors stay legible without competing with the visualization.
    Their full control contrast returns once the user interacts with them.
    MenuSelect applies this only while closed — an open menu always takes the
-   accent state, and these rules would otherwise win on stylesheet order. */
+   accent state, and these rules would otherwise win on stylesheet order.
+
+   Mixed toward --color-surface, not --color-ink: mixing toward ink dims on a
+   dark page but *brightens* on a light one, which would make the quiet variant
+   louder than the default it is supposed to recede from. "Toward the surface"
+   reads as receding in both directions. */
 .menu-quiet {
-  color: color-mix(in srgb, var(--color-ink-3) 84%, var(--color-ink));
+  color: color-mix(in srgb, var(--color-ink-3) 84%, var(--color-surface));
   background-color: color-mix(in srgb, var(--color-surface-2) 62%, transparent);
   border-color: color-mix(in srgb, var(--color-edge) 72%, transparent);
 }
@@ -92,21 +247,25 @@
   border-color: var(--color-edge);
 }
 
-/* Settings has many compact custom controls. Give every button the same
-   keyboard landmark, including controls rendered in the restore portal, and
-   restore a visible focus treatment to fields whose native outline is removed
-   for the dark theme. */
-.settings-panel button:focus-visible,
-.settings-dialog button:focus-visible {
+/* One keyboard landmark for the whole app. This began as a Settings-only rule,
+   which meant focus visibility was decided per component: table sort headings,
+   the Activity view buttons, the category expand chevron and the swatch buttons
+   had no ring at all, while two components carried their own. Promoting the one
+   rule is less code than the set it replaces and it cannot be forgotten by the
+   next control that gets added.
+
+   `outline-none` in a component's utilities does not defeat this — a class is
+   less specific than element+pseudo-class, and these rules are emitted after
+   Tailwind's. Components still style their own border on focus; the ring sits
+   outside it. */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--color-accent) 72%, transparent);
   outline-offset: 2px;
-}
-
-.settings-panel input:focus-visible,
-.settings-panel textarea:focus-visible,
-.settings-dialog input:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: 1px;
 }
 
 html,
@@ -190,21 +349,22 @@ body {
 
 /* Both date pickers, not just the range picker's: the session correction dialog
    uses datetime-local, which was left with the browser's default indicator and
-   a light-mode popup on a dark page. */
+   a light-mode popup on a dark page.
+
+   Drawn as a mask over a token fill rather than as a coloured background image.
+   A stroke colour baked into a data URI is the one place no variable reaches, so
+   the alternative was a second copy of the icon per theme; masking keeps one
+   copy and lets --color-ink-2 colour it. */
 input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   appearance: none;
   width: 14px;
   height: 14px;
   padding: 0;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='%239aa0a8' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='1.5' y='2.5' width='11' height='10' rx='1.5'/%3E%3Cpath d='M4 1.5v2M10 1.5v2M1.5 5.5h11'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
+  background: var(--color-ink-2);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='black' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='1.5' y='2.5' width='11' height='10' rx='1.5'/%3E%3Cpath d='M4 1.5v2M10 1.5v2M1.5 5.5h11'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='black' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='1.5' y='2.5' width='11' height='10' rx='1.5'/%3E%3Cpath d='M4 1.5v2M10 1.5v2M1.5 5.5h11'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
   cursor: pointer;
-}
-
-/* Drives the native calendar popup's own theme, which no page CSS can reach. */
-input[type="date"],
-input[type="datetime-local"] {
-  color-scheme: dark;
 }
 
 /* Hide the spinner arrows on number inputs — the settings fields are typed. */
@@ -222,7 +382,7 @@ input[type="number"] {
   height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a2e36;
+  background: var(--color-scroll-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-track {
@@ -237,6 +397,6 @@ input[type="number"] {
   height: 6px;
 }
 .scroll-well::-webkit-scrollbar-thumb {
-  background: #353b45;
+  background: var(--color-scroll-thumb-well);
   border-radius: 3px;
 }

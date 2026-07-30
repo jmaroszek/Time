@@ -15,7 +15,7 @@ import {
   ACTIVITY_METRIC_LABELS,
   ACTIVITY_METRIC_WORDS,
 } from "./overview";
-import { ACTIVITY_METRIC_RAMPS, CHROME } from "./chartTheme";
+import { ACTIVITY_METRIC_RAMPS, chartChrome } from "./chartTheme";
 import { addDays, dayKey, type Range } from "./time";
 import type { Session } from "./metrics";
 import { calendarGrid, formatActivityCalendarTooltip } from "../components/ActivityCalendar";
@@ -274,7 +274,7 @@ describe("activity metrics", () => {
     const brightest = neutralRamp[neutralRamp.length - 1];
     const luminance = (hex: string) =>
       [1, 3, 5].reduce((sum, i) => sum + parseInt(hex.slice(i, i + 2), 16), 0) / 3;
-    expect(luminance(brightest)).toBeLessThan(luminance(CHROME.axisLabel));
+    expect(luminance(brightest)).toBeLessThan(luminance(chartChrome("dark").axisLabel));
   });
 
   it("starts every ramp at the same empty-cell fill", () => {
@@ -339,7 +339,7 @@ describe("categorySeries", () => {
   ];
 
   it("orders largest total first, using configured order to break ties", () => {
-    const series = categorySeries(buckets, CATEGORIES);
+    const series = categorySeries(buckets, CATEGORIES, "dark");
     expect(series.map((s) => s.name)).toEqual(["Dev", "Games", "Uncategorized", "Neutral"]);
     expect(series.find((s) => s.name === "Dev")!.hours).toEqual([2, 1]);
     expect(series.find((s) => s.name === "Uncategorized")!.hours).toEqual([1, 0]);
@@ -347,7 +347,7 @@ describe("categorySeries", () => {
 
   it("holds Uncategorized back until it reaches an hour, unlike real categories", () => {
     const thin = [{ categorySeconds: new Map([["Dev", 60], ["Uncategorized", 1800]]) }];
-    const series = categorySeries(thin, CATEGORIES);
+    const series = categorySeries(thin, CATEGORIES, "dark");
     // Dev shows with a single minute; sub-hour Uncategorized is suppressed.
     expect(series.map((s) => s.name)).toEqual(["Dev"]);
   });
@@ -356,18 +356,19 @@ describe("categorySeries", () => {
     const series = categorySeries(
       [{ categorySeconds: new Map([["Dev", 3600], ["Neutral", 7200]]) }],
       CATEGORIES,
+      "dark",
     );
     expect(series.map((s) => s.name)).toEqual(["Neutral", "Dev"]);
   });
 
   it("keeps each category's configured color and Uncategorized gray", () => {
-    const series = categorySeries(buckets, CATEGORIES);
+    const series = categorySeries(buckets, CATEGORIES, "dark");
     expect(series.find((s) => s.name === "Dev")!.color).toBe("#378ADD");
     expect(series.find((s) => s.name === "Uncategorized")!.color).toBe("#5b616b");
   });
 
   it("omits ignored categories and any category with no time in range", () => {
-    const series = categorySeries(buckets, CATEGORIES);
+    const series = categorySeries(buckets, CATEGORIES, "dark");
     // "Ignored" is isIgnored; sessions never accrue to it upstream anyway.
     expect(series.some((s) => s.name === "Ignored")).toBe(false);
     // No bucket carries Games in the second slot, but it still appears because
@@ -375,6 +376,7 @@ describe("categorySeries", () => {
     const noGames = categorySeries(
       [{ categorySeconds: new Map([["Dev", 3600]]) }],
       CATEGORIES,
+      "dark",
     );
     expect(noGames.map((s) => s.name)).toEqual(["Dev"]);
   });

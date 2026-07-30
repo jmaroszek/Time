@@ -13,11 +13,16 @@ import { dayKey, listDays, type Range } from "../lib/time";
 import { fmtClock, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
-import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import {
+  afkFill,
+  CHART_FONT_FAMILY,
+  CHART_LABEL_SIZE,
+  chartChrome,
+  tooltipStyle,
+  uncategorizedMark,
+} from "../lib/chartTheme";
 import { timelineHourInterval, useViewportWidth } from "../lib/responsive";
 
-const AFK_COLOR = "#33363d";
-const UNCATEGORIZED_COLOR = "#5b616b";
 
 export interface TimelineSegment {
   process: string;
@@ -49,15 +54,20 @@ export default function TimelineChart({
   classifier: Classifier;
   blockMinutes: number; // 0 = exact sessions
 }) {
-  const { aliases, dayStartHour, dayEndHour } = useMeta();
+  const { aliases, dayStartHour, dayEndHour, theme } = useMeta();
   const viewportWidth = useViewportWidth();
   const hourInterval = timelineHourInterval(viewportWidth);
   const days = useMemo(() => listDays(range), [range]); // oldest on top, reads top-to-bottom
   const dayIndex = useMemo(() => new Map(days.map((d, i) => [dayKey(d), i])), [days]);
 
+  // Both are near-surface fills chosen for their distance from the card, so
+  // both follow the theme: a dark AFK band would be the strongest mark on a
+  // light page, which is the opposite of what idle time should look like.
+  const afk = afkFill(theme);
+  const uncategorized = uncategorizedMark(theme);
   const segments = useMemo<SegmentDatum[]>(() => {
     if (blockMinutes > 0) {
-      return aggregateBlocks(sessions, range, classifier, blockMinutes).flatMap((b) => {
+      return aggregateBlocks(sessions, range, classifier, blockMinutes, uncategorized).flatMap((b) => {
         const idx = dayIndex.get(b.dayKey);
         if (idx === undefined) return [];
         return [
@@ -67,7 +77,7 @@ export default function TimelineChart({
               process: b.apps[0]?.process ?? "",
               title: "",
               categoryName: b.categoryName,
-              color: b.color ?? AFK_COLOR,
+              color: b.color ?? afk,
               startSec: b.startSec,
               endSec: b.endSec,
               isAfk: b.isAfk,
@@ -84,7 +94,7 @@ export default function TimelineChart({
     const endSec = range.end.getTime() / 1000;
     for (const s of clipSessions(sessions, startSec, endSec)) {
       const cat = classifier(s);
-      const color = s.isAfk ? AFK_COLOR : (cat?.color ?? UNCATEGORIZED_COLOR);
+      const color = s.isAfk ? afk : (cat?.color ?? uncategorized);
       const categoryName = s.isAfk ? "AFK" : (cat?.name ?? "Uncategorized");
       for (const chunk of splitAtMidnights(s.start, s.end)) {
         const idx = dayIndex.get(dayKey(chunk.dayStart));
@@ -109,10 +119,11 @@ export default function TimelineChart({
       }
     }
     return out;
-  }, [sessions, range, classifier, dayIndex, blockMinutes]);
+  }, [sessions, range, classifier, dayIndex, blockMinutes, afk, uncategorized]);
 
-  const option = useMemo<EChartsOption>(
-    () => ({
+  const option = useMemo<EChartsOption>(() => {
+    const chrome = chartChrome(theme);
+    return {
       animation: false,
       textStyle: { fontFamily: CHART_FONT_FAMILY },
       grid: { left: 70, right: 16, top: 8, bottom: 24 },
@@ -122,23 +133,23 @@ export default function TimelineChart({
         max: dayEndHour,
         interval: hourInterval,
         axisLabel: {
-          color: CHROME.axisLabel,
-          fontSize: 11,
+          color: chrome.axisLabel,
+          fontSize: CHART_LABEL_SIZE,
           formatter: (h: number) =>
             h === 0 || h === 24 ? "12am" : h === 12 ? "noon" : h < 12 ? `${h}am` : `${h - 12}pm`,
         },
-        splitLine: { lineStyle: { color: CHROME.gridLine } },
+        splitLine: { lineStyle: { color: chrome.gridLine } },
       },
       yAxis: {
         type: "category",
         data: days.map(fmtDayLabel),
         inverse: true,
-        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
+        axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         axisTick: { show: false },
         axisLine: { show: false },
       },
       tooltip: {
-        ...TOOLTIP_STYLE,
+        ...tooltipStyle(theme),
         formatter: (p: { data: { seg: TimelineSegment } }) => formatTooltip(p.data.seg, aliases),
       },
       series: [
@@ -179,9 +190,8 @@ export default function TimelineChart({
           },
         },
       ],
-    }),
-    [segments, days, aliases, dayStartHour, dayEndHour, hourInterval],
-  );
+    };
+  }, [segments, days, aliases, dayStartHour, dayEndHour, hourInterval, theme]);
 
   const chart = (
     <EChart option={option} height={Math.max(days.length * 34 + 40, 110)} />
@@ -202,7 +212,7 @@ export function formatTooltip(
       .slice(0, 4)
       .map(
         (a) =>
-          `<div style="color:${CHROME.axisLabel}">${escapeHtml(cleanProcessName(a.process, aliases))} · ${fmtDuration(a.seconds)}</div>`,
+          `<div class="chart-tip-muted">${escapeHtml(cleanProcessName(a.process, aliases))} · ${fmtDuration(a.seconds)}</div>`,
       )
       .join("");
     return `<b>${escapeHtml(seg.categoryName)}</b> · ${window}<div>${fmtDuration(seg.activeSec ?? 0)} active</div>${apps}`;
@@ -219,7 +229,7 @@ export function formatTooltip(
     : `<b>${escapeHtml(cleanProcessName(seg.process, aliases))}</b> · ${escapeHtml(seg.categoryName)}`;
   const titleLine =
     !seg.isAfk && seg.title
-      ? `<div style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${CHROME.axisLabel}">${escapeHtml(seg.title)}</div>`
+      ? `<div class="chart-tip-muted" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(seg.title)}</div>`
       : "";
   return `${head}${titleLine}<div>${window} · ${fmtDuration(seg.endSec - seg.startSec)}</div>`;
 }

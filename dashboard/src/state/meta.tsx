@@ -20,17 +20,45 @@ import {
   type Rule,
 } from "../lib/classify";
 import { noisePolicyFromSettings, type NoisePolicy } from "../lib/noise";
-import { applyProductivity, resolvePalette, type Palette } from "../lib/palettes";
+import {
+  applyProductivity,
+  paletteForTheme,
+  resolvePalette,
+  themedSwatch,
+  type Palette,
+} from "../lib/palettes";
 import { checkSchemaVersion, fetchCategories, fetchRules, fetchSettings } from "../lib/queries";
+import {
+  resolveTheme,
+  resolveThemePreference,
+  SYSTEM_DARK_QUERY,
+  type ThemeName,
+  type ThemePreference,
+} from "../lib/theme";
 import type { WeekStart } from "../lib/time";
 
 export interface Meta {
+  /** Categories with their colours mapped for the active theme. Everything that
+   *  *draws* a category should use these — the classifier below is built from
+   *  them, so the charts and the activity worker get themed colours for free. */
   categories: Category[];
+  /** The same categories with their colours exactly as stored. Anything that
+   *  *writes* a category must start from these: `updateCategory` takes a whole
+   *  row, so spreading a themed copy would persist the display value and the
+   *  colour would stop round-tripping between themes. */
+  storedCategories: Category[];
   rules: Rule[];
   settings: Record<string, string>;
   /** The selected colour palette (category swatches + productivity colours),
    *  resolved from the `color_palette` setting; defaults to Slate. */
   palette: Palette;
+  /** The stored appearance preference, which may be "system". */
+  themePreference: ThemePreference;
+  /** Which theme is actually on screen. The CSS reads it off the <html> element
+   *  (see the effect below); the canvas charts cannot, so they take it from here
+   *  and pass it to chartChrome()/tooltipStyle() — ECharts has no access to CSS
+   *  custom properties, which is the whole reason chartTheme.ts exists. */
+  theme: ThemeName;
   browserSet: Set<string>;
   aliases: Record<string, string>;
   classifier: Classifier;
@@ -87,21 +115,46 @@ export function MetaProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  const systemPrefersDark = useSystemPrefersDark();
+  const themePreference = resolveThemePreference(settings.theme);
+  const theme = resolveTheme(themePreference, systemPrefersDark);
+
+  // The CSS theme is selected by this attribute, so it has to be on the element
+  // before anything paints in the new theme. Set on <html> rather than a wrapper
+  // so the portalled menus, dialogs and tooltips are inside it too.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
   const value = useMemo<Meta>(() => {
     const browserSet = new Set(
       normalizeBrowserProcesses(settings.browser_processes ?? DEFAULT_BROWSER_PROCESSES),
     );
+    const palette = paletteForTheme(
+      applyProductivity(resolvePalette(settings.color_palette), settings.productivity_style),
+      theme,
+    );
+    // Mapped once here rather than at each of the dozen places that draw a
+    // category colour. The classifier is built from the mapped list, which is
+    // what carries the theme into the charts and both workers.
+    const themedCategories =
+      theme === "light"
+        ? categories.map((category) => ({
+            ...category,
+            color: themedSwatch(palette, theme, category.color),
+          }))
+        : categories;
     return {
-      categories,
+      categories: themedCategories,
+      storedCategories: categories,
       rules,
       settings,
-      palette: applyProductivity(
-        resolvePalette(settings.color_palette),
-        settings.productivity_style,
-      ),
+      palette,
+      themePreference,
+      theme,
       browserSet,
       aliases: parseAliases(settings.process_aliases),
-      classifier: memoizeClassifierById(buildClassifier(categories, rules, browserSet)),
+      classifier: memoizeClassifierById(buildClassifier(themedCategories, rules, browserSet)),
       weekStart: resolveWeekStart(settings.week_start),
       weeklyGoalHours: finiteNonNegative(settings.weekly_goal_hours),
       minAppSecondsPerDay: Math.max(0, Number(settings.min_app_seconds_per_day) || 0),
@@ -112,9 +165,27 @@ export function MetaProvider({ children }: { children: ReactNode }) {
       error,
       refresh,
     };
-  }, [categories, rules, settings, loaded, error, refresh]);
+  }, [categories, rules, settings, loaded, error, refresh, themePreference, theme]);
 
   return <MetaContext.Provider value={value}>{children}</MetaContext.Provider>;
+}
+
+/** Tracks the OS appearance, for the "Follow system" preference. Subscribed
+ *  rather than read once: Windows can flip this while the app is open, on a
+ *  schedule the app never sees. */
+function useSystemPrefersDark(): boolean {
+  const [prefersDark, setPrefersDark] = useState(
+    () => window.matchMedia?.(SYSTEM_DARK_QUERY).matches ?? true,
+  );
+  useEffect(() => {
+    const query = window.matchMedia?.(SYSTEM_DARK_QUERY);
+    if (!query) return;
+    const onChange = (event: MediaQueryListEvent) => setPrefersDark(event.matches);
+    query.addEventListener("change", onChange);
+    setPrefersDark(query.matches);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  return prefersDark;
 }
 
 function finiteNonNegative(raw: string | undefined): number {

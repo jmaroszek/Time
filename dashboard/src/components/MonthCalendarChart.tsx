@@ -16,7 +16,7 @@ import {
 } from "../lib/overview";
 import { useMeta } from "../state/meta";
 import { metricRamps } from "../lib/palettes";
-import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { CHART_FONT_FAMILY, CHART_LABEL_SIZE, chartChrome, tooltipStyle } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -45,13 +45,14 @@ export default function MonthCalendarChart({
   summaries: MonthlyActivitySummary[];
   metric?: ActivityMetric;
 }) {
-  const { aliases, palette } = useMeta();
+  const { aliases, palette, theme } = useMeta();
   const years = useMemo(
     () => [...new Set(summaries.map((month) => month.year))].sort((a, b) => a - b),
     [summaries],
   );
 
   const option = useMemo<EChartsOption>(() => {
+    const chrome = chartChrome(theme);
     const rowIndex = new Map(years.map((year, index) => [year, index]));
     const byPoint = new Map<string, MonthlyActivitySummary>();
     const data: [number, number, number][] = [];
@@ -76,7 +77,7 @@ export default function MonthCalendarChart({
         height: CELL_HEIGHT * years.length,
       },
       tooltip: {
-        ...TOOLTIP_STYLE,
+        ...tooltipStyle(theme),
         formatter: (p: { data: [number, number, number] }) => {
           const month = byPoint.get(`${p.data[0]},${p.data[1]}`);
           return month ? formatMonthCalendarTooltip(month, metric, aliases) : "";
@@ -86,7 +87,7 @@ export default function MonthCalendarChart({
         type: "category",
         position: "top",
         data: MONTH_NAMES,
-        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
+        axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         axisTick: { show: false },
         axisLine: { show: false },
         splitArea: { show: false },
@@ -95,7 +96,7 @@ export default function MonthCalendarChart({
         type: "category",
         data: years.map(String),
         inverse: true, // earliest year on top
-        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
+        axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         axisTick: { show: false },
         axisLine: { show: false },
         splitArea: { show: false },
@@ -104,17 +105,17 @@ export default function MonthCalendarChart({
         show: false,
         min: 0,
         max: Math.max(maxHours, 1),
-        inRange: { color: metricRamps(palette)[metric] },
+        inRange: { color: metricRamps(palette, theme)[metric] },
       },
       series: [
         {
           type: "heatmap",
           data,
-          itemStyle: { borderColor: "#0f1115", borderWidth: 2, borderRadius: 2 },
+          itemStyle: { borderColor: chrome.page, borderWidth: 2, borderRadius: 2 },
         },
       ],
     };
-  }, [summaries, years, metric, aliases, palette]);
+  }, [summaries, years, metric, aliases, palette, theme]);
 
   const height = CELL_HEIGHT * years.length + CHART_TOP + CHART_BOTTOM;
   // Cap the width so 12 columns stay near-square in a full-width card, and
@@ -138,16 +139,16 @@ export function formatMonthCalendarTooltip(
   const word = ACTIVITY_METRIC_WORDS[metric];
   const label = word.replace(/^./, (c) => c.toUpperCase());
   const topApp = metric === "tracked" && month.topApp
-    ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(month.topApp.process, aliases))} · ${fmtDuration(month.topApp.seconds)}</div>`
+    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(cleanProcessName(month.topApp.process, aliases))} · ${fmtDuration(month.topApp.seconds)}</div>`
     : "";
   return [
     `<b>${FULL_MONTH_NAMES[month.month]} ${month.year}</b>`,
     `<div>${label}: ${fmtDuration(metricSeconds(month, metric))}</div>`,
     share === null
       ? ""
-      : `<div style="color:${CHROME.axisLabel}">${share}% of tracked time</div>`,
+      : `<div class="chart-tip-muted">${share}% of tracked time</div>`,
     metric === "productive"
-      ? `<div style="color:${CHROME.axisLabel}">Longest focus: ${fmtDuration(month.longestFocusSeconds)}</div>`
+      ? `<div class="chart-tip-muted">Longest focus: ${fmtDuration(month.longestFocusSeconds)}</div>`
       : "",
     topApp,
   ].join("");

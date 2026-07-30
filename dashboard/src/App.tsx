@@ -313,9 +313,9 @@ function PrivacyOnboarding() {
 
   return (
     <div className="flex min-h-full items-center justify-center p-3 sm:p-8">
-      <section className="scroll-well max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-[18px] border border-edge bg-surface px-4 py-5 shadow-2xl shadow-black/20 sm:max-h-[calc(100dvh-4rem)] sm:px-7 sm:py-6">
-        <p className="text-xs font-bold uppercase tracking-[.12em] text-accent">Private by design</p>
-        <h1 className="mt-2 text-xl font-semibold text-ink">Choose what Time may record</h1>
+      <section className="scroll-well max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-[18px] border border-edge bg-surface px-4 py-5 shadow-panel sm:max-h-[calc(100dvh-4rem)] sm:px-7 sm:py-6">
+        <p className="text-micro font-bold uppercase tracking-[.12em] text-accent">Private by design</p>
+        <h1 className="mt-2 text-lg font-semibold text-ink">Choose what Time may record</h1>
         <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-2">
           Time has no account, server, analytics, or telemetry. Activity is written only to your
           per-user SQLite database. Nothing is uploaded.
@@ -360,7 +360,7 @@ function PrivacyOnboarding() {
             type="button"
             disabled={saving}
             onClick={() => void complete(true)}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-[#081019] transition-opacity disabled:opacity-50"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-opacity disabled:opacity-50"
           >
             {saving ? "Saving…" : "Enable private tracking"}
           </button>
@@ -415,8 +415,8 @@ function FirstRunPanel({ status }: { status: TrackerStatus }) {
   const heartbeatAge = status.lastHeartbeat == null ? null : Date.now() / 1000 - status.lastHeartbeat;
   const trackerLive = heartbeatAge !== null && heartbeatAge < 120;
   return (
-    <section className="rounded-[14px] border border-accent/25 bg-[linear-gradient(180deg,rgba(107,160,218,.06),rgba(107,160,218,.02))] px-5 py-4 text-xs leading-relaxed">
-      <p className="text-[13px] font-semibold">Welcome to Time</p>
+    <section className="rounded-[14px] border border-accent/25 bg-gradient-to-b from-accent/[.06] to-accent/[.02] px-5 py-4 text-xs leading-relaxed">
+      <p className="text-row font-semibold">Welcome to Time</p>
       <p className="mt-2 text-ink-2">
         Time records foreground apps and timing. Window titles are stored only if you opted in;
         browser URLs are stripped before anything reaches the database. Everything stays in a
@@ -489,7 +489,7 @@ function DbErrorScreen({ error }: { error: string }) {
       <p className="mt-3 break-all font-mono text-xs text-ink-3">{getDbPath()}</p>
       <button
         type="button"
-        className="mt-4 rounded-lg border border-edge-2 px-3 py-1.5 text-xs text-ink-2 transition-colors hover:bg-white/[.035] hover:text-ink"
+        className="mt-4 rounded-lg border border-edge-2 px-3 py-1.5 text-xs text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink"
         onClick={() =>
           void navigator.clipboard.writeText(error).then(() => {
             setCopied(true);

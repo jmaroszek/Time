@@ -153,6 +153,7 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('activity_noise_max_sessions','1'),
     ('color_palette','slate'),
     ('productivity_style','vivid'),
+    ('theme','system'),
     ('focus_chain_max_gap_seconds','300'),
     ('day_start_hour','0'),
     ('day_end_hour','24'),

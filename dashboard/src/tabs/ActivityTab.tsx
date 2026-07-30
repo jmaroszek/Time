@@ -15,6 +15,7 @@ import {
   Card,
   CategoryDot,
   Checkbox,
+  ConfirmDialog,
   FloatingTooltip,
   MenuSelect,
   RemoveButton,
@@ -66,7 +67,7 @@ import {
   normalizeWindowTitle,
   splitWindowTitle,
 } from "../lib/titleRules";
-import { UNCATEGORIZED } from "../lib/chartTheme";
+import { uncategorizedMark } from "../lib/chartTheme";
 import {
   describeTitleRule,
   findDuplicateRule,
@@ -79,7 +80,8 @@ import {
   type CategoryListOrder,
   type RuleListOrder,
 } from "../lib/categoryRules";
-import type { Palette } from "../lib/palettes";
+import { canonicalSwatch, type Palette } from "../lib/palettes";
+import type { ThemeName } from "../lib/theme";
 import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
 import { fmtDuration } from "../lib/format";
 import { clipSessions } from "../lib/metrics";
@@ -103,6 +105,7 @@ import {
   listTrackingExclusions,
   previewActivityDelete,
   previewTrackingExclusion,
+  type TrackingExclusionPreview,
   removeTrackingExclusion,
   resetSessionCorrection,
   saveActivityExport,
@@ -131,12 +134,14 @@ type LibraryFilter = ActivityClassificationFilter | "excluded";
 /** One palette for productivity everywhere it names a state: the chart bars and
  *  these classification chips share the selected palette's fills. Ignored keeps
  *  its own gray — it is an absence of judgment, not one of the three states. */
-function stateColors(palette: Palette): Record<CategoryState, string> {
+function stateColors(palette: Palette, theme: ThemeName): Record<CategoryState, string> {
   return {
     productive: palette.productive,
     neutral: palette.neutral,
     unproductive: palette.unproductive,
-    ignored: "#5b616b",
+    // The same near-surface gray the charts use for unclaimed time, so an
+    // absence of judgment looks the same wherever it appears.
+    ignored: uncategorizedMark(theme),
   };
 }
 
@@ -289,7 +294,7 @@ function EditRuleButton({
       title={label}
       aria-label={label}
       onClick={onClick}
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-white/[.05] hover:text-ink-2"
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2"
     >
       <svg
         aria-hidden="true"
@@ -1329,14 +1334,14 @@ function ClearableInput({
           }
         }}
         placeholder={placeholder}
-        className={`w-full rounded-[9px] border border-edge bg-surface-2 py-2 pr-8 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60 ${leadingIcon ? "pl-9" : "pl-2.5"}`}
+        className={`w-full rounded-[9px] border border-control-edge bg-control py-2 pr-8 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60 ${leadingIcon ? "pl-9" : "pl-2.5"}`}
       />
       {value && (
         <button
           type="button"
           onClick={() => onChange("")}
           title={`Clear ${label.toLowerCase()}`}
-          className="absolute right-2 top-1.5 rounded p-1 text-ink-3 hover:bg-white/[.06] hover:text-ink-2"
+          className="absolute right-2 top-1.5 rounded p-1 text-ink-3 hover:bg-hover-2 hover:text-ink-2"
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3">
             <path d="M6 6l12 12M18 6 6 18" />
@@ -1595,7 +1600,7 @@ function SummaryTable({
             // beside it and has to be told apart from the one under the cursor.
             // A second gray could not; the interface's own colour can.
             aria-current={row.selected ? "true" : undefined}
-            className={`cursor-pointer border-b border-edge/40 transition-colors hover:bg-white/[.035] ${row.selected ? "bg-accent/[.09]" : ""}`}
+            className={`cursor-pointer border-b border-edge/40 transition-colors hover:bg-hover ${row.selected ? "bg-accent/[.09]" : ""}`}
             onClick={row.onOpen}
           >
             <td className="py-2.5 pr-4">
@@ -1850,7 +1855,7 @@ function ResultGroup({
     <section>
       <div className="sticky top-0 z-20 flex h-12 items-center bg-surface">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-ink-1">{title}</h3>
+          <h3 className="text-sm font-semibold text-ink">{title}</h3>
           <div className="mt-0.5 flex items-center gap-2 text-xs tabular-nums leading-[1.4] text-ink-3">
             <span>{summary}</span>
           </div>
@@ -1967,12 +1972,13 @@ function RowTag({
   tone?: "muted" | "accent";
   children: ReactNode;
 }) {
-  const styles = tone === "accent" ? "bg-accent/10 text-accent/85" : "bg-surface-3 text-ink-3";
+  // The muted tone sits on surface-3, so it takes the raised ink rank.
+  const styles = tone === "accent" ? "bg-accent/10 text-accent/85" : "bg-surface-3 text-ink-3-raised";
   return (
     <span
       // normal-case is defended, not decorative: the panel's eyebrow row is
       // uppercase, and a tag inheriting that loses the sentence case above.
-      className={`shrink-0 rounded-full px-1.5 py-[1px] text-xs font-medium normal-case leading-[1.4] ${styles}`}
+      className={`shrink-0 rounded-full px-1.5 py-[1px] text-micro font-medium normal-case leading-[1.4] ${styles}`}
       title={title}
     >
       {children}
@@ -2227,7 +2233,7 @@ function GroupSessions({
           applied to any of them. */}
       {groupVisitsByDay(group.sessions).map((day) => (
         <div key={day.key} className="mt-4 flex flex-col gap-1 first:mt-0">
-          <p className="text-xs uppercase tracking-[.04em] text-ink-3">
+          <p className="text-micro uppercase tracking-[.04em] text-ink-3">
             {formatVisitDay(day.visits[0].start)}
           </p>
           {day.visits.map((session) => (
@@ -2330,29 +2336,42 @@ function ExcludedPanel() {
   const [draft, setDraft] = useState("");
   const [deleteHistory, setDeleteHistory] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pendingHistoryDelete, setPendingHistoryDelete] =
+    useState<TrackingExclusionPreview | null>(null);
 
   const load = () => listTrackingExclusions()
     .then(setItems)
     .catch((error: unknown) => banner.report(error, "tracking exclusions"));
   useEffect(() => { void load(); }, []);
 
+  // Excluding is not destructive; excluding *and deleting the matching history*
+  // is, so only that combination stops for a confirmation. The preview runs
+  // first either way, because the count is what the confirmation is for.
   const add = async () => {
     if (!draft.trim()) return;
     setSaving(true);
     try {
       const preview = await previewTrackingExclusion(kind, draft);
-      if (deleteHistory && preview.count > 0 && !window.confirm(
-        `Delete ${preview.count} existing session${preview.count === 1 ? "" : "s"} (${fmtDuration(preview.seconds)}) for ${preview.normalizedPattern}?\n\nThis cannot be undone without a backup.`,
-      )) {
-        setSaving(false);
+      if (deleteHistory && preview.count > 0) {
+        setPendingHistoryDelete(preview);
         return;
       }
+      await commit();
+    } catch (error) {
+      banner.report(error, "tracking exclusion");
+      setSaving(false);
+    }
+  };
+
+  const commit = async () => {
+    try {
       const result = await addTrackingExclusion(kind, draft, deleteHistory);
       banner.show(deleteHistory
         ? `Excluded ${result.normalizedPattern} and deleted ${result.deletedCount} historical session${result.deletedCount === 1 ? "" : "s"}.`
         : `Excluded ${result.normalizedPattern} from future tracking.`);
       setDraft("");
       setDeleteHistory(false);
+      setPendingHistoryDelete(null);
       await load();
     } catch (error) {
       banner.report(error, "tracking exclusion");
@@ -2383,7 +2402,10 @@ function ExcludedPanel() {
         {items.map((item) => (
           <div key={`${item.kind}:${item.pattern}`} className="flex items-center gap-2.5 rounded-lg border border-edge/60 bg-surface-2 px-3 py-2">
             <RuleKindGlyph matchType={item.kind === "app" ? "process" : "domain"} />
-            <span className="w-[70px] shrink-0 text-xs uppercase tracking-[.04em] text-ink-3">{item.kind === "app" ? "App" : "Website"}</span>
+            {/* Sentence case: the glyph to the left already says "this is a kind",
+                so small caps were restating it in the least legible way
+                available. The panel eyebrow is the one uppercase marker left. */}
+            <span className="w-[70px] shrink-0 text-xs text-ink-3">{item.kind === "app" ? "App" : "Website"}</span>
             <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2" title={item.pattern}>{item.pattern}</span>
             <span className="shrink-0 text-xs text-ink-3">since {formatShortDate(item.createdTs)}</span>
             <RemoveButton label={`Allow ${item.pattern} to be tracked again`} onClick={() => void lift(item)} />
@@ -2415,7 +2437,7 @@ function ExcludedPanel() {
             onKeyDown={(event) => { if (event.key === "Enter") void add(); }}
             placeholder={kind === "app" ? "code.exe" : "example.com"}
             aria-label={kind === "app" ? "App to exclude" : "Website to exclude"}
-            className="min-w-0 flex-1 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
+            className="min-w-0 flex-1 rounded-lg border border-control-edge bg-control px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
           />
           <Button variant="primary" disabled={saving || !draft.trim()} onClick={() => void add()}>Do not track</Button>
         </div>
@@ -2428,6 +2450,33 @@ function ExcludedPanel() {
           </p>
         )}
       </div>
+      {pendingHistoryDelete && (
+        <ConfirmDialog
+          title="Delete recorded activity?"
+          body={
+            <>
+              Excluding{" "}
+              <span className="font-mono font-semibold text-ink">
+                {pendingHistoryDelete.normalizedPattern}
+              </span>{" "}
+              will also remove everything already recorded for it.
+            </>
+          }
+          metrics={[
+            { label: "Sessions", value: String(pendingHistoryDelete.count) },
+            { label: "Recorded time", value: fmtDuration(pendingHistoryDelete.seconds) },
+          ]}
+          note="Complete session rows are removed and cannot be restored unless you have a backup. The exclusion itself can be lifted later, but deleted history does not come back with it."
+          confirmLabel="Exclude and delete"
+          busyLabel="Deleting…"
+          busy={saving}
+          onConfirm={() => void commit()}
+          onClose={() => {
+            setPendingHistoryDelete(null);
+            setSaving(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2536,7 +2585,7 @@ function DetailPanel({
       style={dock ?? undefined}
       className={`panel-in flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-edge bg-surface ${
         dock
-          ? `z-30 ${overlapping ? "shadow-[0_18px_48px_rgba(0,0,0,.5)]" : ""}`
+          ? `z-30 ${overlapping ? "shadow-panel" : ""}`
           : "h-full w-full flex-1"
       }`}
     >
@@ -2545,7 +2594,7 @@ function DetailPanel({
           {/* Nothing precedes the eyebrow, so both panels' headers start on the
               same pixel. Anything that led this block indented the title and
               the line beneath it past every other thing in the panel. */}
-          <div className="flex min-w-0 items-center gap-1.5 text-xs uppercase tracking-[.05em] text-ink-3">
+          <div className="flex min-w-0 items-center gap-1.5 text-micro uppercase tracking-[.05em] text-ink-3">
             {eyebrow}
           </div>
           {heading}
@@ -2618,7 +2667,7 @@ function PanelSection({
     // grew with them, or the sections read as one run of text.
     <section className={`mt-6 ${className}`}>
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-[13px] font-semibold">{title}</h3>
+        <h3 className="text-row font-semibold">{title}</h3>
         {right}
       </div>
       {children}
@@ -2670,7 +2719,7 @@ function PanelWindowRow({
     <button
       type="button"
       onClick={() => onOpen(group)}
-      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-xs outline-none transition-colors hover:border-edge-2 hover:bg-white/[.025] focus-visible:border-accent/60"
+      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-xs outline-none transition-colors hover:border-edge-2 hover:bg-hover focus-visible:border-accent/60"
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-ink-2">
@@ -2782,10 +2831,7 @@ function WindowPanel({
       onClose={onClose}
       closeLabel="Close Window details"
     >
-      {/* Two across, not four. In a panel this narrow a quarter is about 100px,
-          which "Today, 4:46 PM" does not fit into — the tile that most wanted
-          the friendlier wording was the one being truncated by it. */}
-      <div className="grid grid-cols-2 gap-3">
+      <DetailMetricGrid>
         <DetailMetric
           label="Time in range"
           value={fmtDuration(group.seconds)}
@@ -2804,7 +2850,7 @@ function WindowPanel({
           hint={`Out of ${countNoun(rangeDays, "day")} in this range.`}
         />
         <DetailMetric label="Last seen" value={formatLastSeen(group.lastSeen)} />
-      </div>
+      </DetailMetricGrid>
 
       <UsageStrip buckets={usage} />
 
@@ -2822,7 +2868,7 @@ function WindowPanel({
       </PanelSection>
       <section className="mt-6">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-[13px] font-semibold">Visits</h3>
+          <h3 className="mr-auto text-row font-semibold">Visits</h3>
           <Button onClick={() => onToggleAllSessions(group.sessionIds)}>
             {allSelected ? "Clear selection" : `Select all ${group.sessionCount} visits`}
           </Button>
@@ -2913,6 +2959,7 @@ function describeRuleSource(matchType: MatchType, pattern: string, entityKey: st
  * job, and category colour is what this app already means by it.
  */
 function CategorySplit({ entity }: { entity: ActivityEntitySummary }) {
+  const { theme } = useMeta();
   const slices = [
     ...entity.categories.map((category) => ({
       key: `category:${category.categoryId}`,
@@ -2924,7 +2971,7 @@ function CategorySplit({ entity }: { entity: ActivityEntitySummary }) {
       ? [{
           key: "uncategorized",
           name: "Uncategorized",
-          color: UNCATEGORIZED,
+          color: uncategorizedMark(theme),
           seconds: entity.uncategorizedSeconds,
         }]
       : []),
@@ -2979,7 +3026,7 @@ function UsageStrip({ buckets }: { buckets: ActivityDayBucket[] }) {
     <section className="mt-6">
       {/* The same word Insights gives the same idea. A section heading naming
           its own chart beats one phrased as the question the chart answers. */}
-      <h3 className="text-[13px] font-semibold">Timeline</h3>
+      <h3 className="text-row font-semibold">Timeline</h3>
       <div className="mt-2.5 flex h-10 items-end gap-px border-b border-edge/70">
         {buckets.map((bucket) => (
           <span
@@ -3157,7 +3204,7 @@ function EntityPanel({
               event.currentTarget.blur();
             }
           }}
-          className="mt-0.5 w-full rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-lg font-semibold outline-none focus:border-accent/60"
+          className="mt-0.5 w-full rounded-md border border-control-edge bg-control px-2 py-0.5 text-lg font-semibold outline-none focus:border-accent/60"
         />
       ) : (
         // Edited where it is shown. The rename field used to be its own section
@@ -3198,10 +3245,7 @@ function EntityPanel({
       onClose={onClose}
       closeLabel="Close activity details"
     >
-      {/* Two across, not four. In a panel this narrow a quarter is about 100px,
-          which "Today, 4:46 PM" does not fit into — the tile that most wanted
-          the friendlier wording was the one being truncated by it. */}
-      <div className="grid grid-cols-2 gap-3">
+      <DetailMetricGrid>
         {/* Each hint carries the fact its tile could not fit — a share, a
             denominator, the arithmetic behind a derived number — and stops
             there. No restating the label, and no sentence explaining how to
@@ -3232,7 +3276,7 @@ function EntityPanel({
         {/* No hint. The tile is already the whole sentence, and the first-seen
             date it used to carry answers a question nobody asked of it. */}
         <DetailMetric label="Last seen" value={formatLastSeen(entity.lastSeen)} />
-      </div>
+      </DetailMetricGrid>
 
       <UsageStrip buckets={usage} />
 
@@ -3355,7 +3399,7 @@ function EntityPanel({
             well's padding so rows pass underneath rather than beside. */}
         <div className="sticky top-0 z-10 -mx-5 -mt-2 bg-surface px-5 pb-2.5 pt-2">
           <div className="flex items-center gap-2">
-            <h3 className="text-[13px] font-semibold">Windows</h3>
+            <h3 className="text-row font-semibold">Windows</h3>
             {/* Labelled counts, phrased so the heading is not repeated back at
                 the reader — "Windows · 2 windows · 309 visits" was three
                 sayings of two facts. */}
@@ -3438,7 +3482,7 @@ function EntityPanel({
           hesitating and by nobody else. */}
       <section className="mt-7 border-t border-edge/60 pt-5">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-[13px] font-semibold text-ink-2">Manage this {kindLabel}</h3>
+          <h3 className="mr-auto text-row font-semibold text-ink-2">Manage this {kindLabel}</h3>
           {/* The pair is one flex item, so it wraps as a pair. Left loose they
               broke apart one at a time, and a narrow panel got the heading and
               a lone button on one line with the second strung below it. */}
@@ -3463,6 +3507,36 @@ function EntityPanel({
   );
 }
 
+/**
+ * The four summary tiles at the top of a detail panel.
+ *
+ * Two across or four, decided by the panel's own width rather than the window's
+ * — the panel is the one surface here whose width runs *against* the viewport's.
+ * Below WIDE_DETAIL_MIN it is the card's drill-in face and grows with the page;
+ * at and above it the panel shrinks into the right margin and caps at
+ * PANEL_MAX_WIDTH. A media query would therefore flip these to a row of four at
+ * exactly the width where they stop fitting, so the breakpoint is a container
+ * query on the block itself.
+ *
+ * 45rem is where a quarter of the block reaches 171px, which is the width the
+ * Insights tiles have at the `md:` breakpoint that turns *them* into a row. The
+ * two sets are the same tiles, so they earn four across at the same size rather
+ * than at the same window width — and at 171px the widest value any of these
+ * carries, an all-two-digit "Today, 12:34 PM" last-seen at 115px, has 30px of
+ * air. That margin is the whole reason the threshold is not lower: truncating
+ * the last-seen tile is what kept this block at two across to begin with.
+ *
+ * The docked panel's content box tops out near 36rem, so the outboard layout
+ * never reaches the threshold and stays 2x2 — which is correct for it.
+ */
+function DetailMetricGrid({ children }: { children: ReactNode }) {
+  return (
+    <div className="@container">
+      <div className="grid grid-cols-2 gap-3 @[45rem]:grid-cols-4">{children}</div>
+    </div>
+  );
+}
+
 function DetailMetric({
   label,
   value,
@@ -3478,7 +3552,9 @@ function DetailMetric({
 }) {
   return (
     <div className="rounded-lg border border-edge bg-surface-2 p-3">
-      <p className="text-xs text-ink-3">
+      {/* -raised, not plain ink-3: the tile's fill is above the page, and ink-3
+          is pinned to the page. See the token pair in index.css. */}
+      <p className="text-xs text-ink-3-raised">
         {hint ? (
           // The label joins the *accessible* name only. A screen reader has no
           // layout telling it the tooltip belongs to the label above it, so it
@@ -3559,7 +3635,7 @@ function ActivityExportMenu({
       <summary
         title="Download CSV"
         aria-label="Download CSV"
-        className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-white/[.05] hover:text-ink-2"
+        className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -3625,9 +3701,9 @@ function TrackingExclusionDialog({
     }
   };
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="exclude-title">
-      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:p-5">
-        <h2 id="exclude-title" className="text-base font-semibold">Do not track {scope.label}</h2>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="exclude-title">
+      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-panel sm:max-h-[calc(100dvh-2rem)] sm:p-5">
+        <h2 id="exclude-title" className="text-sm font-semibold">Do not track {scope.label}</h2>
         <p className="mt-2 text-xs leading-relaxed text-ink-3">This exact {scope.kind === "website" ? "website" : "app"} identity will be excluded whenever recording is enabled.</p>
         <p className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 font-mono text-xs text-ink-2">{preview?.normalizedPattern ?? scope.pattern}</p>
         {scope.kind === "website" && <p className="mt-2 text-xs text-ink-3">Website exclusions work only when Time can detect the browser domain.</p>}
@@ -3811,9 +3887,9 @@ function WindowRuleDialog({
   const encodedScope = encodeTitleScope(spec.scopeKind, spec.scopeValue);
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="window-rule-title">
-      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:p-5">
-        <h2 id="window-rule-title" className="text-base font-semibold">New Window rule</h2>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="window-rule-title">
+      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-panel sm:max-h-[calc(100dvh-2rem)] sm:p-5">
+        <h2 id="window-rule-title" className="text-sm font-semibold">New Window rule</h2>
         {/* "the other windows you mean" asked the reader to hold a set in their
             head that nothing on screen had shown them yet. Each suggestion
             below states its own reach, so the intro only has to say what the
@@ -3922,7 +3998,7 @@ function WindowRuleDialog({
               <input
                 value={spec.pattern}
                 onChange={(event) => changeSpec({ pattern: event.target.value })}
-                className="mt-1 block w-full rounded-lg border border-edge bg-surface px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60"
+                className="mt-1 block w-full rounded-lg border border-control-edge bg-control px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60"
               />
             </label>
             <div className="mt-3">
@@ -4170,9 +4246,9 @@ function SessionCorrectionDialog({
     }
   };
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="correction-title">
-      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:p-5">
-        <h2 id="correction-title" className="text-base font-semibold">Correct session</h2>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="correction-title">
+      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-panel sm:max-h-[calc(100dvh-2rem)] sm:p-5">
+        <h2 id="correction-title" className="text-sm font-semibold">Correct session</h2>
         {!session ? <div className="py-10"><Spinner /></div> : (
           <>
             <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs"><p className="font-medium">{session.domain ?? session.process}</p>{session.title && <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>}</div>
@@ -4224,8 +4300,8 @@ function SessionCorrectionDialog({
                     {describeCorrectionWindow(session)}
                   </p>
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <label className="text-xs text-ink-3">Start<input type="datetime-local" step="1" value={start} min={session.earliestStart == null ? undefined : localInputValue(session.earliestStart)} max={end} onChange={(event) => setStart(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
-                    <label className="text-xs text-ink-3">End<input type="datetime-local" step="1" value={end} min={start} max={session.latestEnd == null ? undefined : localInputValue(session.latestEnd)} onChange={(event) => setEnd(event.target.value)} className="mt-1 block w-full rounded-lg border border-edge bg-surface-2 px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
+                    <label className="text-xs text-ink-3">Start<input type="datetime-local" step="1" value={start} min={session.earliestStart == null ? undefined : localInputValue(session.earliestStart)} max={end} onChange={(event) => setStart(event.target.value)} className="mt-1 block w-full rounded-lg border border-control-edge bg-control px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
+                    <label className="text-xs text-ink-3">End<input type="datetime-local" step="1" value={end} min={start} max={session.latestEnd == null ? undefined : localInputValue(session.latestEnd)} onChange={(event) => setEnd(event.target.value)} className="mt-1 block w-full rounded-lg border border-control-edge bg-control px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
                   </div>
                   <p className="mt-2 text-xs leading-snug text-ink-3">Times use your local timezone and cannot end in the future.</p>
                 </>
@@ -4287,8 +4363,8 @@ function DeleteActivityDialog({
     }
   };
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-2 sm:p-5">
-      <div role="dialog" aria-modal="true" aria-labelledby="delete-activity-title" className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-[14px] border border-edge-2 bg-surface p-4 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:p-5">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-5">
+      <div role="dialog" aria-modal="true" aria-labelledby="delete-activity-title" className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-[14px] border border-edge-2 bg-surface p-4 shadow-panel sm:max-h-[calc(100dvh-2rem)] sm:p-5">
         <h2 id="delete-activity-title" className="text-sm font-semibold">Delete recorded activity?</h2>
         {/* The scope sits above the preview because the preview answers for
             it: every number below this row is the consequence of the choice
@@ -4446,7 +4522,7 @@ function CategoryRuleForm({
           placeholder={draft.type === "domain"
             ? "example.com"
             : draft.type === "title" ? "words to match…" : "example.exe"}
-          className="min-w-0 flex-1 rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
+          className="min-w-0 flex-1 rounded-lg border border-control-edge bg-control px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
         />
         {onCancel && <Button onClick={onCancel}>Cancel</Button>}
         <Button
@@ -4538,7 +4614,7 @@ function CategoryRuleForm({
                 placeholder={draft.scopeKind === "process"
                   ? "example.exe"
                   : "example.com"}
-                className="min-w-0 flex-1 basis-full rounded-lg border border-edge bg-surface px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60 sm:basis-auto"
+                className="min-w-0 flex-1 basis-full rounded-lg border border-control-edge bg-control px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60 sm:basis-auto"
               />
             )}
           </div>
@@ -4616,6 +4692,10 @@ function CategoriesAndRules({
   const meta = useMeta();
   const banner = useBanner();
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set<number>());
+  // Which category is awaiting confirmation, and its rule count — the blast
+  // radius the dialog has to state, since deleting a category takes its rules.
+  const [pendingDelete, setPendingDelete] = useState<{ category: Category; ruleCount: number } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   // Anchored to the swatch's measured position and rendered through a portal:
   // the category list scrolls now, and a menu positioned inside it would be
   // clipped by that scroll container the moment a row neared the bottom.
@@ -4755,11 +4835,22 @@ function CategoriesAndRules({
       banner.report(error, "rule");
     }
   };
+  // updateCategory writes a whole row, and the category objects this component
+  // renders carry theme-mapped colours. Every write therefore starts from the
+  // stored row, so editing a name or a state in light mode cannot quietly
+  // persist the light hex in place of the saved one.
+  const stored = (category: Category): Category =>
+    meta.storedCategories.find((row) => row.id === category.id) ?? category;
+
   const submitCategory = async () => {
     if (!newName.trim()) return;
-    const used = new Set(meta.categories.map((category) => category.color.toLowerCase()));
-    const swatches = meta.palette.swatches;
-    const color = swatches.find((swatch) => !used.has(swatch)) ?? swatches[meta.categories.length % swatches.length];
+    // Compared and stored in canonical values, both sides: `used` comes from the
+    // stored rows and the swatch is mapped back before it is written.
+    const used = new Set(meta.storedCategories.map((category) => category.color.toLowerCase()));
+    const swatches = meta.palette.swatches.map((swatch) =>
+      canonicalSwatch(meta.palette, meta.theme, swatch),
+    );
+    const color = swatches.find((swatch) => !used.has(swatch)) ?? swatches[meta.storedCategories.length % swatches.length];
     try {
       const id = await addCategory(newName, color, NEW_CATEGORY_DEFAULT_STATE);
       setNewName("");
@@ -4770,32 +4861,41 @@ function CategoriesAndRules({
     }
   };
   const setCategoryState = async (category: Category, option: Productivity) => {
-    try { await updateCategory({ ...category, ...categoryStateFlags(option) }); await onChanged(); }
+    try { await updateCategory({ ...stored(category), ...categoryStateFlags(option) }); await onChanged(); }
     catch (error) { banner.report(error, "category"); }
   };
   const setCategoryColor = async (category: Category, color: string) => {
-    try { await updateCategory({ ...category, color }); await onChanged(); }
-    catch (error) { banner.report(error, "category"); }
+    try {
+      await updateCategory({
+        ...stored(category),
+        color: canonicalSwatch(meta.palette, meta.theme, color),
+      });
+      await onChanged();
+    } catch (error) { banner.report(error, "category"); }
   };
   const saveRename = async (category: Category) => {
     const name = renameDraft.trim();
     setRenaming(null);
     if (!name || name === category.name) return;
-    try { await updateCategory({ ...category, name }); await onChanged(); }
+    try { await updateCategory({ ...stored(category), name }); await onChanged(); }
     catch (error) { banner.report(error, "category"); }
   };
   const removeRule = async (ruleId: number) => {
     try { await deleteRule(ruleId); await onChanged(); }
     catch (error) { banner.report(error, "rule"); }
   };
-  const removeCategory = async (category: Category, ruleCount: number) => {
-    const ruleText = ruleCount ? ` and ${ruleCount} ${ruleCount === 1 ? "rule" : "rules"}` : "";
-    if (!window.confirm(`Delete “${category.name}”${ruleText}? This cannot be undone.`)) return;
+  const removeCategory = async (category: Category) => {
+    setDeleting(true);
     try {
       await deleteCategory(category.id);
       setExpanded((current) => { const next = new Set(current); next.delete(category.id); return next; });
+      setPendingDelete(null);
       await onChanged();
-    } catch (error) { banner.report(error, "category"); }
+    } catch (error) {
+      banner.report(error, "category");
+    } finally {
+      setDeleting(false);
+    }
   };
   const resetCount = Number(meta.settings.window_rules_reset_v4_count ?? "0");
   const showResetNotice =
@@ -4845,9 +4945,11 @@ function CategoriesAndRules({
 
   return (
     // Scrolls itself rather than the page once enough categories are open. The
-    // -mr-2/pr-2 pair keeps the scrollbar off the rows without indenting them
-    // when there is nothing to scroll.
-    <div className="scroll-well -mr-2 flex min-h-0 flex-col overflow-y-auto pr-2">
+    // -mr-2/pr-2 keeps the scrollbar off the rows. The smaller left pair gives
+    // outside focus outlines room inside the scroll clip; the negative margin
+    // preserves the alignment of every field and row. Bottom padding keeps the
+    // final input's outline inside the scrollable area at its maximum position.
+    <div className="scroll-well -ml-1 -mr-2 flex min-h-0 flex-col overflow-y-auto pb-1 pl-1 pr-2">
       {colorMenu !== null && <button type="button" aria-label="Close menu" className="fixed inset-0 z-40 cursor-default" onClick={() => setColorMenu(null)} />}
       {showResetNotice && (
         <div className="mb-3 flex items-start gap-3 rounded-lg border border-accent/25 bg-accent/[.055] px-3 py-2.5 text-xs leading-relaxed text-ink-2">
@@ -4914,7 +5016,7 @@ function CategoriesAndRules({
         {categoryRows.map(({ category, allRules, visibleRules }) => {
           const open = normalizedRuleSearch !== "" || expanded.has(category.id);
           const state = categoryState(category);
-          const stateColorMap = stateColors(meta.palette);
+          const stateColorMap = stateColors(meta.palette, meta.theme);
           const locked = isBuiltInIgnored(category);
           const draft = draftFor(category.id);
           const activeEdit =
@@ -4953,7 +5055,7 @@ function CategoriesAndRules({
                     Rename button, because a double-click is invisible to anyone
                     working from the keyboard. */}
                 {renaming === category.id ? (
-                  <input autoFocus value={renameDraft} aria-label={`Rename ${category.name}`} onChange={(event) => setRenameDraft(event.target.value)} onBlur={() => void saveRename(category)} onKeyDown={(event) => { if (event.key === "Enter") void saveRename(category); else if (event.key === "Escape") setRenaming(null); }} className="w-44 rounded-md border border-edge bg-surface px-1.5 py-0.5 text-xs font-semibold outline-none focus:border-accent/60" />
+                  <input autoFocus value={renameDraft} aria-label={`Rename ${category.name}`} onChange={(event) => setRenameDraft(event.target.value)} onBlur={() => void saveRename(category)} onKeyDown={(event) => { if (event.key === "Enter") void saveRename(category); else if (event.key === "Escape") setRenaming(null); }} className="w-44 rounded-md border border-control-edge bg-control px-1.5 py-0.5 text-xs font-semibold outline-none focus:border-accent/60" />
                 ) : (
                   <span
                     className={`font-semibold ${locked ? "" : "cursor-text"}`}
@@ -5016,10 +5118,10 @@ function CategoriesAndRules({
                         className={`-mx-2 flex flex-wrap items-center gap-2 rounded-lg px-2 py-1 text-xs ${
                           activeEdit?.ruleId === rule.id
                             ? "bg-accent/[.06]"
-                            : "hover:bg-white/[.028]"
+                            : "hover:bg-hover"
                         }`}
                       >
-                        <span className="flex w-[74px] shrink-0 items-center gap-1.5 text-xs uppercase tracking-[.04em] text-ink-3">
+                        <span className="flex w-[74px] shrink-0 items-center gap-1.5 text-xs text-ink-3">
                           <RuleKindGlyph matchType={rule.matchType} />
                           {RULE_LABELS[rule.matchType]}
                         </span>
@@ -5127,7 +5229,7 @@ function CategoriesAndRules({
                       variant="quiet-danger"
                       disabled={locked}
                       title={locked ? "The built-in Ignored category cannot be deleted" : undefined}
-                      onClick={() => void removeCategory(category, allRules.length)}
+                      onClick={() => setPendingDelete({ category, ruleCount: allRules.length })}
                     >
                       Delete category
                     </Button>
@@ -5151,7 +5253,7 @@ function CategoriesAndRules({
             if (event.key === "Enter") void submitCategory();
           }}
           placeholder="New category name"
-          className="min-w-0 w-56 max-w-full shrink rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
+          className="min-w-0 w-56 max-w-full shrink rounded-lg border border-control-edge bg-control px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
         />
         <Button
           variant="primary"
@@ -5164,7 +5266,7 @@ function CategoriesAndRules({
       {colorMenu !== null && createPortal(
         <span
           style={{ left: colorMenu.left, top: colorMenu.top, width: SWATCH_MENU_WIDTH }}
-          className="menu-pop fixed z-50 grid grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-[0_12px_34px_rgba(0,0,0,.5)]"
+          className="menu-pop fixed z-50 grid grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-menu"
         >
           {meta.palette.swatches.map((swatch) => {
             const category = meta.categories.find((item) => item.id === colorMenu.id);
@@ -5184,6 +5286,28 @@ function CategoriesAndRules({
           })}
         </span>,
         document.body,
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete this category?"
+          body={
+            <>
+              <span className="font-semibold text-ink">{pendingDelete.category.name}</span>
+              {pendingDelete.ruleCount > 0
+                ? " and every rule that assigns it will be removed."
+                : " will be removed."}
+            </>
+          }
+          metrics={pendingDelete.ruleCount > 0
+            ? [{ label: "Rules removed", value: String(pendingDelete.ruleCount) }]
+            : undefined}
+          note="Recorded activity is kept — the items in this category become uncategorized. This cannot be undone."
+          confirmLabel="Delete category"
+          busyLabel="Deleting…"
+          busy={deleting}
+          onConfirm={() => void removeCategory(pendingDelete.category)}
+          onClose={() => setPendingDelete(null)}
+        />
       )}
     </div>
   );
