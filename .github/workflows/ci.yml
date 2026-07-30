@@ -77,8 +77,11 @@ jobs:
             dashboard/test-results/device
           if-no-files-found: ignore
 
-  native-windows:
-    name: native Windows compatibility
+  # The WebDriver suite (npm run test:native) cannot run here: WebView2 never
+  # opens a remote debugging port on a hosted runner, so no session can be
+  # created. It runs from the release checklist on a real desktop instead.
+  windows-backend:
+    name: Windows backend
     runs-on: windows-latest
     defaults:
       run:
@@ -115,16 +118,7 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      # Compiling the isolated debug application keeps the configuration the
+      # local WebDriver suite depends on from rotting between releases.
       - name: Build isolated debug application
         run: npm run build:native-device
-      - name: Run native Windows suite
-        run: npm run test:native
-      - name: Upload native failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-windows-artifacts
-          path: |
-            dashboard/test-results/native
-            dashboard/src-tauri/target/debug/*.log
-          if-no-files-found: ignore

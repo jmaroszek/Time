@@ -83,6 +83,17 @@ cd dashboard; npx vitest run               # dashboard tests
 py scripts/check_db_anomalies.py <backup-or-beta-db>  # read-only health check
 ```
 
+Before a release, run the native window-state suite. It drives the built
+application through WebDriver, so it needs the sidecar, a debug build, and a
+real Windows desktop session — CI cannot run it:
+
+```powershell
+py scripts\build_tracker.py           # only if src-tauri\binaries\ is empty
+cd dashboard
+npm run build:native-device           # src-tauri\target\debug\Time.exe
+npm run test:native
+```
+
 The release build runs PyInstaller automatically, carries its one-dir tracker
 runtime as a Tauri sidecar, and produces one current-user NSIS installer. The
 installer bootstraps the local database but records nothing and creates no

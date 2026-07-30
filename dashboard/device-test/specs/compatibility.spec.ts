@@ -318,6 +318,36 @@ test("onboarding and restore dialog fit the minimum viewport", async ({
   expect(box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(480 - 8);
 });
 
+// The native WebView2 suite covered this walk before; the project matrix
+// already spans the snap-equivalent sizes, so the tab cycle belongs here and
+// the native suite keeps only what a browser cannot reach.
+test("every primary tab stays reachable at the minimum viewport", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "500x480");
+  await waitForDashboard(page);
+
+  for (const tab of ["Activity", "Settings", "Insights"]) {
+    await page.getByRole("button", { name: tab, exact: true }).click();
+    await assertNoHorizontalOverflow(page);
+  }
+  await assertChartsHaveGeometry(page);
+
+  // Activity keeps its last sub-view, so return to the library explicitly
+  // before reaching for a row.
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("button", { name: "Activity Library", exact: true }).click();
+  const rowTrigger = page.locator("tbody button").first();
+  await expect(rowTrigger).toBeVisible();
+  await rowTrigger.click();
+  await expect(page.getByRole("complementary")).toBeVisible();
+  await assertNoHorizontalOverflow(page);
+
+  await page.getByRole("button", { name: "Back to Activity list" }).click();
+  await expect(page.getByRole("table")).toBeVisible();
+  await expect(rowTrigger).toBeFocused();
+});
+
 test("representative visual baselines stay stable", async ({ page }, testInfo) => {
   test.skip(!visualProjects.has(testInfo.project.name));
   await waitForDashboard(page);
