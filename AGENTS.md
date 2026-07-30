@@ -27,7 +27,7 @@ cd dashboard && npx vitest run      # dashboard logic    (89 tests)
 cd dashboard && npx tsc --noEmit    # typecheck
 cd dashboard/src-tauri && cargo test  # Rust backend     (4 tests)
 cd dashboard && npm run test:device   # renderer, Chromium
-cd dashboard && npm run test:native   # Win32 window state, real desktop only
+cd dashboard && npm run build:native-device && npm run test:native  # see below
 ```
 
 CI runs everything except `test:native` (the dashboard suite twice, under two
@@ -42,6 +42,11 @@ remote debugging port there, so msedgedriver fails every session with
 `DevToolsActivePort file doesn't exist` and no test executes. Run it on a real
 Windows desktop before a release; it is the only end-to-end check of window
 state save/restore and off-screen recovery.
+
+It also builds nothing: the script prepares a demo database and starts
+WebdriverIO against `src-tauri/target/debug/Time.exe`, so
+`npm run build:native-device` has to run first (and the sidecar before that, or
+the Tauri build script stops on the missing `externalBin`).
 
 ## Branches
 
