@@ -16,8 +16,28 @@ export function fmtPct(fraction: number): string {
 }
 
 export function fmtClock(unixSeconds: number): string {
+  const { time, meridiem } = clockParts(unixSeconds);
+  return `${time}${meridiem}`;
+}
+
+export function fmtClockRange(startUnixSeconds: number, endUnixSeconds: number): string {
+  const start = clockParts(startUnixSeconds);
+  const end = clockParts(endUnixSeconds);
+  if (start.meridiem === end.meridiem) {
+    return `${start.time}–${end.time}${end.meridiem}`;
+  }
+  return `${start.time}${start.meridiem}–${end.time}${end.meridiem}`;
+}
+
+function clockParts(unixSeconds: number): { time: string; meridiem: "am" | "pm" } {
   const d = new Date(unixSeconds * 1000);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const hour = d.getHours();
+  const displayHour = hour % 12 || 12;
+  const meridiem = hour < 12 ? "am" : "pm";
+  return {
+    time: `${displayHour}:${String(d.getMinutes()).padStart(2, "0")}`,
+    meridiem,
+  };
 }
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
