@@ -101,6 +101,9 @@ const CONTRAST_FLOORS: Array<{ ink: string; on: string[]; floor: number }> = [
   // the graphical-object floor. Text and annotation dots use plain --color-good,
   // above, and are held to the text floor there.
   { ink: "--color-good-data", on: ["--color-surface", "--color-surface-dim"], floor: 3 },
+  // The Top Apps bar fill: a graphic, held to the same 3:1 floor as -good-data
+  // and split from --color-accent for the same reason.
+  { ink: "--color-accent-data", on: ["--color-surface", "--color-surface-dim"], floor: 3 },
   // A 9px status dot, so the graphical floor applies to it too.
   { ink: "--color-warn", on: ["--color-surface", "--color-surface-dim"], floor: 3 },
   // The settings toggle's knob in its off state: a shape on the surface-2 track,
@@ -141,9 +144,15 @@ describe("theme tokens", () => {
   it("separates controls from records only where the light theme needs it", () => {
     expect(DARK["--color-control"]).toBe(DARK["--color-surface-2"]);
     expect(DARK["--color-control-edge"]).toBe(DARK["--color-edge"]);
-    expect(LIGHT["--color-control"]).toBe(LIGHT["--color-surface"]);
     expect(LIGHT["--color-control-edge"]).toBe(LIGHT["--color-edge-2"]);
+    // Not the card (white was a correction that overshot, removing the fill
+    // entirely) and not surface-2 (that collided with record rows) — its own
+    // fill, reproducing dark's 1.09:1 control-vs-card ratio on light.
+    expect(LIGHT["--color-control"]).not.toBe(LIGHT["--color-surface"]);
     expect(LIGHT["--color-control"]).not.toBe(LIGHT["--color-surface-2"]);
+    expect(
+      Math.round(contrast(LIGHT["--color-control"], LIGHT["--color-surface"]) * 100) / 100,
+    ).toBe(1.09);
   });
 
   for (const [name, tokens] of Object.entries(THEMES)) {

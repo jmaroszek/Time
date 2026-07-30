@@ -60,7 +60,7 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#d33949",
     light: {
-      swatches: ["#5248a1", "#705301", "#4081d2", "#90276a", "#bd5a09", "#965eb8", "#6d8e1b", "#036662", "#5c646e", "#9a8070"],
+      swatches: ["#6f67c3", "#8f712c", "#4e90e2", "#b44a8a", "#d26d29", "#aa71cd", "#799b2d", "#31837f", "#5c646e", "#9a8070"],
       productive: "#017b37",
       neutral: "#80878f",
       unproductive: "#ac1b18",
@@ -75,7 +75,7 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#da404e",
     light: {
-      swatches: ["#354faa", "#695701", "#8f68cb", "#b56103", "#c83b86", "#87248c", "#778b18", "#047f7c", "#505963", "#9b7f74"],
+      swatches: ["#516fcd", "#87752c", "#a079dd", "#ca7426", "#e0529b", "#aa49af", "#84992c", "#2d9491", "#505963", "#9b7f74"],
       productive: "#007132",
       neutral: "#80878f",
       unproductive: "#ac1825",
@@ -93,7 +93,7 @@ export const PALETTES: Palette[] = [
       // #667b80, not the #778993 this was drawn as: that sat at OKLCH L 0.619
       // against the light `neutral` state's 0.620 — ΔE 1.30, indistinguishable.
       // Two low-chroma greys can only be separated by lightness.
-      swatches: ["#9d3479", "#367fbf", "#01646c", "#9260da", "#4d7002", "#4249af", "#109582", "#b4621e", "#667b80", "#65616d"],
+      swatches: ["#bb5094", "#478fd0", "#117881", "#a270ec", "#638828", "#5b67cf", "#27a18d", "#c77333", "#667b80", "#65616d"],
       productive: "#028c43",
       neutral: "#80878f",
       unproductive: "#ac1b14",
@@ -110,7 +110,7 @@ export const PALETTES: Palette[] = [
     light: {
       // #747586 for the same reason as Tide's: #7f8695 was ΔE 1.06 from the
       // light `neutral` state.
-      swatches: ["#056965", "#2c74ca", "#910a66", "#628116", "#4e3da5", "#694e00", "#9e4ab7", "#b35713", "#747586", "#6a5f69"],
+      swatches: ["#388b86", "#488fe8", "#be408d", "#7a9b37", "#7064cf", "#8e7231", "#bc68d6", "#d27337", "#747586", "#6a5f69"],
       productive: "#078968",
       neutral: "#80878f",
       unproductive: "#ac1828",
@@ -125,7 +125,7 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#ee5e23",
     light: {
-      swatches: ["#97225b", "#718519", "#654199", "#bc5b1d", "#b458a9", "#725202", "#4584c2", "#03736b", "#8e7560", "#525b4e"],
+      swatches: ["#bc467a", "#829730", "#8460bb", "#d26f35", "#c86bbc", "#8a6400", "#5594d3", "#308d84", "#8e7560", "#525b4e"],
       productive: "#047e39",
       neutral: "#80878f",
       unproductive: "#a92501",
@@ -316,14 +316,14 @@ export const PRODUCTIVITY_OPTIONS: ProductivityOption[] = [
   // chroma so the two states carry equal weight, a clean red hue, and lightness a
   // touch above the green so it reads vivid rather than muddy.
   { id: "vivid", label: "Vivid", productive: "#04995d", unproductive: "#dc4849",
-    light: { productive: "#04693f", unproductive: "#a1302d" } },
+    light: { productive: "#34895d", unproductive: "#d15c55" } },
   // Colorblind: separates good from bad on the blue↔yellow axis (which
   // red-green CVD preserves) instead of the red↔green axis (which it destroys) —
   // a blue-teal "productive" against a red "unproductive". The two stay distinct
   // under protanopia/deuteranopia, where Vivid's green/red nearly merge
   // (palettes.test.ts holds both facts).
   { id: "cvd", label: "Colorblind", productive: "#048db3", unproductive: "#d02a3a",
-    light: { productive: "#03718f", unproductive: "#b11729" } },
+    light: { productive: "#2784a2", unproductive: "#e14d50" } },
 ];
 
 /** Set the palette's productive/unproductive (both modes) from the selected

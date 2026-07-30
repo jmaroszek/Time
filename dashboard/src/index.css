@@ -36,6 +36,10 @@
   --color-ink-3-raised: #adb5c0;
   --color-ink-2-raised: #c6ccd4;
   --color-accent: #6ba0da;
+  /* --color-accent is doing two jobs on dark: the interactive accent and the
+     nine-row Top Apps data fill. Identical here so dark does not move; light
+     splits them below, the same way --color-good/-good-data already do. */
+  --color-accent-data: #6ba0da;
   /* Text on an accent fill. Near-black is right for a light blue on dark; a
      light theme's darker accent needs white, which is why this is a token. */
   --color-on-accent: #081019;
@@ -100,7 +104,11 @@
   --color-surface-dim: #f8f9fb;
   --color-surface-2: #eaecf1;
   --color-surface-3: #dfe2e9;
-  --color-control: #ffffff;
+  /* Not the white card: a control needs its own fill or it collides with the
+     card and the row fill both. #f3f5f8 reproduces dark's 1.09:1
+     control-vs-card ratio exactly, while staying clear of --color-surface-2
+     and --color-bg. themeTokens.test.ts holds this. */
+  --color-control: #f3f5f8;
   /* A step darker than the values the theme was drawn with (#d9dce3 / #bbc0cb).
      A contrast ratio is a bad model for a hairline near white: the same 1.2:1
      that reads as a lit edge against a near-black card is at the floor of what
@@ -124,6 +132,10 @@
   --color-ink-3-raised: #5c626c;
   --color-ink-2-raised: #3f444d;
   --color-accent: #2a66b0;
+  /* Split from --color-accent: the interactive accent needs to sit dark
+     enough on white, but the Top Apps bar fill wants to be lighter. Dark
+     keeps one value for both jobs; only light needs the split. */
+  --color-accent-data: #4683cf;
   --color-on-accent: #ffffff;
   --color-good: #2a7758;
   --color-good-data: #0a855b;
