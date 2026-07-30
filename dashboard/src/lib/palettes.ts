@@ -21,10 +21,11 @@
 // the same time. That is why the re-stepping exists, and why it is per theme
 // rather than a tweak to the shared values.
 //
-// **The database stores the canonical (dark-block) hex.** The light values are a
-// display transform applied on the way out — see themedSwatch / canonicalSwatch,
-// and the two of them are what keeps "existing categories keep their saved
-// colors" true: the saved value never changes, only how it is drawn.
+// **The database stores the canonical dark hex from the palette generation in
+// which it was selected.** Theme and palette revisions are display transforms
+// applied on the way out — see themedSwatch / canonicalSwatch. Legacy generations
+// keep an old saved value attached to the same palette slot without rewriting the
+// database, while new selections store the current dark value.
 
 import type { ActivityMetric } from "./overview";
 import type { ThemeName } from "./theme";
@@ -44,6 +45,10 @@ export interface Palette extends PaletteColors {
   id: string;
   label: string;
   description: string;
+  /** Older canonical dark blocks, newest first. A palette revision must retain
+   *  its replaced block here so categories saved before the revision still map
+   *  to the same slot in both themes without a dashboard-owned data migration. */
+  legacyDarkSwatches?: readonly (readonly string[])[];
   /** Light-surface re-stepping. Index-parallel with the dark `swatches` above —
    *  themedSwatch and canonicalSwatch both rely on that, so the two arrays must
    *  stay the same length and in the same order. palettes.test.ts checks it. */
@@ -55,7 +60,10 @@ export const PALETTES: Palette[] = [
     id: "slate",
     label: "Slate",
     description: "Muted, balanced colors with a calm, understated feel.",
-    swatches: ["#6056b2", "#826001", "#498adc", "#a03879", "#cf6924", "#b075d2", "#769729", "#0a837e", "#9da5b0", "#947a6a"],
+    swatches: ["#7364c2", "#916e1c", "#2f8fd8", "#b64986", "#d36735", "#b772cb", "#6b9a36", "#1b8a85", "#9da5b0", "#947a6a"],
+    legacyDarkSwatches: [
+      ["#6056b2", "#826001", "#498adc", "#a03879", "#cf6924", "#b075d2", "#769729", "#0a837e", "#9da5b0", "#947a6a"],
+    ],
     productive: "#0cb68b",
     neutral: "#6c7680",
     unproductive: "#d33949",
@@ -70,7 +78,10 @@ export const PALETTES: Palette[] = [
     id: "ember",
     label: "Ember",
     description: "Warm ambers, oranges, and roses with softer cool tones.",
-    swatches: ["#6b8cee", "#796503", "#744dae", "#d77500", "#b21672", "#c964cc", "#879f03", "#0a908d", "#9ba6b1", "#947a6e"],
+    swatches: ["#6b8cee", "#87721c", "#855ec1", "#d77500", "#c83385", "#c964cc", "#879f03", "#0a908d", "#9ba6b1", "#947a6e"],
+    legacyDarkSwatches: [
+      ["#6b8cee", "#796503", "#744dae", "#d77500", "#b21672", "#c964cc", "#879f03", "#0a908d", "#9ba6b1", "#947a6e"],
+    ],
     productive: "#08b785",
     neutral: "#6c7680",
     unproductive: "#da404e",
@@ -85,7 +96,10 @@ export const PALETTES: Palette[] = [
     id: "tide",
     label: "Tide",
     description: "Cool teals, blues, and violets with subdued warm tones.",
-    swatches: ["#ae4388", "#2b97ef", "#05747e", "#a473ee", "#59800a", "#4d57c5", "#0ea995", "#9b4e01", "#95a8b2", "#827e8b"],
+    swatches: ["#b94d91", "#2b97ef", "#1c7f89", "#a473ee", "#5d8513", "#5965d5", "#0ea995", "#ab5c1b", "#95a8b2", "#827e8b"],
+    legacyDarkSwatches: [
+      ["#ae4388", "#2b97ef", "#05747e", "#a473ee", "#59800a", "#4d57c5", "#0ea995", "#9b4e01", "#95a8b2", "#827e8b"],
+    ],
     productive: "#2e9e52",
     neutral: "#6c7680",
     unproductive: "#f05846",
@@ -103,7 +117,10 @@ export const PALETTES: Palette[] = [
     id: "jewel",
     label: "Jewel",
     description: "Deep, moody jewel tones with rich saturation.",
-    swatches: ["#087974", "#3584e0", "#a41b76", "#6f910d", "#5b4cb6", "#7a5b01", "#ae59c7", "#cb600a", "#9da5b4", "#877c86"],
+    swatches: ["#258983", "#218ee4", "#c53883", "#749719", "#7063d0", "#926f24", "#b862d1", "#d56725", "#9da5b4", "#877c86"],
+    legacyDarkSwatches: [
+      ["#087974", "#3584e0", "#a41b76", "#6f910d", "#5b4cb6", "#7a5b01", "#ae59c7", "#cb600a", "#9da5b4", "#877c86"],
+    ],
     productive: "#0cb68b",
     neutral: "#6c7680",
     unproductive: "#f05560",
@@ -120,7 +137,10 @@ export const PALETTES: Palette[] = [
     id: "terra",
     label: "Terra",
     description: "Earthy terracotta, ochre, olive, denim, and plum.",
-    swatches: ["#db6395", "#5d6f03", "#9773d0", "#a34702", "#973d8c", "#b08000", "#3169a0", "#229d92", "#ba9f89", "#6f786a"],
+    swatches: ["#dd6390", "#607f26", "#9076d5", "#b85432", "#ae49a2", "#af8100", "#3f77ae", "#229d92", "#ba9f89", "#6f786a"],
+    legacyDarkSwatches: [
+      ["#db6395", "#5d6f03", "#9773d0", "#a34702", "#973d8c", "#b08000", "#3169a0", "#229d92", "#ba9f89", "#6f786a"],
+    ],
     productive: "#49b567",
     neutral: "#6c7680",
     unproductive: "#ee5e23",
@@ -184,12 +204,10 @@ export function paletteForTheme(palette: Palette, theme: ThemeName): Palette {
  * snapping it to a neighbour we guessed at.
  */
 export function themedSwatch(palette: Palette, theme: ThemeName, hex: string): string {
-  if (theme !== "light") return hex;
   const blocks = swatchBlocks(palette);
-  const index = blocks.canonical.findIndex(
-    (swatch) => swatch.toLowerCase() === hex.toLowerCase(),
-  );
-  return index === -1 ? hex : blocks.light[index];
+  const index = swatchIndex(blocks, hex);
+  if (index === -1) return hex;
+  return theme === "light" ? blocks.light[index] : blocks.canonical[index];
 }
 
 /**
@@ -217,11 +235,38 @@ export function canonicalSwatch(palette: Palette, theme: ThemeName, hex: string)
  * nothing, and silently return its input unchanged. Both mappers were wrong that
  * way once; resolving by id makes the result the same whichever object arrives.
  */
-function swatchBlocks(palette: Palette): { canonical: string[]; light: string[] } {
+function swatchBlocks(palette: Palette): {
+  canonical: readonly string[];
+  light: readonly string[];
+  legacy: readonly (readonly string[])[];
+} {
   const base = PALETTES.find((candidate) => candidate.id === palette.id);
   return base
-    ? { canonical: base.swatches, light: base.light.swatches }
-    : { canonical: palette.swatches, light: palette.light.swatches };
+    ? {
+        canonical: base.swatches,
+        light: base.light.swatches,
+        legacy: base.legacyDarkSwatches ?? [],
+      }
+    : {
+        canonical: palette.swatches,
+        light: palette.light.swatches,
+        legacy: palette.legacyDarkSwatches ?? [],
+      };
+}
+
+function swatchIndex(blocks: ReturnType<typeof swatchBlocks>, hex: string): number {
+  const normalized = hex.toLowerCase();
+  const current = blocks.canonical.findIndex(
+    (swatch) => swatch.toLowerCase() === normalized,
+  );
+  if (current !== -1) return current;
+  for (const generation of blocks.legacy) {
+    const legacy = generation.findIndex(
+      (swatch) => swatch.toLowerCase() === normalized,
+    );
+    if (legacy !== -1) return legacy;
+  }
+  return -1;
 }
 
 /** Display order only. Palette array order still owns new-category assignment. */
@@ -322,7 +367,7 @@ export const PRODUCTIVITY_OPTIONS: ProductivityOption[] = [
   // a blue-teal "productive" against a red "unproductive". The two stay distinct
   // under protanopia/deuteranopia, where Vivid's green/red nearly merge
   // (palettes.test.ts holds both facts).
-  { id: "cvd", label: "Colorblind", productive: "#048db3", unproductive: "#d02a3a",
+  { id: "cvd", label: "Colorblind", productive: "#048db3", unproductive: "#e23e49",
     light: { productive: "#2784a2", unproductive: "#e14d50" } },
 ];
 
