@@ -62,6 +62,11 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - name: Install dependencies
         run: npm ci
+      # The native-test toolchain currently has upstream-only advisories, but
+      # nothing bundled into Time may carry a known npm vulnerability.
+      - name: Audit production dependencies
+        if: matrix.timezone == 'America/New_York'
+        run: npm audit --omit=dev
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Run vitest with branch coverage

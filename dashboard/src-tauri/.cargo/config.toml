@@ -1,0 +1,8 @@
+[env]
+# The restore tests close a database and immediately rename or delete the file
+# that connection owned. Windows releases the handle a moment after the close
+# future resolves, and a parallel harness stretches that moment into a sharing
+# violation — the suite failed roughly two runs in three on a developer machine.
+# The whole lib suite runs in well under a second, so serializing it costs
+# nothing and is the only setting that makes it deterministic.
+RUST_TEST_THREADS = "1"

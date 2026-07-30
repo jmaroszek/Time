@@ -29,12 +29,21 @@ if (doctor.status !== 0) {
   process.exit(doctor.status ?? 1);
 }
 
-const wdioPath = path.join(dashboard, "node_modules", ".bin", "wdio.cmd");
-const wdio = run(process.env.ComSpec ?? "cmd.exe", [
-  "/d",
-  "/s",
-  "/c",
-  `"${wdioPath}" run wdio.native.conf.mjs`,
+// Invoke the JavaScript entry point directly. Passing the generated wdio.cmd
+// shim through cmd.exe adds another quoting layer on Windows, and paths with
+// spaces can then be interpreted as a literal quoted command.
+const wdioPath = path.join(
+  dashboard,
+  "node_modules",
+  "@wdio",
+  "cli",
+  "bin",
+  "wdio.js",
+);
+const wdio = run(process.execPath, [
+  wdioPath,
+  "run",
+  "wdio.native.conf.mjs",
 ]);
 process.stdout.write(wdio.stdout ?? "");
 process.stderr.write(wdio.stderr ?? "");
@@ -44,12 +53,13 @@ if (wdio.status === 0) {
 }
 
 const output = `${wdio.stdout ?? ""}\n${wdio.stderr ?? ""}`;
-const environmentFailure =
-  /DevToolsActivePort|session not created|Failed to create session|ECONNREFUSED|driver.*not found/i
-    .test(output);
+// The WDIO hook emits this marker only after the Tauri/WebView2 session is
+// usable. Any earlier failure belongs to the environment or harness; only a
+// failure after the marker can implicate Time's assertions.
+const appSessionStarted = output.includes("DRIVER_HANDSHAKE_READY:");
 console.error(
-  environmentFailure
-    ? "ENVIRONMENT_BLOCKED: WebView2/WebDriver did not establish an app session."
-    : "APP_FAILURE: the native app session started and a compatibility assertion failed.",
+  appSessionStarted
+    ? "APP_FAILURE: the native app session started and a compatibility assertion failed."
+    : "ENVIRONMENT_BLOCKED: WebView2/WebDriver did not establish an app session.",
 );
 process.exit(wdio.status ?? 1);

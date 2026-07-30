@@ -7,6 +7,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# The sidecar is built windowed (`console=False`), so it lands in the Windows
+# GUI subsystem. PowerShell's call operator does not block on those and leaves
+# $LASTEXITCODE unset, which reads as a failure however the process ended.
+# Start-Process is the only form that both waits and reports a real exit code.
+function Invoke-PackagedTracker {
+    param([Parameter(Mandatory = $true)][string]$Executable)
+
+    $process = Start-Process -FilePath $Executable -Wait -PassThru -NoNewWindow
+    return $process.ExitCode
+}
+
 if ($env:GITHUB_ACTIONS -ne "true") {
     throw "Packaged tracker smoke is restricted to an isolated GitHub Actions runner."
 }
@@ -46,15 +57,15 @@ try {
     $env:LOCALAPPDATA = $localAppData
     $env:TIME_MIGRATE_ONLY = "1"
     Set-Location -LiteralPath (Split-Path -Parent $tracker)
-    & $tracker
-    if ($LASTEXITCODE -ne 0) {
-        throw "Packaged migration/bootstrap exited with $LASTEXITCODE."
+    $migration = Invoke-PackagedTracker -Executable $tracker
+    if ($migration -ne 0) {
+        throw "Packaged migration/bootstrap exited with $migration."
     }
 
     Remove-Item Env:\TIME_MIGRATE_ONLY -ErrorAction SilentlyContinue
-    & $tracker
-    if ($LASTEXITCODE -ne 0) {
-        throw "Fresh no-consent startup exited with $LASTEXITCODE."
+    $startup = Invoke-PackagedTracker -Executable $tracker
+    if ($startup -ne 0) {
+        throw "Fresh no-consent startup exited with $startup."
     }
 } finally {
     Set-Location $previousLocation
