@@ -23,7 +23,9 @@ export const config = {
   bail: 0,
   waitforTimeout: 15_000,
   connectionRetryTimeout: 120_000,
-  connectionRetryCount: 1,
+  // A retried session start replaces the driver's real refusal with a generic
+  // timeout, which hid a "DevToolsActivePort file doesn't exist" failure.
+  connectionRetryCount: 0,
   services: [
     [
       "@wdio/tauri-service",
