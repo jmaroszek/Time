@@ -1,3 +1,7 @@
+# Repository root, not src-tauri/: Cargo discovers this file by walking up from
+# the working directory, not from the manifest. CI runs
+# `cargo test --manifest-path src-tauri/Cargo.toml` from dashboard/, so a config
+# beside the crate is never read and the suite went back to running in parallel.
 [env]
 # The restore tests close a database and immediately rename or delete the file
 # that connection owned. Windows releases the handle a moment after the close

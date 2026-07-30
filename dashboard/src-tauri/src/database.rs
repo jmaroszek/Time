@@ -1458,6 +1458,46 @@ impl TimeDatabase {
         Self::remove_if_exists(&path.with_extension("db-shm"))
     }
 
+    /// Copy a database and fold any write-ahead log into the copy.
+    ///
+    /// Every restore validates through a read-only connection, and a read-only
+    /// connection cannot build the shared-memory index a `-wal` needs: it reads
+    /// the main file alone. A backup carrying a log — one copied out of a
+    /// running Time, say — therefore looked like a database with no `settings`
+    /// table and was rejected as "not a versioned Time database". Copying only
+    /// the main file had the worse failure: whatever the log still held was
+    /// dropped, silently, from the database being restored.
+    ///
+    /// Stage both, then checkpoint the copy, so the thing validated is exactly
+    /// the thing restored. The original is never written to.
+    async fn stage_consolidated_copy(source: &Path, destination: &Path) -> Result<(), String> {
+        Self::remove_if_exists(destination)?;
+        Self::remove_database_sidecars(destination)?;
+        fs::copy(source, destination).map_err(|error| error.to_string())?;
+        let source_log = source.with_extension("db-wal");
+        if source_log.is_file() {
+            fs::copy(&source_log, destination.with_extension("db-wal"))
+                .map_err(|error| error.to_string())?;
+        }
+
+        let options = SqliteConnectOptions::new()
+            .filename(destination)
+            .create_if_missing(false)
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_secs(10));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .map_err(|error| format!("Could not open backup: {error}"))?;
+        let checkpoint = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&pool)
+            .await;
+        pool.close().await;
+        checkpoint.map_err(|error| error.to_string())?;
+        Self::remove_database_sidecars(destination)
+    }
+
     fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
         let temporary = path.with_extension("json.tmp");
         let bytes = serde_json::to_vec(value).map_err(|error| error.to_string())?;
@@ -1472,24 +1512,33 @@ impl TimeDatabase {
         if source == live {
             return Err("Choose a backup, not the live Time database".into());
         }
+        let pending_path = Self::pending_database_path(&self.path)?;
+        let marker_path = Self::pending_marker_path(&self.path)?;
+        // Must end in `.db`: SQLite names a log after the whole filename, and
+        // the sidecar helpers derive it by replacing the last extension. A
+        // `.tmp` staging name made those two disagree, so the copied log was
+        // never replayed and its real one was still open at the rename.
+        let temporary_path = pending_path.with_file_name("restore_staging.db");
+
+        // Stage before validating. Reading the source and then copying it left a
+        // window where the file could change in between; validating the staged
+        // copy closes it, and the copy is what actually gets restored.
+        Self::stage_consolidated_copy(&source, &temporary_path).await?;
         let (schema_version, recording_consent, launch_at_login) =
-            Self::read_restore_settings(&source, true).await?;
+            match Self::read_restore_settings(&temporary_path, true).await {
+                Ok(settings) => settings,
+                Err(error) => {
+                    Self::remove_if_exists(&temporary_path)?;
+                    return Err(error);
+                }
+            };
         if schema_version > SCHEMA_VERSION {
+            Self::remove_if_exists(&temporary_path)?;
             return Err(format!(
                 "This backup uses schema {schema_version}; this Time version supports {SCHEMA_VERSION}"
             ));
         }
         let safety_backup_path = self.backup_named("backup_pre_restore").await?;
-        let pending_path = Self::pending_database_path(&self.path)?;
-        let marker_path = Self::pending_marker_path(&self.path)?;
-        let temporary_path = pending_path.with_extension("db.tmp");
-        Self::remove_if_exists(&temporary_path)?;
-        fs::copy(&source, &temporary_path).map_err(|error| error.to_string())?;
-        let copied_settings = Self::read_restore_settings(&temporary_path, true).await?;
-        if copied_settings.0 != schema_version {
-            Self::remove_if_exists(&temporary_path)?;
-            return Err("The staged backup changed during validation".into());
-        }
         Self::remove_if_exists(&pending_path)?;
         fs::rename(&temporary_path, &pending_path).map_err(|error| error.to_string())?;
         let pending = PendingRestore {
@@ -1794,12 +1843,39 @@ pub fn database_path(base: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{
         ActivityDeleteRequest, SessionCorrectionRequest, TimeDatabase, BOOTSTRAP_SQL,
         SCHEMA_VERSION,
     };
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// A directory no previous run has touched.
+    ///
+    /// Sharing one path means deleting the last run's files first, and on
+    /// Windows a handle that has not finished closing turns that into a sharing
+    /// violation — or leaves the directory in a delete-pending state where a
+    /// file written afterwards silently disappears. Both were live flakes here.
+    pub(crate) fn scratch_root(name: &str) -> PathBuf {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let unique = NEXT.fetch_add(1, Ordering::Relaxed);
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("{name}-{stamp}-{unique}"));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    pub(crate) fn scratch_database(name: &str) -> PathBuf {
+        scratch_root(name).join("time_log.db")
+    }
 
     #[test]
     fn rejects_dangerous_or_multi_statement_sql() {
@@ -1832,19 +1908,7 @@ mod tests {
 
     #[test]
     fn exclusions_are_normalized_and_can_atomically_delete_history() {
-        let path = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("database-exclusion-test.db");
-        for candidate in [
-            path.clone(),
-            path.with_extension("db-wal"),
-            path.with_extension("db-shm"),
-        ] {
-            if candidate.exists() {
-                std::fs::remove_file(candidate).unwrap();
-            }
-        }
+        let path = scratch_database("database-exclusion-test");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path).await.unwrap();
             sqlx::query(
@@ -1911,19 +1975,7 @@ mod tests {
 
     #[test]
     fn corrections_overlay_raw_sessions_and_validate_timeline_rules() {
-        let path = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("database-correction-test.db");
-        for candidate in [
-            path.clone(),
-            path.with_extension("db-wal"),
-            path.with_extension("db-shm"),
-        ] {
-            if candidate.exists() {
-                std::fs::remove_file(candidate).unwrap();
-            }
-        }
+        let path = scratch_database("database-correction-test");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path).await.unwrap();
             let now = super::unix_now().unwrap();
@@ -2012,16 +2064,67 @@ mod tests {
         );
     }
 
+    /// A backup copied out of a running Time keeps its write-ahead log, and the
+    /// rows it holds are not in the main file yet. Restore validates through a
+    /// read-only connection, which cannot replay a log, so such a backup was
+    /// rejected as unversioned — and when it was copied, the log was left
+    /// behind and its rows vanished from the restored database.
+    #[test]
+    fn a_backup_carrying_a_write_ahead_log_restores_everything_it_holds() {
+        let root = scratch_root("database-restore-wal-test");
+        let live = root.join("time_log.db");
+        let backup = root.join("copied-while-running.db");
+
+        let origin = root.join("still-running.db");
+        tauri::async_runtime::block_on(async {
+            let source = TimeDatabase::open(origin.clone()).await.unwrap();
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process) VALUES (7,70,80,'kept.exe')",
+            )
+            .execute(&source.pool)
+            .await
+            .unwrap();
+            // Copy while the database is still open, which is what taking a
+            // backup out from under a running tracker actually produces: the
+            // rows live in the log, not yet in the main file.
+            std::fs::copy(&origin, &backup).unwrap();
+            std::fs::copy(
+                origin.with_extension("db-wal"),
+                backup.with_extension("db-wal"),
+            )
+            .unwrap();
+            source.close().await;
+        });
+        assert!(
+            backup.with_extension("db-wal").is_file(),
+            "the fixture must leave a write-ahead log for this to test anything",
+        );
+
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(live.clone()).await.unwrap();
+            database.prepare_restore(backup.clone()).await.unwrap();
+            database.close().await;
+
+            let swap = TimeDatabase::begin_pending_restore(&live)
+                .await
+                .unwrap()
+                .unwrap();
+            swap.commit().unwrap();
+
+            let restored = TimeDatabase::open(live.clone()).await.unwrap();
+            let processes: Vec<String> =
+                sqlx::query_scalar("SELECT process FROM sessions ORDER BY id")
+                    .fetch_all(&restored.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(processes, ["kept.exe"]);
+            restored.close().await;
+        });
+    }
+
     #[test]
     fn backup_folder_and_staged_restore_preserve_a_rollback_until_reopen() {
-        let root = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("database-restore-test");
-        if root.exists() {
-            std::fs::remove_dir_all(&root).unwrap();
-        }
-        std::fs::create_dir_all(&root).unwrap();
+        let root = scratch_root("database-restore-test");
         let path = root.join("time_log.db");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path.clone()).await.unwrap();
@@ -2068,19 +2171,7 @@ mod tests {
 
     #[test]
     fn fresh_database_has_essential_private_defaults() {
-        let path = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("database-bootstrap-test.db");
-        for candidate in [
-            path.clone(),
-            path.with_extension("db-wal"),
-            path.with_extension("db-shm"),
-        ] {
-            if candidate.exists() {
-                std::fs::remove_file(candidate).unwrap();
-            }
-        }
+        let path = scratch_database("database-bootstrap-test");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path.clone()).await.unwrap();
             let categories: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories")
@@ -2124,19 +2215,7 @@ mod tests {
 
     #[test]
     fn existing_taxonomy_does_not_receive_starter_categories() {
-        let path = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("database-existing-taxonomy-test.db");
-        for candidate in [
-            path.clone(),
-            path.with_extension("db-wal"),
-            path.with_extension("db-shm"),
-        ] {
-            if candidate.exists() {
-                std::fs::remove_file(candidate).unwrap();
-            }
-        }
+        let path = scratch_database("database-existing-taxonomy-test");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path.clone()).await.unwrap();
             sqlx::query("DELETE FROM categories")
@@ -2177,19 +2256,7 @@ mod tests {
 
     #[test]
     fn session_read_is_columnar_ordered_and_windowed() {
-        let path = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("database-session-columns-test.db");
-        for candidate in [
-            path.clone(),
-            path.with_extension("db-wal"),
-            path.with_extension("db-shm"),
-        ] {
-            if candidate.exists() {
-                std::fs::remove_file(candidate).unwrap();
-            }
-        }
+        let path = scratch_database("database-session-columns-test");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path).await.unwrap();
             for values in [
@@ -2223,19 +2290,7 @@ mod tests {
 
     #[test]
     fn activity_delete_is_exact_and_snapshot_bounded() {
-        let path = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("database-activity-delete-test.db");
-        for candidate in [
-            path.clone(),
-            path.with_extension("db-wal"),
-            path.with_extension("db-shm"),
-        ] {
-            if candidate.exists() {
-                std::fs::remove_file(candidate).unwrap();
-            }
-        }
+        let path = scratch_database("database-activity-delete-test");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path).await.unwrap();
             for values in [
@@ -2342,19 +2397,7 @@ mod tests {
 
     #[test]
     fn targeted_and_retention_deletion_reject_a_newer_schema() {
-        let path = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("database-activity-newer-schema-test.db");
-        for candidate in [
-            path.clone(),
-            path.with_extension("db-wal"),
-            path.with_extension("db-shm"),
-        ] {
-            if candidate.exists() {
-                std::fs::remove_file(candidate).unwrap();
-            }
-        }
+        let path = scratch_database("database-activity-newer-schema-test");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path.clone()).await.unwrap();
             sqlx::query("UPDATE settings SET value='999' WHERE key='schema_version'")
@@ -2383,19 +2426,7 @@ mod tests {
 
     #[test]
     fn activity_delete_protects_the_recent_live_edge() {
-        let path = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("database-activity-live-edge-test.db");
-        for candidate in [
-            path.clone(),
-            path.with_extension("db-wal"),
-            path.with_extension("db-shm"),
-        ] {
-            if candidate.exists() {
-                std::fs::remove_file(candidate).unwrap();
-            }
-        }
+        let path = scratch_database("database-activity-live-edge-test");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path).await.unwrap();
             let now = std::time::SystemTime::now()
