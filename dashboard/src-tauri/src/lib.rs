@@ -581,7 +581,7 @@ mod tests {
         open_database_with_pending_restore_using, RuntimeControl, TimeDatabase, SCHEMA_VERSION,
     };
     use serde_json::json;
-    use std::{cell::RefCell, fs, path::PathBuf};
+    use std::{cell::RefCell, path::PathBuf};
 
     #[derive(Default)]
     struct FakeRuntime {
@@ -622,12 +622,7 @@ mod tests {
     }
 
     fn restore_root(name: &str) -> PathBuf {
-        let root = std::env::current_dir().unwrap().join("target").join(name);
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-        fs::create_dir_all(&root).unwrap();
-        root
+        crate::database::tests::scratch_root(name)
     }
 
     async fn set_setting(database: &TimeDatabase, key: &str, value: &str) {
