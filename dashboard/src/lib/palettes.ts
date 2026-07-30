@@ -8,11 +8,26 @@
 // colourblind separation, all-pairs distinctness (no two swatches read alike —
 // same-hue pairs are split by lightness), and a floor on swatch-vs-productivity
 // distance (a category never reads as a productivity state — the rule the old
-// PROTECTED_HUE_ZONES enforced, now held per palette in palettes.test.ts). The
-// `light` block is the light-surface re-stepping for the future light theme; the
-// app is dark-only today and reads the dark values.
+// PROTECTED_HUE_ZONES enforced, now held per palette in palettes.test.ts).
+//
+// Every palette carries a `light` block: the same identities re-stepped for a
+// white card. It is not decoration. The eight hue identities would survive
+// unchanged — being mid-dark, they gain contrast on white (Jewel's run 2.53–4.85
+// on the dark card and 3.66–7.01 on the light one) — but the two muted neutrals
+// cannot. They separate from the `neutral` productivity state by being *lighter*
+// than it, and that lightness is exactly what makes them vanish on white
+// (2.46–2.50:1). No single value satisfies both surfaces: it would have to be
+// lighter than a cool mid-grey state and dark enough to read against white at
+// the same time. That is why the re-stepping exists, and why it is per theme
+// rather than a tweak to the shared values.
+//
+// **The database stores the canonical (dark-block) hex.** The light values are a
+// display transform applied on the way out — see themedSwatch / canonicalSwatch,
+// and the two of them are what keeps "existing categories keep their saved
+// colors" true: the saved value never changes, only how it is drawn.
 
 import type { ActivityMetric } from "./overview";
+import type { ThemeName } from "./theme";
 
 export interface PaletteColors {
   /** Category swatches offered in the picker, assigned in order: the first eight
@@ -29,7 +44,9 @@ export interface Palette extends PaletteColors {
   id: string;
   label: string;
   description: string;
-  /** Light-surface re-stepping, banked for the future light theme (unused today). */
+  /** Light-surface re-stepping. Index-parallel with the dark `swatches` above —
+   *  themedSwatch and canonicalSwatch both rely on that, so the two arrays must
+   *  stay the same length and in the same order. palettes.test.ts checks it. */
   light: PaletteColors;
 }
 
@@ -73,7 +90,10 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#f05846",
     light: {
-      swatches: ["#9d3479", "#367fbf", "#01646c", "#9260da", "#4d7002", "#4249af", "#109582", "#b4621e", "#778993", "#65616d"],
+      // #667b80, not the #778993 this was drawn as: that sat at OKLCH L 0.619
+      // against the light `neutral` state's 0.620 — ΔE 1.30, indistinguishable.
+      // Two low-chroma greys can only be separated by lightness.
+      swatches: ["#9d3479", "#367fbf", "#01646c", "#9260da", "#4d7002", "#4249af", "#109582", "#b4621e", "#667b80", "#65616d"],
       productive: "#028c43",
       neutral: "#80878f",
       unproductive: "#ac1b14",
@@ -88,7 +108,9 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#f05560",
     light: {
-      swatches: ["#056965", "#2c74ca", "#910a66", "#628116", "#4e3da5", "#694e00", "#9e4ab7", "#b35713", "#7f8695", "#6a5f69"],
+      // #747586 for the same reason as Tide's: #7f8695 was ΔE 1.06 from the
+      // light `neutral` state.
+      swatches: ["#056965", "#2c74ca", "#910a66", "#628116", "#4e3da5", "#694e00", "#9e4ab7", "#b35713", "#747586", "#6a5f69"],
       productive: "#078968",
       neutral: "#80878f",
       unproductive: "#ac1828",
@@ -140,6 +162,68 @@ function perceptualHue(hex: string): number {
   return (hue - 35 + 720) % 360;
 }
 
+/**
+ * The palette as the active theme draws it. Returning a `Palette` whose top-level
+ * colours are already the right ones means every existing consumer of
+ * `meta.palette.productive` (and the rest) is correct without knowing a theme
+ * exists. `light` is carried through so the two mappers below still have both
+ * blocks to work from.
+ */
+export function paletteForTheme(palette: Palette, theme: ThemeName): Palette {
+  return theme === "light" ? { ...palette, ...palette.light } : palette;
+}
+
+/**
+ * A stored category colour as the active theme should draw it.
+ *
+ * Index-based rather than a colour computation: the light block is hand-stepped,
+ * not derived, so the only thing that can map one to the other is the slot they
+ * share. A hex that is not in this palette at all — saved under a different
+ * palette, or from a release that offered other swatches — is returned unchanged.
+ * That is the deliberate fallback: showing a colour the user actually chose beats
+ * snapping it to a neighbour we guessed at.
+ */
+export function themedSwatch(palette: Palette, theme: ThemeName, hex: string): string {
+  if (theme !== "light") return hex;
+  const blocks = swatchBlocks(palette);
+  const index = blocks.canonical.findIndex(
+    (swatch) => swatch.toLowerCase() === hex.toLowerCase(),
+  );
+  return index === -1 ? hex : blocks.light[index];
+}
+
+/**
+ * The inverse, for the write path. Anything the user picks in light mode has to
+ * be stored as its dark-block equivalent, or the value would stop round-tripping
+ * the moment they switched themes.
+ */
+export function canonicalSwatch(palette: Palette, theme: ThemeName, hex: string): string {
+  if (theme !== "light") return hex;
+  const blocks = swatchBlocks(palette);
+  const index = blocks.light.findIndex(
+    (swatch) => swatch.toLowerCase() === hex.toLowerCase(),
+  );
+  return index === -1 ? hex : blocks.canonical[index];
+}
+
+/**
+ * The two swatch blocks, resolved from the palette's *id* rather than read off
+ * the object handed in.
+ *
+ * This is not defensiveness for its own sake. `paletteForTheme` returns a palette
+ * whose top-level `swatches` are already the light block, and that themed object
+ * is what lives on `meta.palette` — so a mapper reading `palette.swatches`
+ * directly would be looking for a canonical value in a list of light ones, find
+ * nothing, and silently return its input unchanged. Both mappers were wrong that
+ * way once; resolving by id makes the result the same whichever object arrives.
+ */
+function swatchBlocks(palette: Palette): { canonical: string[]; light: string[] } {
+  const base = PALETTES.find((candidate) => candidate.id === palette.id);
+  return base
+    ? { canonical: base.swatches, light: base.light.swatches }
+    : { canonical: palette.swatches, light: palette.light.swatches };
+}
+
 /** Display order only. Palette array order still owns new-category assignment. */
 export function previewSwatches(palette: Palette): string[] {
   return [
@@ -151,12 +235,28 @@ export function previewSwatches(palette: Palette): string[] {
 }
 
 // The card surface an empty heatmap cell melts into (mirrors --color-surface).
-const RAMP_SURFACE = "#16181d";
+// A parameter of the ramp rather than a constant: every calendar and rhythm ramp
+// blends up from it, so pinned to the dark card an empty cell renders as a dark
+// square in the middle of a light one.
+const RAMP_SURFACE: Record<ThemeName, string> = {
+  dark: "#16181d",
+  light: "#ffffff",
+};
+
+/** The card an empty heatmap cell melts into, for callers that need the fill
+ *  itself (a cell border, say) rather than a ramp. */
+export function rampSurface(theme: ThemeName): string {
+  return RAMP_SURFACE[theme];
+}
 
 /** Neutral "amount" peak for the tracked-time metric: a fixed blue, the same in
  *  every palette. Blue communicates volume without the productive/non-productive
- *  judgment green or red would make. */
-const TRACKED_PEAK = "#59a9ef";
+ *  judgment green or red would make. Re-stepped for light, where the dark value
+ *  is too pale against white to read as the top of a scale. */
+const TRACKED_PEAK: Record<ThemeName, string> = {
+  dark: "#59a9ef",
+  light: "#2a6ab5",
+};
 
 // Keep zero flush with the card and the maximum at the full data colour, but
 // bring typical nonzero cells forward. A linear blend left most heatmap cells
@@ -174,19 +274,25 @@ function mix(from: string, to: string, t: number): string {
 
 /** A perceptually front-loaded 4-stop ramp from the card surface up to `color`,
  *  so empty cells recede, typical activity remains legible, and the hottest cell
- *  still reaches the palette's exact state colour. */
-function rampFrom(color: string): string[] {
-  return RAMP_BLEND_STRENGTHS.map((strength) => mix(RAMP_SURFACE, color, strength));
+ *  still reaches the palette's exact state colour. The blend strengths are
+ *  theme-independent — they are perceptual, and only the surface they start from
+ *  changes. */
+function rampFrom(surface: string, color: string): string[] {
+  return RAMP_BLEND_STRENGTHS.map((strength) => mix(surface, color, strength));
 }
 
-/** Heatmap ramp per shaded metric, derived from the palette's state colours.
- *  Tracked stays the fixed neutral blue. */
-export function metricRamps(palette: Palette): Record<ActivityMetric, string[]> {
+/** Heatmap ramp per shaded metric, derived from the palette's state colours and
+ *  the active theme's card surface. Tracked stays the neutral blue. */
+export function metricRamps(
+  palette: Palette,
+  theme: ThemeName,
+): Record<ActivityMetric, string[]> {
+  const surface = RAMP_SURFACE[theme];
   return {
-    tracked: rampFrom(TRACKED_PEAK),
-    productive: rampFrom(palette.productive),
-    unproductive: rampFrom(palette.unproductive),
-    neutral: rampFrom(palette.neutral),
+    tracked: rampFrom(surface, TRACKED_PEAK[theme]),
+    productive: rampFrom(surface, palette.productive),
+    unproductive: rampFrom(surface, palette.unproductive),
+    neutral: rampFrom(surface, palette.neutral),
   };
 }
 

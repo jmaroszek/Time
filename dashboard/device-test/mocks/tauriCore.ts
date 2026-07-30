@@ -178,6 +178,20 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
     case "db_select":
       result = selectFixture(args);
       break;
+    // Settings writes land in the same in-memory map db_select reads, so a
+    // control that changes a setting can actually be driven here. Without it
+    // every write threw and the fixture could only ever show defaults — which
+    // hid the whole theme switch from this harness.
+    case "db_execute": {
+      const query = normalizedSql(args);
+      const values = (args?.values ?? []) as unknown[];
+      if (query.startsWith("insert into settings") && typeof values[0] === "string") {
+        settings[values[0]] = String(values[1] ?? "");
+        result = { rowsAffected: 1, lastInsertId: 0 };
+        break;
+      }
+      throw new Error(`Device fixture has no db_execute response for: ${query}`);
+    }
     case "fetch_sessions":
       result = sessionColumns(args);
       break;

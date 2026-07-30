@@ -38,23 +38,31 @@ export function MetricCard({
   value,
   sub,
   hint,
+  mark,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   /** Optional explanation shown when the card title is hovered or focused. */
   hint?: string;
+  /** A small glyph beside the label, for a state the figure itself shouldn't
+   *  carry. It sits with the label rather than the value on purpose: the figure
+   *  is the measurement, and anything appended there competes with reading it. */
+  mark?: ReactNode;
 }) {
   return (
     <div className="rounded-xl border border-edge bg-surface px-4 py-3">
-      <p
-        tabIndex={hint ? 0 : undefined}
-        aria-label={hint ? `${label}. ${hint}` : undefined}
-        className={`group relative w-fit text-xs text-ink-2 outline-none ${hint ? "cursor-help" : ""}`}
-      >
-        {label}
-        {hint && <InfoHint text={hint} />}
-      </p>
+      <div className="flex items-center gap-1.5">
+        <p
+          tabIndex={hint ? 0 : undefined}
+          aria-label={hint ? `${label}. ${hint}` : undefined}
+          className={`group relative w-fit text-xs text-ink-2 outline-none ${hint ? "cursor-help" : ""}`}
+        >
+          {label}
+          {hint && <InfoHint text={hint} />}
+        </p>
+        {mark}
+      </div>
       <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
       {sub && <p className="mt-0.5 text-xs text-ink-2">{sub}</p>}
     </div>
@@ -66,7 +74,7 @@ function InfoHint({ text }: { text: string }) {
   return (
     <span
       role="tooltip"
-      className="pointer-events-none invisible absolute left-0 top-5 z-20 w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs font-normal leading-snug text-ink-2 opacity-0 shadow-lg transition-opacity delay-0 duration-100 group-hover:visible group-hover:opacity-100 group-hover:delay-500 group-focus:visible group-focus:opacity-100 group-focus:delay-0"
+      className="pointer-events-none invisible absolute left-0 top-5 z-20 w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-meta font-normal leading-snug text-ink-2 opacity-0 shadow-menu transition-opacity delay-0 duration-100 group-hover:visible group-hover:opacity-100 group-hover:delay-500 group-focus:visible group-focus:opacity-100 group-focus:delay-0"
     >
       {text}
     </span>
@@ -142,7 +150,7 @@ export function FloatingTooltip({
           style={{ left: position.left, top: position.top }}
           // Above menus, which are above dialogs: a tooltip explains whatever
           // is frontmost, so it can never be the thing that gets covered.
-          className="pointer-events-none fixed z-[85] w-52 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-left text-xs font-normal leading-snug text-ink-2 shadow-lg"
+          className="pointer-events-none fixed z-[85] w-52 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-left text-meta font-normal leading-snug text-ink-2 shadow-menu"
         >
           {text}
         </span>,
@@ -292,7 +300,7 @@ export function TextInput({
       onChange={(e) => onChange(e.target.value)}
       onBlur={onCommit}
       onKeyDown={(e) => e.key === "Enter" && onCommit?.()}
-      className={`rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-xs text-ink outline-none focus:border-accent/60 ${className}`}
+      className={`rounded-lg border border-control-edge bg-control px-2.5 py-1.5 text-xs text-ink outline-none focus:border-accent/60 ${className}`}
     />
   );
 }
@@ -319,10 +327,10 @@ const SIZES = {
 } as const;
 
 const VARIANTS = {
-  default: "border-edge bg-surface-2 text-ink hover:border-edge-2 focus-visible:border-accent/60",
+  default: "border-control-edge bg-control text-ink hover:border-edge-2 focus-visible:border-accent/60",
   quiet: "menu-quiet",
   bare: "border-transparent text-ink-3 hover:bg-surface-3 disabled:hover:bg-transparent",
-  resting: "border-edge bg-surface-2 text-ink-3 hover:border-edge-2 hover:text-ink-2 focus-visible:border-accent/60",
+  resting: "border-control-edge bg-control text-ink-3 hover:border-edge-2 hover:text-ink-2 focus-visible:border-accent/60",
   engaged: "border-accent/45 bg-accent/[.06] text-ink hover:border-accent/65 focus-visible:border-accent/60",
 } as const;
 /** Windows list views forget a typeahead buffer after roughly a second. */
@@ -570,10 +578,14 @@ export function MenuSelect({
           }}
           // Above the dialog layer (z-70): a menu belongs on top of whatever
           // opened it, and these are used inside modals as well as on the page.
-          className="menu-pop fixed z-[80] rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-[0_12px_34px_rgba(0,0,0,.5)]"
+          className="menu-pop fixed z-[80] rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-menu"
         >
+          {/* The popup is a raised fill, so its two text ranks take the -raised
+              inks. This is the pair's motivating case: the header sits directly
+              above the rows, and plain ink-3 on dark is lighter than the raised
+              ink-2 beneath it — the two ranks would read inverted. */}
           {header && (
-            <p className="px-2.5 py-1.5 text-xs leading-snug text-ink-3">{header}</p>
+            <p className="px-2.5 py-1.5 text-xs leading-snug text-ink-3-raised">{header}</p>
           )}
           <div id={`${id}-list`} role="listbox" aria-label={label}>
           {options.map((option, i) => (
@@ -587,7 +599,7 @@ export function MenuSelect({
                 onClick={() => commit(i)}
                 onMouseEnter={() => setActive(i)}
                 className={`flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
-                  i === active ? "bg-surface-3 text-ink" : "text-ink-2"
+                  i === active ? "bg-surface-3 text-ink" : "text-ink-2-raised"
                 }`}
               >
                 <span className="flex min-w-0 items-center gap-2">
@@ -686,6 +698,148 @@ export function Checkbox({
       </span>
       {children}
     </label>
+  );
+}
+
+export interface ConfirmMetric {
+  label: string;
+  value: string;
+}
+
+/**
+ * The app's confirmation for a destructive action, with the same anatomy as
+ * DeleteActivityDialog: what is about to happen, how much of it there is, and
+ * one button that commits.
+ *
+ * It exists because four of these were `window.confirm` and `window.prompt` —
+ * including erasing all recorded history, the highest-stakes action in the
+ * product, which had the cheapest dialog in it. A native confirm cannot show a
+ * count, cannot be read at the same size as the page, and puts the destructive
+ * choice wherever the OS decides.
+ *
+ * `requireTyped` replaces the prompt that asked for the word DELETE: the same
+ * gate, but with the consequence visible above the field rather than in a
+ * sentence the reader has to parse before typing.
+ */
+export function ConfirmDialog({
+  title,
+  body,
+  metrics,
+  note,
+  confirmLabel,
+  busyLabel,
+  busy = false,
+  variant = "danger",
+  requireTyped,
+  extraAction,
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  body: ReactNode;
+  /** Tiles quantifying the blast radius. Omitted when there is nothing to count. */
+  metrics?: ConfirmMetric[];
+  /** What cannot be undone, and what survives. */
+  note?: ReactNode;
+  confirmLabel: string;
+  busyLabel?: string;
+  busy?: boolean;
+  /** "danger" commits a deletion; "default" for a reset that destroys no data. */
+  variant?: "danger" | "default";
+  /** Word the reader must type before the commit button enables. */
+  requireTyped?: string;
+  /** A non-committing escape hatch — "Back up first", say. */
+  extraAction?: ReactNode;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const id = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [typed, setTyped] = useState("");
+  const satisfied = requireTyped === undefined || typed.trim() === requireTyped;
+
+  // Focus moves into the dialog rather than staying on the button that opened
+  // it, so the next Tab walks the dialog and Escape has somewhere to return from.
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-5"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${id}-title`}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !busy) {
+            event.stopPropagation();
+            onClose();
+            return;
+          }
+          if (event.key !== "Tab") return;
+          const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          )];
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+        className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-[14px] border border-edge-2 bg-surface p-4 shadow-panel outline-none sm:max-h-[calc(100dvh-2rem)] sm:p-5"
+      >
+        <h2 id={`${id}-title`} className="text-sm font-semibold">{title}</h2>
+        <div className="mt-3 text-xs leading-snug text-ink-2">{body}</div>
+        {metrics && metrics.length > 0 && (
+          <div className={`mt-3 grid gap-2 ${metrics.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
+            {metrics.map((metric) => (
+              <div key={metric.label} className="rounded-lg border border-edge bg-surface-2 p-3">
+                <p className="text-xs text-ink-3-raised">{metric.label}</p>
+                <p className="mt-1 text-sm font-semibold tabular-nums">{metric.value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        {note && <p className="mt-3 text-xs leading-snug text-ink-3">{note}</p>}
+        {requireTyped !== undefined && (
+          <label className="mt-3 block">
+            <span className="text-xs text-ink-2">
+              Type <span className="font-mono font-semibold text-ink">{requireTyped}</span> to confirm
+            </span>
+            <TextInput
+              value={typed}
+              onChange={setTyped}
+              onCommit={() => satisfied && !busy && onConfirm()}
+              className="mt-1.5 w-full font-mono"
+            />
+          </label>
+        )}
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <Button onClick={onClose} disabled={busy}>Cancel</Button>
+          {extraAction}
+          <Button
+            variant={variant === "danger" ? "danger" : "primary"}
+            disabled={busy || !satisfied}
+            onClick={onConfirm}
+          >
+            {busy ? (busyLabel ?? confirmLabel) : confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

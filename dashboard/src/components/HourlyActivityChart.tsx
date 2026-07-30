@@ -2,7 +2,13 @@ import { useMemo } from "react";
 
 import { fmtDuration } from "../lib/format";
 import type { HourlyActivitySummary } from "../lib/overview";
-import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE, UNCATEGORIZED_BAR } from "../lib/chartTheme";
+import {
+  CHART_FONT_FAMILY,
+  CHART_LABEL_SIZE,
+  chartChrome,
+  tooltipStyle,
+  uncategorizedBar,
+} from "../lib/chartTheme";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
 import { shouldShowUncategorized } from "./ProductiveHoursChart";
@@ -12,8 +18,9 @@ export default function HourlyActivityChart({
 }: {
   hours: HourlyActivitySummary[];
 }) {
-  const { palette } = useMeta();
+  const { palette, theme } = useMeta();
   const option = useMemo<EChartsOption>(() => {
+    const chrome = chartChrome(theme);
     const toMinutes = (seconds: number) => Math.round(seconds / 6) / 10;
     const productive = hours.map((hour) => toMinutes(hour.productiveSeconds));
     const neutral = hours.map((hour) => toMinutes(hour.neutralSeconds));
@@ -37,7 +44,7 @@ export default function HourlyActivityChart({
       grid: { left: 40, right: 12, top: 12, bottom: hasUncategorized ? 84 : 62 },
       tooltip: {
         trigger: "axis",
-        ...TOOLTIP_STYLE,
+        ...tooltipStyle(theme),
         formatter: (params: Array<{ dataIndex: number; marker: string; seriesName: string; value: number }>) => {
           if (!params.length) return "";
           const hour = hours[params[0].dataIndex].hour;
@@ -53,7 +60,7 @@ export default function HourlyActivityChart({
         left: "center",
         width: "92%",
         data: stackNames,
-        textStyle: { color: CHROME.axisLabel, fontSize: 11 },
+        textStyle: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         itemWidth: 14,
         itemHeight: 8,
         itemGap: 14,
@@ -62,20 +69,20 @@ export default function HourlyActivityChart({
         type: "category",
         data: hours.map((hour) => compactHour(hour.hour)),
         axisLabel: {
-          color: CHROME.axisLabel,
-          fontSize: 11,
+          color: chrome.axisLabel,
+          fontSize: CHART_LABEL_SIZE,
           interval: hours.length > 12 ? 1 : 0,
         },
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: CHROME.axisLine } },
+        axisLine: { lineStyle: { color: chrome.axisLine } },
       },
       yAxis: {
         type: "value",
         min: 0,
         max: maxMinutes,
         interval: 15,
-        axisLabel: { color: CHROME.axisLabel, fontSize: 11, formatter: "{value}m" },
-        splitLine: { lineStyle: { color: CHROME.gridLine } },
+        axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE, formatter: "{value}m" },
+        splitLine: { lineStyle: { color: chrome.gridLine } },
       },
       series: [
         {
@@ -111,7 +118,7 @@ export default function HourlyActivityChart({
               type: "bar" as const,
               stack: "hour",
               data: uncategorized,
-              itemStyle: { color: UNCATEGORIZED_BAR, borderRadius: [3, 3, 0, 0] },
+              itemStyle: { color: uncategorizedBar(theme), borderRadius: [3, 3, 0, 0] },
               barMaxWidth: 24,
             }]
           : []),

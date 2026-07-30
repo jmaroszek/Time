@@ -18,7 +18,7 @@ import {
 } from "../lib/time";
 import { useMeta } from "../state/meta";
 import { metricRamps } from "../lib/palettes";
-import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { CHART_FONT_FAMILY, CHART_LABEL_SIZE, chartChrome, tooltipStyle } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 import { useElementWidth } from "../lib/responsive";
 
@@ -55,16 +55,17 @@ export default function ActivityCalendar({
   range: Range;
   metric?: ActivityMetric;
 }) {
-  const { aliases, weekStart, palette } = useMeta();
+  const { aliases, weekStart, palette, theme } = useMeta();
   const containerRef = useRef<HTMLDivElement>(null);
   const availableWidth = useElementWidth(containerRef, 440);
   const option = useMemo<EChartsOption>(() => {
+    const chrome = chartChrome(theme);
     const byKey = new Map(summaries.map((day) => [day.key, day]));
     const shaded = (day: DailyActivitySummary) => metricSeconds(day, metric);
     // Rescaled per metric: every state is a subset of tracked, so reusing the
     // tracked scale would wash the narrower fields out.
     const maxHours = Math.max(...summaries.map((day) => shaded(day) / 3600), 1);
-    const ramp = metricRamps(palette)[metric];
+    const ramp = metricRamps(palette, theme)[metric];
     const lastDay = addDays(range.end, -1);
     // A week-column count low enough that "auto" would stretch each cell into a
     // wide bar instead of a day. Below it, size the cells squarely and center
@@ -77,7 +78,7 @@ export default function ActivityCalendar({
       animation: false,
       textStyle: { fontFamily: CHART_FONT_FAMILY },
       tooltip: {
-        ...TOOLTIP_STYLE,
+        ...tooltipStyle(theme),
         formatter: (params: { data: [string, number] }) => {
           const day = byKey.get(params.data[0]);
           return day ? formatActivityCalendarTooltip(day, metric, aliases) : "";
@@ -106,19 +107,19 @@ export default function ActivityCalendar({
           // Empty-day fill: the ramp's own zero stop, so days with no data sit
           // flush with the low end of whichever scale is showing.
           color: ramp[0],
-          borderColor: CHROME.gridLine,
+          borderColor: chrome.gridLine,
           borderWidth: 2,
         },
         dayLabel: {
           firstDay: weekStart === "Monday" ? 1 : 0,
           nameMap: DAY_NAMES,
-          color: CHROME.axisLabel,
-          fontSize: 11,
+          color: chrome.axisLabel,
+          fontSize: CHART_LABEL_SIZE,
           margin: 8,
         },
         monthLabel: {
-          color: CHROME.axisLabel,
-          fontSize: 11,
+          color: chrome.axisLabel,
+          fontSize: CHART_LABEL_SIZE,
           margin: 8,
         },
         yearLabel: { show: false },
@@ -131,7 +132,7 @@ export default function ActivityCalendar({
         },
       ],
     };
-  }, [summaries, metric, aliases, weekStart, range, palette, availableWidth]);
+  }, [summaries, metric, aliases, weekStart, range, palette, theme, availableWidth]);
 
   const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart, availableWidth);
   const rows = orientation === "vertical" ? weekColumns : 7;
@@ -183,7 +184,7 @@ export function formatActivityCalendarTooltip(
 ): string {
   const date = `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}`;
   const topApp = metric === "tracked" && day.topApp
-    ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(day.topApp.process, aliases))} · ${fmtDuration(day.topApp.seconds)}</div>`
+    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(cleanProcessName(day.topApp.process, aliases))} · ${fmtDuration(day.topApp.seconds)}</div>`
     : "";
   const share = metricTrackedShare(day, metric);
   const word = ACTIVITY_METRIC_WORDS[metric];
@@ -193,9 +194,9 @@ export function formatActivityCalendarTooltip(
     `<div>${label}: ${fmtDuration(metricSeconds(day, metric))}</div>`,
     share === null
       ? ""
-      : `<div style="color:${CHROME.axisLabel}">${share}% of tracked time</div>`,
+      : `<div class="chart-tip-muted">${share}% of tracked time</div>`,
     metric === "productive"
-      ? `<div style="color:${CHROME.axisLabel}">Longest focus: ${fmtDuration(day.longestFocusSeconds)}</div>`
+      ? `<div class="chart-tip-muted">Longest focus: ${fmtDuration(day.longestFocusSeconds)}</div>`
       : "",
     topApp,
   ].join("");

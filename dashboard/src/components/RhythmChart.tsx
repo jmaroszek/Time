@@ -19,7 +19,7 @@ import {
 } from "../lib/overview";
 import { useMeta } from "../state/meta";
 import { metricRamps } from "../lib/palettes";
-import { CHART_FONT_FAMILY, CHROME, TOOLTIP_STYLE } from "../lib/chartTheme";
+import { CHART_FONT_FAMILY, CHART_LABEL_SIZE, chartChrome, tooltipStyle } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 import { rhythmHourInterval, useViewportWidth } from "../lib/responsive";
 
@@ -33,10 +33,11 @@ export default function RhythmChart({
   summary: WeekdayRhythmSummary;
   metric?: ActivityMetric;
 }) {
-  const { aliases, weekStart, dayStartHour, dayEndHour, palette } = useMeta();
+  const { aliases, weekStart, dayStartHour, dayEndHour, palette, theme } = useMeta();
   const viewportWidth = useViewportWidth();
   const hourInterval = rhythmHourInterval(viewportWidth);
   const option = useMemo<EChartsOption>(() => {
+    const chrome = chartChrome(theme);
     const { cells, weekdayCounts } = summary;
     const weekdayRows = weekStart === "Monday" ? [1, 2, 3, 4, 5, 6, 0] : [0, 1, 2, 3, 4, 5, 6];
     const rowIndex = new Map(weekdayRows.map((weekday, index) => [weekday, index]));
@@ -61,7 +62,7 @@ export default function RhythmChart({
       textStyle: { fontFamily: CHART_FONT_FAMILY },
       grid: { left: 44, right: 16, top: 8, bottom: 28 },
       tooltip: {
-        ...TOOLTIP_STYLE,
+        ...tooltipStyle(theme),
         formatter: (p: { data: [number, number, number] }) => {
           const cell = cellByPoint.get(`${p.data[0]},${p.data[1]}`);
           return cell
@@ -74,7 +75,7 @@ export default function RhythmChart({
         data: visibleHours.map((hour) =>
           (hour - dayStartHour) % hourInterval === 0 ? compactHour(hour) : ""
         ),
-        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
+        axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         axisTick: { show: false },
         axisLine: { show: false },
       },
@@ -82,7 +83,7 @@ export default function RhythmChart({
         type: "category",
         data: weekdayRows.map((weekday) => DAY_NAMES[weekday]),
         inverse: true, // first day of the week on top
-        axisLabel: { color: CHROME.axisLabel, fontSize: 11 },
+        axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         axisTick: { show: false },
         axisLine: { show: false },
       },
@@ -92,17 +93,17 @@ export default function RhythmChart({
         // Rescaled per metric — every state is a subset of tracked, so a shared
         // scale would render the narrower fields uniformly dim.
         max: Math.max(maxMinutes, 1),
-        inRange: { color: metricRamps(palette)[metric] },
+        inRange: { color: metricRamps(palette, theme)[metric] },
       },
       series: [
         {
           type: "heatmap",
           data,
-          itemStyle: { borderColor: "#0f1115", borderWidth: 1.5, borderRadius: 2 },
+          itemStyle: { borderColor: chrome.page, borderWidth: 1.5, borderRadius: 2 },
         },
       ],
     };
-  }, [summary, metric, aliases, weekStart, dayStartHour, dayEndHour, palette, hourInterval]);
+  }, [summary, metric, aliases, weekStart, dayStartHour, dayEndHour, palette, theme, hourInterval]);
 
   return <EChart option={option} height={260} />;
 }
@@ -115,7 +116,7 @@ export function formatRhythmTooltip(
 ): string {
   const avg = (seconds: number) => fmtDuration(weekdayCount > 0 ? seconds / weekdayCount : 0);
   const topApp = metric === "tracked" && cell.topApp
-    ? `<div style="color:${CHROME.axisLabel}">Top app: ${escapeHtml(cleanProcessName(cell.topApp.process, aliases))} · ${fmtDuration(cell.topApp.seconds)} total</div>`
+    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(cleanProcessName(cell.topApp.process, aliases))} · ${fmtDuration(cell.topApp.seconds)} total</div>`
     : "";
   const share = metricTrackedShare(cell, metric);
   const word = ACTIVITY_METRIC_WORDS[metric];
@@ -124,7 +125,7 @@ export function formatRhythmTooltip(
     `<div>Avg ${word}: ${avg(metricSeconds(cell, metric))}</div>`,
     share === null
       ? ""
-      : `<div style="color:${CHROME.axisLabel}">${share}% of tracked time</div>`,
+      : `<div class="chart-tip-muted">${share}% of tracked time</div>`,
     topApp,
   ].join("");
 }
