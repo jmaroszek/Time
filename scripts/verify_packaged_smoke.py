@@ -5,9 +5,15 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
-from tracker.db import SCHEMA_VERSION
+# Runs as a script from the packaged smoke, where only scripts/ lands on
+# sys.path. The suite reaches it as a module and never needs this, which is why
+# the standalone import broke without a failing test.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from tracker.db import SCHEMA_VERSION  # noqa: E402
 
 
 def verify_smoke_database(database: Path, local_app_data: Path) -> dict[str, object]:
