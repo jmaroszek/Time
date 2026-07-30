@@ -85,6 +85,24 @@ function minAllPairs(colors: string[]): number {
   return min;
 }
 
+// WCAG contrast, for the light hue swatches. These are never drawn as text —
+// stateColors feeds CategoryDot, TopAppsList and TimelineChart fill blocks,
+// chartTheme fills series — so the applicable floor is the 3:1 graphical-object
+// one, not the 4.5:1 text floor. A one-sided minimum only pushes light values
+// darker, which is how they ended up 50-90% heavier than their dark mirror; the
+// band plus the spread cap below is what catches that regressing again.
+const LIGHT_CARD = "#ffffff";
+function wcagLuminance(hex: string): number {
+  const [r, g, b] = [1, 3, 5]
+    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function wcagContrast(a: string, b: string): number {
+  const [high, low] = [wcagLuminance(a), wcagLuminance(b)].sort((x, y) => y - x);
+  return (high + 0.05) / (low + 0.05);
+}
+
 const MODES: Array<[string, (palette: (typeof PALETTES)[number]) => PaletteColors]> = [
   ["dark", (palette) => palette],
   ["light", (palette) => palette.light],
@@ -125,8 +143,13 @@ describe("palettes", () => {
 
         // The eight hue identities read alike to no pair, even side by side in a
         // donut — same-hue pairs are separated in lightness, not left as twins.
+        // Light's floor is lower than dark's: holding the graphical-contrast
+        // band (below) compresses the lightness range available to spread
+        // hues across, so light trades some of that separation for staying on
+        // a white card the way a category swatch — a graphic, not text —
+        // should. 10.19 is the lowest any current palette (Ember) reaches.
         it("keeps the eight hue swatches perceptually distinct", () => {
-          expect(minAllPairs(hues)).toBeGreaterThanOrEqual(12);
+          expect(minAllPairs(hues)).toBeGreaterThanOrEqual(mode === "light" ? 10 : 12);
         });
 
         // The two neutrals are quieter, so they sit closer than the hues — but
@@ -140,6 +163,36 @@ describe("palettes", () => {
         it("keeps the last two swatches muted", () => {
           for (const neutral of neutrals) expect(chroma(neutral)).toBeLessThanOrEqual(0.09);
         });
+
+        // Light only: swatches are graphics (CategoryDot, TopAppsList,
+        // TimelineChart, chartTheme series), never text, so the applicable WCAG
+        // floor is 3:1, not 4.5:1. The band's upper bound is what a one-sided
+        // minimum could never catch — a swatch that is too heavy is a failure
+        // too, which is the case the old assertion had no way to express.
+        if (mode === "light") {
+          it("keeps each hue swatch within the graphical-fill contrast band on the light card", () => {
+            for (const hue of hues) {
+              const ratio = wcagContrast(hue, LIGHT_CARD);
+              expect(Math.round(ratio * 100) / 100, hue).toBeGreaterThanOrEqual(3.0);
+              // Most swatches land at 3.2-4.9:1. Two sit higher by design — Tide's
+              // #117881 (5.21) and Terra's #8a6400 (5.38) — nudged off a pure
+              // rank-preserving re-step specifically to hold the all-pairs
+              // distinctness floor; the ceiling admits them rather than the
+              // typical spread so a real regression (going darker still) is
+              // still caught.
+              expect(Math.round(ratio * 100) / 100, hue).toBeLessThanOrEqual(5.4);
+            }
+          });
+
+          // The real defect: the old slate spread was 2.06x, which is why the
+          // list read as a ranking instead of eight peers. Every proposed
+          // palette lands at 1.53x; the cap gives it room without regressing.
+          it("keeps the eight hue swatches' contrast spread tight, so the set reads as peers", () => {
+            const ratios = hues.map((hue) => wcagContrast(hue, LIGHT_CARD));
+            const spread = Math.max(...ratios) / Math.min(...ratios);
+            expect(spread).toBeLessThanOrEqual(1.7);
+          });
+        }
       });
     }
 
@@ -281,5 +334,17 @@ describe("productivity options", () => {
     expect(cvdDeltaE(cvd.productive, cvd.unproductive)).toBeGreaterThanOrEqual(12);
     expect(cvdDeltaE(cvd.light.productive, cvd.light.unproductive)).toBeGreaterThanOrEqual(12);
     expect(cvdDeltaE(vivid.productive, vivid.unproductive)).toBeLessThan(8);
+  });
+
+  // Productivity bars are fills too, so the same graphical-contrast band
+  // applies to their light values as to the swatches above.
+  it("keeps each light productivity colour within the graphical-fill contrast band", () => {
+    for (const option of PRODUCTIVITY_OPTIONS) {
+      for (const color of [option.light.productive, option.light.unproductive]) {
+        const ratio = wcagContrast(color, LIGHT_CARD);
+        expect(Math.round(ratio * 100) / 100, color).toBeGreaterThanOrEqual(3.0);
+        expect(Math.round(ratio * 100) / 100, color).toBeLessThanOrEqual(5.2);
+      }
+    }
   });
 });

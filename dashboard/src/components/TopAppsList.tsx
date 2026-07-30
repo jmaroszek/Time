@@ -91,7 +91,7 @@ export default function TopAppsList({
                   category, and hues of unequal visual weight made equal-length
                   bars read unequal — length is the only thing the bar encodes. */}
               <div
-                className="h-full rounded-full bg-accent"
+                className="h-full rounded-full bg-accent-data"
                 style={{ width: `${Math.max((app.seconds / max) * 100, 1.5)}%` }}
               />
             </div>
