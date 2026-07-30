@@ -130,7 +130,7 @@ jobs:
 
           npm run test:native:prepare
           $env:TIME_DB_PATH = (Resolve-Path ../data/device-compat.db).Path
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+          $env:TIME_WEBVIEW_DEBUG_PORT = "9222"
           $app = Start-Process -FilePath src-tauri/target/debug/Time.exe -PassThru
           Start-Sleep -Seconds 20
           if ($app.HasExited) {
