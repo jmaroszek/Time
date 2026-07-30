@@ -46,13 +46,30 @@ async function setNativeWindowRect(x, y, width, height) {
 }
 
 async function waitForDashboard() {
-  await browser.waitUntil(
-    () => browser.execute(
-      () => [...document.querySelectorAll("button")]
-        .some((button) => button.textContent?.trim() === "Insights"),
-    ),
-    { timeout: 30_000, timeoutMsg: "dashboard navigation did not become ready" },
-  );
+  try {
+    await browser.waitUntil(
+      () => browser.execute(
+        () => [...document.querySelectorAll("button")]
+          .some((button) => button.textContent?.trim() === "Insights"),
+      ),
+      { timeout: 30_000, timeoutMsg: "dashboard navigation did not become ready" },
+    );
+  } catch (error) {
+    // Without this the failure says only that navigation never appeared, which
+    // is true of a crashed webview, an onboarding screen, and a renamed tab
+    // alike. Report what the window actually held.
+    const state = await browser.execute(() => ({
+      url: location.href,
+      title: document.title,
+      buttons: [...document.querySelectorAll("button")]
+        .map((button) => button.textContent?.trim())
+        .filter(Boolean)
+        .slice(0, 20),
+      text: document.body?.innerText?.trim().slice(0, 600) ?? "",
+    })).catch((reason) => ({ unreachable: String(reason) }));
+    error.message += `\nwindow contents: ${JSON.stringify(state, null, 2)}`;
+    throw error;
+  }
 }
 
 async function closeAndReload() {
