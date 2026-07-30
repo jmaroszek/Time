@@ -568,6 +568,9 @@ export default function ActivityTab({
   const [detailSort, setDetailSort] = useState<ActivityWindowSort>("seconds");
   const [detailDirection, setDetailDirection] = useState<ActivitySortDirection>("desc");
   const [selectedWindow, setSelectedWindow] = useState<ActivityTitleGroup | null>(null);
+  // Back describes the path into a Window, not its parent relationship. A
+  // direct Library result has no previous detail panel to return to.
+  const [windowOrigin, setWindowOrigin] = useState<"library" | "entity-detail" | null>(null);
   // Visit selection belongs to a detail surface. The compact search table only
   // discovers a Window; it never silently turns one row into hundreds of
   // selected sessions.
@@ -703,6 +706,7 @@ export default function ActivityTab({
   const closeActivityDetail = () => {
     const entityId = selectedEntityId;
     setPanelSessionIds(new Set());
+    setWindowOrigin(null);
     setSelectedWindow(null);
     setSelectedEntityId(null);
     if (entityId) {
@@ -719,9 +723,10 @@ export default function ActivityTab({
    * spent walking it, which is what triaging a library actually is. Anything
    * with its own arrow behaviour (a field, an open menu) keeps it.
    *
-   * Escape dismisses one layer at a time: a Window returns to the app it
-   * belongs to, and only then does the panel close. A dialog on top owns
-   * Escape outright, or closing it would take the panel underneath with it.
+   * Escape follows the same path as the visible chrome: a Window opened from
+   * an entity returns there, while a direct Library result closes. A dialog on
+   * top owns Escape outright, or closing it would take the panel underneath
+   * with it.
    */
   useEffect(() => {
     if (!selectedEntityId || dialogOpen) return;
@@ -734,8 +739,12 @@ export default function ActivityTab({
         if (from?.closest("[role='combobox'][aria-expanded='true']")) return;
         event.preventDefault();
         setPanelSessionIds(new Set());
-        if (selectedWindow) setSelectedWindow(null);
-        else closeActivityDetail();
+        if (selectedWindow && windowOrigin === "entity-detail") {
+          setWindowOrigin(null);
+          setSelectedWindow(null);
+        } else {
+          closeActivityDetail();
+        }
         return;
       }
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -752,7 +761,7 @@ export default function ActivityTab({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [selectedEntityId, selectedWindow, dialogOpen, catalogRows]);
+  }, [selectedEntityId, selectedWindow, windowOrigin, dialogOpen, catalogRows]);
 
   // Whichever way the selection moved, the row it landed on has to be visible:
   // walking the list with the arrows is useless if the highlight is offscreen.
@@ -926,25 +935,37 @@ export default function ActivityTab({
   const historyDeleted = (closeEntity: boolean) => {
     setPanelSessionIds(new Set());
     if (closeEntity) {
+      setWindowOrigin(null);
       setSelectedWindow(null);
       setSelectedEntityId(null);
     }
   };
   const openEntity = (entityId: string) => {
     setPanelSessionIds(new Set());
+    setWindowOrigin(null);
     setSelectedWindow(null);
     setSelectedEntityId(entityId);
   };
-  const openWindow = (group: ActivityTitleGroup) => {
+  const openWindow = (
+    group: ActivityTitleGroup,
+    origin: "library" | "entity-detail",
+  ) => {
     setPanelSessionIds(new Set());
     setSelectedEntityId(group.entityId);
+    setWindowOrigin(origin);
     setSelectedWindow(group);
+  };
+  const openWindowParent = () => {
+    setPanelSessionIds(new Set());
+    setWindowOrigin(null);
+    setSelectedWindow(null);
   };
   // The panel describes a row in the Library. Carrying it across to Categories
   // & Rules left it beside a list that could not have opened it.
   const switchView = (next: ActivityView) => {
     onViewChange(next);
     setPanelSessionIds(new Set());
+    setWindowOrigin(null);
     setSelectedWindow(null);
     setSelectedEntityId(null);
   };
@@ -973,10 +994,8 @@ export default function ActivityTab({
       onDeleteSelected={() => requestSessionDeletion(panelSessionIds)}
       onEditSession={setEditingSessionId}
       onMakeRule={setRuleDraft}
-      onBack={() => {
-        setPanelSessionIds(new Set());
-        setSelectedWindow(null);
-      }}
+      onOpenParent={openWindowParent}
+      onBack={windowOrigin === "entity-detail" ? openWindowParent : undefined}
       onClose={closeActivityDetail}
     />
   ) : result?.selectedEntity ? (
@@ -998,7 +1017,6 @@ export default function ActivityTab({
         setDetailDirection(nextDirection);
       }}
       onLoadMore={() => setDetailLimit((limit) => limit + PANEL_WINDOW_MORE)}
-      onBack={detailMode === "drill-in" ? closeActivityDetail : undefined}
       onClose={closeActivityDetail}
       categories={meta.categories}
       rules={meta.rules}
@@ -1009,7 +1027,7 @@ export default function ActivityTab({
         pattern: result.selectedEntity!.key,
         label: result.selectedEntity!.displayName,
       })}
-      onOpenWindow={openWindow}
+      onOpenWindow={(group) => openWindow(group, "entity-detail")}
       onAssign={(categoryId) => assignEntity(result.selectedEntity!, categoryId)}
       onSaveAlias={(alias) => saveAlias(result.selectedEntity!.key, alias)}
       onRemoveExactRule={() => removeExactRules(result.selectedEntity!)}
@@ -1127,7 +1145,7 @@ export default function ActivityTab({
                       selectedEntityId={selectedEntityId}
                       selectedWindowKey={currentWindow?.key ?? null}
                       onSelectEntity={openEntity}
-                      onSelectWindow={openWindow}
+                      onSelectWindow={(group) => openWindow(group, "library")}
                       onLoadIdentities={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
                       onLoadWindows={() => setWindowLimit((limit) => limit + WINDOW_PAGE)}
                       isAllTime={isAllTime}
@@ -1178,7 +1196,8 @@ export default function ActivityTab({
             if (request.mode === "sessions" && currentWindow) {
               const deletedIds = new Set(request.sessionIds);
               if (currentWindow.sessionIds.every((id) => deletedIds.has(id))) {
-                setSelectedWindow(null);
+                if (windowOrigin === "entity-detail") openWindowParent();
+                else closeActivityDetail();
               }
             }
             historyDeleted(request.mode === "entity");
@@ -2589,51 +2608,57 @@ function DetailPanel({
           : "h-full w-full flex-1"
       }`}
     >
-      <div className="flex shrink-0 items-start gap-3 border-b border-edge px-4 py-4 sm:px-5">
-        <div className="min-w-0 flex-1">
-          {/* Nothing precedes the eyebrow, so both panels' headers start on the
-              same pixel. Anything that led this block indented the title and
-              the line beneath it past every other thing in the panel. */}
-          <div className="flex min-w-0 items-center gap-1.5 text-micro uppercase tracking-[.05em] text-ink-3">
-            {eyebrow}
-          </div>
-          {heading}
-          {subtitle}
-        </div>
-        {/* Both ways out of the view, together. Back is conventionally on the
-            left, but the left of this header belongs to what the panel is
-            about, and these two are the same kind of act. */}
-        {/* Two SVGs, never a glyph and an SVG. A text ✕ is centred on its own
-            baseline inside an em box, an icon on the geometry of its viewBox,
-            and the two systems disagree by a pixel or so — an offset that
-            cannot be nudged away, because it moves with font and DPI scaling.
-            Matched viewBox, size, and stroke line up by construction. */}
-        <span className="flex shrink-0 items-center gap-1">
-          {onBack && (
+      <div className="shrink-0 border-b border-edge">
+        {/* Both controls use matched SVG geometry. Mixing a text ✕ with an icon
+            makes their apparent alignment move with font and DPI scaling. */}
+        {onBack && (
+          <div className="flex items-center justify-between px-4 pt-3 sm:px-5">
             <button
               type="button"
               onClick={onBack}
               title={backLabel}
               aria-label={backLabel}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
+              className="-ml-1.5 flex h-7 w-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M19 12H5m7-7-7 7 7 7" />
               </svg>
             </button>
+            <button
+              type="button"
+              onClick={onClose}
+              title={`${closeLabel} (Esc)`}
+              aria-label={closeLabel}
+              className="-mr-1.5 flex h-7 w-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+        <div className={`flex items-start gap-3 px-4 sm:px-5 ${onBack ? "pb-4 pt-1" : "py-4"}`}>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-1.5 text-micro uppercase tracking-[.05em] text-ink-3">
+              {eyebrow}
+            </div>
+            {heading}
+            {subtitle}
+          </div>
+          {!onBack && (
+            <button
+              type="button"
+              onClick={onClose}
+              title={`${closeLabel} (Esc)`}
+              aria-label={closeLabel}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            title={`${closeLabel} (Esc)`}
-            aria-label={closeLabel}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </span>
+        </div>
       </div>
       {/* The top padding belongs to the content, not the scroll box. A sticky
           heading with `top: 0` pins to the scroll container's *content* box, so
@@ -2772,6 +2797,7 @@ function WindowPanel({
   onDeleteSelected,
   onEditSession,
   onMakeRule,
+  onOpenParent,
   onBack,
   onClose,
 }: {
@@ -2788,7 +2814,8 @@ function WindowPanel({
   onDeleteSelected: () => void;
   onEditSession: (id: number) => void;
   onMakeRule: (group: ActivityTitleGroup) => void;
-  onBack: () => void;
+  onOpenParent: () => void;
+  onBack?: () => void;
   onClose: () => void;
 }) {
   const classification = windowGroupClassification(group);
@@ -2812,13 +2839,13 @@ function WindowPanel({
         </h2>
       }
       subtitle={
-        // The parent is already named here, so it may as well be the way back
-        // to it — the shortest path in the panel, for anyone who spots it.
+        // This link expresses hierarchy and is always available. The arrow is
+        // separate: it appears only when this Window was opened from here.
         <p className="truncate text-xs text-ink-3" title={group.entityKey}>
           <button
             type="button"
-            onClick={onBack}
-            title={`Back to ${group.displayName} details`}
+            onClick={onOpenParent}
+            title={`Open ${group.displayName} details`}
             className="rounded-sm underline-offset-2 outline-none transition-colors hover:text-ink-2 hover:underline focus-visible:text-ink-2 focus-visible:underline"
           >
             {group.displayName}
@@ -3080,7 +3107,6 @@ function EntityPanel({
   detailDirection,
   onDetailSort,
   onLoadMore,
-  onBack,
   onClose,
   categories,
   rules,
@@ -3108,7 +3134,6 @@ function EntityPanel({
   detailDirection: ActivitySortDirection;
   onDetailSort: (sort: ActivityWindowSort, direction: ActivitySortDirection) => void;
   onLoadMore: () => void;
-  onBack?: () => void;
   onClose: () => void;
   categories: Category[];
   rules: Rule[];
@@ -3240,8 +3265,6 @@ function EntityPanel({
           )}
         </>
       }
-      onBack={onBack}
-      backLabel="Back to Activity list"
       onClose={onClose}
       closeLabel="Close activity details"
     >
