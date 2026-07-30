@@ -463,17 +463,6 @@ fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, Str
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // WebView2 reads this when the environment is created, so it has to be set
-    // before the first window exists. Debug builds only: a release build with a
-    // debugging port open would expose the webview to any local process.
-    #[cfg(all(windows, debug_assertions))]
-    if let Ok(port) = std::env::var("TIME_WEBVIEW_DEBUG_PORT") {
-        std::env::set_var(
-            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            format!("--remote-debugging-port={port}"),
-        );
-    }
-
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(

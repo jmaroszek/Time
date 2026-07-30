@@ -77,8 +77,11 @@ jobs:
             dashboard/test-results/device
           if-no-files-found: ignore
 
-  native-windows:
-    name: native Windows compatibility
+  # The WebDriver suite (npm run test:native) cannot run here: WebView2 never
+  # opens a remote debugging port on a hosted runner, so no session can be
+  # created. It runs from the release checklist on a real desktop instead.
+  windows-backend:
+    name: Windows backend
     runs-on: windows-latest
     defaults:
       run:
@@ -115,61 +118,7 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      # Compiling the isolated debug application keeps the configuration the
+      # local WebDriver suite depends on from rotting between releases.
       - name: Build isolated debug application
         run: npm run build:native-device
-      # Temporary: does WebView2 expose a debugging endpoint on this runner at
-      # all? A reachable endpoint means the app starts fine hidden and the
-      # msedgedriver handshake is at fault; an unreachable one means the
-      # webview never comes up.
-      - name: Probe WebView2 debugging endpoint
-        run: |
-          $key = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-          Write-Host "WebView2 runtime: $((Get-ItemProperty $key -ErrorAction SilentlyContinue).pv)"
-          $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-          Write-Host "Edge: $((Get-Item $edge -ErrorAction SilentlyContinue).VersionInfo.ProductVersion)"
-
-          npm run test:native:prepare
-          $env:TIME_DB_PATH = (Resolve-Path ../data/device-compat.db).Path
-          $env:TIME_WEBVIEW_DEBUG_PORT = "9222"
-          $app = Start-Process -FilePath src-tauri/target/debug/Time.exe -PassThru
-          Start-Sleep -Seconds 20
-          if ($app.HasExited) {
-            Write-Host "app exited early with code $($app.ExitCode)"
-          } else {
-            Write-Host "app still running after 20s"
-            try {
-              $probe = Invoke-WebRequest "http://127.0.0.1:9222/json/version" -UseBasicParsing -TimeoutSec 5
-              Write-Host "devtools endpoint reachable: $($probe.Content)"
-            } catch {
-              Write-Host "devtools endpoint unreachable: $_"
-            }
-            Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
-          }
-      - name: Run native Windows suite
-        run: npm run test:native
-        env:
-          WDIO_LOG_LEVEL: debug
-      # A failed WebDriver handshake leaves nothing in the job output, so echo
-      # the driver and application capture instead of only archiving it.
-      - name: Dump native suite logs
-        if: failure()
-        run: |
-          $driver = Get-ChildItem -Recurse -Filter msedgedriver.exe -ErrorAction SilentlyContinue `
-            -Path node_modules, "$env:USERPROFILE\.cache" | Select-Object -First 1
-          if ($driver) { Write-Host "msedgedriver: $($driver.FullName) $(& $driver.FullName --version)" }
-          $logs = Get-ChildItem -Recurse -File test-results/native -ErrorAction SilentlyContinue
-          if (-not $logs) { Write-Host "no captured logs"; exit 0 }
-          foreach ($log in $logs) {
-            Write-Host "::group::$($log.Name)"
-            Get-Content -Raw $log.FullName
-            Write-Host "::endgroup::"
-          }
-      - name: Upload native failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-windows-artifacts
-          path: |
-            dashboard/test-results/native
-            dashboard/src-tauri/target/debug/*.log
-          if-no-files-found: ignore
