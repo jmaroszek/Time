@@ -1,0 +1,22 @@
+[run]
+branch = True
+source =
+    tracker
+    scripts
+omit =
+    */tests/*
+
+[report]
+show_missing = True
+skip_covered = False
+precision = 2
+# Integer floor of the first reviewed green branch report (2026-07-30).
+# Raising is routine; lowering requires an explicit reviewed justification.
+fail_under = 76
+
+[xml]
+output = coverage/python/coverage.xml
+
+[json]
+output = coverage/python/coverage.json
+pretty_print = True

@@ -22,26 +22,32 @@ docs/personal/  Owner-only working documents. Git-ignored. See below.
 Run from the repository root unless noted.
 
 ```
-python -m pytest -q                 # tracker + scripts  (98 tests)
-cd dashboard && npx vitest run      # dashboard logic    (89 tests)
+python -m coverage run -m pytest -q tracker/tests scripts/tests
+python -m coverage report           # tracker + scripts branch-coverage gate
+cd dashboard && npm run test:coverage  # dashboard logic + V8 branch coverage
 cd dashboard && npx tsc --noEmit    # typecheck
-cd dashboard/src-tauri && cargo test  # Rust backend     (4 tests)
+cd dashboard/src-tauri && cargo test  # named Rust backend tests
 cd dashboard && npm run test:device   # renderer, Chromium
-cd dashboard && npm run build:native-device && npm run test:native  # see below
+cd dashboard && npm run build:native-device
+cd dashboard && npm run test:native:doctor && npm run test:native  # see below
 ```
 
 CI runs everything except `test:native` (the dashboard suite twice, under two
 timezones, because date handling is timezone-sensitive; `cargo test`, the debug
-application build, and the renderer suite). **Any cargo command builds the
-tracker sidecar first**: the Tauri build script fails if `externalBin` —
-`src-tauri/binaries/` — is missing, so CI runs `scripts/build_tracker.py` before
-the Rust steps, and locally you need it built once too.
+application build, packaged-tracker scratch smoke, and the deterministic
+renderer suite). **Any cargo command builds the tracker sidecar first**: the
+Tauri build script fails if `externalBin` — `src-tauri/binaries/` — is missing,
+so CI runs `scripts/build_tracker.py` before the Rust steps, and locally you
+need it built once too.
 
 **`test:native` cannot run on a hosted Windows runner.** WebView2 opens no
 remote debugging port there, so msedgedriver fails every session with
 `DevToolsActivePort file doesn't exist` and no test executes. Run it on a real
 Windows desktop before a release; it is the only end-to-end check of window
-state save/restore and off-screen recovery.
+state save/restore and off-screen recovery. The doctor must print
+`ENVIRONMENT_READY` before WebdriverIO starts. A failure is then classified as
+`ENVIRONMENT_BLOCKED` (the harness/session never became usable) or
+`APP_FAILURE` (a Time assertion failed); either blocks release.
 
 It also builds nothing: the script prepares a demo database and starts
 WebdriverIO against `src-tauri/target/debug/Time.exe`, so

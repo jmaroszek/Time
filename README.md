@@ -78,8 +78,10 @@ pythonw tracker/tracker.py          # tracker (headless)
 cd dashboard; npm run tauri dev     # dashboard (dev)
 cd dashboard; npm run tauri build   # one NSIS installer with packaged tracker
 
-py -m pytest tracker/tests scripts/tests   # python tests
-cd dashboard; npx vitest run               # dashboard tests
+py -m coverage run -m pytest tracker/tests scripts/tests
+py -m coverage report                       # Python branch-coverage ratchet
+cd dashboard; npm run test:coverage         # dashboard V8 branch coverage
+cd dashboard; npm run test:device           # deterministic renderer suite
 py scripts/check_db_anomalies.py <backup-or-beta-db>  # read-only health check
 ```
 
@@ -91,6 +93,7 @@ real Windows desktop session — CI cannot run it:
 py scripts\build_tracker.py           # only if src-tauri\binaries\ is empty
 cd dashboard
 npm run build:native-device           # src-tauri\target\debug\Time.exe
+npm run test:native:doctor            # refuses live/production state
 npm run test:native
 ```
 
@@ -99,8 +102,9 @@ runtime as a Tauri sidecar, and produces one current-user NSIS installer. The
 installer bootstraps the local database but records nothing and creates no
 startup entry until the user opts in. Uninstall removes the process/autostart
 entry while keeping the user's database.
-Follow the [clean-VM release checklist](docs/clean-vm-release-checklist.md)
-before shipping an artifact. Invited testers should receive the
+Complete the owner-run clean-VM release checklist on Windows 10 and Windows 11
+before shipping an artifact. Automated source checks do not replace that
+evidence. Invited testers should receive the
 [beta invite note](docs/beta-invite.md) with the build's SHA-256 hash filled in.
 
 During a beta soak, run the anomaly checker weekly against an explicit database

@@ -299,8 +299,34 @@ fn tracker_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "Time executable has no parent directory".into())
 }
 
-#[tauri::command]
-fn start_tracker() -> Result<(), String> {
+trait RuntimeControl {
+    fn start_tracker(&self) -> Result<(), String>;
+    fn stop_tracker(&self) -> Result<(), String>;
+    fn set_launch_at_login(&self, enabled: bool) -> Result<(), String>;
+    fn run_tracker_migration(&self) -> Result<(), String>;
+}
+
+struct SystemRuntimeControl;
+
+impl RuntimeControl for SystemRuntimeControl {
+    fn start_tracker(&self) -> Result<(), String> {
+        system_start_tracker()
+    }
+
+    fn stop_tracker(&self) -> Result<(), String> {
+        system_stop_tracker()
+    }
+
+    fn set_launch_at_login(&self, enabled: bool) -> Result<(), String> {
+        system_set_launch_at_login(enabled)
+    }
+
+    fn run_tracker_migration(&self) -> Result<(), String> {
+        system_run_tracker_migration()
+    }
+}
+
+fn system_start_tracker() -> Result<(), String> {
     let path = tracker_path()?;
     if !path.is_file() {
         return Err(format!(
@@ -315,8 +341,7 @@ fn start_tracker() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn stop_tracker() -> Result<(), String> {
+fn system_stop_tracker() -> Result<(), String> {
     #[cfg(windows)]
     {
         let status = Command::new("taskkill")
@@ -334,12 +359,7 @@ fn stop_tracker() -> Result<(), String> {
     Err("Stopping the tracker is supported only on Windows".into())
 }
 
-#[tauri::command]
-fn set_launch_at_login(enabled: bool) -> Result<(), String> {
-    set_launch_at_login_impl(enabled)
-}
-
-fn set_launch_at_login_impl(enabled: bool) -> Result<(), String> {
+fn system_set_launch_at_login(enabled: bool) -> Result<(), String> {
     #[cfg(windows)]
     {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -372,7 +392,7 @@ fn set_launch_at_login_impl(enabled: bool) -> Result<(), String> {
     }
 }
 
-fn run_tracker_migration() -> Result<(), String> {
+fn system_run_tracker_migration() -> Result<(), String> {
     let path = tracker_path()?;
     if !path.is_file() {
         return Err(format!(
@@ -394,7 +414,25 @@ fn run_tracker_migration() -> Result<(), String> {
     }
 }
 
-fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, String> {
+#[tauri::command]
+fn start_tracker() -> Result<(), String> {
+    SystemRuntimeControl.start_tracker()
+}
+
+#[tauri::command]
+fn stop_tracker() -> Result<(), String> {
+    SystemRuntimeControl.stop_tracker()
+}
+
+#[tauri::command]
+fn set_launch_at_login(enabled: bool) -> Result<(), String> {
+    SystemRuntimeControl.set_launch_at_login(enabled)
+}
+
+fn open_database_with_pending_restore_using(
+    path: PathBuf,
+    runtime: &dyn RuntimeControl,
+) -> Result<TimeDatabase, String> {
     let pending = tauri::async_runtime::block_on(TimeDatabase::begin_pending_restore(&path));
     let swap = match pending {
         Ok(Some(swap)) => swap,
@@ -408,7 +446,7 @@ fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, Str
     let restored = swap.pending.clone();
     let opened = (|| {
         if restored.schema_version < SCHEMA_VERSION {
-            run_tracker_migration()?;
+            runtime.run_tracker_migration()?;
         }
         tauri::async_runtime::block_on(TimeDatabase::open(path.clone()))
     })();
@@ -429,12 +467,12 @@ fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, Str
 
     let mut warnings = Vec::new();
     if let Err(error) =
-        set_launch_at_login_impl(restored.recording_consent && restored.launch_at_login)
+        runtime.set_launch_at_login(restored.recording_consent && restored.launch_at_login)
     {
         warnings.push(format!("Windows startup could not be updated: {error}"));
     }
     if restored.recording_consent {
-        if let Err(error) = start_tracker() {
+        if let Err(error) = runtime.start_tracker() {
             warnings.push(format!("the tracker could not be restarted: {error}"));
         }
     }
@@ -459,6 +497,10 @@ fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, Str
         },
     )?;
     Ok(database)
+}
+
+fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, String> {
+    open_database_with_pending_restore_using(path, &SystemRuntimeControl)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -531,4 +573,195 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        open_database_with_pending_restore_using, RuntimeControl, TimeDatabase, SCHEMA_VERSION,
+    };
+    use serde_json::json;
+    use std::{cell::RefCell, fs, path::PathBuf};
+
+    #[derive(Default)]
+    struct FakeRuntime {
+        calls: RefCell<Vec<String>>,
+        migration_error: Option<String>,
+        startup_error: Option<String>,
+        tracker_error: Option<String>,
+    }
+
+    impl FakeRuntime {
+        fn calls(&self) -> Vec<String> {
+            self.calls.borrow().clone()
+        }
+    }
+
+    impl RuntimeControl for FakeRuntime {
+        fn start_tracker(&self) -> Result<(), String> {
+            self.calls.borrow_mut().push("start_tracker".into());
+            self.tracker_error.clone().map_or(Ok(()), Err)
+        }
+
+        fn stop_tracker(&self) -> Result<(), String> {
+            self.calls.borrow_mut().push("stop_tracker".into());
+            Ok(())
+        }
+
+        fn set_launch_at_login(&self, enabled: bool) -> Result<(), String> {
+            self.calls
+                .borrow_mut()
+                .push(format!("set_launch_at_login:{enabled}"));
+            self.startup_error.clone().map_or(Ok(()), Err)
+        }
+
+        fn run_tracker_migration(&self) -> Result<(), String> {
+            self.calls.borrow_mut().push("run_tracker_migration".into());
+            self.migration_error.clone().map_or(Ok(()), Err)
+        }
+    }
+
+    fn restore_root(name: &str) -> PathBuf {
+        let root = std::env::current_dir().unwrap().join("target").join(name);
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    async fn set_setting(database: &TimeDatabase, key: &str, value: &str) {
+        database
+            .execute(
+                "INSERT INTO settings (key,value) VALUES ($1,$2) \
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+                    .into(),
+                vec![json!(key), json!(value)],
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn read_setting(database: &TimeDatabase, key: &str) -> String {
+        let rows = database
+            .select(
+                "SELECT value FROM settings WHERE key=$1".into(),
+                vec![json!(key)],
+            )
+            .await
+            .unwrap();
+        rows[0]["value"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn current_restore_reapplies_startup_and_restarts_only_with_consent() {
+        let root = restore_root("runtime-control-restore-success");
+        let path = root.join("time_log.db");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path.clone()).await.unwrap();
+            set_setting(&database, "recording_consent", "1").await;
+            set_setting(&database, "launch_at_login", "1").await;
+            let backup = PathBuf::from(database.backup().await.unwrap());
+            set_setting(&database, "recording_consent", "0").await;
+            set_setting(&database, "launch_at_login", "0").await;
+            database.prepare_restore(backup).await.unwrap();
+            database.close().await;
+        });
+
+        let runtime = FakeRuntime::default();
+        let restored = open_database_with_pending_restore_using(path.clone(), &runtime).unwrap();
+        assert_eq!(
+            runtime.calls(),
+            ["set_launch_at_login:true", "start_tracker"]
+        );
+        tauri::async_runtime::block_on(async {
+            assert_eq!(read_setting(&restored, "recording_consent").await, "1");
+            restored.close().await;
+        });
+        let notice = TimeDatabase::take_restore_notice(&path).unwrap().unwrap();
+        assert!(notice.ok);
+        assert!(notice.message.contains("Restored"));
+    }
+
+    #[test]
+    fn migration_failure_rolls_back_the_previous_database() {
+        let root = restore_root("runtime-control-migration-rollback");
+        let path = root.join("time_log.db");
+        let old_backup = root.join("schema-two.db");
+        tauri::async_runtime::block_on(async {
+            let previous = TimeDatabase::open(path.clone()).await.unwrap();
+            set_setting(&previous, "recording_consent", "1").await;
+
+            let old = TimeDatabase::open(old_backup.clone()).await.unwrap();
+            set_setting(&old, "schema_version", "2").await;
+            old.close().await;
+
+            previous.prepare_restore(old_backup).await.unwrap();
+            previous.close().await;
+        });
+
+        let runtime = FakeRuntime {
+            migration_error: Some("injected migration failure".into()),
+            ..FakeRuntime::default()
+        };
+        let reopened = open_database_with_pending_restore_using(path.clone(), &runtime).unwrap();
+        assert_eq!(runtime.calls(), ["run_tracker_migration"]);
+        tauri::async_runtime::block_on(async {
+            assert_eq!(
+                read_setting(&reopened, "schema_version").await,
+                SCHEMA_VERSION.to_string()
+            );
+            assert_eq!(read_setting(&reopened, "recording_consent").await, "1");
+            reopened.close().await;
+        });
+        let notice = TimeDatabase::take_restore_notice(&path).unwrap().unwrap();
+        assert!(!notice.ok);
+        assert!(notice.message.contains("put back unchanged"));
+        assert!(notice.message.contains("injected migration failure"));
+    }
+
+    #[test]
+    fn restore_without_consent_disables_startup_and_does_not_restart_tracker() {
+        let root = restore_root("runtime-control-no-consent");
+        let path = root.join("time_log.db");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path.clone()).await.unwrap();
+            set_setting(&database, "recording_consent", "0").await;
+            set_setting(&database, "launch_at_login", "1").await;
+            let backup = PathBuf::from(database.backup().await.unwrap());
+            database.prepare_restore(backup).await.unwrap();
+            database.close().await;
+        });
+
+        let runtime = FakeRuntime::default();
+        let restored = open_database_with_pending_restore_using(path.clone(), &runtime).unwrap();
+        assert_eq!(runtime.calls(), ["set_launch_at_login:false"]);
+        tauri::async_runtime::block_on(restored.close());
+    }
+
+    #[test]
+    fn restore_surfaces_startup_and_restart_warnings_without_rolling_back() {
+        let root = restore_root("runtime-control-warning");
+        let path = root.join("time_log.db");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path.clone()).await.unwrap();
+            set_setting(&database, "recording_consent", "1").await;
+            set_setting(&database, "launch_at_login", "1").await;
+            let backup = PathBuf::from(database.backup().await.unwrap());
+            database.prepare_restore(backup).await.unwrap();
+            database.close().await;
+        });
+
+        let runtime = FakeRuntime {
+            startup_error: Some("startup registration denied".into()),
+            tracker_error: Some("tracker launch denied".into()),
+            ..FakeRuntime::default()
+        };
+        let restored = open_database_with_pending_restore_using(path.clone(), &runtime).unwrap();
+        tauri::async_runtime::block_on(restored.close());
+        let notice = TimeDatabase::take_restore_notice(&path).unwrap().unwrap();
+        assert!(notice.ok);
+        assert!(notice.message.contains("startup registration denied"));
+        assert!(notice.message.contains("tracker launch denied"));
+    }
 }

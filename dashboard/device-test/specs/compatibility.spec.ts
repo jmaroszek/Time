@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const visualProjects = new Set(["500x480", "960x540", "1366x768", "2208x1242"]);
+const FIXED_NOW = new Date("2026-07-30T17:00:00.000Z");
+
+test.beforeEach(async ({ page }) => {
+  // Apply before the first navigation: the fixture captures Date.now() while
+  // its module loads. Fixed Date keeps real timers alive for chart settling.
+  await page.clock.setFixedTime(FIXED_NOW);
+});
 
 async function waitForDashboard(page: Page) {
   await page.goto("/");
@@ -88,7 +94,7 @@ async function assertOpenMenuFitsViewport(page: Page) {
   expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height - 7);
 }
 
-test("primary screens remain usable at the effective viewport contract", async ({
+test("@matrix primary screens remain usable at the effective viewport contract", async ({
   page,
 }, testInfo) => {
   await waitForDashboard(page);
@@ -195,7 +201,9 @@ test("primary screens remain usable at the effective viewport contract", async (
 
   if (width < 1832) {
     await expect(page.getByRole("table")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Back to Activity list" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Close activity details" }),
+    ).toBeVisible();
   } else {
     await expect(page.getByRole("table")).toBeVisible();
   }
@@ -207,7 +215,7 @@ test("primary screens remain usable at the effective viewport contract", async (
 
   if (width < 1832) {
     await rowTrigger.click();
-    await page.getByRole("button", { name: "Back to Activity list" }).click();
+    await page.getByRole("button", { name: "Close activity details" }).click();
     await expect(page.getByRole("table")).toBeVisible();
     await expect(rowTrigger).toBeFocused();
   }
@@ -281,10 +289,9 @@ test("primary screens remain usable at the effective viewport contract", async (
   await assertNoHorizontalOverflow(page);
 });
 
-test("onboarding and restore dialog fit the minimum viewport", async ({
+test("@minimum onboarding and restore dialog fit the minimum viewport", async ({
   page,
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "500x480");
+}) => {
   await page.goto("/?fixture=onboarding");
   await expect(page.getByRole("heading", { name: "Choose what Time may record" })).toBeVisible();
   await assertNoHorizontalOverflow(page);
@@ -321,16 +328,16 @@ test("onboarding and restore dialog fit the minimum viewport", async ({
 // The native WebView2 suite covered this walk before; the project matrix
 // already spans the snap-equivalent sizes, so the tab cycle belongs here and
 // the native suite keeps only what a browser cannot reach.
-test("every primary tab stays reachable at the minimum viewport", async ({
+test("@minimum every primary tab stays reachable at the minimum viewport", async ({
   page,
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "500x480");
+}) => {
   await waitForDashboard(page);
 
   for (const tab of ["Activity", "Settings", "Insights"]) {
     await page.getByRole("button", { name: tab, exact: true }).click();
     await assertNoHorizontalOverflow(page);
   }
+  await expect(page.locator("canvas").first()).toBeVisible();
   await assertChartsHaveGeometry(page);
 
   // Activity keeps its last sub-view, so return to the library explicitly
@@ -343,13 +350,12 @@ test("every primary tab stays reachable at the minimum viewport", async ({
   await expect(page.getByRole("complementary")).toBeVisible();
   await assertNoHorizontalOverflow(page);
 
-  await page.getByRole("button", { name: "Back to Activity list" }).click();
+  await page.getByRole("button", { name: "Close activity details" }).click();
   await expect(page.getByRole("table")).toBeVisible();
   await expect(rowTrigger).toBeFocused();
 });
 
-test("representative visual baselines stay stable", async ({ page }, testInfo) => {
-  test.skip(!visualProjects.has(testInfo.project.name));
+test("@visual representative visual baselines stay stable", async ({ page }) => {
   await waitForDashboard(page);
   await expect(page).toHaveScreenshot("insights.png", {
     mask: [page.locator("canvas")],
@@ -367,8 +373,7 @@ test("representative visual baselines stay stable", async ({ page }, testInfo) =
   });
 });
 
-test("charts render at high device pixel ratio", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "960x540-dpr2");
+test("@dpr charts render at high device pixel ratio", async ({ page }) => {
   await waitForDashboard(page);
   await expect.poll(() => page.evaluate(() => window.devicePixelRatio)).toBe(2);
   const ratio = await page.locator("canvas").first().evaluate((canvas) => {
@@ -379,10 +384,9 @@ test("charts render at high device pixel ratio", async ({ page }, testInfo) => {
   await assertNoHorizontalOverflow(page);
 });
 
-test("charts settle after repeated responsive transitions", async ({
+test("@settle charts settle after repeated responsive transitions", async ({
   page,
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "1008x640");
+}) => {
   await waitForDashboard(page);
 
   for (const viewport of [

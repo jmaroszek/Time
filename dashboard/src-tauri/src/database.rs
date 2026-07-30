@@ -334,6 +334,11 @@ struct DeletionCandidate {
 }
 
 impl TimeDatabase {
+    #[cfg(test)]
+    pub async fn close(self) {
+        self.pool.close().await;
+    }
+
     pub async fn open(path: PathBuf) -> Result<Self, String> {
         let preexisting = path.metadata().map(|meta| meta.len() > 0).unwrap_or(false);
         let options = SqliteConnectOptions::new()
