@@ -45,23 +45,6 @@ def test_tray_pause_resume_callbacks_persist_state(tmp_path, monkeypatch):
     assert icon.title == "Time — Recording"
 
 
-def test_tray_until_tomorrow_uses_midnight_boundary(tmp_path, monkeypatch):
-    path = tmp_path / "tray.db"
-    conn = db.open_db(path)
-    conn.close()
-    actions = tray._TrayActions(path, threading.Event())
-    monkeypatch.setattr(tray, "_next_midnight", lambda: 86_400.0)
-
-    class FakeIcon:
-        title = ""
-
-    actions.pause_until_tomorrow(FakeIcon(), None)
-
-    settings = _settings(path)
-    assert settings["tracking_paused"] == "0"
-    assert settings["tracking_paused_until"] == "86400"
-
-
 def test_tray_tooltip_distinguishes_recording_and_pause_states():
     one_pm = tray._dt.datetime(2026, 7, 30, 13, 0).timestamp()
     assert tray._tooltip_text(False, 0, now=1_000) == "Time — Recording"
@@ -98,6 +81,43 @@ def test_tray_menu_uses_default_dashboard_and_one_state_action(tmp_path, monkeyp
     tray._write_pause(path, "1", 0)
     assert items[2].visible is False
     assert items[3].visible is True
+
+
+def test_pause_menu_matches_caffeine_durations_plus_until_resumed(tmp_path):
+    actions = tray._TrayActions(tmp_path / "unused.db", threading.Event())
+    seconds = []
+    actions.pause_for = lambda duration: seconds.append(duration) or (lambda *_: None)
+
+    menu = tray._build_menu(pystray, actions)
+    pause_items = menu.items[2].submenu.items
+
+    assert [str(item.text) for item in pause_items] == [
+        "15 minutes",
+        "30 minutes",
+        "45 minutes",
+        "- - - -",
+        "1 hour",
+        "2 hours",
+        "4 hours",
+        "6 hours",
+        "8 hours",
+        "10 hours",
+        "24 hours",
+        "- - - -",
+        "Until resumed",
+    ]
+    assert seconds == [
+        15 * 60,
+        30 * 60,
+        45 * 60,
+        60 * 60,
+        2 * 60 * 60,
+        4 * 60 * 60,
+        6 * 60 * 60,
+        8 * 60 * 60,
+        10 * 60 * 60,
+        24 * 60 * 60,
+    ]
 
 
 def test_tray_open_dashboard_and_quit_callbacks(tmp_path, monkeypatch):

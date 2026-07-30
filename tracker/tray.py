@@ -84,11 +84,6 @@ def _read_pause_state(db_path: str | Path) -> tuple[bool, float]:
     return paused, until
 
 
-def _next_midnight() -> float:
-    tomorrow = _dt.date.today() + _dt.timedelta(days=1)
-    return _dt.datetime.combine(tomorrow, _dt.time.min).timestamp()
-
-
 class _TrayActions:
     """Testable callback boundary between pystray and Time's persisted state."""
 
@@ -118,10 +113,6 @@ class _TrayActions:
             self._refresh_icon_title(icon)
 
         return action
-
-    def pause_until_tomorrow(self, icon, _item) -> None:
-        _write_pause(self.db_path, "0", _next_midnight())
-        self._refresh_icon_title(icon)
 
     def pause_indefinitely(self, icon, _item) -> None:
         _write_pause(self.db_path, "1", 0)
@@ -157,6 +148,21 @@ def _tooltip_text(paused: bool, until: float, now: float | None = None) -> str:
 
 def _build_menu(pystray, actions: _TrayActions):
     """Create the native menu in task order, with one state-relevant control."""
+    pause_menu = pystray.Menu(
+        pystray.MenuItem("15 minutes", actions.pause_for(15 * 60)),
+        pystray.MenuItem("30 minutes", actions.pause_for(30 * 60)),
+        pystray.MenuItem("45 minutes", actions.pause_for(45 * 60)),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("1 hour", actions.pause_for(60 * 60)),
+        pystray.MenuItem("2 hours", actions.pause_for(2 * 60 * 60)),
+        pystray.MenuItem("4 hours", actions.pause_for(4 * 60 * 60)),
+        pystray.MenuItem("6 hours", actions.pause_for(6 * 60 * 60)),
+        pystray.MenuItem("8 hours", actions.pause_for(8 * 60 * 60)),
+        pystray.MenuItem("10 hours", actions.pause_for(10 * 60 * 60)),
+        pystray.MenuItem("24 hours", actions.pause_for(24 * 60 * 60)),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Until resumed", actions.pause_indefinitely),
+    )
     return pystray.Menu(
         pystray.MenuItem(
             "Open dashboard",
@@ -167,12 +173,7 @@ def _build_menu(pystray, actions: _TrayActions):
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
             "Pause tracking",
-            pystray.Menu(
-                pystray.MenuItem("For 15 minutes", actions.pause_for(15 * 60)),
-                pystray.MenuItem("For 1 hour", actions.pause_for(60 * 60)),
-                pystray.MenuItem("Until tomorrow", actions.pause_until_tomorrow),
-                pystray.MenuItem("Until resumed", actions.pause_indefinitely),
-            ),
+            pause_menu,
             visible=actions.is_recording,
         ),
         pystray.MenuItem(
