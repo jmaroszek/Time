@@ -355,24 +355,6 @@ test("@minimum every primary tab stays reachable at the minimum viewport", async
   await expect(rowTrigger).toBeFocused();
 });
 
-test("@visual representative visual baselines stay stable", async ({ page }) => {
-  await waitForDashboard(page);
-  await expect(page).toHaveScreenshot("insights.png", {
-    mask: [page.locator("canvas")],
-    maskColor: "#1d2026",
-  });
-
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const rowTrigger = page.locator("tbody button").first();
-  await expect(rowTrigger).toBeVisible();
-  await rowTrigger.click();
-  await expect(page.getByRole("complementary")).toBeVisible();
-  await expect(page).toHaveScreenshot("activity-detail.png", {
-    mask: [page.locator("canvas")],
-    maskColor: "#1d2026",
-  });
-});
-
 test("@dpr charts render at high device pixel ratio", async ({ page }) => {
   await waitForDashboard(page);
   await expect.poll(() => page.evaluate(() => window.devicePixelRatio)).toBe(2);

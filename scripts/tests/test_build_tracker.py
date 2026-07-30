@@ -1,4 +1,6 @@
 import importlib.metadata
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -77,3 +79,52 @@ def test_target_triple_refuses_unknown_architecture(monkeypatch):
 
     with pytest.raises(SystemExit, match="Unsupported Windows build architecture"):
         build_tracker._target_triple(None)
+
+
+def _fake_run(monkeypatch, *, returncode, write_database):
+    """Stand in for launching the packaged sidecar, and record its isolation."""
+    captured = {}
+
+    def run(command, *, cwd, env, capture_output, text, timeout):
+        captured["env"] = env
+        if write_database:
+            database = Path(env["LOCALAPPDATA"]) / "Time" / "time_log.db"
+            database.parent.mkdir(parents=True, exist_ok=True)
+            database.write_text("", encoding="utf-8")
+        return subprocess.CompletedProcess(command, returncode, "", "boom")
+
+    monkeypatch.setattr(build_tracker.subprocess, "run", run)
+    return captured
+
+
+def test_sidecar_check_runs_against_an_isolated_scratch_profile(monkeypatch, tmp_path):
+    captured = _fake_run(monkeypatch, returncode=0, write_database=True)
+    monkeypatch.setenv("TIME_DATA_DIR", str(tmp_path / "should-be-ignored"))
+
+    build_tracker._verify_sidecar_starts(tmp_path / "time-tracker.exe")
+
+    environment = captured["env"]
+    assert environment["TIME_MIGRATE_ONLY"] == "1"
+    # A developer's live tracker owns the production mutex; sharing it would
+    # turn this into a duplicate-instance exit that proves nothing.
+    assert environment["TIME_MUTEX_NAME"] != "Global\\TimeTrackerSingleton"
+    assert "TIME_DATA_DIR" not in environment
+    assert environment["LOCALAPPDATA"] != str(tmp_path)
+
+
+def test_sidecar_check_fails_the_build_when_the_bundle_cannot_start(
+    monkeypatch, tmp_path
+):
+    _fake_run(monkeypatch, returncode=1, write_database=False)
+
+    with pytest.raises(SystemExit, match="Packaged tracker did not start"):
+        build_tracker._verify_sidecar_starts(tmp_path / "time-tracker.exe")
+
+
+def test_sidecar_check_fails_when_no_database_is_produced(monkeypatch, tmp_path):
+    """A zero exit with no database means the run bailed out early rather than
+    bootstrapping — the duplicate-instance path returns exactly that."""
+    _fake_run(monkeypatch, returncode=0, write_database=False)
+
+    with pytest.raises(SystemExit, match="Packaged tracker did not start"):
+        build_tracker._verify_sidecar_starts(tmp_path / "time-tracker.exe")

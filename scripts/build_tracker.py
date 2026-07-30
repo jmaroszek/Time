@@ -9,6 +9,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -43,6 +44,41 @@ def _verify_pinned_runtime() -> None:
         )
 
 
+def _verify_sidecar_starts(executable: Path) -> None:
+    """A bundle can build cleanly and still be missing a DLL its first import
+    needs, which surfaces only when someone runs the release. Start the thing
+    once, against a scratch profile, and let the build fail instead.
+
+    Isolated three ways: LOCALAPPDATA moves the database into the temporary
+    directory, TIME_MIGRATE_ONLY stops before the tray and the recording loop,
+    and a distinct mutex keeps a developer's live tracker from turning this into
+    a duplicate-instance exit that proves nothing.
+    """
+    with tempfile.TemporaryDirectory(prefix="time-sidecar-check-") as scratch:
+        environment = os.environ.copy()
+        environment["LOCALAPPDATA"] = scratch
+        environment["TIME_MIGRATE_ONLY"] = "1"
+        environment["TIME_MUTEX_NAME"] = "Global\\TimeTrackerBuildCheck"
+        environment.pop("TIME_DATA_DIR", None)
+        completed = subprocess.run(
+            [str(executable)],
+            cwd=executable.parent,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        database = Path(scratch) / "Time" / "time_log.db"
+        if completed.returncode != 0 or not database.is_file():
+            details = (completed.stderr or completed.stdout or "").strip()
+            raise SystemExit(
+                "Packaged tracker did not start "
+                f"(exit {completed.returncode}):\n{details}\n"
+                "The sidecar is not shippable. A conda-derived build Python is "
+                "the usual cause; see the build notes in README.md."
+            )
+
+
 def _target_triple(explicit: str | None) -> str:
     if explicit:
         return explicit
@@ -66,6 +102,14 @@ def build(target_triple: str) -> Path:
     _verify_pinned_runtime()
     env = os.environ.copy()
     env["TIME_TRACKER_TARGET_TRIPLE"] = target_triple
+    # A conda interpreter keeps the DLLs its extension modules link against in
+    # `Library\bin` rather than beside the modules. PyInstaller resolves binary
+    # dependencies through PATH, so without this the bundle builds cleanly and
+    # then dies on the first `import ctypes` — and again on `import sqlite3`.
+    # Stock CPython has no such directory and is unaffected.
+    library_bin = Path(sys.base_prefix) / "Library" / "bin"
+    if library_bin.is_dir():
+        env["PATH"] = f"{library_bin}{os.pathsep}{env.get('PATH', '')}"
     subprocess.run(
         [
             sys.executable,
@@ -88,6 +132,8 @@ def build(target_triple: str) -> Path:
     built_exe = built_dir / f"time-tracker-{target_triple}.exe"
     if not built_exe.is_file() or not (built_dir / "_internal").is_dir():
         raise SystemExit("PyInstaller did not produce the expected one-dir layout")
+
+    _verify_sidecar_starts(built_exe)
 
     if TAURI_BINARIES.exists():
         shutil.rmtree(TAURI_BINARIES)

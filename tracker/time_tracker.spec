@@ -11,6 +11,7 @@ target_triple = os.environ.get(
     "TIME_TRACKER_TARGET_TRIPLE", "x86_64-pc-windows-msvc"
 )
 
+
 a = Analysis(
     [str(tracker_dir / "tracker.py")],
     pathex=[str(project_root)],
