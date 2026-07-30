@@ -164,6 +164,9 @@ DEFAULT_SETTINGS = {
     "activity_noise_max_sessions": "1",
     "color_palette": "slate",
     "productivity_style": "vivid",
+    # Appearance (dashboard-only). dark | light | system; "system" follows the
+    # OS so a light-mode user never gets a dark first run.
+    "theme": "system",
     "focus_chain_max_gap_seconds": "300",
     "day_start_hour": "0",
     "day_end_hour": "24",

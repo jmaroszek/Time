@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+// The gray the timeline passes for unclaimed sessions; its value is not what
+// these tests are about, only that it reaches the block.
+const UNCAT = "#5b616b";
+
 import { aggregateBlocks } from "./blocks";
 import { buildClassifier, type Category, type Rule } from "./classify";
 import type { Session } from "./metrics";
@@ -31,6 +35,8 @@ describe("aggregateBlocks", () => {
       RANGE,
       classify,
       15,
+
+        UNCAT,
     );
     expect(blocks).toHaveLength(1);
     const b = blocks[0];
@@ -45,7 +51,7 @@ describe("aggregateBlocks", () => {
 
   it("splits long sessions across block boundaries", () => {
     // 2h continuous session -> 8 contiguous 15m blocks, same color
-    const blocks = aggregateBlocks([sess(T0 + 10 * 3600, T0 + 12 * 3600)], RANGE, classify, 15);
+    const blocks = aggregateBlocks([sess(T0 + 10 * 3600, T0 + 12 * 3600)], RANGE, classify, 15, UNCAT);
     expect(blocks).toHaveLength(8);
     expect(new Set(blocks.map((b) => b.categoryName))).toEqual(new Set(["Notes"]));
     expect(blocks[0].startHour).toBe(10);
@@ -54,7 +60,7 @@ describe("aggregateBlocks", () => {
 
   it("drops blocks with negligible activity", () => {
     // 20s of activity in a 15m block (< 5%)
-    const blocks = aggregateBlocks([sess(T0 + 9 * 3600, T0 + 9 * 3600 + 20)], RANGE, classify, 15);
+    const blocks = aggregateBlocks([sess(T0 + 9 * 3600, T0 + 9 * 3600 + 20)], RANGE, classify, 15, UNCAT);
     expect(blocks).toHaveLength(0);
   });
 
@@ -64,6 +70,8 @@ describe("aggregateBlocks", () => {
       RANGE,
       classify,
       15,
+
+        UNCAT,
     );
     expect(blocks).toHaveLength(1);
     expect(blocks[0].isAfk).toBe(true);
@@ -79,6 +87,8 @@ describe("aggregateBlocks", () => {
       RANGE,
       classify,
       15,
+
+        UNCAT,
     );
     expect(blocks).toHaveLength(1);
     expect(blocks[0].isAfk).toBe(false);
@@ -91,6 +101,8 @@ describe("aggregateBlocks", () => {
       RANGE,
       classify,
       15,
+
+        UNCAT,
     );
     expect(blocks[0].categoryName).toBe("Uncategorized");
   });
@@ -103,6 +115,7 @@ describe("aggregateBlocks", () => {
       range2,
       classify,
       15,
+      UNCAT,
     );
     expect(blocks[0].dayKey).toBe("2026-06-08");
     expect(blocks[blocks.length - 1].dayKey).toBe("2026-06-09");

@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalSwatch,
   DEFAULT_PALETTE_ID,
   metricRamps,
+  paletteForTheme,
   PALETTES,
   previewSwatches,
   PRODUCTIVITY_OPTIONS,
   resolvePalette,
+  themedSwatch,
   type PaletteColors,
 } from "./palettes";
 
@@ -139,19 +142,110 @@ describe("palettes", () => {
         });
       });
     }
+
+    // The rule the old PROTECTED_HUE_ZONES enforced, and the one thing the file
+    // header claimed was held here without anything actually checking it: a
+    // category must never read as a productivity state. Both selectable
+    // productivity pairs count, not just the palette's own — a pair chosen in
+    // Settings replaces the palette's, so a swatch has to clear all of them.
+    //
+    // Both modes, because both are drawn now. This is what caught Tide's #778993
+    // and Jewel's #7f8695 sitting ΔE 1.30 and 1.06 from their own light
+    // `neutral` — two low-chroma greys at the same lightness, indistinguishable.
+    for (const [mode, pick] of MODES) {
+      const colors = pick(palette);
+      describe(`${palette.label} · ${mode} · productivity separation`, () => {
+        const states = [
+          colors.productive,
+          colors.neutral,
+          colors.unproductive,
+          ...PRODUCTIVITY_OPTIONS.flatMap((option) =>
+            mode === "light"
+              ? [option.light.productive, option.light.unproductive]
+              : [option.productive, option.unproductive],
+          ),
+        ];
+        it("keeps every swatch clear of every productivity state", () => {
+          for (const swatch of colors.swatches) {
+            for (const state of states) {
+              expect(
+                Math.round(deltaE(swatch, state) * 100) / 100,
+                `${swatch} vs ${state}`,
+              ).toBeGreaterThanOrEqual(3.5);
+            }
+          }
+        });
+      });
+    }
   }
+
+  // themedSwatch and canonicalSwatch map a stored colour to its counterpart by
+  // the slot the two blocks share, so the two arrays have to stay aligned. A
+  // reordered or short `light` block would silently map colours to the wrong
+  // identity — a category would change hue on a theme switch.
+  it("keeps the light block index-parallel with the dark one, and round-trips", () => {
+    for (const palette of PALETTES) {
+      expect(palette.light.swatches).toHaveLength(palette.swatches.length);
+      for (const [index, swatch] of palette.swatches.entries()) {
+        const light = themedSwatch(palette, "light", swatch);
+        expect(light).toBe(palette.light.swatches[index]);
+        expect(canonicalSwatch(palette, "light", light)).toBe(swatch);
+        // Dark is the canonical block, so both mappers are identities there.
+        expect(themedSwatch(palette, "dark", swatch)).toBe(swatch);
+        expect(canonicalSwatch(palette, "dark", swatch)).toBe(swatch);
+      }
+    }
+  });
+
+  // The mistake this caught in review, and the reason the mappers resolve their
+  // blocks by palette id: `meta.palette` is the *themed* palette, so its
+  // `swatches` are already the light block. A mapper reading that field directly
+  // finds no canonical value in it and returns its input unchanged — the mapping
+  // silently does nothing, in exactly the case it exists for.
+  it("maps correctly when handed the themed palette, not just the raw one", () => {
+    for (const palette of PALETTES) {
+      const themed = paletteForTheme(palette, "light");
+      for (const [index, canonical] of palette.swatches.entries()) {
+        const light = palette.light.swatches[index];
+        expect(themedSwatch(themed, "light", canonical)).toBe(light);
+        expect(canonicalSwatch(themed, "light", light)).toBe(canonical);
+      }
+    }
+  });
+
+  // A colour saved under another palette, or by a release that offered different
+  // swatches, has no counterpart. It must survive untouched rather than snap to
+  // whatever happens to be nearby.
+  it("passes through a colour the palette does not contain", () => {
+    const palette = PALETTES[0];
+    expect(themedSwatch(palette, "light", "#123456")).toBe("#123456");
+    expect(canonicalSwatch(palette, "light", "#123456")).toBe("#123456");
+  });
+
+  it("resolves the palette's own colours to the active theme's block", () => {
+    for (const palette of PALETTES) {
+      expect(paletteForTheme(palette, "dark").swatches).toEqual(palette.swatches);
+      const light = paletteForTheme(palette, "light");
+      expect(light.swatches).toEqual(palette.light.swatches);
+      expect(light.productive).toBe(palette.light.productive);
+      expect(light.neutral).toBe(palette.light.neutral);
+      expect(light.unproductive).toBe(palette.light.unproductive);
+      // `light` is carried through, so the mappers still have both blocks.
+      expect(light.light).toEqual(palette.light);
+    }
+  });
 });
 
 describe("metric ramps", () => {
   it("derives a 4-stop ramp per metric, all starting at the same surface fill", () => {
-    const ramps = metricRamps(PALETTES[0]);
+    const ramps = metricRamps(PALETTES[0], "dark");
     for (const ramp of Object.values(ramps)) expect(ramp).toHaveLength(4);
     expect(new Set(Object.values(ramps).map((ramp) => ramp[0])).size).toBe(1);
   });
 
   it("front-loads colour while preserving the surface and exact metric peaks", () => {
     const palette = PALETTES[0];
-    const ramps = metricRamps(palette);
+    const ramps = metricRamps(palette, "dark");
     expect(ramps.tracked[3]).toBe("#59a9ef");
     expect(ramps.productive[3]).toBe(palette.productive);
     expect(ramps.neutral[3]).toBe(palette.neutral);
