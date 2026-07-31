@@ -85,18 +85,15 @@ cd dashboard; npm run test:device           # deterministic renderer suite
 py scripts/check_db_anomalies.py <backup-or-beta-db>  # read-only health check
 ```
 
-Before a release, run the native window-state suite. It drives the built
-application through WebDriver, so it needs the sidecar, a debug build, and a
-real Windows desktop session — CI cannot run it:
+Building the application needs the sidecar on disk first, because every cargo
+invocation runs the Tauri build script and that script requires it:
 
 ```powershell
 python -m venv data\tracker-build-env
 data\tracker-build-env\Scripts\python -m pip install -r tracker\requirements-build.txt
 data\tracker-build-env\Scripts\python scripts\build_tracker.py
 cd dashboard
-npm run build:native-device           # src-tauri\target\debug\Time.exe
-npm run test:native:doctor            # refuses live/production state
-npm run test:native
+npm run build:debug-app               # src-tauri\target\debug\Time.exe
 ```
 
 The builder starts the bundle once against a scratch profile and fails rather
