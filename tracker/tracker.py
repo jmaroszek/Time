@@ -155,7 +155,10 @@ class FailureThrottle:
         last = self._last_report.get(kind)
         if last is None:
             self._last_report[kind] = now
-            logging.exception("%s (%s)", message, kind)
+            # exc_info takes the exception rather than logging.exception's
+            # ambient sys.exc_info(), so the traceback survives a caller that
+            # records outside the handler that caught it.
+            logging.error("%s (%s)", message, kind, exc_info=exc)
             return
         self._suppressed[kind] = self._suppressed.get(kind, 0) + 1
         if now - last >= self._summary_seconds:
