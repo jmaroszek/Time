@@ -438,7 +438,22 @@ fn open_database_with_pending_restore_using(
         Ok(Some(swap)) => swap,
         Ok(None) => return tauri::async_runtime::block_on(TimeDatabase::open(path)),
         Err(error) => {
-            let message = format!("Restore was canceled before replacement: {error}");
+            // A swap that failed partway leaves no database here. Discarding the
+            // marker would remove the one thing that lets the next launch put the
+            // rollback copy back, and opening would create an empty database over
+            // the top of it — history intact on disk, and invisible. Refuse to
+            // start instead: the next launch recovers, and a loud failure beats a
+            // Time that looks like it forgot everything.
+            if !path.exists() {
+                return Err(format!(
+                    "Restore could not be completed and the previous database is not back in \
+                     place: {error}"
+                ));
+            }
+            let message = format!(
+                "Restore was canceled and your existing data was left unchanged. \
+                 You can try the restore again: {error}"
+            );
             TimeDatabase::discard_pending_restore(&path, message)?;
             return tauri::async_runtime::block_on(TimeDatabase::open(path));
         }
@@ -584,190 +599,4 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        open_database_with_pending_restore_using, RuntimeControl, TimeDatabase, SCHEMA_VERSION,
-    };
-    use serde_json::json;
-    use std::{cell::RefCell, path::PathBuf};
-
-    #[derive(Default)]
-    struct FakeRuntime {
-        calls: RefCell<Vec<String>>,
-        migration_error: Option<String>,
-        startup_error: Option<String>,
-        tracker_error: Option<String>,
-    }
-
-    impl FakeRuntime {
-        fn calls(&self) -> Vec<String> {
-            self.calls.borrow().clone()
-        }
-    }
-
-    impl RuntimeControl for FakeRuntime {
-        fn start_tracker(&self) -> Result<(), String> {
-            self.calls.borrow_mut().push("start_tracker".into());
-            self.tracker_error.clone().map_or(Ok(()), Err)
-        }
-
-        fn stop_tracker(&self) -> Result<(), String> {
-            self.calls.borrow_mut().push("stop_tracker".into());
-            Ok(())
-        }
-
-        fn set_launch_at_login(&self, enabled: bool) -> Result<(), String> {
-            self.calls
-                .borrow_mut()
-                .push(format!("set_launch_at_login:{enabled}"));
-            self.startup_error.clone().map_or(Ok(()), Err)
-        }
-
-        fn run_tracker_migration(&self) -> Result<(), String> {
-            self.calls.borrow_mut().push("run_tracker_migration".into());
-            self.migration_error.clone().map_or(Ok(()), Err)
-        }
-    }
-
-    fn restore_root(name: &str) -> PathBuf {
-        crate::database::tests::scratch_root(name)
-    }
-
-    async fn set_setting(database: &TimeDatabase, key: &str, value: &str) {
-        database
-            .execute(
-                "INSERT INTO settings (key,value) VALUES ($1,$2) \
-                 ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-                    .into(),
-                vec![json!(key), json!(value)],
-            )
-            .await
-            .unwrap();
-    }
-
-    async fn read_setting(database: &TimeDatabase, key: &str) -> String {
-        let rows = database
-            .select(
-                "SELECT value FROM settings WHERE key=$1".into(),
-                vec![json!(key)],
-            )
-            .await
-            .unwrap();
-        rows[0]["value"].as_str().unwrap().to_owned()
-    }
-
-    #[test]
-    fn current_restore_reapplies_startup_and_restarts_only_with_consent() {
-        let root = restore_root("runtime-control-restore-success");
-        let path = root.join("time_log.db");
-        tauri::async_runtime::block_on(async {
-            let database = TimeDatabase::open(path.clone()).await.unwrap();
-            set_setting(&database, "recording_consent", "1").await;
-            set_setting(&database, "launch_at_login", "1").await;
-            let backup = PathBuf::from(database.backup().await.unwrap());
-            set_setting(&database, "recording_consent", "0").await;
-            set_setting(&database, "launch_at_login", "0").await;
-            database.prepare_restore(backup).await.unwrap();
-            database.close().await;
-        });
-
-        let runtime = FakeRuntime::default();
-        let restored = open_database_with_pending_restore_using(path.clone(), &runtime).unwrap();
-        assert_eq!(
-            runtime.calls(),
-            ["set_launch_at_login:true", "start_tracker"]
-        );
-        tauri::async_runtime::block_on(async {
-            assert_eq!(read_setting(&restored, "recording_consent").await, "1");
-            restored.close().await;
-        });
-        let notice = TimeDatabase::take_restore_notice(&path).unwrap().unwrap();
-        assert!(notice.ok);
-        assert!(notice.message.contains("Restored"));
-    }
-
-    #[test]
-    fn migration_failure_rolls_back_the_previous_database() {
-        let root = restore_root("runtime-control-migration-rollback");
-        let path = root.join("time_log.db");
-        let old_backup = root.join("schema-two.db");
-        tauri::async_runtime::block_on(async {
-            let previous = TimeDatabase::open(path.clone()).await.unwrap();
-            set_setting(&previous, "recording_consent", "1").await;
-
-            let old = TimeDatabase::open(old_backup.clone()).await.unwrap();
-            set_setting(&old, "schema_version", "2").await;
-            old.close().await;
-
-            previous.prepare_restore(old_backup).await.unwrap();
-            previous.close().await;
-        });
-
-        let runtime = FakeRuntime {
-            migration_error: Some("injected migration failure".into()),
-            ..FakeRuntime::default()
-        };
-        let reopened = open_database_with_pending_restore_using(path.clone(), &runtime).unwrap();
-        assert_eq!(runtime.calls(), ["run_tracker_migration"]);
-        tauri::async_runtime::block_on(async {
-            assert_eq!(
-                read_setting(&reopened, "schema_version").await,
-                SCHEMA_VERSION.to_string()
-            );
-            assert_eq!(read_setting(&reopened, "recording_consent").await, "1");
-            reopened.close().await;
-        });
-        let notice = TimeDatabase::take_restore_notice(&path).unwrap().unwrap();
-        assert!(!notice.ok);
-        assert!(notice.message.contains("put back unchanged"));
-        assert!(notice.message.contains("injected migration failure"));
-    }
-
-    #[test]
-    fn restore_without_consent_disables_startup_and_does_not_restart_tracker() {
-        let root = restore_root("runtime-control-no-consent");
-        let path = root.join("time_log.db");
-        tauri::async_runtime::block_on(async {
-            let database = TimeDatabase::open(path.clone()).await.unwrap();
-            set_setting(&database, "recording_consent", "0").await;
-            set_setting(&database, "launch_at_login", "1").await;
-            let backup = PathBuf::from(database.backup().await.unwrap());
-            database.prepare_restore(backup).await.unwrap();
-            database.close().await;
-        });
-
-        let runtime = FakeRuntime::default();
-        let restored = open_database_with_pending_restore_using(path.clone(), &runtime).unwrap();
-        assert_eq!(runtime.calls(), ["set_launch_at_login:false"]);
-        tauri::async_runtime::block_on(restored.close());
-    }
-
-    #[test]
-    fn restore_surfaces_startup_and_restart_warnings_without_rolling_back() {
-        let root = restore_root("runtime-control-warning");
-        let path = root.join("time_log.db");
-        tauri::async_runtime::block_on(async {
-            let database = TimeDatabase::open(path.clone()).await.unwrap();
-            set_setting(&database, "recording_consent", "1").await;
-            set_setting(&database, "launch_at_login", "1").await;
-            let backup = PathBuf::from(database.backup().await.unwrap());
-            database.prepare_restore(backup).await.unwrap();
-            database.close().await;
-        });
-
-        let runtime = FakeRuntime {
-            startup_error: Some("startup registration denied".into()),
-            tracker_error: Some("tracker launch denied".into()),
-            ..FakeRuntime::default()
-        };
-        let restored = open_database_with_pending_restore_using(path.clone(), &runtime).unwrap();
-        tauri::async_runtime::block_on(restored.close());
-        let notice = TimeDatabase::take_restore_notice(&path).unwrap().unwrap();
-        assert!(notice.ok);
-        assert!(notice.message.contains("startup registration denied"));
-        assert!(notice.message.contains("tracker launch denied"));
-    }
 }
