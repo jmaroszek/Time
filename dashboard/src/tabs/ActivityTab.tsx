@@ -1619,7 +1619,7 @@ function LibraryControls({
             label="Search activity"
             placeholder="Search apps, websites, and windows…"
             leadingIcon
-            className="min-w-0 basis-full sm:min-w-[240px] sm:basis-auto sm:flex-1"
+            className="min-w-0 basis-full sm:min-w-[240px] sm:max-w-[360px] sm:basis-auto sm:flex-1"
           />
           <MenuSelect
             size="field"
@@ -1652,15 +1652,15 @@ function LibraryControls({
       {/* Muted, not accent: this is about rows nobody asked to see, and it was
           the loudest thing in the card header while being the least
           consequential. It sits with the filters because it is one — the row of
-          controls that decides what the table lists. The extra left margin is
-          the seam between a set of pickers and a piece of prose; without it the
-          row read as one crowded strip, and the width comes out of the search
-          field, which is the only thing here that grows. */}
+          controls that decides what the table lists. It is pushed to the far
+          right (ml-auto) rather than following the dropdowns directly, so it
+          reads as a status note beside the toolbar instead of one more control
+          crowded into it. */}
       {noiseHidden > 0 && (
         <button
           type="button"
           onClick={onIncludeNoise}
-          className="shrink-0 text-xs text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline sm:ml-2"
+          className="shrink-0 text-xs text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline sm:ml-auto"
           title="Rare-item and utility rows are hidden from this list. They still count in every total."
         >
           {includeNoise ? `Hide ${noiseHidden} filtered` : `${noiseHidden} filtered · Show`}
