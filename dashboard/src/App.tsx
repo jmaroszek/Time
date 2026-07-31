@@ -9,9 +9,16 @@ import { currentHistoryRevision, subscribeHistoryInvalidation } from "./lib/hist
 import { deleteCategory, fetchEarliestSessionStart, fetchTrackerStatus, takeRestoreNotice, updateSetting, type TrackerStatus } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
 import { allTimeRange, isRollingPreset, rangeForCalendarPreset, rangeForPreset, type Range } from "./lib/time";
+import {
+  BACKLOG_BADGE_SECONDS,
+  backlogOnlyQuery,
+  type ActivitySource,
+} from "./lib/activity";
 import { BannerProvider, useBanner } from "./state/banner";
 import { MetaProvider, useMeta } from "./state/meta";
+import { useActivityModel } from "./state/useActivityModel";
 import { useInsightsView } from "./state/useInsightsView";
+import { useSessions } from "./state/useSessions";
 import ActivityTab, { type ActivityView } from "./tabs/ActivityTab";
 import OverviewTab from "./tabs/OverviewTab";
 import SettingsTab from "./tabs/SettingsTab";
@@ -123,6 +130,34 @@ function Shell() {
     };
   }, [ready, status]);
 
+  // The backlog behind the Activity tab's mark. It lives here rather than in
+  // ActivityTab because the reader who most needs telling is the one who has
+  // never opened that tab — and an unmounted tab cannot report anything. The
+  // window is the same all-time one ActivityTab asks for, so the session cache
+  // serves both from one fetch, and the worker reuses its index across them.
+  const backlogRange = useMemo(
+    () => allTimeRange(firstSessionSec),
+    [firstSessionSec, historyRevision],
+  );
+  const backlogSessions = useSessions(
+    backlogRange.start.getTime() / 1000,
+    backlogRange.end.getTime() / 1000,
+    historyRevision,
+  );
+  const backlogSource = useMemo<ActivitySource | null>(() => {
+    if (!backlogSessions.ready) return null;
+    return {
+      sessions: backlogSessions.sessions,
+      categories: meta.categories,
+      rules: meta.rules,
+      browserProcesses: [...meta.browserSet].sort(),
+      aliases: meta.aliases,
+    };
+  }, [backlogSessions.ready, backlogSessions.sessions, meta.categories, meta.rules, meta.aliases, meta.browserSet]);
+  const backlogQuery = useMemo(() => backlogOnlyQuery(meta.noisePolicy), [meta.noisePolicy]);
+  const backlog = useActivityModel(backlogSource, backlogQuery);
+  const showBacklogBadge = (backlog.result?.triage.seconds ?? 0) >= BACKLOG_BADGE_SECONDS;
+
   if (!meta.loaded) return <Spinner label="Connecting to database..." />;
   if (waitingForTracker) return <WaitingForTracker />;
   if (meta.error && isNewerSchemaError(meta.error)) return <NewerDatabaseScreen />;
@@ -155,7 +190,7 @@ function Shell() {
       className={`time-shell mx-auto flex max-w-6xl flex-col gap-4 px-3 pt-2 pb-5 sm:px-6 ${bounded ? "h-full overflow-hidden" : "min-h-full"}`}
     >
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <TabBar tab={tab} onTab={setTab} />
+        <TabBar tab={tab} onTab={setTab} backlog={showBacklogBadge} />
         {showRange && (
           <DateRangePicker
             preset={preset}
@@ -215,7 +250,16 @@ function Shell() {
 /** Tab switcher whose selected pill slides between tabs instead of jumping. The
  *  pill is one absolutely positioned element measured off the button rects, so it
  *  tracks label widths and font/zoom changes rather than assuming equal tabs. */
-function TabBar({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
+function TabBar({
+  tab,
+  onTab,
+  backlog,
+}: {
+  tab: Tab;
+  onTab: (t: Tab) => void;
+  /** Enough unclassified time to be worth a mark on the Activity tab. */
+  backlog: boolean;
+}) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const buttonRefs = useRef(new Map<Tab, HTMLButtonElement>());
   const [pill, setPill] = useState<{ left: number; width: number } | null>(null);
@@ -260,6 +304,20 @@ function TabBar({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
           }`}
         >
           {t.label}
+          {/* A dot, not a count: the number belongs where you can act on it, and
+              the Library's own section carries it. Absolutely positioned so the
+              tab keeps its width — a label that grew when the mark appeared
+              would shift the tabs beside it and move the sliding pill under the
+              cursor that just clicked. */}
+          {t.id === "activity" && backlog && (
+            <>
+              <span
+                aria-hidden="true"
+                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-accent"
+              />
+              <span className="sr-only"> — unclassified activity is waiting</span>
+            </>
+          )}
         </button>
       ))}
     </div>

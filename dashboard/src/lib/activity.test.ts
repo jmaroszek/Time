@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   GROUP_SESSION_SAMPLE,
   TRIAGE_VISIBLE,
+  backlogOnlyQuery,
   bucketDailyUsage,
   buildActivityIndex,
   packActivitySource,
@@ -168,6 +169,24 @@ describe("Activity index", () => {
     ]);
     // The counts describe the whole backlog, not the five rows shown.
     expect(result.triage).toMatchObject({ total: 7, seconds: 60 + 120 + 180 + 240 + 300 + 360 + 420 });
+  });
+
+  it("reports the whole backlog from the badge's empty-range query", () => {
+    const index = buildActivityIndex(source);
+    const badge = queryActivityIndex(index, backlogOnlyQuery());
+    // The empty range is the point: nothing range-scoped is aggregated, so the
+    // badge pays for no catalog, while the backlog it needs comes out whole.
+    expect(badge.catalog.rows).toEqual([]);
+    expect(badge.totalSeconds).toBe(0);
+    expect(badge.triage).toMatchObject({ total: 1, seconds: 30 });
+    expect(badge.triage.items.map((item) => item.id)).toEqual(["app:unknown.exe"]);
+    // And it carries the noise policy, so the badge cannot light up over rows
+    // the section it points at would refuse to list.
+    const folded = queryActivityIndex(
+      index,
+      backlogOnlyQuery({ mode: "one_off", maxSeconds: 120, maxSessions: 1 }),
+    );
+    expect(folded.triage).toMatchObject({ total: 0, seconds: 0 });
   });
 
   it("empties the backlog once a rule claims the last unclassified row", () => {
