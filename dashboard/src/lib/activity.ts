@@ -362,6 +362,33 @@ export interface ActivityUncategorizedSummary {
   seconds: number;
 }
 
+/** How many pending rows the Library's Unclassified section lists at once.
+ *  A cap rather than a scroll: the section is a place to make five decisions,
+ *  and the rest arrive as those are made. */
+export const TRIAGE_VISIBLE = 5;
+
+/** One item of pending classification work. Deliberately thinner than an entity
+ *  summary — the section shows an identity, a kind, a total and a control, and
+ *  carrying the rest would invite it to grow back into a second catalog. */
+export interface ActivityTriageItem {
+  id: string;
+  kind: ActivityEntityKind;
+  /** The pattern an exact rule would be written against. */
+  key: string;
+  displayName: string;
+  /** All-history time. Equal to the uncategorized total, since these rows are
+   *  uncategorized in full. */
+  seconds: number;
+}
+
+export interface ActivityTriage {
+  /** The busiest pending items, longest first, capped at TRIAGE_VISIBLE. */
+  items: ActivityTriageItem[];
+  /** Every pending item, not only the listed ones. */
+  total: number;
+  seconds: number;
+}
+
 export interface ActivityQueryResult {
   catalog: ActivityEntityPage;
   /** Entities the noise policy hides from the catalog, whether or not
@@ -391,6 +418,9 @@ export interface ActivityQueryResult {
   /** Entities with uncategorized time in range, after the noise and type
    *  filters — the same rows picking "Uncategorized" would land on. */
   uncategorized: ActivityUncategorizedSummary;
+  /** Pending classification work over all of history. Answers to none of the
+   *  query's filters — see triageSummary for why each one is refused. */
+  triage: ActivityTriage;
   selectedEntity: ActivityEntitySummary | null;
   /** The selected entity's windows, grouped the same way as a title search.
    *  One entity, so titles alone separate the groups. */
@@ -777,6 +807,56 @@ function compareEntities(
   };
 }
 
+/**
+ * Pending classification work, and the four things it deliberately ignores.
+ *
+ * *The range.* Read from lifetime summaries, not the visible ones: a backlog
+ * that shrank because the date picker moved would be a to-do list nobody could
+ * finish, and "I have classified everything" has to be a statement about the
+ * data rather than about a week of it.
+ *
+ * *Partly-classified rows.* Narrower than the "Uncategorized" filter, which
+ * also admits `partial` entities. Those carry stray uncategorized sessions that
+ * one assignment cannot clear, so they would stay put after being acted on —
+ * worse in a list whose whole promise is that acting on a row removes it.
+ *
+ * *The search and type filters.* They scope the catalog below, which answers a
+ * different question. This section sits above them for that reason.
+ *
+ * *"Show".* The noise fold applies whatever the catalog is currently showing.
+ * Every folded item is uncategorized by construction — classifyNoise returns
+ * null for anything already decided — so honouring "Show" would not widen this
+ * list at its edges, it would flood it with installers and one-off launches
+ * ranked by the same time that ranks real work.
+ */
+function triageSummary(index: ActivityIndex, policy: NoisePolicy | undefined): ActivityTriage {
+  const pending = [...index.lifetimeEntities.values()].filter(
+    (entity) =>
+      entity.status === "uncategorized"
+      && (!policy || classifyNoise(entity, policy) === null),
+  );
+  return {
+    // Longest first: the section is triage, so it spends its five rows on the
+    // decisions that move the most time. Name and id only break ties, to keep
+    // the order stable across the re-sort every assignment causes.
+    items: [...pending]
+      .sort((left, right) =>
+        right.seconds - left.seconds
+        || left.displayName.localeCompare(right.displayName)
+        || left.id.localeCompare(right.id))
+      .slice(0, TRIAGE_VISIBLE)
+      .map((entity) => ({
+        id: entity.id,
+        kind: entity.kind,
+        key: entity.key,
+        displayName: entity.displayName,
+        seconds: entity.seconds,
+      })),
+    total: pending.length,
+    seconds: pending.reduce((total, entity) => total + entity.seconds, 0),
+  };
+}
+
 function uncategorizedSummary(entities: ActivityEntitySummary[]): ActivityUncategorizedSummary {
   const pending = entities.filter(
     (entity) => entity.uncategorizedSeconds > 0 && entity.noise === null,
@@ -961,6 +1041,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     // that applies that filter, so reading it from an already-filtered set
     // would zero it the moment any other classification was chosen.
     uncategorized: uncategorizedSummary(allEntities.filter(inType)),
+    triage: triageSummary(index, policy),
     selectedEntity,
     detailGroups: {
       rows: page(detailGrouped, query.detailOffset ?? 0, query.detailLimit ?? 50),

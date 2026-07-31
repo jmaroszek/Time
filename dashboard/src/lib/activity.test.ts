@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   GROUP_SESSION_SAMPLE,
+  TRIAGE_VISIBLE,
   bucketDailyUsage,
   buildActivityIndex,
   packActivitySource,
@@ -88,6 +89,93 @@ describe("Activity index", () => {
       rules: [...rules, { id: 6, matchType: "process", pattern: "chrome.exe", categoryId: 1, priority: 3 }],
     });
     expect(queryActivityIndex(mixed, baseQuery).catalog.rows.find((row) => row.id === "website:example.com")?.status).toBe("mixed");
+  });
+
+  it("reads the unclassified backlog from all history, not the queried range", () => {
+    const index = buildActivityIndex(source);
+    // A window holding none of the sessions. The catalog empties; a backlog
+    // that emptied with it would be a to-do list nobody could ever finish.
+    const narrow = queryActivityIndex(index, { ...baseQuery, startSec: 0, endSec: 5 });
+    expect(narrow.catalog.rows).toEqual([]);
+    expect(narrow.triage.items.map((item) => item.id)).toEqual(["app:unknown.exe"]);
+    expect(narrow.triage).toMatchObject({ total: 1, seconds: 30 });
+    expect(narrow.triage.items[0].seconds).toBe(30);
+  });
+
+  it("refuses partly classified rows that the Uncategorized filter admits", () => {
+    const index = buildActivityIndex(source);
+    // example.com has one categorized visit and one nothing matched, so the
+    // filter lists it while a single assignment could not clear it — and a row
+    // that survives being acted on is worse than one never offered.
+    const listed = queryActivityIndex(index, {
+      ...baseQuery,
+      classificationFilter: "uncategorized",
+    });
+    expect(listed.catalog.rows.map((row) => row.id)).toContain("website:example.com");
+    expect(listed.triage.items.map((item) => item.id)).not.toContain("website:example.com");
+  });
+
+  it("keeps the noise fold whatever the catalog has been asked to show", () => {
+    const index = buildActivityIndex(source);
+    const shown = queryActivityIndex(index, {
+      ...baseQuery,
+      noise: { mode: "one_off", maxSeconds: 120, maxSessions: 1 },
+      includeNoise: true,
+    });
+    // Every folded row is uncategorized by construction, so honouring "Show"
+    // here would not widen the backlog — it would replace it with one-offs.
+    expect(shown.catalog.rows.map((row) => row.id)).toContain("app:unknown.exe");
+    expect(shown.triage.items).toEqual([]);
+    expect(shown.triage).toMatchObject({ total: 0, seconds: 0 });
+  });
+
+  it("answers to none of the filters the controls below it set", () => {
+    const index = buildActivityIndex(source);
+    const filtered = queryActivityIndex(index, {
+      ...baseQuery,
+      search: "code",
+      typeFilter: "website",
+      classificationFilter: "category:1",
+    });
+    expect(filtered.triage.items.map((item) => item.id)).toEqual(["app:unknown.exe"]);
+  });
+
+  it("ranks the backlog by time, caps the list, and counts past the cap", () => {
+    const pending: ActivitySource = {
+      categories,
+      rules: [],
+      browserProcesses: [],
+      aliases: {},
+      // Seven unclassified apps at 60s, 120s, … 420s.
+      sessions: Array.from({ length: 7 }, (_, i) => ({
+        id: i + 1,
+        start: i * 1000,
+        end: i * 1000 + (i + 1) * 60,
+        process: `app${i + 1}.exe`,
+        title: "",
+        domain: null,
+        isAfk: false,
+      })),
+    };
+    const result = queryActivityIndex(buildActivityIndex(pending), { ...baseQuery, endSec: 10_000 });
+    expect(result.triage.items).toHaveLength(TRIAGE_VISIBLE);
+    expect(result.triage.items.map((item) => item.id)).toEqual([
+      "app:app7.exe",
+      "app:app6.exe",
+      "app:app5.exe",
+      "app:app4.exe",
+      "app:app3.exe",
+    ]);
+    // The counts describe the whole backlog, not the five rows shown.
+    expect(result.triage).toMatchObject({ total: 7, seconds: 60 + 120 + 180 + 240 + 300 + 360 + 420 });
+  });
+
+  it("empties the backlog once a rule claims the last unclassified row", () => {
+    const index = buildActivityIndex({
+      ...source,
+      rules: [...rules, { id: 9, matchType: "process", pattern: "unknown.exe", categoryId: 1, priority: 3 }],
+    });
+    expect(queryActivityIndex(index, baseQuery).triage).toEqual({ items: [], total: 0, seconds: 0 });
   });
 
   it("treats an entity as ignored when every applied category is excluded", () => {
