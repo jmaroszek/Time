@@ -19,6 +19,10 @@ const fixtureParams = new URLSearchParams(window.location.search);
 const forcedFailure = fixtureParams.get("fail");
 const now = Date.now() / 1000;
 const day = 86_400;
+/** A dev build and an installed build of one app, aliased to the same name so
+ *  Insights lists them as a single row. Behind a fixture flag because the
+ *  merged row changes every app total the default fixture's layout tests read. */
+const mergedApps = fixtureParams.get("fixture") === "merged";
 const processes = [
   {
     process: "code.exe",
@@ -40,6 +44,12 @@ const processes = [
     title: "C:\\Users\\Example\\Documents\\An intentionally very long project folder name",
     domain: null,
   },
+  ...(mergedApps
+    ? [
+        { process: "time.exe", title: "Time", domain: null },
+        { process: "time-tracker.exe", title: "Time", domain: null },
+      ]
+    : []),
 ];
 
 const recentSessions = Array.from({ length: 21 * processes.length }, (_, index) => {
@@ -146,6 +156,7 @@ const settings: Record<string, string> = {
   tracking_paused_until: "0",
   process_aliases: JSON.stringify({
     "code.exe": "Visual Studio Code with an intentionally long friendly application name",
+    ...(mergedApps ? { "time.exe": "Time", "time-tracker.exe": "Time" } : {}),
   }),
   tracker_version: "0.1.0-device-fixture",
 };

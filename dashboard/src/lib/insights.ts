@@ -6,12 +6,18 @@ import {
   type Classifier,
   type Rule,
 } from "./classify";
+import { appGroupKey } from "./format";
 import {
+  addAppSeconds,
+  addTopAppSeconds,
   forEachDayChunk,
   goalPace,
   isFocusChainBreaker,
+  rankAppUsage,
+  topAppOf,
   withDeltas,
   type AppUsage,
+  type AppUsageAccumulator,
   type Kpis,
   type Session,
 } from "./metrics";
@@ -39,7 +45,7 @@ import {
 } from "./time";
 
 interface MutableDay extends DailyActivitySummary {
-  appSeconds: Map<string, number>;
+  appSeconds: Map<string, { name: string; seconds: number }>;
   focusRunSeconds: number;
   focusChainEnd: number | null;
 }
@@ -65,6 +71,9 @@ export interface InsightsRequest {
   weekStart: WeekStart;
   weeklyGoalHours: number;
   minAppSecondsPerDay: number;
+  /** Process display names. Rows group by these, so a rename regroups the list
+   *  — `insightsRequestKey` has to include them or the change won't be seen. */
+  aliases: Record<string, string>;
   focusChainMaxGapSeconds: number;
   dayStartHour: number;
   dayEndHour: number;
@@ -132,7 +141,7 @@ function makeDays(range: Range): Map<string, MutableDay> {
           categorySeconds: new Map<string, number>(),
           topApp: null,
           longestFocusSeconds: 0,
-          appSeconds: new Map<string, number>(),
+          appSeconds: new Map<string, { name: string; seconds: number }>(),
           focusRunSeconds: 0,
           focusChainEnd: null,
         },
@@ -146,6 +155,7 @@ function addDaySeconds(
   session: Session,
   category: Category | null,
   seconds: number,
+  aliases: Record<string, string> | undefined,
 ): void {
   if (!day || seconds <= 0) return;
   day.trackedSeconds += seconds;
@@ -161,17 +171,14 @@ function addDaySeconds(
     categoryName,
     (day.categorySeconds.get(categoryName) ?? 0) + seconds,
   );
-  day.appSeconds.set(session.process, (day.appSeconds.get(session.process) ?? 0) + seconds);
+  addTopAppSeconds(day.appSeconds, session.process, aliases, seconds);
 }
 
 function finalizeDays(days: Map<string, MutableDay>): DailyActivitySummary[] {
-  return [...days.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...day }) => {
-    let topApp: DailyActivitySummary["topApp"] = null;
-    for (const [process, seconds] of appSeconds) {
-      if (!topApp || seconds > topApp.seconds) topApp = { process, seconds };
-    }
-    return { ...day, topApp };
-  });
+  return [...days.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...day }) => ({
+    ...day,
+    topApp: topAppOf(appSeconds),
+  }));
 }
 
 function orderedSessions(sessions: Session[]): Session[] {
@@ -194,6 +201,7 @@ export function aggregateInsightsSessions(
   classifier: Classifier,
   focusChainMaxGapSeconds: number,
   weekStart: WeekStart,
+  aliases?: Record<string, string>,
 ): InsightsAggregation {
   const previous = previousRange(range);
   const granularity = overviewGranularity(range);
@@ -213,8 +221,8 @@ export function aggregateInsightsSessions(
   );
   const currentDaily = new Map<string, number[]>();
   const previousDaily = new Map<string, number[]>();
-  const currentApps = new Map<string, AppUsage>();
-  const previousApps = new Map<string, AppUsage>();
+  const currentApps = new Map<string, AppUsageAccumulator>();
+  const previousApps = new Map<string, AppUsageAccumulator>();
   const activeDayKeys = new Set<string>();
   const current: Session[] = [];
   let totalSec = 0;
@@ -223,11 +231,14 @@ export function aggregateInsightsSessions(
   let focusRunSec = 0;
   let focusChainEnd: number | null = null;
 
+  // Keyed by app row, not by process: `withDeltas` looks these series up by the
+  // row's key, and a miss would read as a quiet "no time last period".
   const dailyArray = (into: Map<string, number[]>, process: string, length: number) => {
-    let values = into.get(process);
+    const key = appGroupKey(process, aliases);
+    let values = into.get(key);
     if (!values) {
       values = Array(length).fill(0);
-      into.set(process, values);
+      into.set(key, values);
     }
     return values;
   };
@@ -247,12 +258,7 @@ export function aggregateInsightsSessions(
       } else {
         const seconds = inCurrent.end - inCurrent.start;
         totalSec += seconds;
-        let app = currentApps.get(inCurrent.process);
-        if (!app) {
-          app = { process: inCurrent.process, seconds: 0, category };
-          currentApps.set(inCurrent.process, app);
-        }
-        app.seconds += seconds;
+        addAppSeconds(currentApps, inCurrent.process, aliases, category, seconds);
         if (category?.isProductive) {
           prodSec += seconds;
           focusRunSec =
@@ -277,12 +283,7 @@ export function aggregateInsightsSessions(
 
     if (inPrevious && !inPrevious.isAfk) {
       const seconds = inPrevious.end - inPrevious.start;
-      let app = previousApps.get(inPrevious.process);
-      if (!app) {
-        app = { process: inPrevious.process, seconds: 0, category };
-        previousApps.set(inPrevious.process, app);
-      }
-      app.seconds += seconds;
+      addAppSeconds(previousApps, inPrevious.process, aliases, category, seconds);
       const values = dailyArray(previousDaily, inPrevious.process, previousDayIndex.size);
       forEachDayChunk(inPrevious.start, inPrevious.end, (chunk) => {
         const index = previousDayIndex.get(dayKey(chunk.dayStart));
@@ -305,7 +306,7 @@ export function aggregateInsightsSessions(
           return;
         }
         const seconds = chunk.endSec - chunk.startSec;
-        addDaySeconds(day, inHistory, category, seconds);
+        addDaySeconds(day, inHistory, category, seconds, aliases);
         if (day) {
           if (category?.isProductive) {
             day.focusRunSeconds =
@@ -350,8 +351,8 @@ export function aggregateInsightsSessions(
       prodFraction: totalSec > 0 ? prodSec / totalSec : 0,
       longestFocusSec,
     },
-    currentRanked: [...currentApps.values()].sort((left, right) => right.seconds - left.seconds),
-    previousRanked: [...previousApps.values()].sort((left, right) => right.seconds - left.seconds),
+    currentRanked: rankAppUsage(currentApps),
+    previousRanked: rankAppUsage(previousApps),
     currentDaily,
     previousDaily,
     historyDays: finalizeDays(historyDays),
@@ -372,6 +373,7 @@ function buildInsightsModelWithClassifier(
     classifier,
     request.focusChainMaxGapSeconds,
     request.weekStart,
+    request.aliases,
   );
   // The filter is a rate, not a total: a flat "hide under 2 minutes" bar is
   // most of a day's use of a rare app on Today and invisible on Year, so the
@@ -396,6 +398,7 @@ function buildInsightsModelWithClassifier(
           classifier,
           request.dayStartHour,
           request.dayEndHour,
+          request.aliases,
         )
       : null;
   const monthly =
@@ -405,6 +408,7 @@ function buildInsightsModelWithClassifier(
           request.range,
           classifier,
           request.focusChainMaxGapSeconds,
+          request.aliases,
         )
       : null;
   const hourly =

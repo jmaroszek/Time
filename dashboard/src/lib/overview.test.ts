@@ -111,7 +111,7 @@ describe("dailyActivitySummaries", () => {
     expect(summaries.map((day) => day.neutralSeconds)).toEqual([0, 1800, 0]);
     expect(summaries.map((day) => day.unproductiveSeconds)).toEqual([0, 7200, 0]);
     expect(summaries.map((day) => day.uncategorizedSeconds)).toEqual([0, 900, 0]);
-    expect(summaries[1].topApp).toEqual({ process: "game.exe", seconds: 7200 });
+    expect(summaries[1].topApp).toEqual({ name: "Game", seconds: 7200 });
     expect(summaries[2].topApp).toBeNull();
     // Category decomposition sums to the same tracked total, unmatched sessions
     // under the Uncategorized label.
@@ -131,14 +131,33 @@ describe("dailyActivitySummaries", () => {
       ],
       rangeFrom(new Date(2026, 5, 8), 1),
       classify,
+      300,
+      { "code.exe": "Editor <Main>" },
     )[0];
-    const tooltip = formatActivityCalendarTooltip(day, "tracked", { "code.exe": "Editor <Main>" });
+    const tooltip = formatActivityCalendarTooltip(day, "tracked");
     expect(tooltip).toContain("Monday, June 8, 2026");
     expect(tooltip).toContain("Tracked: 1h 30m");
     expect(tooltip).toContain("Top app: Editor &lt;Main&gt; · 1h 0m");
     // The dropdown picks the state; the tracked view need not list the others.
     expect(tooltip).not.toContain("Productive");
     expect(tooltip).not.toContain("Unproductive");
+  });
+
+  it("merges aliased processes into one top app, and breaks ties by name", () => {
+    const day = dailyActivitySummaries(
+      [
+        session(new Date(2026, 5, 8, 9).getTime() / 1000, new Date(2026, 5, 8, 10).getTime() / 1000, "time.exe"),
+        session(new Date(2026, 5, 8, 10).getTime() / 1000, new Date(2026, 5, 8, 10, 30).getTime() / 1000, "time-tracker.exe"),
+        session(new Date(2026, 5, 8, 11).getTime() / 1000, new Date(2026, 5, 8, 12, 30).getTime() / 1000, "game.exe"),
+      ],
+      rangeFrom(new Date(2026, 5, 8), 1),
+      classify,
+      300,
+      { "time.exe": "Time", "time-tracker.exe": "Time" },
+    )[0];
+    // Apart the two builds hold 1h and 30m and neither leads; merged they tie
+    // game.exe at 1h 30m, and the name decides.
+    expect(day.topApp).toEqual({ name: "Game", seconds: 5400 });
   });
 
   it("leads the calendar tooltip with the selected metric and its share of tracked", () => {
@@ -206,7 +225,7 @@ describe("monthlyActivitySummaries", () => {
     expect(month("2025-11")).toMatchObject({
       trackedSeconds: 7200,
       productiveSeconds: 7200,
-      topApp: { process: "code.exe", seconds: 7200 },
+      topApp: { name: "Code", seconds: 7200 },
     });
     expect(Object.fromEntries(month("2025-12").categorySeconds)).toEqual({
       Games: 7200,
@@ -215,7 +234,14 @@ describe("monthlyActivitySummaries", () => {
   });
 
   it("formats the month tooltip with a share and aliased top app", () => {
-    const tooltip = formatMonthCalendarTooltip(month("2025-11"), "tracked", { "code.exe": "Editor" });
+    const aliased = monthlyActivitySummaries(
+      [session(at(2025, 10, 3, 9), at(2025, 10, 3, 11), "code.exe")],
+      range,
+      classify,
+      300,
+      { "code.exe": "Editor" },
+    ).find((entry) => entry.key === "2025-11")!;
+    const tooltip = formatMonthCalendarTooltip(aliased, "tracked");
     expect(tooltip).toContain("November 2025");
     expect(tooltip).toContain("Tracked: 2h 0m");
     expect(tooltip).toContain("Top app: Editor · 2h 0m");
@@ -405,7 +431,7 @@ describe("weekdayRhythmSummaries", () => {
   const range = rangeFrom(new Date(2026, 5, 8), 15);
   const at = (day: number, hour: number, minute = 0) =>
     new Date(2026, 5, day, hour, minute).getTime() / 1000;
-  const summary = () =>
+  const summary = (aliases?: Record<string, string>) =>
     weekdayRhythmSummaries(
       [
         session(at(8, 9), at(8, 10, 30), "code.exe"),
@@ -419,10 +445,11 @@ describe("weekdayRhythmSummaries", () => {
       classify,
       9,
       12,
+      aliases,
     );
 
-  const cell = (weekday: number, hour: number) =>
-    summary().cells.find((c) => c.weekday === weekday && c.hour === hour)!;
+  const cell = (weekday: number, hour: number, aliases?: Record<string, string>) =>
+    summary(aliases).cells.find((c) => c.weekday === weekday && c.hour === hour)!;
 
   it("counts weekday occurrences from calendar days in the range", () => {
     expect(summary().weekdayCounts).toEqual([2, 3, 2, 2, 2, 2, 2]);
@@ -438,7 +465,7 @@ describe("weekdayRhythmSummaries", () => {
       trackedSeconds: 5400,
       productiveSeconds: 3600,
       unproductiveSeconds: 1800,
-      topApp: { process: "code.exe", seconds: 3600 },
+      topApp: { name: "Code", seconds: 3600 },
     });
     expect(cell(1, 10)).toMatchObject({ trackedSeconds: 1800, productiveSeconds: 1800 });
     expect(cell(1, 11).trackedSeconds).toBe(0); // ignored session invisible
@@ -447,7 +474,7 @@ describe("weekdayRhythmSummaries", () => {
   });
 
   it("formats the tracked tooltip as a per-occurrence average with an aliased top app", () => {
-    const tooltip = formatRhythmTooltip(cell(1, 9), 3, "tracked", { "code.exe": "Editor <Main>" });
+    const tooltip = formatRhythmTooltip(cell(1, 9, { "code.exe": "Editor <Main>" }), 3, "tracked");
     expect(tooltip).toContain("Monday · 9am–10am");
     expect(tooltip).toContain("Avg tracked: 30m");
     expect(tooltip).toContain("Top app: Editor &lt;Main&gt; · 1h 0m total");

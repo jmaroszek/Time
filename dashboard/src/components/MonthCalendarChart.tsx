@@ -6,7 +6,7 @@
 
 import { useMemo } from "react";
 
-import { cleanProcessName, fmtDuration } from "../lib/format";
+import { fmtDuration } from "../lib/format";
 import {
   ACTIVITY_METRIC_WORDS,
   metricSeconds,
@@ -45,7 +45,7 @@ export default function MonthCalendarChart({
   summaries: MonthlyActivitySummary[];
   metric?: ActivityMetric;
 }) {
-  const { aliases, palette, theme } = useMeta();
+  const { palette, theme } = useMeta();
   const years = useMemo(
     () => [...new Set(summaries.map((month) => month.year))].sort((a, b) => a - b),
     [summaries],
@@ -80,7 +80,7 @@ export default function MonthCalendarChart({
         ...tooltipStyle(theme),
         formatter: (p: { data: [number, number, number] }) => {
           const month = byPoint.get(`${p.data[0]},${p.data[1]}`);
-          return month ? formatMonthCalendarTooltip(month, metric, aliases) : "";
+          return month ? formatMonthCalendarTooltip(month, metric) : "";
         },
       },
       xAxis: {
@@ -115,7 +115,7 @@ export default function MonthCalendarChart({
         },
       ],
     };
-  }, [summaries, years, metric, aliases, palette, theme]);
+  }, [summaries, years, metric, palette, theme]);
 
   const height = CELL_HEIGHT * years.length + CHART_TOP + CHART_BOTTOM;
   // Cap the width so 12 columns stay near-square in a full-width card, and
@@ -133,13 +133,12 @@ export default function MonthCalendarChart({
 export function formatMonthCalendarTooltip(
   month: MonthlyActivitySummary,
   metric: ActivityMetric = "tracked",
-  aliases?: Record<string, string>,
 ): string {
   const share = metricTrackedShare(month, metric);
   const word = ACTIVITY_METRIC_WORDS[metric];
   const label = word.replace(/^./, (c) => c.toUpperCase());
   const topApp = metric === "tracked" && month.topApp
-    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(cleanProcessName(month.topApp.process, aliases))} · ${fmtDuration(month.topApp.seconds)}</div>`
+    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(month.topApp.name)} · ${fmtDuration(month.topApp.seconds)}</div>`
     : "";
   return [
     `<b>${FULL_MONTH_NAMES[month.month]} ${month.year}</b>`,

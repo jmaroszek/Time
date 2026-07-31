@@ -1,17 +1,20 @@
 // Top apps with quiet, direction-aware deltas vs the previous period. Category
 // shows up once per row, in the dot beside the name.
 
-import { useState } from "react";
-
 import type { AppDelta } from "../lib/metrics";
-import { withAlias } from "../lib/aliases";
-import { cleanProcessName, fmtDuration } from "../lib/format";
-import { saveProcessAliases } from "../lib/queries";
-import { useBanner } from "../state/banner";
+import { fmtDuration } from "../lib/format";
 import { uncategorizedMark } from "../lib/chartTheme";
 import { useMeta } from "../state/meta";
 import { CategoryDot, FloatingTooltip } from "./ui";
 
+/**
+ * Rows are read here, not edited. Naming an app is one app's business and lives
+ * in its Activity panel; this list groups by the name that produces, so a row
+ * can stand for several processes. An editor here would have been the only
+ * control in Time that mutated several things at once, and everything it needed
+ * to stay honest — a scope hint, a count in the confirmation, a warning that
+ * clearing the name splits the row — was weight this list did not need to carry.
+ */
 export default function TopAppsList({
   apps,
   comparisonDays,
@@ -24,29 +27,8 @@ export default function TopAppsList({
   hiddenAppCount: number;
 }) {
   const meta = useMeta();
-  const banner = useBanner();
-  const { aliases, browserSet, minAppSecondsPerDay } = meta;
-  const [editingProcess, setEditingProcess] = useState<string | null>(null);
-  const [aliasDraft, setAliasDraft] = useState("");
+  const { browserSet, minAppSecondsPerDay } = meta;
   const max = apps[0]?.seconds ?? 1;
-  const beginRename = (process: string) => {
-    setEditingProcess(process);
-    setAliasDraft(aliases[process.toLowerCase()] ?? "");
-  };
-  const commitRename = async (process: string) => {
-    const key = process.toLowerCase();
-    const alias = aliasDraft.trim();
-    const currentAlias = aliases[key] ?? "";
-    setEditingProcess(null);
-    if (alias === currentAlias) return;
-    const nextAliases = withAlias(aliases, key, alias);
-    try {
-      await saveProcessAliases(nextAliases);
-      await meta.refresh();
-    } catch (error) {
-      banner.report(error, "name");
-    }
-  };
   return (
     <div>
       <div
@@ -54,7 +36,7 @@ export default function TopAppsList({
       >
         {apps.map((app) => (
           <div
-            key={app.process}
+            key={app.key}
             className="top-app-row grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1.5 text-xs sm:flex sm:gap-y-0"
           >
             <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-2 truncate sm:w-36 sm:shrink-0">
@@ -62,29 +44,12 @@ export default function TopAppsList({
                 color={app.category?.color ?? uncategorizedMark(meta.theme)}
                 label={app.category?.name ?? "Uncategorized"}
               />
-              {editingProcess === app.process ? (
-                <input
-                  autoFocus
-                  value={aliasDraft}
-                  aria-label={`Rename ${cleanProcessName(app.process)}`}
-                  placeholder={cleanProcessName(app.process)}
-                  onChange={(event) => setAliasDraft(event.target.value)}
-                  onBlur={() => void commitRename(app.process)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void commitRename(app.process);
-                    else if (event.key === "Escape") setEditingProcess(null);
-                  }}
-                  className="w-full min-w-0 rounded-md border border-control-edge bg-control px-1.5 py-0.5 text-xs text-ink outline-none focus:border-accent/60"
-                />
-              ) : (
-                <span
-                  className="truncate cursor-text"
-                  title={`${app.process} — double-click to rename`}
-                  onDoubleClick={() => beginRename(app.process)}
-                >
-                  {cleanProcessName(app.process, aliases)}
-                </span>
-              )}
+              {/* Every process the row stands for. Usually one, and then this is
+                  the raw executable behind a cleaned-up name; when a shared name
+                  has merged several, it is the only place that says which. */}
+              <span className="truncate" title={app.processes.join(", ")}>
+                {app.name}
+              </span>
             </span>
             <div className="col-span-3 row-start-2 h-2 min-w-0 overflow-hidden rounded-full bg-surface-2 sm:col-auto sm:row-auto sm:flex-1">
               {/* One accent fill for every bar: the dot already carries the
@@ -102,7 +67,7 @@ export default function TopAppsList({
               app={app}
               comparisonDays={comparisonDays}
               comparisonAvailable={comparisonAvailable}
-              forceNeutral={browserSet.has(app.process.toLowerCase())}
+              forceNeutral={app.processes.some((process) => browserSet.has(process.toLowerCase()))}
             />
           </div>
         ))}

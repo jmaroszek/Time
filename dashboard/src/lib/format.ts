@@ -63,6 +63,22 @@ export function cleanProcessName(process: string, aliases?: Record<string, strin
 }
 
 /**
+ * Identity of the app *row* a process belongs to: its display name, lowercased.
+ *
+ * Rows group by the name the user sees, which makes an alias the merge control.
+ * Aliasing a dev build and an installed build to one name totals them as one
+ * app instead of two identically-labeled halves of the truth. Only the key is
+ * compared — the row's label keeps the alias's own casing.
+ *
+ * Every per-app aggregation must key on this, including the daily series behind
+ * the deltas. A map keyed by raw process against rows keyed by group silently
+ * misses, and a miss reads as "no time last period" rather than failing.
+ */
+export function appGroupKey(process: string, aliases?: Record<string, string>): string {
+  return cleanProcessName(process, aliases).toLowerCase();
+}
+
+/**
  * Display name for a domain. A user alias (keyed by the lowercased domain)
  * wins; otherwise the domain is shown as-is — it's already readable, so unlike
  * a process name there's no fallback transform. The raw domain should still be

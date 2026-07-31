@@ -8,7 +8,7 @@
 
 import { useMemo } from "react";
 
-import { cleanProcessName, fmtDuration } from "../lib/format";
+import { fmtDuration } from "../lib/format";
 import {
   metricSeconds,
   metricTrackedShare,
@@ -33,7 +33,7 @@ export default function RhythmChart({
   summary: WeekdayRhythmSummary;
   metric?: ActivityMetric;
 }) {
-  const { aliases, weekStart, dayStartHour, dayEndHour, palette, theme } = useMeta();
+  const { weekStart, dayStartHour, dayEndHour, palette, theme } = useMeta();
   const viewportWidth = useViewportWidth();
   const hourInterval = rhythmHourInterval(viewportWidth);
   const option = useMemo<EChartsOption>(() => {
@@ -66,7 +66,7 @@ export default function RhythmChart({
         formatter: (p: { data: [number, number, number] }) => {
           const cell = cellByPoint.get(`${p.data[0]},${p.data[1]}`);
           return cell
-            ? formatRhythmTooltip(cell, weekdayCounts[cell.weekday], metric, aliases)
+            ? formatRhythmTooltip(cell, weekdayCounts[cell.weekday], metric)
             : "";
         },
       },
@@ -103,7 +103,7 @@ export default function RhythmChart({
         },
       ],
     };
-  }, [summary, metric, aliases, weekStart, dayStartHour, dayEndHour, palette, theme, hourInterval]);
+  }, [summary, metric, weekStart, dayStartHour, dayEndHour, palette, theme, hourInterval]);
 
   return <EChart option={option} height={260} />;
 }
@@ -112,11 +112,10 @@ export function formatRhythmTooltip(
   cell: RhythmCell,
   weekdayCount: number,
   metric: ActivityMetric = "tracked",
-  aliases?: Record<string, string>,
 ): string {
   const avg = (seconds: number) => fmtDuration(weekdayCount > 0 ? seconds / weekdayCount : 0);
   const topApp = metric === "tracked" && cell.topApp
-    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(cleanProcessName(cell.topApp.process, aliases))} · ${fmtDuration(cell.topApp.seconds)} total</div>`
+    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(cell.topApp.name)} · ${fmtDuration(cell.topApp.seconds)} total</div>`
     : "";
   const share = metricTrackedShare(cell, metric);
   const word = ACTIVITY_METRIC_WORDS[metric];

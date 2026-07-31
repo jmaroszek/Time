@@ -2,6 +2,7 @@
 // Sessions use unix SECONDS (DB native); Dates appear only at day/hour splits.
 
 import type { Category, Classifier } from "./classify";
+import { appGroupKey, cleanProcessName } from "./format";
 import { addDays, calendarDays, dayKey, listDays, type Range } from "./time";
 
 export interface Session {
@@ -185,23 +186,142 @@ export function goalPace(prodSec: number, range: Range, weeklyGoalHours: number)
 // ---------------- top apps ----------------
 
 export interface AppUsage {
-  process: string;
+  /** Row identity — see `appGroupKey`. Processes sharing an alias share a row. */
+  key: string;
+  /** What the row is labeled, in the alias's own casing. */
+  name: string;
+  /** Raw process names folded into this row, sorted. Usually one; more once a
+   *  user has aliased several executables to the same name. Callers that need a
+   *  real process — a rule to write, a browser to test for — must consult all
+   *  of them rather than assuming a single member. */
+  processes: string[];
   seconds: number;
   category: Category | null;
 }
 
-export function topApps(sessions: Session[], classify: Classifier): AppUsage[] {
-  const byProcess = new Map<string, AppUsage>();
+/** An app row mid-build. `categorySeconds` exists only to settle the row's
+ *  category once every session has landed; see `rankAppUsage`. */
+export interface AppUsageAccumulator {
+  key: string;
+  name: string;
+  processes: Set<string>;
+  seconds: number;
+  /** Keyed by category id, null for unclassified. */
+  categorySeconds: Map<number | null, { category: Category | null; seconds: number }>;
+}
+
+/**
+ * Fold one session's seconds into its app row. Insights runs its own single
+ * ordered pass rather than calling `topApps`, so both paths share this to stay
+ * on one definition of what an app row is — `insights.test.ts` asserts the two
+ * agree, and that assertion is only worth something while they share this.
+ */
+export function addAppSeconds(
+  into: Map<string, AppUsageAccumulator>,
+  process: string,
+  aliases: Record<string, string> | undefined,
+  category: Category | null,
+  seconds: number,
+): void {
+  const key = appGroupKey(process, aliases);
+  let row = into.get(key);
+  if (!row) {
+    row = {
+      key,
+      name: cleanProcessName(process, aliases),
+      processes: new Set<string>(),
+      seconds: 0,
+      categorySeconds: new Map(),
+    };
+    into.set(key, row);
+  }
+  row.processes.add(process);
+  row.seconds += seconds;
+  const id = category?.id ?? null;
+  const bucket = row.categorySeconds.get(id);
+  if (bucket) bucket.seconds += seconds;
+  else row.categorySeconds.set(id, { category, seconds });
+}
+
+/**
+ * The category a row is labeled with: whichever holds most of its seconds.
+ *
+ * A row built from one process has exactly one category and is unaffected. A
+ * merged row can span several — two builds of the same app classified apart —
+ * and the majority is the only answer that stays put as time accumulates.
+ * Ties break toward the lower category id, and toward any real category over
+ * unclassified, so the label never depends on session order.
+ */
+function dominantCategory(
+  buckets: Map<number | null, { category: Category | null; seconds: number }>,
+): Category | null {
+  let best: { category: Category | null; seconds: number } | null = null;
+  for (const bucket of buckets.values()) {
+    if (best === null || bucket.seconds > best.seconds) {
+      best = bucket;
+      continue;
+    }
+    if (bucket.seconds < best.seconds) continue;
+    if (best.category === null) best = bucket;
+    else if (bucket.category !== null && bucket.category.id < best.category.id) best = bucket;
+  }
+  return best?.category ?? null;
+}
+
+/** Finish and rank accumulated rows. Equal totals break by key so a merge that
+ *  produces a tie still orders the same way on every rebuild. */
+export function rankAppUsage(rows: Map<string, AppUsageAccumulator>): AppUsage[] {
+  return [...rows.values()]
+    .map((row) => ({
+      key: row.key,
+      name: row.name,
+      processes: [...row.processes].sort(),
+      seconds: row.seconds,
+      category: dominantCategory(row.categorySeconds),
+    }))
+    .sort((a, b) => b.seconds - a.seconds || a.key.localeCompare(b.key));
+}
+
+export function topApps(
+  sessions: Session[],
+  classify: Classifier,
+  aliases?: Record<string, string>,
+): AppUsage[] {
+  const rows = new Map<string, AppUsageAccumulator>();
   for (const s of sessions) {
     if (s.isAfk) continue;
-    let entry = byProcess.get(s.process);
-    if (!entry) {
-      entry = { process: s.process, seconds: 0, category: classify(s) };
-      byProcess.set(s.process, entry);
-    }
-    entry.seconds += duration(s);
+    addAppSeconds(rows, s.process, aliases, classify(s), duration(s));
   }
-  return [...byProcess.values()].sort((a, b) => b.seconds - a.seconds);
+  return rankAppUsage(rows);
+}
+
+/** Seconds under the display name grouping `process`, for the "Top app" line in
+ *  heatmap and calendar tooltips. Same grouping as the Top Apps list, so a
+ *  merged app cannot lead one and be split across the other. */
+export function addTopAppSeconds(
+  into: Map<string, { name: string; seconds: number }>,
+  process: string,
+  aliases: Record<string, string> | undefined,
+  seconds: number,
+): void {
+  const key = appGroupKey(process, aliases);
+  const row = into.get(key);
+  if (row) row.seconds += seconds;
+  else into.set(key, { name: cleanProcessName(process, aliases), seconds });
+}
+
+/** Busiest entry of an `addTopAppSeconds` map, ties breaking by name so the
+ *  tooltip doesn't change between rebuilds. */
+export function topAppOf(
+  apps: Map<string, { name: string; seconds: number }>,
+): { name: string; seconds: number } | null {
+  let top: { name: string; seconds: number } | null = null;
+  for (const app of apps.values()) {
+    if (!top || app.seconds > top.seconds || (app.seconds === top.seconds && app.name < top.name)) {
+      top = app;
+    }
+  }
+  return top;
 }
 
 export type DeltaDirection = "good" | "bad" | "neutral";
@@ -224,17 +344,23 @@ export interface AppDelta extends AppUsage {
   direction: DeltaDirection;
 }
 
-/** Seconds per day per process over the range's days (zero-filled arrays). */
-export function dailySecondsByApp(sessions: Session[], range: Range): Map<string, number[]> {
+/** Seconds per day per app row over the range's days (zero-filled arrays),
+ *  keyed by `appGroupKey` to match the rows these series are looked up by. */
+export function dailySecondsByApp(
+  sessions: Session[],
+  range: Range,
+  aliases?: Record<string, string>,
+): Map<string, number[]> {
   const dayKeys = listDays(range).map(dayKey);
   const indexByKey = new Map(dayKeys.map((k, i) => [k, i]));
   const out = new Map<string, number[]>();
   for (const s of sessions) {
     if (s.isAfk) continue;
-    let arr = out.get(s.process);
+    const key = appGroupKey(s.process, aliases);
+    let arr = out.get(key);
     if (!arr) {
       arr = Array(dayKeys.length).fill(0);
-      out.set(s.process, arr);
+      out.set(key, arr);
     }
     for (const chunk of splitAtMidnights(s.start, s.end)) {
       const i = indexByKey.get(dayKey(chunk.dayStart));
@@ -322,12 +448,12 @@ export function withDeltas(
   previous: AppUsage[],
   opts: DeltaOptions = {},
 ): AppDelta[] {
-  const prevByProcess = new Map(previous.map((a) => [a.process, a.seconds]));
+  const prevByKey = new Map(previous.map((a) => [a.key, a.seconds]));
   return current.map((app) => {
-    const prev = prevByProcess.get(app.process) ?? 0;
+    const prev = prevByKey.get(app.key) ?? 0;
     const deltaFraction = prev > 0 ? (app.seconds - prev) / prev : null;
-    const cur = opts.currentDaily?.get(app.process);
-    const prv = opts.previousDaily?.get(app.process);
+    const cur = opts.currentDaily?.get(app.key);
+    const prv = opts.previousDaily?.get(app.key);
     const robustFraction = deltaFraction === null ? null : robustDeltaFraction(cur, prv);
     const days = cur?.length ?? prv?.length ?? 1;
     const baselineNegligible = prev > 0 && prev < MIN_BASELINE_SECONDS_PER_DAY * days;

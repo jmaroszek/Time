@@ -67,7 +67,7 @@ test("@workflow onboarding rolls back consent when tracker startup fails", async
 test("@workflow restore dispatches only after an explicit backup selection", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Restore backup…" }).click();
+  await page.getByRole("button", { name: "Restore backupâ€¦" }).click();
   const dialog = page.getByRole("dialog", { name: "Restore backup" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Restore and restart" })).toBeDisabled();
@@ -140,7 +140,7 @@ test("@workflow backup and restore failures remain actionable", async ({ page })
 
   await page.goto("/?fail=restore_database");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Restore backup…" }).click();
+  await page.getByRole("button", { name: "Restore backupâ€¦" }).click();
   const dialog = page.getByRole("dialog", { name: "Restore backup" });
   await dialog.getByRole("radio").first().click();
   await dialog.getByRole("button", { name: "Restore and restart" }).click();
@@ -235,4 +235,21 @@ test("@workflow all-history erase disables recording before stopping and erasing
   await expect.poll(() =>
     page.evaluate(() => window.__TIME_DEVICE_TEST__.sessionCount())
   ).toBe(0);
+});
+
+test("@workflow Top Apps totals processes that share a display name as one row", async ({
+  page,
+}) => {
+  await page.goto("/?fixture=merged");
+  // Both builds are aliased "Time". Before rows were keyed by display name these
+  // were two rows, identically labelled, each holding half the total.
+  const rows = page.locator(".top-app-row").filter({ hasText: "Time" });
+  await expect(rows).toHaveCount(1);
+
+  // The row carries no editor — naming an app belongs to its Activity panel —
+  // but it still says which processes it stands for.
+  await expect(rows.getByTitle("time-tracker.exe, time.exe")).toBeVisible();
+  await expect(rows.getByRole("textbox")).toHaveCount(0);
+  await rows.first().dblclick();
+  await expect(rows.getByRole("textbox")).toHaveCount(0);
 });

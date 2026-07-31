@@ -111,6 +111,7 @@ export default function OverviewTab({
       weekStart: meta.weekStart,
       weeklyGoalHours: meta.weeklyGoalHours,
       minAppSecondsPerDay: meta.minAppSecondsPerDay,
+      aliases: meta.aliases,
       focusChainMaxGapSeconds: meta.focusChainMaxGapSeconds,
       dayStartHour: meta.dayStartHour,
       dayEndHour: meta.dayEndHour,
