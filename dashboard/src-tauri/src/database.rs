@@ -1631,7 +1631,17 @@ impl TimeDatabase {
         Self::remove_database_sidecars(database_path)?;
         fs::rename(database_path, &rollback_path).map_err(|error| error.to_string())?;
         if let Err(error) = fs::rename(&pending_path, database_path) {
-            let _ = fs::rename(&rollback_path, database_path);
+            // Putting the original back is the only thing between a failed swap
+            // and an empty database opened over the user's history. Discarding
+            // that failure left no database in place, and the caller could not
+            // tell the difference, so say it plainly instead.
+            if let Err(rollback) = fs::rename(&rollback_path, database_path) {
+                return Err(format!(
+                    "The restore could not be applied ({error}) and the previous database could \
+                     not be put back ({rollback}). It is saved as {}",
+                    rollback_path.display()
+                ));
+            }
             return Err(error.to_string());
         }
         Ok(Some(RestoreSwap {
