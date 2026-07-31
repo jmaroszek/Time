@@ -6,8 +6,8 @@ export default mergeConfig(
   viteConfig,
   defineConfig({
     test: {
-      // Playwright and WebdriverIO own these suites. Letting Vitest discover
-      // them calls their incompatible global test APIs during unit collection.
+      // Playwright owns this suite. Letting Vitest discover it calls an
+      // incompatible global test API during unit collection.
       exclude: [...configDefaults.exclude, "device-test/**"],
       coverage: {
         provider: "v8",

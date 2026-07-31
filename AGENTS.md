@@ -26,10 +26,9 @@ python -m coverage run -m pytest -q tracker/tests scripts/tests
 python -m coverage report           # tracker + scripts branch-coverage gate
 cd dashboard && npm run test:coverage  # dashboard logic + V8 branch coverage
 cd dashboard && npx tsc --noEmit    # typecheck
-cd dashboard/src-tauri && cargo test  # named Rust backend tests
+cd dashboard && cargo test --manifest-path src-tauri/Cargo.toml  # Rust backend
 cd dashboard && npm run test:device   # renderer, Chromium
-cd dashboard && npm run build:native-device
-cd dashboard && npm run test:native:doctor && npm run test:native  # see below
+cd dashboard && npm run build:debug-app  # links the whole application
 scripts/smoke_packaged_tracker.ps1 -TrackerExecutable <sidecar> -OutputDirectory <scratch>
 ```
 
@@ -43,32 +42,34 @@ the repository root because cargo resolves that file from the working
 directory, and CI runs cargo from `dashboard/`. The restore tests swap files
 underneath an open database; in parallel they failed about one run in six.
 
-CI runs everything except `test:native` (the dashboard suite twice, under two
-timezones, because date handling is timezone-sensitive; `cargo test`, the debug
+**Run it from `dashboard/`, not from `dashboard/src-tauri`.** The test scratch
+root is built from `std::env::current_dir()`, so running it a directory lower
+puts scratch databases inside cargo's own `target/` and
+`restore_without_consent_disables_startup_and_does_not_restart_tracker` fails
+against working code. CI uses `dashboard/`; match it.
+
+CI runs every gate above (the dashboard suite twice, under two timezones,
+because date handling is timezone-sensitive; `cargo test`, the debug
 application build, packaged-tracker scratch smoke, and the deterministic
 renderer suite). **Any cargo command builds the tracker sidecar first**: the
 Tauri build script fails if `externalBin` — `src-tauri/binaries/` — is missing,
 so CI runs `scripts/build_tracker.py` before the Rust steps, and locally you
 need it built once too.
 
-**`test:native` cannot run on a hosted Windows runner.** WebView2 opens no
-remote debugging port there, so msedgedriver fails every session with
-`DevToolsActivePort file doesn't exist` and no test executes. Run it on a real
-Windows desktop before a release; it is the only end-to-end check of window
-state save/restore and off-screen recovery. The doctor must print
-`ENVIRONMENT_READY` before WebdriverIO starts. A failure is then classified as
-`ENVIRONMENT_BLOCKED` (the harness/session never became usable) or
-`APP_FAILURE` (a Time assertion failed); either blocks release.
+**Window state save/restore has no end-to-end gate.** A WebDriver suite covered
+it until 2026-07-31 and was deleted: WebView2 opens no remote debugging port on
+a hosted runner, so it could only ever run by hand, and two of its four checks
+asserted against a window it drove with `SetWindowPos` from outside Tauri —
+which the window-state plugin never observes, so they failed against a working
+app. The unit tests in `src-tauri/src/window_state.rs` cover the clamping and
+off-screen recovery logic; the clean-VM checklist covers the rest by eye. Do not
+rebuild an automated replacement without a failure it would have caught.
 
-It also builds nothing: the script prepares a demo database and starts
-WebdriverIO against `src-tauri/target/debug/Time.exe`, so
-`npm run build:native-device` has to run first (and the sidecar before that, or
-the Tauri build script stops on the missing `externalBin`). Build the tracker
-from the dedicated, git-ignored `data/tracker-build-env` environment described
-in the README. Reusing a broad Conda or development environment can expose
-unrelated PyInstaller hooks and native packages to the build. The builder also
-refuses mismatched runtime packages rather than producing an unreproducible
-sidecar.
+Build the tracker from the dedicated, git-ignored `data/tracker-build-env`
+environment described in the README. Reusing a broad Conda or development
+environment can expose unrelated PyInstaller hooks and native packages to the
+build. The builder also refuses mismatched runtime packages rather than
+producing an unreproducible sidecar.
 
 ## Branches
 

@@ -113,9 +113,6 @@ jobs:
             dashboard/test-results/device
           if-no-files-found: ignore
 
-  # The WebDriver suite (npm run test:native) cannot run here: WebView2 never
-  # opens a remote debugging port on a hosted runner, so no session can be
-  # created. It runs from the release checklist on a real desktop instead.
   windows-backend:
     name: Windows backend
     runs-on: windows-latest
@@ -168,10 +165,10 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
-      # Compiling the isolated debug application keeps the configuration the
-      # local WebDriver suite depends on from rotting between releases.
-      - name: Build isolated debug application
-        run: npm run build:native-device
+      # The only job that links the whole application. cargo test compiles the
+      # crate but never produces the binary the installer ships.
+      - name: Build debug application
+        run: npm run build:debug-app
 
   quality-gate:
     name: Required quality gate
