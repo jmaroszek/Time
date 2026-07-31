@@ -25,6 +25,10 @@ import SettingsTab from "./tabs/SettingsTab";
 
 type Tab = "insights" | "activity" | "settings";
 
+/** Ties the Activity tab to its backlog hint without putting the hint inside
+ *  the button, where it would become part of the tab's accessible name. */
+const BACKLOG_HINT_ID = "activity-backlog-hint";
+
 const TABS: { id: Tab; label: string }[] = [
   { id: "insights", label: "Insights" },
   { id: "activity", label: "Activity" },
@@ -302,6 +306,7 @@ function TabBar({
           className={`relative rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors ${
             tab === t.id ? "text-ink" : "text-ink-2 hover:text-ink"
           }`}
+          aria-describedby={t.id === "activity" && backlog ? BACKLOG_HINT_ID : undefined}
         >
           {t.label}
           {/* A dot, not a count: the number belongs where you can act on it, and
@@ -310,16 +315,22 @@ function TabBar({
               would shift the tabs beside it and move the sliding pill under the
               cursor that just clicked. */}
           {t.id === "activity" && backlog && (
-            <>
-              <span
-                aria-hidden="true"
-                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-accent"
-              />
-              <span className="sr-only"> — unclassified activity is waiting</span>
-            </>
+            <span
+              aria-hidden="true"
+              className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-accent"
+            />
           )}
         </button>
       ))}
+      {/* Described, not renamed. This text sits outside the button on purpose:
+          inside it, it would join the accessible name, and a tab that is called
+          "Activity" while idle and something longer while work is pending is a
+          different control to anyone finding it by name. */}
+      {backlog && (
+        <span id={BACKLOG_HINT_ID} className="sr-only">
+          Unclassified activity is waiting
+        </span>
+      )}
     </div>
   );
 }
