@@ -3547,12 +3547,19 @@ function EntityPanel({
 
       <UsageStrip buckets={usage} />
 
-      <PanelSection
-        title="Classification"
-        right={
+      <PanelSection title="Classification">
+        {/* The control sits under the heading rather than beside it, because
+            whenever a standing rule names the category the trigger *is* this
+            section's value — and a value floated up to heading level reads as a
+            section action instead. What decided it moves opposite, so the rule
+            and the ✕ that removes it read as the answer to "where did this come
+            from". Only an exact rule earns that slot: every other state's line
+            is a sentence, and a sentence right-aligned against a control wraps
+            badly at the panel's narrowest. */}
+        <div className="mt-2 flex items-center justify-between gap-3">
           <span className="shrink-0">
             <MenuSelect
-              align="end"
+              align="start"
               // A standing exact rule is a real current value, so the trigger
               // names it; without one this stays an action menu whose trigger
               // falls back to a prompt, because several categories can be in
@@ -3573,42 +3580,40 @@ function EntityPanel({
               }))}
             />
           </span>
-        }
-      >
-        {/* What decided it, not what it is. The trigger beside this heading
-            already names the category whenever there is a standing rule to
-            name, so repeating it here spent the section's first and most
-            emphasised line restating the control next to it. The category
-            returns as the lead only when the trigger is showing a prompt
-            instead — mixed, uncategorized, or decided by some other rule. */}
-        {!exactRule && <p className="mt-2 text-xs text-ink-2">{summary.label}</p>}
-        {/* No flex-1 on the text: letting it grow parked the remove button
-            against the panel's right edge, half a panel away from the two
-            words it acts on. Sized to its content, the button lands beside
-            them. */}
-        <div className={`flex items-center gap-1.5 ${exactRule ? "mt-2" : "mt-0.5"}`}>
-          <p className={`min-w-0 leading-snug ${
-            exactRule ? "text-xs text-ink-2" : "text-xs text-ink-3"
-          }`}
-          >
-            {summary.detail}
-          </p>
-          {/* The app's own row-level delete, sized to the one line it removes.
-              A full bordered button here was wider than the rule it offered to
-              undo, and louder than anything else in the section. */}
-          {exactRule && !confirmingRuleRemoval && (
-            // The glyph sits high in its own em box, so centring the button
-            // box still leaves the ✕ a shade above the line it belongs to. One
-            // pixel is the whole correction — two overshot it.
-            <span className="flex translate-y-px">
-              <RemoveButton
-                compact
-                label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
-                onClick={() => setConfirmingRuleRemoval(true)}
-              />
-            </span>
+          {/* What decided it, opposite what it is. The trigger already names the
+              category whenever a standing rule names it, so the old lead line
+              here only restated the control. */}
+          {exactRule && (
+            <div className="flex min-w-0 items-center gap-1.5">
+              <p className="min-w-0 truncate text-xs leading-snug text-ink-2">{summary.detail}</p>
+              {/* The app's own row-level delete, sized to the one line it
+                  removes. A full bordered button here was wider than the rule
+                  it offered to undo, and louder than anything else here. */}
+              {!confirmingRuleRemoval && (
+                // The glyph sits high in its own em box, so centring the button
+                // box still leaves the ✕ a shade above the line it belongs to.
+                // One pixel is the whole correction — two overshot it.
+                <span className="flex translate-y-px">
+                  <RemoveButton
+                    compact
+                    label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
+                    onClick={() => setConfirmingRuleRemoval(true)}
+                  />
+                </span>
+              )}
+            </div>
           )}
         </div>
+        {/* With no rule to name it, the category leads and what decided it
+            follows. Both need more air under the control than they needed
+            beside it: the trigger is a bordered box, and at the heading's old
+            8px the category read as its caption rather than as the answer. */}
+        {!exactRule && (
+          <>
+            <p className="mt-3.5 text-xs text-ink-2">{summary.label}</p>
+            <p className="mt-0.5 text-xs leading-snug text-ink-3">{summary.detail}</p>
+          </>
+        )}
         {entity.status === "mixed" && (
           <p className="mt-2 text-xs text-ink-3">Website and Window rules can override an App default.</p>
         )}
