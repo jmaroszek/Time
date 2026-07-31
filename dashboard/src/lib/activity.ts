@@ -131,6 +131,36 @@ export interface ActivityQuery {
   selectedWindowSessionLimit?: number;
 }
 
+/**
+ * A query that asks for nothing but the backlog. The range is empty on purpose:
+ * every range-scoped part of the result then aggregates zero sessions, while
+ * `triage` reads the lifetime summaries the index already holds — so the tab
+ * badge can have the same number the Library's Unclassified section shows
+ * without paying for a catalog nobody is going to look at.
+ *
+ * It takes the noise policy because the badge has to agree with that section.
+ * A badge counting folded rows would light up over installers and then lead to
+ * a section with nothing in it.
+ */
+export function backlogOnlyQuery(noise?: NoisePolicy): ActivityQuery {
+  return {
+    startSec: 0,
+    endSec: 0,
+    search: "",
+    typeFilter: "all",
+    classificationFilter: "all",
+    sort: "seconds",
+    direction: "desc",
+    windowSort: "seconds",
+    windowDirection: "desc",
+    entityOffset: 0,
+    entityLimit: 1,
+    windowOffset: 0,
+    windowLimit: 1,
+    noise,
+  };
+}
+
 export interface ActivityEntityPage {
   rows: ActivityEntitySummary[];
   total: number;
@@ -366,6 +396,18 @@ export interface ActivityUncategorizedSummary {
  *  A cap rather than a scroll: the section is a place to make five decisions,
  *  and the rest arrive as those are made. */
 export const TRIAGE_VISIBLE = 5;
+
+/**
+ * How much backlog is worth a mark on the Activity tab.
+ *
+ * Deliberately less sensitive than the section itself, because the two
+ * interrupt differently: the section is already on the surface you came to,
+ * while the badge reaches across the app to say a different tab wants you. An
+ * hour is the same floor ProductiveHoursChart uses before it will draw
+ * Uncategorized as a series of its own, and it is high enough that a one-off
+ * launch nobody will ever classify cannot raise it.
+ */
+export const BACKLOG_BADGE_SECONDS = 3600;
 
 /** One item of pending classification work. Deliberately thinner than an entity
  *  summary — the section shows an identity, a kind, a total and a control, and
