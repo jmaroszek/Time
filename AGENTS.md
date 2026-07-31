@@ -42,11 +42,10 @@ the repository root because cargo resolves that file from the working
 directory, and CI runs cargo from `dashboard/`. The restore tests swap files
 underneath an open database; in parallel they failed about one run in six.
 
-**Run it from `dashboard/`, not from `dashboard/src-tauri`.** The test scratch
-root is built from `std::env::current_dir()`, so running it a directory lower
-puts scratch databases inside cargo's own `target/` and
-`restore_without_consent_disables_startup_and_does_not_restart_tracker` fails
-against working code. CI uses `dashboard/`; match it.
+Run it from `dashboard/` to match CI. The test scratch root is built from
+`std::env::current_dir()`, so a different working directory puts scratch
+databases somewhere else — harmless, but it is one less difference to reason
+about when something only fails in one place.
 
 CI runs every gate above (the dashboard suite twice, under two timezones,
 because date handling is timezone-sensitive; `cargo test`, the debug
