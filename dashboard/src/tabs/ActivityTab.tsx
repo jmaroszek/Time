@@ -1467,7 +1467,14 @@ function UnclassifiedSection({
       // making that loud a promise. The bottom margin is larger than the card's
       // usual rhythm on purpose — the controls below belong to the table, and at
       // an even gap the two surfaces read as one continuous thing.
-      className="mb-6 shrink-0 rounded-[12px] border border-edge bg-surface-dim px-3.5 py-3"
+      // Gone below sm, where this card stops promising a usable table well at
+      // all — TableRegion drops its 240px floor at the same breakpoint, so the
+      // five rows here would be spending a vertical budget that no longer
+      // exists and the table underneath would collapse to nothing. The window
+      // cannot actually be dragged this narrow (tauri.conf floors it at
+      // 1000px); the rule is that going under it degrades the page rather than
+      // crushing it, and the tab badge still says there is work waiting.
+      className="mb-6 hidden shrink-0 rounded-[12px] border border-edge bg-surface-dim px-3.5 py-3 sm:block"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 id="unclassified-heading" className="text-row font-semibold text-ink">

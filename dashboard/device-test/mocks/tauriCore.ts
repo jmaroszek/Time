@@ -114,6 +114,9 @@ const ruleRows = [
   },
 ];
 
+/** Ids for rules written during a session, past the seeded three. */
+let nextRuleId = ruleRows.length + 1;
+
 const settings: Record<string, string> = {
   schema_version: "4",
   privacy_onboarding_complete:
@@ -236,6 +239,52 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
       if (query.startsWith("insert into settings") && typeof values[0] === "string") {
         settings[values[0]] = String(values[1] ?? "");
         result = { rowsAffected: 1, lastInsertId: 0 };
+        break;
+      }
+      // Rule writes land in the same array db_select reads, so classifying
+      // something here actually reclassifies it — which is the only way to
+      // drive the Unclassified section, whose whole subject is a list that
+      // shrinks as you act on it. Without this the fixture could show the
+      // section but never a single assignment, undo, or backfill.
+      if (query.startsWith("insert into rules")) {
+        const [matchType, pattern, categoryId, priority, scopeKind, scopeValue, titleMatchMode, titleAnchor] =
+          values as [string, string, number, number, string, string, string, string];
+        // The real table's ON CONFLICT key, so a repeated assignment moves the
+        // existing rule here too rather than growing a duplicate.
+        const conflict = ruleRows.find(
+          (rule) =>
+            rule.match_type === matchType
+            && rule.pattern === pattern
+            && rule.scope_kind === scopeKind
+            && rule.scope_value === scopeValue
+            && rule.title_match_mode === titleMatchMode
+            && rule.title_anchor === titleAnchor,
+        );
+        if (conflict) {
+          conflict.category_id = categoryId;
+          conflict.priority = priority;
+          result = { rowsAffected: 1, lastInsertId: conflict.id };
+        } else {
+          const id = nextRuleId++;
+          ruleRows.push({
+            id,
+            match_type: matchType,
+            pattern,
+            category_id: categoryId,
+            priority,
+            scope_kind: scopeKind,
+            scope_value: scopeValue,
+            title_match_mode: titleMatchMode,
+            title_anchor: titleAnchor,
+          });
+          result = { rowsAffected: 1, lastInsertId: id };
+        }
+        break;
+      }
+      if (query.startsWith("delete from rules")) {
+        const at = ruleRows.findIndex((rule) => rule.id === Number(values[0]));
+        if (at !== -1) ruleRows.splice(at, 1);
+        result = { rowsAffected: at === -1 ? 0 : 1, lastInsertId: 0 };
         break;
       }
       throw new Error(`Device fixture has no db_execute response for: ${query}`);
