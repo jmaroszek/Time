@@ -30,19 +30,35 @@ export function bannerDismissMs(tone: BannerTone): number | null {
   return tone === "good" ? 4500 : null;
 }
 
+/**
+ * One optional action offered beside a confirmation, for a write that is cheap
+ * to make by accident — the Unclassified section's assignments, where the whole
+ * point is that a category is one click away. Running it clears the banner: the
+ * news it carried is no longer true.
+ */
+export interface BannerAction {
+  label: string;
+  run: () => void;
+}
+
 interface Banner {
   /** Show a friendly message for a caught write failure. */
   report: (error: unknown, subject?: string) => void;
   /** Confirm something that succeeded. */
-  show: (message: string) => void;
+  show: (message: string, action?: BannerAction) => void;
 }
 
 const BannerContext = createContext<Banner | null>(null);
 
 export function BannerProvider({ children }: { children: ReactNode }) {
-  const [banner, setBanner] = useState<{ message: string; tone: BannerTone } | null>(null);
+  const [banner, setBanner] = useState<
+    { message: string; tone: BannerTone; action?: BannerAction } | null
+  >(null);
 
-  const show = useCallback((message: string) => setBanner({ message, tone: "good" }), []);
+  const show = useCallback(
+    (message: string, action?: BannerAction) => setBanner({ message, tone: "good", action }),
+    [],
+  );
   const report = useCallback(
     (error: unknown, subject?: string) =>
       setBanner({ message: explainDbError(error, subject), tone: "bad" }),
@@ -79,6 +95,19 @@ export function BannerProvider({ children }: { children: ReactNode }) {
               className={`h-2 w-2 shrink-0 rounded-full ${banner.tone === "bad" ? "bg-bad" : "bg-good"}`}
             />
             <span className="min-w-0">{banner.message}</span>
+            {banner.action && (
+              <button
+                type="button"
+                className="shrink-0 rounded-md border border-edge-2 px-2 py-1 text-ink transition-colors hover:bg-hover-2"
+                onClick={() => {
+                  const run = banner.action?.run;
+                  setBanner(null);
+                  run?.();
+                }}
+              >
+                {banner.action.label}
+              </button>
+            )}
             <button
               type="button"
               aria-label="Dismiss"

@@ -36,6 +36,8 @@ import {
   type ActivitySort,
   type ActivitySortDirection,
   type ActivitySource,
+  type ActivityTriage,
+  type ActivityTriageItem,
   type ActivityTypeFilter,
   type ActivityWindowSort,
 } from "../lib/activity";
@@ -130,6 +132,11 @@ export type ActivityView = "library" | "rules";
 /** "Excluded" is a view of the pre-capture exclusion list, not a property of a
  *  recorded entity — the classification dropdown is only its entry point. */
 type LibraryFilter = ActivityClassificationFilter | "excluded";
+
+/** Everything writing an exact rule needs to know about its subject. Stated
+ *  structurally so a full entity summary and the Unclassified section's much
+ *  thinner row both satisfy it without either being converted to the other. */
+type ClassifiableEntity = Pick<ActivityEntitySummary, "kind" | "key" | "displayName">;
 
 /** One palette for productivity everywhere it names a state: the chart bars and
  *  these classification chips share the selected palette's fills. Ignored keeps
@@ -834,18 +841,37 @@ export default function ActivityTab({
   const refreshMeta = async () => {
     await meta.refresh();
   };
+  // Rules as of the latest render, for handlers that run after one — a banner's
+  // Undo fires long after the assignment that offered it, and the closure that
+  // captured `meta` captured the rules from before the write it has to reverse.
+  const rulesRef = useRef(meta.rules);
+  rulesRef.current = meta.rules;
+
+  const exactRulesFor = (entity: ClassifiableEntity) => {
+    const matchType = entity.kind === "website" ? "domain" : "process";
+    return rulesRef.current.filter(
+      (rule) => rule.matchType === matchType && rule.pattern.toLowerCase() === entity.key.toLowerCase(),
+    );
+  };
+
+  /** Write the exact rule that puts an entity in a category, replacing whatever
+   *  other exact rules it had. Shared by the inspector's picker and the
+   *  Unclassified section's so the two cannot drift; only the confirmation each
+   *  one shows afterwards differs. */
+  const writeEntityRule = async (entity: ClassifiableEntity, categoryId: number) => {
+    const matchType = entity.kind === "website" ? "domain" : "process";
+    const exactRules = exactRulesFor(entity);
+    const retained = exactRules.find((rule) => rule.categoryId === categoryId);
+    for (const rule of exactRules) {
+      if (rule.id !== retained?.id) await deleteRule(rule.id);
+    }
+    if (!retained) await addRule(matchType, entity.key, categoryId);
+    await refreshMeta();
+  };
+
   const assignEntity = async (entity: ActivityEntitySummary, categoryId: number) => {
     try {
-      const matchType = entity.kind === "website" ? "domain" : "process";
-      const exactRules = meta.rules.filter(
-        (rule) => rule.matchType === matchType && rule.pattern.toLowerCase() === entity.key.toLowerCase(),
-      );
-      const retained = exactRules.find((rule) => rule.categoryId === categoryId);
-      for (const rule of exactRules) {
-        if (rule.id !== retained?.id) await deleteRule(rule.id);
-      }
-      if (!retained) await addRule(matchType, entity.key, categoryId);
-      await refreshMeta();
+      await writeEntityRule(entity, categoryId);
       // A rule is retroactive and global, and the panel it was set from only
       // shows one date range. Saying so once, on the change itself, beats the
       // standing paragraph that used to warn about it before anything happened.
@@ -853,6 +879,39 @@ export default function ActivityTab({
       if (category) {
         banner.show(`${entity.displayName} is now ${category.name}, in all history and from now on.`);
       }
+    } catch (error) {
+      banner.report(error, "classification");
+    }
+  };
+
+  /**
+   * The same write, confirmed differently. Triage is a run of decisions rather
+   * than one deliberate change, so the sentence loses the clause explaining that
+   * rules are retroactive — true, and read four items ago — and spends the room
+   * on an Undo instead, which is what a one-click category actually needs.
+   */
+  const assignFromTriage = async (item: ActivityTriageItem, categoryId: number) => {
+    try {
+      await writeEntityRule(item, categoryId);
+      const category = meta.categories.find((option) => option.id === categoryId);
+      if (category) {
+        banner.show(`${item.displayName} is now ${category.name}.`, {
+          label: "Undo",
+          run: () => void undoTriageAssign(item),
+        });
+      }
+    } catch (error) {
+      banner.report(error, "classification");
+    }
+  };
+
+  /** These rows are uncategorized in full, so nothing classified them before the
+   *  assignment: removing the exact rules they have now restores exactly the
+   *  state Undo promises. Reads rules through the ref — see its note. */
+  const undoTriageAssign = async (item: ActivityTriageItem) => {
+    try {
+      for (const rule of exactRulesFor(item)) await deleteRule(rule.id);
+      await refreshMeta();
     } catch (error) {
       banner.report(error, "classification");
     }
@@ -868,11 +927,7 @@ export default function ActivityTab({
   };
   const removeExactRules = async (entity: ActivityEntitySummary) => {
     try {
-      const matchType = entity.kind === "website" ? "domain" : "process";
-      const exactRules = meta.rules.filter(
-        (rule) => rule.matchType === matchType && rule.pattern.toLowerCase() === entity.key.toLowerCase(),
-      );
-      for (const rule of exactRules) await deleteRule(rule.id);
+      for (const rule of exactRulesFor(entity)) await deleteRule(rule.id);
       await refreshMeta();
       banner.show(`Removed the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}.`);
     } catch (error) {
@@ -1077,24 +1132,12 @@ export default function ActivityTab({
         className="flex min-h-0 min-w-0 flex-1 flex-col"
         title={<ViewSwitcher view={view} onView={switchView} />}
         right={view === "library" ? (
+          // Export only. The noise-fold link used to sit here too, and moved
+          // down beside the filters once the Unclassified section arrived: it
+          // shapes the table, not the card, and it was landing one line above a
+          // different "Show" that meant something else entirely. The header
+          // keeps what acts on the card as a whole.
           <span className="flex flex-wrap items-center gap-3 text-xs text-ink-3">
-            {/* Muted, not accent: this is about rows nobody asked to see, and
-                it was the loudest thing in the header while being the least
-                consequential. The row count it used to sit beside is gone —
-                the load-more footer already reports it, and only to someone
-                who has scrolled far enough to be asking. */}
-            {result && !showingExclusions && result.noiseHidden > 0 && (
-              <button
-                type="button"
-                onClick={() => setIncludeNoise((shown) => !shown)}
-                className="underline-offset-2 hover:text-ink-2 hover:underline"
-                title="Rare-item and utility rows are hidden from this list. They still count in every total."
-              >
-                {includeNoise
-                  ? `Hide ${result.noiseHidden} filtered`
-                  : `${result.noiseHidden} filtered · Show`}
-              </button>
-            )}
             {source && result && (
               <ActivityExportMenu
                 source={source}
@@ -1109,6 +1152,20 @@ export default function ActivityTab({
       >
         {view === "library" ? (
           <>
+            {/* Above the controls, deliberately: it answers to none of them,
+                and it reads over all of history while the table below reads
+                the selected range. */}
+            {!showingExclusions && result && (
+              <UnclassifiedSection
+                triage={result.triage}
+                categories={meta.categories}
+                onAssign={assignFromTriage}
+                onShowAll={() => {
+                  setClassificationFilter("uncategorized");
+                  if (!isAllTime) onTryAllTime();
+                }}
+              />
+            )}
             <LibraryControls
               search={search}
               onSearch={setSearch}
@@ -1118,6 +1175,9 @@ export default function ActivityTab({
               onClassificationFilter={setClassificationFilter}
               categories={meta.categories}
               uncategorizedCount={result?.uncategorized.entities ?? 0}
+              noiseHidden={showingExclusions ? 0 : (result?.noiseHidden ?? 0)}
+              includeNoise={includeNoise}
+              onIncludeNoise={() => setIncludeNoise((shown) => !shown)}
             />
             {showingExclusions ? (
               <ExcludedPanel />
@@ -1372,6 +1432,148 @@ function ClearableInput({
   );
 }
 
+/**
+ * Pending classification work, with the decision attached.
+ *
+ * The Library could already tell you an item was unclassified — on its own row,
+ * in a word, sorted by time so the newest and smallest sat below the fold, and
+ * counted only inside a dropdown nobody opens. What it could not do was let you
+ * act: the category picker lives in the inspector, behind a click on the row
+ * most people never make. This section exists for the action; the count is what
+ * makes it worth looking at.
+ *
+ * It renders nothing when there is nothing pending, which is what keeps it a
+ * state rather than furniture — and what lets it be this legible while it is up.
+ */
+function UnclassifiedSection({
+  triage,
+  categories,
+  onAssign,
+  onShowAll,
+}: {
+  triage: ActivityTriage;
+  categories: Category[];
+  onAssign: (item: ActivityTriageItem, categoryId: number) => void;
+  onShowAll: () => void;
+}) {
+  if (triage.total === 0) return null;
+  const listed = triage.items.length;
+  return (
+    <section
+      aria-labelledby="unclassified-heading"
+      // Recessed rather than tinted: the accent wash the first-run panel and the
+      // domain hint use is for news that arrives once. This comes back every
+      // time something new is installed, and a recurring chore should not keep
+      // making that loud a promise. The bottom margin is larger than the card's
+      // usual rhythm on purpose — the controls below belong to the table, and at
+      // an even gap the two surfaces read as one continuous thing.
+      className="mb-6 shrink-0 rounded-[12px] border border-edge bg-surface-dim px-3.5 py-3"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 id="unclassified-heading" className="text-row font-semibold text-ink">
+          Unclassified
+          {/* The scope, stated: everything else in this card reads the selected
+              range, and a backlog that emptied when the date picker moved would
+              be a to-do list nobody could finish. */}
+          <span className="ml-2 text-meta font-normal text-ink-3">all history</span>
+        </h3>
+        <span className="text-xs tabular-nums text-ink-3">
+          {`${triage.total} ${triage.total === 1 ? "item" : "items"} · ${fmtDuration(triage.seconds)}`}
+          {triage.total > listed && (
+            <>
+              {" · "}
+              <button
+                type="button"
+                onClick={onShowAll}
+                className="tabular-nums underline-offset-2 hover:text-ink-2 hover:underline"
+              >
+                Show all
+              </button>
+            </>
+          )}
+        </span>
+      </div>
+      {/* Why this is worth a minute, in the one place someone is looking at the
+          consequence. The Insights timeline draws this time in a near-surface
+          gray that reads as "nothing here" rather than "not yet decided". */}
+      <p className="mt-1 text-meta leading-snug text-ink-3">
+        Time in these apps and sites is left out of every category total in Insights until you
+        classify it.
+      </p>
+      <div className="mt-2">
+        {triage.items.map((item) => (
+          <TriageRow key={item.id} item={item} categories={categories} onAssign={onAssign} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** One decision. Identity, kind, total, control — and nothing else: days seen
+ *  and a share bar belong to a table you are reading, not to a row you are
+ *  about to remove. The kind stays because it is not always "App" (a browser
+ *  with no rule yet puts websites here) and because an app and a website can
+ *  carry the same name, which on this row is the only thing telling them
+ *  apart. */
+function TriageRow({
+  item,
+  categories,
+  onAssign,
+}: {
+  item: ActivityTriageItem;
+  categories: Category[];
+  onAssign: (item: ActivityTriageItem, categoryId: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border-t border-edge py-1.5 pr-1 pl-0.5 first:border-t-0 hover:bg-hover">
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
+        <span className="truncate text-row font-semibold text-ink">{item.displayName}</span>
+        <span className="shrink-0 text-meta text-ink-3">
+          {item.kind === "website" ? "Website" : "App"}
+        </span>
+      </span>
+      <span className="shrink-0 text-xs tabular-nums text-ink-2">{fmtDuration(item.seconds)}</span>
+      {/* A placeholder trigger, not a value: every row here is uncategorized, so
+          showing that as the current selection would print the same word five
+          times and call it information. The verb is what the control does. */}
+      <MenuSelect
+        size="compact"
+        variant="resting"
+        align="end"
+        label={`Classify ${item.displayName}`}
+        placeholder="Classify"
+        value=""
+        onChange={(value) => onAssign(item, Number(value))}
+        options={triageCategoryOptions(categories)}
+      />
+    </div>
+  );
+}
+
+/**
+ * Where a row can go. Not classificationOptions: that list is filters — it
+ * opens with "All classifications" and folds every ignored category into one
+ * synthetic "Ignored" entry, neither of which is somewhere an entity can be
+ * put. This one is destinations, so the real ignored rows appear by name behind
+ * a rule. Without them a row you will never classify has no way to leave, and a
+ * to-do list with a permanent top item stops being read.
+ */
+function triageCategoryOptions(categories: Category[]): MenuOption[] {
+  const destinations = [
+    ...categories.filter((category) => !category.isIgnored),
+    ...categories.filter((category) => category.isIgnored),
+  ];
+  const firstIgnored = categories.findIndex((category) => category.isIgnored) === -1
+    ? -1
+    : destinations.findIndex((category) => category.isIgnored);
+  return destinations.map((category, index) => ({
+    value: String(category.id),
+    label: category.name,
+    dot: category.color,
+    divider: index === firstIgnored && index > 0,
+  }));
+}
+
 function LibraryControls({
   search,
   onSearch,
@@ -1381,6 +1583,9 @@ function LibraryControls({
   onClassificationFilter,
   categories,
   uncategorizedCount,
+  noiseHidden,
+  includeNoise,
+  onIncludeNoise,
 }: {
   search: string;
   onSearch: (value: string) => void;
@@ -1390,6 +1595,9 @@ function LibraryControls({
   onClassificationFilter: (value: LibraryFilter) => void;
   categories: Category[];
   uncategorizedCount: number;
+  noiseHidden: number;
+  includeNoise: boolean;
+  onIncludeNoise: () => void;
 }) {
   // Search and type narrow recorded activity; the excluded list is not
   // recorded activity, so leaving them enabled there would be a lie.
@@ -1434,6 +1642,23 @@ function LibraryControls({
         onChange={(value) => onClassificationFilter(value as LibraryFilter)}
         options={classificationOptions(categories, uncategorizedCount)}
       />
+      {/* Muted, not accent: this is about rows nobody asked to see, and it was
+          the loudest thing in the card header while being the least
+          consequential. It sits with the filters because it is one — the row of
+          controls that decides what the table lists. The extra left margin is
+          the seam between a set of pickers and a piece of prose; without it the
+          row read as one crowded strip, and the width comes out of the search
+          field, which is the only thing here that grows. */}
+      {noiseHidden > 0 && (
+        <button
+          type="button"
+          onClick={onIncludeNoise}
+          className="shrink-0 text-xs text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline sm:ml-2"
+          title="Rare-item and utility rows are hidden from this list. They still count in every total."
+        >
+          {includeNoise ? `Hide ${noiseHidden} filtered` : `${noiseHidden} filtered · Show`}
+        </button>
+      )}
     </div>
   );
 }
