@@ -16,6 +16,7 @@ import {
   type AppUsage,
   type Session,
 } from "./metrics";
+import { appGroupKey, cleanProcessName } from "./format";
 import { dayKey } from "./time";
 
 const CATS: Category[] = [
@@ -34,6 +35,23 @@ const classify = buildClassifier(CATS, RULES, new Set());
 let nextId = 1;
 function sess(start: number, end: number, process = "code.exe", isAfk = false): Session {
   return { id: nextId++, start, end, process, title: "", domain: null, isAfk };
+}
+
+/** One app row, as `topApps` would build it from a single un-aliased process. */
+function app(process: string, seconds: number, category: Category | null): AppUsage {
+  return {
+    key: appGroupKey(process),
+    name: cleanProcessName(process),
+    processes: [process],
+    seconds,
+    category,
+  };
+}
+
+/** Daily series are keyed by app row, not by raw process, because that is how
+ *  `withDeltas` looks them up. */
+function dailySeries(process: string, values: number[]): Map<string, number[]> {
+  return new Map([[appGroupKey(process), values]]);
 }
 
 // A local-midnight base keeps day-split assertions deterministic.
@@ -184,24 +202,122 @@ describe("topApps / withDeltas", () => {
       [sess(0, 100, "code.exe"), sess(100, 400, "apex.exe"), sess(400, 450, "code.exe")],
       classify,
     );
-    expect(apps[0].process).toBe("apex.exe");
+    expect(apps[0].name).toBe("Apex");
+    expect(apps[0].processes).toEqual(["apex.exe"]);
     expect(apps[1].seconds).toBe(150);
+  });
+
+  it("folds processes that share an alias into one row", () => {
+    // The dev build and the installed build of the same app. Before rows were
+    // keyed by display name these were two rows, each labeled "Time" and each
+    // holding half the truth.
+    const aliases = { "time.exe": "Time", "time-tracker.exe": "Time" };
+    const apps = topApps(
+      [
+        sess(0, 100, "time.exe"),
+        sess(100, 400, "time-tracker.exe"),
+        sess(400, 450, "time.exe"),
+      ],
+      classify,
+      aliases,
+    );
+    expect(apps).toHaveLength(1);
+    expect(apps[0].name).toBe("Time");
+    expect(apps[0].seconds).toBe(450);
+    expect(apps[0].processes).toEqual(["time-tracker.exe", "time.exe"]);
+  });
+
+  it("splits the row again when one member's alias is cleared", () => {
+    const sessions = [sess(0, 100, "time.exe"), sess(100, 400, "time-tracker.exe")];
+    const apps = topApps(sessions, classify, { "time.exe": "Time" });
+    expect(apps.map((row) => row.name)).toEqual(["Time-tracker", "Time"]);
+  });
+
+  it("a merged row is labeled by the category holding most of its time", () => {
+    // Only the dev build carries a rule; the installed build is the majority.
+    const aliases = { "code.exe": "Editor", "code-insiders.exe": "Editor" };
+    const apps = topApps(
+      [sess(0, 100, "code.exe"), sess(100, 1000, "code-insiders.exe")],
+      classify,
+      aliases,
+    );
+    expect(apps[0].category).toBeNull();
+    const flipped = topApps(
+      [sess(0, 1000, "code.exe"), sess(1000, 1100, "code-insiders.exe")],
+      classify,
+      aliases,
+    );
+    expect(flipped[0].category?.name).toBe("Dev");
+  });
+
+  it("compares a merged row against its merged baseline", () => {
+    // The regression this guards: daily series keyed by raw process while rows
+    // are keyed by group. Every merged row would miss its lookup and read as
+    // brand new rather than as flat.
+    const aliases = { "time.exe": "Time", "time-tracker.exe": "Time" };
+    const current = topApps(
+      [sess(0, 7 * 1800, "time.exe"), sess(0, 7 * 1800, "time-tracker.exe")],
+      classify,
+      aliases,
+    );
+    const previous = topApps([sess(0, 7 * 3600, "time.exe")], classify, aliases);
+    const deltas = withDeltas(current, previous);
+    expect(deltas[0].previousSeconds).toBe(7 * 3600);
+    expect(deltas[0].deltaFraction).toBeCloseTo(0);
+  });
+
+  it("settles a tied merged row the same way whatever order sessions arrive in", () => {
+    // Equal time in a classified and an unclassified member. Neither is the
+    // majority, so the label falls to the tie-break rather than to whichever
+    // session the loop happened to see first.
+    const aliases = { "code.exe": "Split", "unknown.exe": "Split" };
+    const classifiedFirst = topApps(
+      [sess(0, 100, "code.exe"), sess(100, 200, "unknown.exe")],
+      classify,
+      aliases,
+    );
+    const unclassifiedFirst = topApps(
+      [sess(0, 100, "unknown.exe"), sess(100, 200, "code.exe")],
+      classify,
+      aliases,
+    );
+    expect(classifiedFirst[0].category?.name).toBe("Dev");
+    expect(unclassifiedFirst[0].category?.name).toBe("Dev");
+  });
+
+  it("breaks a tie between two real categories by category order", () => {
+    // Dev (id 1) and Gaming (id 2) tied: the earlier category wins, whichever
+    // session ran first.
+    const aliases = { "code.exe": "Split", "apex.exe": "Split" };
+    expect(
+      topApps([sess(0, 100, "apex.exe"), sess(100, 200, "code.exe")], classify, aliases)[0].category
+        ?.name,
+    ).toBe("Dev");
+    expect(
+      topApps([sess(0, 100, "code.exe"), sess(100, 200, "apex.exe")], classify, aliases)[0].category
+        ?.name,
+    ).toBe("Dev");
+  });
+
+  it("orders equal-time rows by name so a rebuild does not reshuffle them", () => {
+    const apps = topApps([sess(0, 100, "zebra.exe"), sess(100, 200, "alpha.exe")], classify);
+    expect(apps.map((row) => row.name)).toEqual(["Alpha", "Zebra"]);
   });
 
   it("delta direction is category-aware when the change is meaningful", () => {
     // A sustained doubling: 30 min/day up from 15, every day of the week.
     const daily = (v: number) =>
       new Map([
-        ["code.exe", Array(7).fill(v)],
-        ["apex.exe", Array(7).fill(v)],
+        [appGroupKey("code.exe"), Array(7).fill(v)],
+        [appGroupKey("apex.exe"), Array(7).fill(v)],
       ]);
     const cur: AppUsage[] = [
-      { process: "code.exe", seconds: 7 * 1800, category: CATS[0] }, // productive, up
-      { process: "apex.exe", seconds: 7 * 1800, category: CATS[1] }, // non-productive, up
+      app("code.exe", 7 * 1800, CATS[0]), // productive, up
+      app("apex.exe", 7 * 1800, CATS[1]), // non-productive, up
     ];
     const prev: AppUsage[] = [
-      { process: "code.exe", seconds: 7 * 900, category: CATS[0] },
-      { process: "apex.exe", seconds: 7 * 900, category: CATS[1] },
+      app("code.exe", 7 * 900, CATS[0]),
+      app("apex.exe", 7 * 900, CATS[1]),
     ];
     const deltas = withDeltas(cur, prev, {
       currentDaily: daily(1800),
@@ -218,11 +334,11 @@ describe("topApps / withDeltas", () => {
     const cur = [0, 0, 0, 0, 0, 4 * 3600, 4 * 3600];
     const prv = [0, 0, 0, 0, 0, 3600, 1.5 * 3600];
     const deltas = withDeltas(
-      [{ process: "apex.exe", seconds: 8 * 3600, category: CATS[1] }],
-      [{ process: "apex.exe", seconds: 2.5 * 3600, category: CATS[1] }],
+      [app("apex.exe", 8 * 3600, CATS[1])],
+      [app("apex.exe", 2.5 * 3600, CATS[1])],
       {
-        currentDaily: new Map([["apex.exe", cur]]),
-        previousDaily: new Map([["apex.exe", prv]]),
+        currentDaily: dailySeries("apex.exe", cur),
+        previousDaily: dailySeries("apex.exe", prv),
       },
     );
     expect(deltas[0].direction).toBe("bad");
@@ -234,11 +350,11 @@ describe("topApps / withDeltas", () => {
     const cur = [600, 600, 600, 5 * 3600, 600, 600, 600];
     const prv = Array(7).fill(600);
     const deltas = withDeltas(
-      [{ process: "apex.exe", seconds: 3600 + 5 * 3600, category: CATS[1] }],
-      [{ process: "apex.exe", seconds: 7 * 600, category: CATS[1] }],
+      [app("apex.exe", 3600 + 5 * 3600, CATS[1])],
+      [app("apex.exe", 7 * 600, CATS[1])],
       {
-        currentDaily: new Map([["apex.exe", cur]]),
-        previousDaily: new Map([["apex.exe", prv]]),
+        currentDaily: dailySeries("apex.exe", cur),
+        previousDaily: dailySeries("apex.exe", prv),
       },
     );
     expect(deltas[0].deltaFraction).toBeGreaterThan(3);
@@ -249,11 +365,11 @@ describe("topApps / withDeltas", () => {
   it("large percentages on trivial amounts of time stay neutral", () => {
     // 1 min/day -> 3 min/day is +200%, but only +14 min across the week.
     const deltas = withDeltas(
-      [{ process: "code.exe", seconds: 7 * 180, category: CATS[0] }],
-      [{ process: "code.exe", seconds: 7 * 60, category: CATS[0] }],
+      [app("code.exe", 7 * 180, CATS[0])],
+      [app("code.exe", 7 * 60, CATS[0])],
       {
-        currentDaily: new Map([["code.exe", Array(7).fill(180)]]),
-        previousDaily: new Map([["code.exe", Array(7).fill(60)]]),
+        currentDaily: dailySeries("code.exe", Array(7).fill(180)),
+        previousDaily: dailySeries("code.exe", Array(7).fill(60)),
       },
     );
     expect(deltas[0].deltaFraction).toBeCloseTo(2.0);
@@ -263,11 +379,11 @@ describe("topApps / withDeltas", () => {
   it("small steady changes stay neutral however consistent they are", () => {
     // Near-zero variance made this significant under the t-test; +8% is not news.
     const deltas = withDeltas(
-      [{ process: "code.exe", seconds: 7 * 3888, category: CATS[0] }],
-      [{ process: "code.exe", seconds: 7 * 3600, category: CATS[0] }],
+      [app("code.exe", 7 * 3888, CATS[0])],
+      [app("code.exe", 7 * 3600, CATS[0])],
       {
-        currentDaily: new Map([["code.exe", [3890, 3886, 3888, 3887, 3889, 3888, 3888]]]),
-        previousDaily: new Map([["code.exe", [3600, 3601, 3599, 3600, 3602, 3598, 3600]]]),
+        currentDaily: dailySeries("code.exe", [3890, 3886, 3888, 3887, 3889, 3888, 3888]),
+        previousDaily: dailySeries("code.exe", [3600, 3601, 3599, 3600, 3602, 3598, 3600]),
       },
     );
     expect(deltas[0].direction).toBe("neutral");
@@ -275,19 +391,19 @@ describe("topApps / withDeltas", () => {
 
   it("without daily samples, falls back to the size gates alone", () => {
     const big = withDeltas(
-      [{ process: "code.exe", seconds: 4000, category: CATS[0] }],
-      [{ process: "code.exe", seconds: 2000, category: CATS[0] }],
+      [app("code.exe", 4000, CATS[0])],
+      [app("code.exe", 2000, CATS[0])],
     );
     expect(big[0].direction).toBe("good");
     const small = withDeltas(
-      [{ process: "code.exe", seconds: 2100, category: CATS[0] }],
-      [{ process: "code.exe", seconds: 2000, category: CATS[0] }],
+      [app("code.exe", 2100, CATS[0])],
+      [app("code.exe", 2000, CATS[0])],
     );
     expect(small[0].direction).toBe("neutral"); // +5%: business as usual
   });
 
   it("new apps have null delta and neutral direction", () => {
-    const deltas = withDeltas([{ process: "new.exe", seconds: 100, category: CATS[0] }], []);
+    const deltas = withDeltas([app("new.exe", 100, CATS[0])], []);
     expect(deltas[0].deltaFraction).toBeNull();
     expect(deltas[0].direction).toBe("neutral");
   });
@@ -296,11 +412,11 @@ describe("topApps / withDeltas", () => {
     // 3 minutes across last week against 26 hours this week: arithmetically
     // +51698%, but the previous period is too thin to quote a ratio from.
     const deltas = withDeltas(
-      [{ process: "code.exe", seconds: 26 * 3600, category: CATS[0] }],
-      [{ process: "code.exe", seconds: 181, category: CATS[0] }],
+      [app("code.exe", 26 * 3600, CATS[0])],
+      [app("code.exe", 181, CATS[0])],
       {
-        currentDaily: new Map([["code.exe", Array(7).fill(13371)]]),
-        previousDaily: new Map([["code.exe", [181, 0, 0, 0, 0, 0, 0]]]),
+        currentDaily: dailySeries("code.exe", Array(7).fill(13371)),
+        previousDaily: dailySeries("code.exe", [181, 0, 0, 0, 0, 0, 0]),
       },
     );
     expect(deltas[0].baselineNegligible).toBe(true);
@@ -311,11 +427,11 @@ describe("topApps / withDeltas", () => {
   it("a real if small baseline is still worth a ratio", () => {
     // 30 min/day up to 2 h/day: a baseline this size divides honestly.
     const deltas = withDeltas(
-      [{ process: "code.exe", seconds: 7 * 7200, category: CATS[0] }],
-      [{ process: "code.exe", seconds: 7 * 1800, category: CATS[0] }],
+      [app("code.exe", 7 * 7200, CATS[0])],
+      [app("code.exe", 7 * 1800, CATS[0])],
       {
-        currentDaily: new Map([["code.exe", Array(7).fill(7200)]]),
-        previousDaily: new Map([["code.exe", Array(7).fill(1800)]]),
+        currentDaily: dailySeries("code.exe", Array(7).fill(7200)),
+        previousDaily: dailySeries("code.exe", Array(7).fill(1800)),
       },
     );
     expect(deltas[0].baselineNegligible).toBe(false);
@@ -324,10 +440,10 @@ describe("topApps / withDeltas", () => {
 
   it("neutral categories are never judged, even on a meaningful change", () => {
     const neutral = { ...CATS[1], isProductive: false, isNeutral: true }; // e.g. games
-    const daily = (v: number) => new Map([["apex.exe", Array(7).fill(v)]]);
+    const daily = (v: number) => dailySeries("apex.exe", Array(7).fill(v));
     const deltas = withDeltas(
-      [{ process: "apex.exe", seconds: 7 * 1800, category: neutral }],
-      [{ process: "apex.exe", seconds: 7 * 900, category: neutral }],
+      [app("apex.exe", 7 * 1800, neutral)],
+      [app("apex.exe", 7 * 900, neutral)],
       { currentDaily: daily(1800), previousDaily: daily(900) },
     );
     // The change clears every gate, but neutral time is uncolored.
@@ -367,8 +483,19 @@ describe("dailySecondsByApp", () => {
       [sess(T0 + 3600, T0 + 7200, "code.exe"), sess(T0 + 90000, T0 + 93600, "apex.exe")],
       range,
     );
-    expect(byApp.get("code.exe")).toEqual([3600, 0, 0]);
-    expect(byApp.get("apex.exe")).toEqual([0, 3600, 0]);
+    expect(byApp.get("code")).toEqual([3600, 0, 0]);
+    expect(byApp.get("apex")).toEqual([0, 3600, 0]);
+  });
+
+  it("keys by app row, so aliased processes share one series", () => {
+    const range = { start: new Date(2026, 5, 8), end: new Date(2026, 5, 11) };
+    const byApp = dailySecondsByApp(
+      [sess(T0 + 3600, T0 + 7200, "time.exe"), sess(T0 + 7200, T0 + 9000, "time-tracker.exe")],
+      range,
+      { "time.exe": "Time", "time-tracker.exe": "Time" },
+    );
+    expect([...byApp.keys()]).toEqual(["time"]);
+    expect(byApp.get("time")).toEqual([5400, 0, 0]);
   });
 });
 

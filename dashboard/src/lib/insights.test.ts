@@ -52,6 +52,9 @@ const sessions: Session[] = [
   make(8, at(10, 8), at(10, 9), "hidden.exe"),
   make(9, at(10, 10), at(10, 11), "unknown.exe"),
 ];
+// code.exe and video.exe are unrelated, but aliasing them to one name is the
+// only way to exercise merged rows through the whole Insights pipeline.
+const aliases = { "code.exe": "Studio", "video.exe": "Studio" };
 
 describe("aggregateInsightsSessions", () => {
   it("matches the prior independent aggregation pipeline", () => {
@@ -87,6 +90,31 @@ describe("aggregateInsightsSessions", () => {
     expect(actual.currentDaily).toEqual(dailySecondsByApp(current, range));
     expect(actual.previousDaily).toEqual(dailySecondsByApp(prior, previous));
     expect(actual.historyDays).toEqual(dailyActivitySummaries(history, historyRange, classifier));
+  });
+
+  it("still matches it once aliases merge rows", () => {
+    // Insights runs its own single pass instead of calling topApps, so the two
+    // have to be held to the same definition of an app row — including which
+    // processes fold together and which category survives the fold.
+    const previous = previousRange(range);
+    const visible = sessions.filter((session) => classifier(session)?.isIgnored !== true);
+    const current = clipSessions(visible, range.start.getTime() / 1000, range.end.getTime() / 1000);
+    const prior = clipSessions(
+      visible,
+      previous.start.getTime() / 1000,
+      previous.end.getTime() / 1000,
+    );
+
+    const actual = aggregateInsightsSessions(sessions, range, classifier, 120, "Sunday", aliases);
+
+    expect(actual.currentRanked).toEqual(topApps(current, classifier, aliases));
+    expect(actual.previousRanked).toEqual(topApps(prior, classifier, aliases));
+    expect(actual.currentDaily).toEqual(dailySecondsByApp(current, range, aliases));
+    expect(actual.previousDaily).toEqual(dailySecondsByApp(prior, previous, aliases));
+    expect(actual.currentRanked.find((row) => row.name === "Studio")?.processes).toEqual([
+      "code.exe",
+      "video.exe",
+    ]);
   });
 
   it("sorts an unexpected unordered input before computing focus chains", () => {
@@ -134,6 +162,7 @@ describe("minimum app time", () => {
       weekStart: "Sunday",
       weeklyGoalHours: 0,
       minAppSecondsPerDay: 60,
+      aliases: {},
       focusChainMaxGapSeconds: 120,
       dayStartHour: 0,
       dayEndHour: 24,
@@ -142,14 +171,43 @@ describe("minimum app time", () => {
 
   it("scales the bar by days that recorded activity, not calendar days", () => {
     const model = modelOver(new Date(2026, 5, 1), new Date(2026, 5, 11));
-    expect(model.apps.map((app) => app.process)).toEqual(["code.exe", "often.exe"]);
+    expect(model.apps.map((app) => app.name)).toEqual(["Code", "Often"]);
     expect(model.hiddenAppCount).toBe(1);
   });
 
   it("keeps the same apps eligible when the range widens", () => {
     const wide = modelOver(new Date(2026, 5, 1), new Date(2026, 5, 11));
     const tight = modelOver(new Date(2026, 5, 8), new Date(2026, 5, 10));
-    expect(tight.apps.map((app) => app.process)).toEqual(wide.apps.map((app) => app.process));
+    expect(tight.apps.map((app) => app.key)).toEqual(wide.apps.map((app) => app.key));
+  });
+
+  it("weighs the bar against merged time, not each half separately", () => {
+    // Two builds at 100s each on their own active day: both fall under a
+    // 150s bar apart, and clear it together. Filtering before the merge would
+    // hide an app the user spends real time in.
+    const split: Session[] = [
+      make(1, at(8, 9), at(8, 11), "code.exe"),
+      make(2, at(9, 9), at(9, 11), "code.exe"),
+      make(3, at(8, 12), at(8, 12) + 100, "time.exe"),
+      make(4, at(9, 12), at(9, 12) + 100, "time-tracker.exe"),
+    ];
+    const model = buildInsightsModel({
+      sessions: split,
+      range: { start: new Date(2026, 5, 8), end: new Date(2026, 5, 10) },
+      categories,
+      rules,
+      browserProcesses: [],
+      weekStart: "Sunday",
+      weeklyGoalHours: 0,
+      minAppSecondsPerDay: 75,
+      aliases: { "time.exe": "Time", "time-tracker.exe": "Time" },
+      focusChainMaxGapSeconds: 120,
+      dayStartHour: 0,
+      dayEndHour: 24,
+      labelMode: "date",
+    });
+    expect(model.apps.map((app) => app.name)).toEqual(["Code", "Time"]);
+    expect(model.hiddenAppCount).toBe(0);
   });
 });
 
@@ -168,6 +226,7 @@ describe("packed Insights transport", () => {
       weekStart: "Sunday" as const,
       weeklyGoalHours: 10,
       minAppSecondsPerDay: 0,
+      aliases,
       focusChainMaxGapSeconds: 120,
       dayStartHour: 0,
       dayEndHour: 24,
@@ -188,6 +247,7 @@ describe("packed Insights transport", () => {
       weekStart: "Sunday" as const,
       weeklyGoalHours: 10,
       minAppSecondsPerDay: 0,
+      aliases,
       focusChainMaxGapSeconds: 120,
       dayStartHour: 0,
       dayEndHour: 24,

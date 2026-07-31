@@ -1,8 +1,10 @@
 import { categoryKind, type Classifier } from "./classify";
 import {
+  addTopAppSeconds,
   forEachClippedSession,
   forEachDayChunk,
   isFocusChainBreaker,
+  topAppOf,
   type Session,
 } from "./metrics";
 import {
@@ -76,6 +78,10 @@ function addCategorySeconds(
   into.set(key, (into.get(key) ?? 0) + seconds);
 }
 
+/** A bucket's app totals awaiting `topAppOf`, keyed by `appGroupKey`. */
+type TopAppSeconds = Map<string, { name: string; seconds: number }>;
+const newTopAppSeconds = (): TopAppSeconds => new Map();
+
 export function metricSeconds(totals: ActivityTotals, metric: ActivityMetric): number {
   switch (metric) {
     case "productive":
@@ -125,7 +131,8 @@ export interface DailyActivitySummary {
   uncategorizedSeconds: number;
   /** Seconds per category name, UNCATEGORIZED_LABEL for unmatched sessions. */
   categorySeconds: Map<string, number>;
-  topApp: { process: string; seconds: number } | null;
+  /** Busiest app row of the bucket, already named and merged. */
+  topApp: { name: string; seconds: number } | null;
   /** Longest productive chain contained within this calendar day. */
   longestFocusSeconds: number;
 }
@@ -203,7 +210,8 @@ export interface RhythmCell {
   neutralSeconds: number;
   unproductiveSeconds: number;
   uncategorizedSeconds: number;
-  topApp: { process: string; seconds: number } | null;
+  /** Busiest app row of the bucket, already named and merged. */
+  topApp: { name: string; seconds: number } | null;
 }
 
 export interface WeekdayRhythmSummary {
@@ -223,8 +231,9 @@ export function weekdayRhythmSummaries(
   classifier: Classifier,
   startHour: number,
   endHour: number,
+  aliases?: Record<string, string>,
 ): WeekdayRhythmSummary {
-  const cells: (RhythmCell & { appSeconds: Map<string, number> })[] = [];
+  const cells: (RhythmCell & { appSeconds: TopAppSeconds })[] = [];
   const byKey = new Map<number, (typeof cells)[number]>();
   for (let weekday = 0; weekday < 7; weekday++) {
     for (let hour = startHour; hour < endHour; hour++) {
@@ -237,7 +246,7 @@ export function weekdayRhythmSummaries(
         unproductiveSeconds: 0,
         uncategorizedSeconds: 0,
         topApp: null,
-        appSeconds: new Map<string, number>(),
+        appSeconds: newTopAppSeconds(),
       };
       cells.push(cell);
       byKey.set(weekday * 24 + hour, cell);
@@ -273,20 +282,14 @@ export function weekdayRhythmSummaries(
           else if (kind === "neutral") cell.neutralSeconds += seconds;
           else cell.unproductiveSeconds += seconds;
         }
-        cell.appSeconds.set(session.process, (cell.appSeconds.get(session.process) ?? 0) + seconds);
+        addTopAppSeconds(cell.appSeconds, session.process, aliases, seconds);
       }
       cursor = chunkEnd;
     }
   });
 
   return {
-    cells: cells.map(({ appSeconds, ...cell }) => {
-      let topApp: RhythmCell["topApp"] = null;
-      for (const [process, seconds] of appSeconds) {
-        if (!topApp || seconds > topApp.seconds) topApp = { process, seconds };
-      }
-      return { ...cell, topApp };
-    }),
+    cells: cells.map(({ appSeconds, ...cell }) => ({ ...cell, topApp: topAppOf(appSeconds) })),
     weekdayCounts,
   };
 }
@@ -297,6 +300,7 @@ export function dailyActivitySummaries(
   range: Range,
   classifier: Classifier,
   focusChainMaxGapSeconds = 300,
+  aliases?: Record<string, string>,
 ): DailyActivitySummary[] {
   const days = listDays(range);
   const byKey = new Map(
@@ -313,7 +317,7 @@ export function dailyActivitySummaries(
         categorySeconds: new Map<string, number>(),
         topApp: null,
         longestFocusSeconds: 0,
-        appSeconds: new Map<string, number>(),
+        appSeconds: newTopAppSeconds(),
         focusRunSeconds: 0,
         focusChainEnd: null as number | null,
       },
@@ -344,7 +348,7 @@ export function dailyActivitySummaries(
         else day.unproductiveSeconds += seconds;
       }
       addCategorySeconds(day.categorySeconds, category?.name, seconds);
-      day.appSeconds.set(session.process, (day.appSeconds.get(session.process) ?? 0) + seconds);
+      addTopAppSeconds(day.appSeconds, session.process, aliases, seconds);
       if (category?.isProductive) {
         day.focusRunSeconds =
           day.focusChainEnd !== null && chunk.startSec - day.focusChainEnd <= focusChainMaxGapSeconds
@@ -366,13 +370,10 @@ export function dailyActivitySummaries(
     });
   });
 
-  return [...byKey.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...day }) => {
-    let topApp: DailyActivitySummary["topApp"] = null;
-    for (const [process, seconds] of appSeconds) {
-      if (!topApp || seconds > topApp.seconds) topApp = { process, seconds };
-    }
-    return { ...day, topApp };
-  });
+  return [...byKey.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...day }) => ({
+    ...day,
+    topApp: topAppOf(appSeconds),
+  }));
 }
 
 export interface MonthlyActivitySummary {
@@ -386,7 +387,8 @@ export interface MonthlyActivitySummary {
   unproductiveSeconds: number;
   uncategorizedSeconds: number;
   categorySeconds: Map<string, number>;
-  topApp: { process: string; seconds: number } | null;
+  /** Busiest app row of the bucket, already named and merged. */
+  topApp: { name: string; seconds: number } | null;
   /** Longest productive chain contained within this calendar month. */
   longestFocusSeconds: number;
 }
@@ -403,11 +405,12 @@ export function monthlyActivitySummaries(
   range: Range,
   classifier: Classifier,
   focusChainMaxGapSeconds = 300,
+  aliases?: Record<string, string>,
 ): MonthlyActivitySummary[] {
   const byKey = new Map<
     string,
     MonthlyActivitySummary & {
-      appSeconds: Map<string, number>;
+      appSeconds: TopAppSeconds;
       focusRunSeconds: number;
       focusChainEnd: number | null;
     }
@@ -427,7 +430,7 @@ export function monthlyActivitySummaries(
       categorySeconds: new Map<string, number>(),
       topApp: null,
       longestFocusSeconds: 0,
-      appSeconds: new Map<string, number>(),
+      appSeconds: newTopAppSeconds(),
       focusRunSeconds: 0,
       focusChainEnd: null,
     });
@@ -456,7 +459,7 @@ export function monthlyActivitySummaries(
         else month.unproductiveSeconds += seconds;
       }
       addCategorySeconds(month.categorySeconds, category?.name, seconds);
-      month.appSeconds.set(session.process, (month.appSeconds.get(session.process) ?? 0) + seconds);
+      addTopAppSeconds(month.appSeconds, session.process, aliases, seconds);
       if (category?.isProductive) {
         month.focusRunSeconds =
           month.focusChainEnd !== null && chunk.startSec - month.focusChainEnd <= focusChainMaxGapSeconds
@@ -478,13 +481,10 @@ export function monthlyActivitySummaries(
     });
   });
 
-  return [...byKey.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...month }) => {
-    let topApp: MonthlyActivitySummary["topApp"] = null;
-    for (const [process, seconds] of appSeconds) {
-      if (!topApp || seconds > topApp.seconds) topApp = { process, seconds };
-    }
-    return { ...month, topApp };
-  });
+  return [...byKey.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...month }) => ({
+    ...month,
+    topApp: topAppOf(appSeconds),
+  }));
 }
 
 export interface HoursBucket {

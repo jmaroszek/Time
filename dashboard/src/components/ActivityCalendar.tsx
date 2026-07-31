@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 
-import { cleanProcessName, fmtDuration } from "../lib/format";
+import { fmtDuration } from "../lib/format";
 import {
   metricSeconds,
   metricTrackedShare,
@@ -55,7 +55,7 @@ export default function ActivityCalendar({
   range: Range;
   metric?: ActivityMetric;
 }) {
-  const { aliases, weekStart, palette, theme } = useMeta();
+  const { weekStart, palette, theme } = useMeta();
   const containerRef = useRef<HTMLDivElement>(null);
   const availableWidth = useElementWidth(containerRef, 440);
   const option = useMemo<EChartsOption>(() => {
@@ -81,7 +81,7 @@ export default function ActivityCalendar({
         ...tooltipStyle(theme),
         formatter: (params: { data: [string, number] }) => {
           const day = byKey.get(params.data[0]);
-          return day ? formatActivityCalendarTooltip(day, metric, aliases) : "";
+          return day ? formatActivityCalendarTooltip(day, metric) : "";
         },
       },
       visualMap: {
@@ -132,7 +132,7 @@ export default function ActivityCalendar({
         },
       ],
     };
-  }, [summaries, metric, aliases, weekStart, range, palette, theme, availableWidth]);
+  }, [summaries, metric, weekStart, range, palette, theme, availableWidth]);
 
   const { weekColumns, cellPx, orientation } = calendarGrid(range, weekStart, availableWidth);
   const rows = orientation === "vertical" ? weekColumns : 7;
@@ -180,11 +180,10 @@ export function calendarGrid(
 export function formatActivityCalendarTooltip(
   day: DailyActivitySummary,
   metric: ActivityMetric = "tracked",
-  aliases?: Record<string, string>,
 ): string {
   const date = `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}`;
   const topApp = metric === "tracked" && day.topApp
-    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(cleanProcessName(day.topApp.process, aliases))} · ${fmtDuration(day.topApp.seconds)}</div>`
+    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(day.topApp.name)} · ${fmtDuration(day.topApp.seconds)}</div>`
     : "";
   const share = metricTrackedShare(day, metric);
   const word = ACTIVITY_METRIC_WORDS[metric];
