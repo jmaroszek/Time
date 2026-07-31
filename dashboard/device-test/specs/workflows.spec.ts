@@ -67,7 +67,7 @@ test("@workflow onboarding rolls back consent when tracker startup fails", async
 test("@workflow restore dispatches only after an explicit backup selection", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Restore backupâ€¦" }).click();
+  await page.getByRole("button", { name: "Restore backup…" }).click();
   const dialog = page.getByRole("dialog", { name: "Restore backup" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Restore and restart" })).toBeDisabled();
@@ -140,7 +140,7 @@ test("@workflow backup and restore failures remain actionable", async ({ page })
 
   await page.goto("/?fail=restore_database");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Restore backupâ€¦" }).click();
+  await page.getByRole("button", { name: "Restore backup…" }).click();
   const dialog = page.getByRole("dialog", { name: "Restore backup" });
   await dialog.getByRole("radio").first().click();
   await dialog.getByRole("button", { name: "Restore and restart" }).click();
@@ -235,6 +235,30 @@ test("@workflow all-history erase disables recording before stopping and erasing
   await expect.poll(() =>
     page.evaluate(() => window.__TIME_DEVICE_TEST__.sessionCount())
   ).toBe(0);
+});
+
+test("@workflow the panel's Manage row offers rename alongside the hover pencil", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.locator("tbody tr button").first().click();
+
+  const panel = page.getByRole("complementary", { name: /^Activity details/ });
+  // The pencil only exists on hover, so the Manage row is the findable way in.
+  // Exact, or this also matches the pencil's "Rename Explorer".
+  await panel.getByRole("button", { name: "Rename", exact: true }).click();
+
+  // It drives the same editor the pencil does — on the heading, not in place.
+  const field = panel.getByRole("textbox", { name: /^Rename / });
+  await expect(field).toBeFocused();
+  await field.fill("File Manager");
+  await field.press("Enter");
+
+  await expect(panel.getByRole("heading", { name: "File Manager" })).toBeVisible();
+  await expect.poll(async () => JSON.parse((await fixtureSettings(page)).process_aliases)).toMatchObject({
+    "explorer.exe": "File Manager",
+  });
 });
 
 test("@workflow Top Apps totals processes that share a display name as one row", async ({

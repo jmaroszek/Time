@@ -3403,6 +3403,14 @@ function EntityPanel({
       void onSaveAlias(aliasDraft);
     }
   };
+  // Two ways in, one state. The pencil is the direct one and sits on the name
+  // itself; the Manage row is where someone who has never noticed a hover-only
+  // control goes looking for what can be done to this entity.
+  const beginRename = () => {
+    cancelAlias.current = false;
+    setAliasDraft(savedAlias);
+    setRenaming(true);
+  };
 
   // The standing rule for this exact app or domain, when there is one. It is
   // the panel's one real "current value", so the menu can show it instead of
@@ -3475,7 +3483,7 @@ function EntityPanel({
           <span className="min-w-0 truncate text-lg font-semibold">{entity.displayName}</span>
           <button
             type="button"
-            onClick={() => { cancelAlias.current = false; setAliasDraft(savedAlias); setRenaming(true); }}
+            onClick={beginRename}
             title="Rename"
             aria-label={`Rename ${entity.displayName}`}
             className="shrink-0 rounded p-1 text-ink-3 opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
@@ -3746,6 +3754,14 @@ function EntityPanel({
               broke apart one at a time, and a narrow panel got the heading and
               a lone button on one line with the second strung below it. */}
           <span className="flex items-center gap-2">
+            {/* First of the three, and the only harmless one: the row reads
+                left to right as rename, stop recording, delete. */}
+            <Button
+              onClick={beginRename}
+              title={`Change how this ${kindLabel} is labeled throughout Time. Recorded activity is untouched.`}
+            >
+              Rename
+            </Button>
             <Button
               onClick={onExclude}
               title={`Never record this ${kindLabel} again. Existing history is kept.`}
