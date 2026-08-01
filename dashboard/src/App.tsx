@@ -121,6 +121,10 @@ function Shell() {
     setFirstSessionSec(first);
   }, []);
 
+  const refreshTrackerStatus = useCallback(async () => {
+    setStatus(await fetchTrackerStatus());
+  }, []);
+
   useEffect(() => subscribeHistoryInvalidation((revision) => {
     setHistoryRevision(revision);
     void refreshFirstSession().catch(() => {});
@@ -253,7 +257,13 @@ function Shell() {
         )}
       </header>
 
-      {firstRun && <FirstRunPanel status={status} onOpenSettings={() => setTab("settings")} />}
+      {firstRun && (
+        <FirstRunPanel
+          status={status}
+          onRefreshStatus={refreshTrackerStatus}
+          onOpenSettings={() => setTab("settings")}
+        />
+      )}
 
       {/* A flex column so a tab can opt into filling the leftover viewport
           height — Activity does, to bound its own scroll wells. Tabs that do
@@ -545,9 +555,11 @@ function ConsentCheck({
  *  right now. */
 function FirstRunPanel({
   status,
+  onRefreshStatus,
   onOpenSettings,
 }: {
   status: TrackerStatus;
+  onRefreshStatus: () => Promise<void>;
   onOpenSettings: () => void;
 }) {
   const meta = useMeta();
@@ -575,7 +587,7 @@ function FirstRunPanel({
     try {
       await updateSetting("recording_consent", "1");
       await invoke("start_tracker");
-      await meta.refresh();
+      await Promise.all([meta.refresh(), onRefreshStatus()]);
       setStartAttempted(true);
       if (needsStartup) setOfferStartup(true);
     } catch (cause) {
