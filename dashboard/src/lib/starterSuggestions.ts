@@ -15,11 +15,12 @@
 // Three things deliberately get no suggestion:
 //
 //   browsers    A browser's category would cover every site visited inside it.
-//               Domains are only visible when a URL-in-title extension is
-//               installed, so most browser time carries none, and a browser rule
-//               would swallow it *and* take the browser out of the queue that
-//               would have prompted a fix. RECOGNIZED_NOT_SUGGESTED lists them,
-//               and the caller's live `browser_processes` set is checked too.
+//               Domains are only visible when Time Website Integration (or a
+//               compatible legacy extension) is installed, so most browser time
+//               carries none, and a browser rule would swallow it *and* take the
+//               browser out of the queue that would have prompted a fix.
+//               RECOGNIZED_NOT_SUGGESTED lists them, and the caller's live
+//               `browser_processes` set is checked too.
 //   bimodal     Discord and OBS serve work and leisure for different people. A
 //               single default merges two things a tracker exists to separate.
 //   everything  An unlisted app is not a failure. Games in particular cannot be
@@ -245,14 +246,14 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
  * not helpfully add discord.exe to the catalog above.
  */
 export const RECOGNIZED_NOT_SUGGESTED: Readonly<Record<string, string>> = {
-  "chrome.exe": "Time can't tell which sites without the URL-in-title extension",
-  "msedge.exe": "Time can't tell which sites without the URL-in-title extension",
-  "firefox.exe": "Time can't tell which sites without the URL-in-title extension",
-  "brave.exe": "Time can't tell which sites without the URL-in-title extension",
-  "opera.exe": "Time can't tell which sites without the URL-in-title extension",
-  "vivaldi.exe": "Time can't tell which sites without the URL-in-title extension",
-  "arc.exe": "Time can't tell which sites without the URL-in-title extension",
-  "chromium.exe": "Time can't tell which sites without the URL-in-title extension",
+  "chrome.exe": "Time can't tell which sites without Time Website Integration",
+  "msedge.exe": "Time can't tell which sites without Time Website Integration",
+  "firefox.exe": "Time can't tell which sites without Time Website Integration",
+  "brave.exe": "Time can't tell which sites without Time Website Integration",
+  "opera.exe": "Time can't tell which sites without Time Website Integration",
+  "vivaldi.exe": "Time can't tell which sites without Time Website Integration",
+  "arc.exe": "Time can't tell which sites without Time Website Integration",
+  "chromium.exe": "Time can't tell which sites without Time Website Integration",
   "discord.exe": "Work chat for some people, leisure for others",
   "obs64.exe": "Screen recording is work for some people, streaming is not for others",
   "obs32.exe": "Screen recording is work for some people, streaming is not for others",
@@ -397,7 +398,7 @@ export function recognizedWithoutSuggestion<T extends SuggestibleEntity>(
     const name = entity.key.trim().toLowerCase();
     const reason = RECOGNIZED_NOT_SUGGESTED[name]
       ?? (browserProcesses.has(name)
-        ? "Time can't tell which sites without the URL-in-title extension"
+        ? "Time can't tell which sites without Time Website Integration"
         : null);
     if (reason) recognized.push({ entity, reason });
   }

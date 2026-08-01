@@ -142,9 +142,10 @@ END;
 #
 # Browsing exists because browser time is the largest single block of a typical
 # day and the one thing Time must never classify on the user's behalf — domains
-# are only visible with a third-party extension, so a browser rule would swallow
-# the rest. A neutral home the user can accept keeps that time honest, and
-# Website rules (priority 1) still outrank the App rule (priority 3) later.
+# are only visible when a URL-title extension is installed, so a browser rule
+# would swallow the rest. A neutral home the user can accept keeps that time
+# honest, and Website rules (priority 1) still outrank the App rule (priority 3)
+# later.
 #
 # Colors come from the dashboard's category swatch list and must stay out of the
 # hue arcs productivity reserves (green ~150-165deg, red-orange ~10-25deg), or a

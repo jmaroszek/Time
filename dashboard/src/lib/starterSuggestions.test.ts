@@ -226,7 +226,7 @@ describe("suggesting", () => {
 describe("recognized without a suggestion", () => {
   it("explains a browser rather than skipping it silently", () => {
     const [recognized] = recognizedWithoutSuggestion([app("chrome.exe")], BROWSERS);
-    expect(recognized?.reason).toContain("URL-in-title extension");
+    expect(recognized?.reason).toContain("Time Website Integration");
   });
 
   it("explains a bimodal app in terms of people, not the app", () => {

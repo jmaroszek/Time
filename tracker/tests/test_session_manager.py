@@ -349,6 +349,22 @@ def test_browser_session_gets_domain(manager, store):
     assert store.opened[0][3] == "Video"
 
 
+def test_v1_browser_session_stores_clean_title_and_normalized_domain(manager, store):
+    manager.tick(
+        active(
+            1000.0,
+            process="chrome.exe",
+            title=(
+                "Pull request [[TIME_URL_V1:"
+                "https://www.GitHub.com/openai/example/pull/42]]"
+            ),
+        )
+    )
+    assert store.opened[0][3] == "Pull request"
+    assert store.opened[0][4] == "github.com"
+    assert "TIME_URL" not in store.opened[0][3]
+
+
 def test_titles_are_omitted_unless_enabled(store):
     manager = SessionManager(store=store, settings=Settings(record_window_titles=False))
     manager.tick(active(1000.0, process="code.exe", title="private-document.txt"))
@@ -360,6 +376,59 @@ def test_browser_domains_are_kept_when_titles_are_disabled(store):
     manager.tick(active(1000.0, process="chrome.exe", title="Account - https://example.com/private"))
     assert store.opened[0][3] == ""
     assert store.opened[0][4] == "example.com"
+
+
+def test_v1_browser_domain_is_kept_when_titles_are_disabled(store):
+    manager = SessionManager(store=store, settings=Settings(record_window_titles=False))
+    manager.tick(
+        active(
+            1000.0,
+            process="firefox.exe",
+            title="Account [[TIME_URL_V1:https://example.com/private/path]]",
+        )
+    )
+    assert store.opened[0][3] == ""
+    assert store.opened[0][4] == "example.com"
+
+
+def test_v1_path_only_change_does_not_create_a_session_boundary(manager, store):
+    manager.tick(
+        active(
+            1000.0,
+            process="chrome.exe",
+            title="Docs [[TIME_URL_V1:https://example.com/a]]",
+        )
+    )
+    manager.tick(
+        active(
+            1001.0,
+            process="chrome.exe",
+            title="Docs [[TIME_URL_V1:https://example.com/b]]",
+        )
+    )
+    manager.tick(
+        active(
+            1002.0,
+            process="chrome.exe",
+            title="Docs [[TIME_URL_V1:https://example.com/b]]",
+        )
+    )
+    assert len(store.opened) == 1
+    assert store.closed == {}
+
+
+def test_malformed_v1_marker_fails_closed_without_legacy_domain(manager, store):
+    raw = "Account [[TIME_URL_V1:https://example.com/private?secret=1]]"
+    manager.tick(active(1000.0, process="chrome.exe", title=raw))
+    assert store.opened[0][3] == raw
+    assert store.opened[0][4] is None
+
+
+def test_non_browser_process_does_not_interpret_v1_marker(manager, store):
+    raw = "Editor [[TIME_URL_V1:https://example.com/private]]"
+    manager.tick(active(1000.0, process="code.exe", title=raw))
+    assert store.opened[0][3] == raw
+    assert store.opened[0][4] is None
 
 
 def test_no_recording_without_consent(store):
@@ -400,6 +469,24 @@ def test_website_exclusion_works_when_title_storage_is_disabled(store):
     )
     assert store.opened[0][3] == ""
     assert store.opened[0][4] == "openai.com"
+
+
+def test_v1_website_exclusion_works_when_title_storage_is_disabled(store):
+    manager = SessionManager(
+        store=store,
+        settings=Settings(
+            record_window_titles=False,
+            excluded_domains=frozenset({"example.com"}),
+        ),
+    )
+    manager.tick(
+        active(
+            1000.0,
+            process="chrome.exe",
+            title="Private [[TIME_URL_V1:https://example.com/path]]",
+        )
+    )
+    assert store.opened == []
 
 
 def test_excluded_website_bypasses_title_debounce(store):

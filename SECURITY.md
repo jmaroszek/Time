@@ -30,8 +30,11 @@ device encryption or BitLocker when protection at rest matters.
 
 Window titles can contain document names, message subjects, or other sensitive
 text. Leave title storage off unless that detail is worth the privacy cost.
-Third-party browser extensions used for optional site splitting have their own
-permissions and trust model; Time does not install or control them.
+The optional first-party Time Website Integration extension requires broad
+HTTP/HTTPS site access so it can add the current origin and path to the
+OS-visible browser title. It excludes queries, fragments, and private browsing;
+it has no storage, network, telemetry, or named browser API permission. Time
+derives the normalized domain and discards the raw origin/path before recording.
 
 SQLite `secure_delete` is enabled. History deletion checkpoints the WAL and
 compacts the database, but separate backup files are intentionally retained and

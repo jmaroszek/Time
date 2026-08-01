@@ -814,7 +814,7 @@ export default function SettingsTab({
           stacked
           compact
           label="Website detection"
-          help="Time reads websites from browser window titles, which needs a third-party extension that puts the web address there. Without one, browser time is not split by site."
+          help="Time Website Integration adds a privacy-reduced address to the browser title. Time uses its domain for Website rules and discards the path; without the extension, browser time is not split by site."
           control={<ExtensionLinks />}
         />
       </Section>
