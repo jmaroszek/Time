@@ -125,11 +125,14 @@ INSERT OR IGNORE INTO settings (key,value)
     WHERE NOT EXISTS (SELECT 1 FROM categories);
 WITH starter(name, color, is_productive, is_neutral, is_ignored, sort_order) AS (
     VALUES
-        ('Focus', '#2f6fc0', 1, 0, 0, 1),
-        ('Learning', '#9c8ff0', 1, 0, 0, 2),
-        ('Communication', '#56c8d8', 0, 1, 0, 3),
+        -- Mirrors _SEED_CATEGORIES in tracker/db.py, which explains why these
+        -- names describe kinds of application rather than kinds of intent.
+        -- Either half may create the database, so the two lists must agree.
+        ('Work', '#2f6fc0', 1, 0, 0, 1),
+        ('Communication', '#56c8d8', 0, 1, 0, 2),
+        ('Browsing', '#e0a53a', 0, 1, 0, 3),
         ('Entertainment', '#e75fa0', 0, 0, 0, 4),
-        ('Utilities', '#828994', 0, 1, 0, 5),
+        ('System', '#828994', 0, 1, 0, 5),
         ('Ignored', '#44474e', 0, 0, 1, 99)
 )
 INSERT OR IGNORE INTO categories
@@ -2224,6 +2227,33 @@ pub(crate) mod tests {
                     starter_pending.as_str()
                 ),
                 (6, 0, "0", "0", "1", "1")
+            );
+            // The same list test_seed_categories_and_settings_present asserts on
+            // the Python side. Either half may create the database first, so the
+            // two seed declarations drifting would hand one user a taxonomy the
+            // other never sees — and nothing else fails when it happens.
+            let seeded: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+                "SELECT name, is_productive, is_neutral, is_ignored FROM categories ORDER BY sort_order",
+            )
+            .fetch_all(&database.pool)
+            .await
+            .unwrap();
+            let seeded: Vec<(&str, i64, i64, i64)> = seeded
+                .iter()
+                .map(|(name, productive, neutral, ignored)| {
+                    (name.as_str(), *productive, *neutral, *ignored)
+                })
+                .collect();
+            assert_eq!(
+                seeded,
+                vec![
+                    ("Work", 1, 0, 0),
+                    ("Communication", 0, 1, 0),
+                    ("Browsing", 0, 1, 0),
+                    ("Entertainment", 0, 0, 0),
+                    ("System", 0, 1, 0),
+                    ("Ignored", 0, 0, 1),
+                ]
             );
             database.pool.close().await;
             drop(database);

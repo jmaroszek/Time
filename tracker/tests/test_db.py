@@ -31,11 +31,11 @@ def test_seed_categories_and_settings_present(conn):
         " ORDER BY sort_order"
     ).fetchall()
     assert [tuple(row) for row in rows] == [
-        ("Focus", 1, 0, 0),
-        ("Learning", 1, 0, 0),
+        ("Work", 1, 0, 0),
         ("Communication", 0, 1, 0),
+        ("Browsing", 0, 1, 0),
         ("Entertainment", 0, 0, 0),
-        ("Utilities", 0, 1, 0),
+        ("System", 0, 1, 0),
         ("Ignored", 0, 0, 1),
     ]
     assert conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0
@@ -76,8 +76,12 @@ def test_seed_does_not_add_starter_categories_to_existing_taxonomy(tmp_path):
 def test_current_schema_constraints_and_category_cleanup(conn):
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO sessions (start_ts,end_ts,process) VALUES (20,10,'bad.exe')")
+    # Named out of the seed taxonomy's namespace on purpose: categories.name is
+    # UNIQUE and the fixture connection is already seeded, so a name that later
+    # became a starter category would fail here for a reason unrelated to the
+    # cascade this test is about.
     category_id = conn.execute(
-        "INSERT INTO categories (name,color) VALUES ('Work','#123456') RETURNING id"
+        "INSERT INTO categories (name,color) VALUES ('Cascade fixture','#123456') RETURNING id"
     ).fetchone()[0]
     conn.execute(
         "INSERT INTO rules (match_type,pattern,category_id,priority) VALUES ('process','editor.exe',?,3)",

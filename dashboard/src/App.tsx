@@ -418,12 +418,15 @@ function PrivacyOnboarding() {
     try {
       if (meta.settings.starter_categories_pending === "1") {
         if (!startWithEssentials) {
+          // Exactly what _SEED_CATEGORIES inserts, minus the functional Ignored
+          // row the app keeps either way. A name left out here survives as an
+          // orphan the reader never asked for.
           const starterNames = new Set([
-            "Focus",
-            "Learning",
+            "Work",
             "Communication",
+            "Browsing",
             "Entertainment",
-            "Utilities",
+            "System",
           ]);
           for (const category of meta.categories) {
             if (starterNames.has(category.name)) await deleteCategory(category.id);
@@ -481,7 +484,7 @@ function PrivacyOnboarding() {
               checked={startWithEssentials}
               onChange={setStartWithEssentials}
               title="Start with essential categories"
-              detail="Adds Focus, Learning, Communication, Entertainment, and Utilities without classifying any apps or sites. You can rename, change, or delete them later."
+              detail="Adds Work, Communication, Browsing, Entertainment, and System without classifying any apps or sites. You can rename, change, or delete them later."
             />
           )}
           <ConsentCheck
