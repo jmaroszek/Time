@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { invoke } from "@tauri-apps/api/core";
 
 import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePicker";
-import { Checkbox, Spinner } from "./components/ui";
+import { Button, Checkbox, Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
 import { currentHistoryRevision, subscribeHistoryInvalidation } from "./lib/historyInvalidation";
@@ -28,6 +28,11 @@ type Tab = "insights" | "activity" | "settings";
 /** Ties the Activity tab to its backlog hint without putting the hint inside
  *  the button, where it would become part of the tab's accessible name. */
 const BACKLOG_HINT_ID = "activity-backlog-hint";
+
+/** How long the welcome panel waits for a heartbeat before admitting it cannot
+ *  tell whether the tracker came up. Comfortably past the status poll's ten
+ *  seconds, so a slow first heartbeat is not reported as a failure. */
+const TRACKER_CONFIRM_MS = 25_000;
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "insights", label: "Insights" },
@@ -57,6 +62,10 @@ function Shell() {
   // send the reader to the list that owns exclusions, and Activity clears the
   // request once it has mounted with it so a later tab switch lands normally.
   const [openExclusions, setOpenExclusions] = useState(false);
+  // Same one-shot shape as openExclusions: a control elsewhere can send the
+  // reader to a specific section of Settings, and Settings clears the request
+  // once it has acted on it.
+  const [highlightSection, setHighlightSection] = useState<string | null>(null);
   const [preset, setPreset] = useState<PresetOrCustom>("last7");
   const [rolling, setRolling] = useState(true);
   const [customRange, setCustomRange] = useState<Range | null>(null);
@@ -117,8 +126,16 @@ function Shell() {
     return () => clearInterval(id);
   }, [ready, firstSessionSec, refreshFirstSession]);
   const firstRun = status !== null && status.totalSessionCount === 0;
+  // Depend on the answer, not on `status` itself. fetchTrackerStatus resolves a
+  // new object every time, so keeping `status` in the dependency list tore this
+  // effect down and rebuilt it on every poll — and because the body starts with
+  // an immediate load(), each rebuild issued another query at once. On a
+  // database with no sessions the guard below never fires, so that ran as an
+  // unbounded loop: roughly twelve hundred queries a second, for as long as a
+  // fresh install went without its first session.
+  const awaitingFirstSession = status === null || status.totalSessionCount === 0;
   useEffect(() => {
-    if (!ready || (status !== null && status.totalSessionCount > 0)) return;
+    if (!ready || !awaitingFirstSession) return;
     let cancelled = false;
     const load = () =>
       void fetchTrackerStatus()
@@ -132,7 +149,7 @@ function Shell() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [ready, status]);
+  }, [ready, awaitingFirstSession]);
 
   // The backlog behind the Activity tab's mark. It lives here rather than in
   // ActivityTab because the reader who most needs telling is the one who has
@@ -210,14 +227,23 @@ function Shell() {
         )}
       </header>
 
-      {firstRun && <FirstRunPanel status={status} />}
+      {firstRun && <FirstRunPanel status={status} onOpenSettings={() => setTab("settings")} />}
 
       {/* A flex column so a tab can opt into filling the leftover viewport
           height — Activity does, to bound its own scroll wells. Tabs that do
           not simply size to their content, as they did before. */}
       <main className="flex min-h-0 flex-1 flex-col">
         {tab === "insights" && (
-          <OverviewTab range={range} preset={preset} firstSessionSec={firstSessionSec} view={insightsView} />
+          <OverviewTab
+            range={range}
+            preset={preset}
+            firstSessionSec={firstSessionSec}
+            view={insightsView}
+            onOpenSettings={() => {
+              setHighlightSection("Goals");
+              setTab("settings");
+            }}
+          />
         )}
         {tab === "activity" && (
           <ActivityTab
@@ -244,6 +270,8 @@ function Shell() {
               setActivityView("rules");
               setTab("activity");
             }}
+            highlightSection={highlightSection}
+            onHighlightShown={() => setHighlightSection(null)}
           />
         )}
       </main>
@@ -386,21 +414,27 @@ function PrivacyOnboarding() {
         <p className="text-micro font-bold uppercase tracking-[.12em] text-accent">Private by design</p>
         <h1 className="mt-2 text-lg font-semibold text-ink">Choose what Time may record</h1>
         <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-2">
-          Time has no account, server, analytics, or telemetry. Activity is written only to your
-          per-user SQLite database. Nothing is uploaded.
+          Time has no accounts, servers, or telemetry. All activity is recorded and analyzed
+          locally. Your data stays yours forever.
         </p>
 
         <div className="mt-5 space-y-3 text-sm">
           <div className="rounded-xl border border-edge bg-surface-dim p-4">
             <p className="font-medium">When tracking is enabled</p>
             <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
-              Time stores the foreground app name, start and end time, and idle or lock periods.
-              Browser domains are derived in memory when an optional URL-in-title extension is
-              present; URL paths, queries, fragments, and credentials are never stored. Awake AFK
-              periods retain the foreground app and available domain, but never the window title.
-              Locked periods retain no foreground identity, and sleep is not recorded.
+              Time tracks which apps you use and for how long. In your browser, it can also track
+              the websites you visit, but never the specific pages.
             </p>
           </div>
+          {/* Ordered by default state, not importance: the two boxes that ship
+              checked come first, so the one setting a reader has to opt into is
+              also the last thing they pass on the way to the button. */}
+          <ConsentCheck
+            checked={startAtLogin}
+            onChange={setStartAtLogin}
+            title="Start the tracker when I sign in"
+            detail="Runs only for this Windows account. You can disable tracking and startup later in Settings."
+          />
           {meta.settings.starter_categories_pending === "1" && (
             <ConsentCheck
               checked={startWithEssentials}
@@ -412,14 +446,8 @@ function PrivacyOnboarding() {
           <ConsentCheck
             checked={windowTitles}
             onChange={setWindowTitles}
-            title="Also store sanitized window titles"
-            detail="Off by default. Titles can reveal document names, email subjects, or other sensitive text. Browser URLs are stripped even when this is enabled."
-          />
-          <ConsentCheck
-            checked={startAtLogin}
-            onChange={setStartAtLogin}
-            title="Start the tracker when I sign in"
-            detail="Runs only for this Windows account. You can disable tracking or startup later in Settings."
+            title="Store window titles"
+            detail="Storing window titles lets you create rules that separate work from leisure within the same app. Titles may include document names, email subjects, or other sensitive text, so this setting is off by default."
           />
         </div>
 
@@ -431,7 +459,7 @@ function PrivacyOnboarding() {
             onClick={() => void complete(true)}
             className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-opacity disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Enable private tracking"}
+            {saving ? "Saving…" : "Start tracking"}
           </button>
           <button
             type="button"
@@ -477,38 +505,136 @@ function ConsentCheck({
   );
 }
 
-/** Shown while this database has zero sessions: says what is recorded, that it
- *  stays local, whether the tracker is live, and the browser-extension caveat.
- *  Disappears on its own once the first session lands. */
-function FirstRunPanel({ status }: { status: TrackerStatus }) {
+/** Shown while this database has zero sessions, and only until the first one
+ *  lands. It deliberately does not restate what Time records or repeat the
+ *  browser-extension caveat: the consent screen has just said the first, and
+ *  the second now has two better-targeted homes — the Activity hint, which
+ *  fires when browser time actually goes unsplit, and the Settings row. This
+ *  panel answers one question, which is whether anything is being recorded
+ *  right now. */
+function FirstRunPanel({
+  status,
+  onOpenSettings,
+}: {
+  status: TrackerStatus;
+  onOpenSettings: () => void;
+}) {
+  const meta = useMeta();
+  const banner = useBanner();
+  const [starting, setStarting] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const [offerStartup, setOfferStartup] = useState(false);
+  const [startAttempted, setStartAttempted] = useState(false);
+  const [startUnconfirmed, setStartUnconfirmed] = useState(false);
   const heartbeatAge = status.lastHeartbeat == null ? null : Date.now() / 1000 - status.lastHeartbeat;
   const trackerLive = heartbeatAge !== null && heartbeatAge < 120;
+
+  // Consent first, then launch: a tracker started while recording_consent is
+  // "0" comes up and records nothing, which would read here as a button that
+  // did nothing at all. Startup-at-login is deliberately not bundled in — it
+  // writes a registry entry, and this button asks for tracking, not for a
+  // permanent change to the machine. It is offered separately below, because
+  // tracking that silently stops at the next shutdown is a worse surprise than
+  // being asked.
+  const startTracking = async () => {
+    // Read before the refresh: `meta` is this render's snapshot, so asking it
+    // after meta.refresh() would answer from the pre-refresh value anyway.
+    const needsStartup = meta.settings.launch_at_login !== "1";
+    setStarting(true);
+    try {
+      await updateSetting("recording_consent", "1");
+      await invoke("start_tracker");
+      await meta.refresh();
+      setStartAttempted(true);
+      if (needsStartup) setOfferStartup(true);
+    } catch (cause) {
+      banner.report(cause, "tracker startup");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  // start_tracker resolves as soon as the process is spawned, not once it is
+  // recording — a tracker that dies immediately (a stale instance already
+  // holding the mutex, a failed launch) reports success and then changes
+  // nothing on screen. Give it a window to prove itself by writing a heartbeat,
+  // and say so plainly if it never does, rather than leaving a button that
+  // looks like it did nothing.
+  useEffect(() => {
+    if (!startAttempted) return;
+    if (trackerLive) {
+      setStartUnconfirmed(false);
+      setStartAttempted(false);
+      return;
+    }
+    const id = setTimeout(() => setStartUnconfirmed(true), TRACKER_CONFIRM_MS);
+    return () => clearTimeout(id);
+  }, [startAttempted, trackerLive]);
+
+  const enableStartup = async () => {
+    setRegistering(true);
+    try {
+      await updateSetting("launch_at_login", "1");
+      await invoke("set_launch_at_login", { enabled: true });
+      await meta.refresh();
+      setOfferStartup(false);
+    } catch (cause) {
+      banner.report(cause, "startup registration");
+    } finally {
+      setRegistering(false);
+    }
+  };
+
   return (
     <section className="rounded-[14px] border border-accent/25 bg-gradient-to-b from-accent/[.06] to-accent/[.02] px-5 py-4 text-xs leading-relaxed">
       <p className="text-row font-semibold">Welcome to Time</p>
-      <p className="mt-2 text-ink-2">
-        Time records foreground apps and timing. Window titles are stored only if you opted in;
-        browser URLs are stripped before anything reaches the database. Everything stays in a
-        local file and nothing is uploaded.
-      </p>
-      <p className="mt-2 flex flex-wrap items-center gap-2">
-        <span className={`h-2 w-2 rounded-full ${trackerLive ? "bg-good-data" : "bg-bad"}`} />
-        {trackerLive ? (
-          <span className="text-ink-2">
-            The tracker is running — your first activity will appear here within a minute.
-          </span>
-        ) : (
-          <span className="text-ink-2">
-            The tracker isn&apos;t running yet — nothing is recorded until it starts. Its status
-            also lives in Settings.
-          </span>
-        )}
-      </p>
-      <p className="mt-2 text-ink-2">
-        Site splitting is optional and requires a third-party extension that adds the current URL
-        to the browser title. Such extensions can see browsing data, so review their permissions
-        before installing one. Without an extension, browser time is tracked per app only.
-      </p>
+      {trackerLive ? (
+        <>
+          <p className="mt-2 flex flex-wrap items-center gap-2 text-ink-2">
+            <span className="h-2 w-2 rounded-full bg-good-data" />
+            Tracking is on. Your first activity will appear here within a minute.
+          </p>
+          {offerStartup && (
+            <div className="mt-3 rounded-[10px] border border-edge bg-surface-2/60 px-3 py-2.5">
+              <p className="text-ink-2">
+                Time won&rsquo;t come back on its own after you shut down. Start it automatically
+                when you sign in?
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  variant="primary"
+                  disabled={registering}
+                  onClick={() => void enableStartup()}
+                >
+                  {registering ? "Saving…" : "Start at sign-in"}
+                </Button>
+                <Button onClick={() => setOfferStartup(false)}>Not now</Button>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="mt-2 flex flex-wrap items-center gap-2 text-ink-2">
+            <span className="h-2 w-2 rounded-full bg-bad" />
+            The tracker isn&rsquo;t running, so nothing is being recorded.
+          </p>
+          <p className="mt-1 text-ink-2">
+            Start tracking when you&rsquo;re ready, or review your settings first.
+          </p>
+          {startUnconfirmed && (
+            <p className="mt-2 text-bad">
+              Time couldn&rsquo;t confirm the tracker started. Open Settings to check its status.
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="primary" disabled={starting} onClick={() => void startTracking()}>
+              {starting ? "Starting…" : "Start tracking"}
+            </Button>
+            <Button onClick={onOpenSettings}>Open settings</Button>
+          </div>
+        </>
+      )}
     </section>
   );
 }

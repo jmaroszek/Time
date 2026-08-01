@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -10,6 +12,7 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 
 import { Button, ConfirmDialog, Spinner, TrashButton } from "../components/ui";
+import { ExtensionLinks } from "../components/ExtensionLinks";
 import { displayBrowserProcesses, normalizeBrowserProcesses } from "../lib/browsers";
 import { getDbPath } from "../lib/db";
 import { explainDbError } from "../lib/dbErrors";
@@ -160,12 +163,23 @@ function trapModalFocus(event: KeyboardEvent<HTMLDivElement>) {
 
 type SaveOutcome = "idle" | "saved" | "failed";
 
+/** The section currently being pointed at, so SettingsSection can mark itself
+ *  without every one of the ten call sites having to thread a prop it does not
+ *  otherwise care about. */
+const FlashedSection = createContext<string | null>(null);
+
 export default function SettingsTab({
   onManageExclusions,
   onManageCategories,
+  highlightSection = null,
+  onHighlightShown,
 }: {
   onManageExclusions: () => void;
   onManageCategories: () => void;
+  /** A section title to scroll to and mark on arrival — a one-shot request from
+   *  whatever sent the reader here, cleared through onHighlightShown. */
+  highlightSection?: string | null;
+  onHighlightShown?: () => void;
 }) {
   const meta = useMeta();
   const banner = useBanner();
@@ -173,6 +187,9 @@ export default function SettingsTab({
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [startingTracker, setStartingTracker] = useState(false);
   const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
+  const [flashedSection, setFlashedSection] = useState<string | null>(null);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [saveOutcome, setSaveOutcome] = useState<SaveOutcome>("idle");
   const writeQueueRef = useRef(new KeyedSerialQueue());
   const writeSequenceRef = useRef(0);
@@ -190,6 +207,33 @@ export default function SettingsTab({
   }, [meta.settings]);
   useEffect(() => () => {
     if (saveOutcomeTimerRef.current) clearTimeout(saveOutcomeTimerRef.current);
+  }, []);
+
+  // The timer is held in a ref rather than cleared by this effect's teardown:
+  // onHighlightShown clears the request that triggered it, which re-runs the
+  // effect immediately — a teardown-owned timer would cancel the mark before
+  // anyone saw it.
+  useEffect(() => {
+    if (!highlightSection) return;
+    const slug = sectionSlug(highlightSection);
+    setFlashedSection(highlightSection);
+    onHighlightShown?.();
+    // Instant, and after the tab has settled. This effect runs in the commit
+    // that mounts Settings; scrolling from there does not survive, because the
+    // panel is still being built around it — under StrictMode it is mounted
+    // twice, and the viewport's scrollTop clamps back to zero while the
+    // content it was scrolled over is briefly gone. A smooth scroll fares
+    // worse still: the charts sizing themselves cancel it outright.
+    const scroll = setTimeout(() => {
+      document.getElementById(slug)?.scrollIntoView({ block: "start" });
+    }, SECTION_SCROLL_DELAY_MS);
+    scrollTimerRef.current = scroll;
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setFlashedSection(null), SECTION_FLASH_MS);
+  }, [highlightSection, onHighlightShown]);
+  useEffect(() => () => {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
   }, []);
 
   const [pause, setPause] = useState<{ paused: boolean; until: number }>({ paused: false, until: 0 });
@@ -456,6 +500,7 @@ export default function SettingsTab({
     // again the next time a setting is added. Length is the only thing that grows
     // here — which is what the rail beside it addresses, without taking width
     // from the column or reflowing it.
+    <FlashedSection.Provider value={flashedSection}>
     <div className="settings-panel mr-auto flex w-full max-w-[774px] gap-6 pt-2">
       <div className="flex min-w-0 w-full max-w-[600px] flex-col gap-[26px]">
       <SettingsSection title="Tracker status">
@@ -533,7 +578,13 @@ export default function SettingsTab({
           label="Start at Windows sign-in"
           help="Start the tracker when you sign into this Windows account."
           control={
-            <span className="inline-flex flex-col items-start gap-1">
+            /* The hint is wider than the switch, and this column is only as
+               wide as its widest child — so aligning to the start left-shifted
+               the switch out of line with every other row's. Align to the end
+               instead, where the rail of switches actually is, and back to the
+               start on the narrow layout where the row stacks and the switches
+               sit left. */
+            <span className="inline-flex flex-col items-end gap-1 max-sm:items-start">
               <PrivacyToggle
                 label="Start at Windows sign-in"
                 enabled={meta.settings.launch_at_login === "1"}
@@ -541,7 +592,7 @@ export default function SettingsTab({
                 onChange={(enabled) => void setStartAtLogin(enabled)}
               />
               {!trackingEnabled && (
-                <span className="text-xs text-ink-3">
+                <span className="text-xs text-ink-3 text-right max-sm:text-left">
                   Enable Record activity first
                 </span>
               )}
@@ -759,6 +810,13 @@ export default function SettingsTab({
             />
           }
         />
+        <Row
+          stacked
+          compact
+          label="Website detection"
+          help="Time reads websites from browser window titles, which needs a third-party extension that puts the web address there. Without one, browser time is not split by site."
+          control={<ExtensionLinks />}
+        />
       </Section>
 
       <RestoreDefaultsSection
@@ -769,6 +827,7 @@ export default function SettingsTab({
       </div>
       <SectionRail />
     </div>
+    </FlashedSection.Provider>
   );
 }
 
@@ -1420,6 +1479,15 @@ const SETTINGS_SECTIONS = [
  *  current one. Roughly one section label plus its gap. */
 const ACTIVE_SECTION_BAND = 88;
 
+/** How long a pointed-at section stays marked. Long enough to be found by
+ *  someone whose eyes are still travelling from the tile they clicked, short
+ *  enough that it never becomes part of the page. */
+const SECTION_FLASH_MS = 2_200;
+
+/** Long enough for the tab to finish mounting before it is scrolled — see the
+ *  note at the call site. Short enough to read as a jump, not a delay. */
+const SECTION_SCROLL_DELAY_MS = 150;
+
 function sectionSlug(title: string): string {
   return `settings-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 }
@@ -1427,8 +1495,14 @@ function sectionSlug(title: string): string {
 /** A section wrapper that carries its own anchor. `scroll-mt` clears the height
  *  the label would otherwise be jammed against at the top of the viewport. */
 function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
+  const flashed = useContext(FlashedSection) === title;
   return (
-    <section id={sectionSlug(title)} className="scroll-mt-4">
+    <section
+      id={sectionSlug(title)}
+      className={`scroll-mt-4 rounded-[15px] transition-shadow duration-500 ${
+        flashed ? "ring-2 ring-accent/70" : "ring-0 ring-transparent"
+      }`}
+    >
       {children}
     </section>
   );

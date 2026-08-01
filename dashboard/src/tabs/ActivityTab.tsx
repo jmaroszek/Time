@@ -22,6 +22,7 @@ import {
   Spinner,
   type MenuOption,
 } from "../components/ui";
+import { ExtensionLinks } from "../components/ExtensionLinks";
 import { withAlias } from "../lib/aliases";
 import {
   GROUP_SESSION_SAMPLE,
@@ -1095,8 +1096,13 @@ export default function ActivityTab({
     >
       {view === "library" && showDomainHint && (
         <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2">
-          Browser time is not being split by website. Install the third-party &quot;URL in title&quot;
-          extension so Time can read websites from browser window titles.
+          <p>
+            Browser time is not being split by website. Time reads websites from browser window
+            titles, which needs a third-party extension that puts the web address there.
+          </p>
+          <div className="mt-2.5">
+            <ExtensionLinks />
+          </div>
         </section>
       )}
 

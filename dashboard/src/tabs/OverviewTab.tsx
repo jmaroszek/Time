@@ -84,11 +84,13 @@ export default function OverviewTab({
   preset,
   firstSessionSec,
   view,
+  onOpenSettings,
 }: {
   range: Range;
   preset: PresetOrCustom;
   firstSessionSec: number | null;
   view: InsightsViewState;
+  onOpenSettings: () => void;
 }) {
   const meta = useMeta();
   // The view controls (top-app count, timeline resolution, aggregate view,
@@ -275,13 +277,24 @@ export default function OverviewTab({
                 {`of ${pace.targetHours.toFixed(0)}h`}
               </span>
             </span>
-          ) : "Not set"}
+          ) : (
+            /* "Not set" named the state and left the reader to hunt for the
+               control. The tile is where the absence is noticed, so it is also
+               where the way out belongs. */
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="text-accent transition-colors hover:underline hover:decoration-accent/50 hover:underline-offset-4"
+            >
+              Set a goal
+            </button>
+          )}
           mark={meta.weeklyGoalHours > 0 && pace.doneHours > pace.targetHours
             ? <GoalMetMark />
             : undefined}
           hint={meta.weeklyGoalHours > 0
             ? "Productive time in this range vs your weekly goal, prorated to the range's length."
-            : "Set an optional weekly goal in Settings."}
+            : "An optional weekly goal. Opens Settings, where you can set one."}
         />
       </div>
 

@@ -66,20 +66,27 @@ const recentSessions = Array.from({ length: 21 * processes.length }, (_, index) 
     isCorrected: false,
   };
 });
-let sessions = [
-  {
-    id: 10_000,
-    start: now - 500 * day,
-    end: now - 500 * day + 3_600,
-    process: "explorer.exe",
-    title: "Archived project material from an older monitor configuration",
-    domain: null,
-    isAfk: false,
-    categoryOverrideId: null,
-    isCorrected: false,
-  },
-  ...recentSessions,
-].sort((a, b) => a.start - b.start);
+/** The welcome panel exists only while the database holds no sessions at all,
+ *  so seeing it at all requires a fixture that has none. Pair with
+ *  `tracker=missing` for the variant that offers to start tracking. */
+const firstRun = fixtureParams.get("fixture") === "firstrun";
+
+let sessions = firstRun
+  ? []
+  : [
+      {
+        id: 10_000,
+        start: now - 500 * day,
+        end: now - 500 * day + 3_600,
+        process: "explorer.exe",
+        title: "Archived project material from an older monitor configuration",
+        domain: null,
+        isAfk: false,
+        categoryOverrideId: null,
+        isCorrected: false,
+      },
+      ...recentSessions,
+    ].sort((a, b) => a.start - b.start);
 
 const categoryRows = [
   { id: 1, name: "Focus", color: "#6ba0da", is_productive: 1, is_neutral: 0, is_ignored: 0, sort_order: 1 },
@@ -132,13 +139,18 @@ const settings: Record<string, string> = {
   privacy_onboarding_complete:
     fixtureParams.get("fixture") === "onboarding" ? "0" : "1",
   starter_categories_pending: fixtureParams.get("fixture") === "onboarding" ? "1" : "0",
-  recording_consent: "1",
+  // The first-run fixture models the state "Not now" leaves behind: onboarding
+  // is complete, but nothing was consented to and no startup entry was written.
+  // That is the only state in which the welcome panel offers to start tracking.
+  recording_consent: firstRun ? "0" : "1",
   record_window_titles: "1",
-  launch_at_login: "1",
+  launch_at_login: firstRun ? "0" : "1",
   show_tray_icon: "1",
   tracker_health_heartbeat:
     fixtureParams.get("tracker") === "missing" ? "0" : String(now - 5),
-  weekly_goal_hours: "20",
+  // Fresh installs ship no goal (DEFAULT_USER_SETTINGS), which is the only
+  // state where the Goal pace tile offers its own way into Settings.
+  weekly_goal_hours: firstRun ? "0" : "20",
   idle_threshold_seconds: "300",
   heartbeat_seconds: "15",
   week_start: "Sunday",
