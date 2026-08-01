@@ -25,6 +25,7 @@ import {
 import { ExtensionLinks } from "../components/ExtensionLinks";
 import { withAlias } from "../lib/aliases";
 import {
+  BACKLOG_BADGE_SECONDS,
   GROUP_SESSION_SAMPLE,
   type ActivityClassificationFilter,
   type ActivityDayBucket,
@@ -89,6 +90,12 @@ import {
   serializeDismissed,
   type ConsolidationSuggestion,
 } from "../lib/domainConsolidation";
+import {
+  recognizedWithoutSuggestion,
+  suggestForTriage,
+  suggestionKey,
+  type StarterSuggestion,
+} from "../lib/starterSuggestions";
 import { canonicalSwatch, type Palette } from "../lib/palettes";
 import type { ThemeName } from "../lib/theme";
 import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
@@ -931,6 +938,90 @@ export default function ActivityTab({
       banner.report(error, "classification");
     }
   };
+  // Apps the reader has already turned down. Persisted for the reason the
+  // consolidation notice persists its own: a suggestion that comes back after
+  // being dismissed is what makes the next one not worth reading.
+  const dismissedSuggestions = useMemo(
+    () => parseDismissed(meta.settings.starter_suggestions_dismissed),
+    [meta.settings.starter_suggestions_dismissed],
+  );
+  // Offered against every pending app, not the five the section lists: the
+  // review sheet exists to sweep the tail.
+  const starterSuggestions = useMemo(
+    () =>
+      result
+        ? suggestForTriage(
+          result.triage.pendingApps,
+          meta.categories,
+          dismissedSuggestions,
+          meta.browserSet,
+        )
+        : [],
+    [result, meta.categories, dismissedSuggestions, meta.browserSet],
+  );
+  const suggestionByItemId = useMemo(
+    () => new Map(starterSuggestions.map((suggestion) => [suggestion.entity.id, suggestion])),
+    [starterSuggestions],
+  );
+  const recognizedPending = useMemo(
+    () => (result ? recognizedWithoutSuggestion(result.triage.pendingApps, meta.browserSet) : []),
+    [result, meta.browserSet],
+  );
+  const [reviewingSuggestions, setReviewingSuggestions] = useState(false);
+
+  /**
+   * Accept several suggestions at once.
+   *
+   * One banner and one Undo for the whole batch: applying seven rules and
+   * offering seven separate deletions is not reversible in any sense that
+   * matters. The count still pending is stated alongside, because the starter
+   * list reaches work apps far better than it reaches games — a sheet that
+   * implied completion here would quietly inflate the productive share.
+   */
+  const applySuggestions = async (accepted: StarterSuggestion<ActivityTriageItem>[]) => {
+    if (accepted.length === 0) return;
+    try {
+      for (const suggestion of accepted) {
+        await writeEntityRule(suggestion.entity, suggestion.categoryId);
+      }
+      const remaining = (result?.triage.total ?? accepted.length) - accepted.length;
+      banner.show(
+        `Classified ${accepted.length} app${accepted.length === 1 ? "" : "s"}.`
+        + (remaining > 0
+          ? ` ${remaining} item${remaining === 1 ? "" : "s"} still unclassified.`
+          : " Everything is classified."),
+        { label: "Undo", run: () => void undoSuggestions(accepted) },
+      );
+    } catch (error) {
+      banner.report(error, "classification");
+    }
+  };
+
+  /** Every accepted row was uncategorized before the batch, so dropping the
+   *  exact rules it has now restores the state Undo promises. */
+  const undoSuggestions = async (accepted: StarterSuggestion<ActivityTriageItem>[]) => {
+    try {
+      for (const suggestion of accepted) {
+        for (const rule of exactRulesFor(suggestion.entity)) await deleteRule(rule.id);
+      }
+      await refreshMeta();
+    } catch (error) {
+      banner.report(error, "classification");
+    }
+  };
+
+  const dismissSuggestion = async (item: ActivityTriageItem) => {
+    try {
+      await updateSetting(
+        "starter_suggestions_dismissed",
+        serializeDismissed([...dismissedSuggestions, suggestionKey(item)]),
+      );
+      await refreshMeta();
+    } catch (error) {
+      banner.report(error, "rule suggestion");
+    }
+  };
+
   const saveAlias = async (key: string, alias: string) => {
     const next = withAlias(meta.aliases, key, alias);
     try {
@@ -1206,6 +1297,9 @@ export default function ActivityTab({
               <UnclassifiedSection
                 triage={result.triage}
                 categories={meta.categories}
+                suggestionByItemId={suggestionByItemId}
+                suggestionCount={starterSuggestions.length}
+                onReview={() => setReviewingSuggestions(true)}
                 onAssign={assignFromTriage}
                 onShowAll={() => {
                   setClassificationFilter("uncategorized");
@@ -1294,6 +1388,26 @@ export default function ActivityTab({
 
       {detailMode === "outboard" ? detailPanel : null}
 
+      {reviewingSuggestions && (
+        <StarterSuggestionDialog
+          suggestions={starterSuggestions}
+          recognized={recognizedPending}
+          categories={meta.categories}
+          pendingTotal={result?.triage.total ?? 0}
+          onClose={() => setReviewingSuggestions(false)}
+          // Turning down the last row leaves nothing to review, and a dialog
+          // that stayed open on an empty list with a disabled button would make
+          // the reader find their own way out of a screen they just finished.
+          onDismiss={async (item) => {
+            if (starterSuggestions.length <= 1) setReviewingSuggestions(false);
+            await dismissSuggestion(item);
+          }}
+          onApply={async (accepted) => {
+            setReviewingSuggestions(false);
+            await applySuggestions(accepted);
+          }}
+        />
+      )}
       {deleteScope && (
         <DeleteActivityDialog
           scope={deleteScope}
@@ -1500,16 +1614,26 @@ function ClearableInput({
 function UnclassifiedSection({
   triage,
   categories,
+  suggestionByItemId,
+  suggestionCount,
+  onReview,
   onAssign,
   onShowAll,
 }: {
   triage: ActivityTriage;
   categories: Category[];
+  suggestionByItemId: Map<string, StarterSuggestion<ActivityTriageItem>>;
+  suggestionCount: number;
+  onReview: () => void;
   onAssign: (item: ActivityTriageItem, categoryId: number) => void;
   onShowAll: () => void;
 }) {
   if (triage.total === 0) return null;
   const listed = triage.items.length;
+  // The same floor the tab badge uses. Per-row suggestions need no gate — they
+  // cost nothing and teach the mechanism — but an invitation to sit down and
+  // review a list has to be worth the interruption first.
+  const offerReview = suggestionCount > 0 && triage.seconds >= BACKLOG_BADGE_SECONDS;
   return (
     <section
       aria-labelledby="unclassified-heading"
@@ -1559,9 +1683,32 @@ function UnclassifiedSection({
         Time in these apps and sites is left out of every category total in Insights until you
         classify it.
       </p>
+      {/* An offer, phrased as one. It names the source in the same breath so the
+          reader knows a list shipped with Time is doing the recognizing, and
+          nothing has been decided for them yet. */}
+      {offerReview && (
+        <p className="mt-2 text-meta leading-snug text-ink-2">
+          {suggestionCount === 1
+            ? "One of these matches Time's starter list of common apps."
+            : `${suggestionCount} of these match Time's starter list of common apps.`}{" "}
+          <button
+            type="button"
+            onClick={onReview}
+            className="font-medium text-accent underline-offset-2 hover:underline"
+          >
+            Review
+          </button>
+        </p>
+      )}
       <div className="mt-2">
         {triage.items.map((item) => (
-          <TriageRow key={item.id} item={item} categories={categories} onAssign={onAssign} />
+          <TriageRow
+            key={item.id}
+            item={item}
+            categories={categories}
+            suggestion={suggestionByItemId.get(item.id) ?? null}
+            onAssign={onAssign}
+          />
         ))}
       </div>
     </section>
@@ -1577,12 +1724,17 @@ function UnclassifiedSection({
 function TriageRow({
   item,
   categories,
+  suggestion,
   onAssign,
 }: {
   item: ActivityTriageItem;
   categories: Category[];
+  suggestion: StarterSuggestion<ActivityTriageItem> | null;
   onAssign: (item: ActivityTriageItem, categoryId: number) => void;
 }) {
+  const suggested = suggestion
+    ? categories.find((category) => category.id === suggestion.categoryId) ?? null
+    : null;
   return (
     <div className="flex items-center gap-3 rounded-lg border-t border-edge py-1.5 pr-1 pl-0.5 first:border-t-0 hover:bg-hover">
       <span className="flex min-w-0 flex-1 items-baseline gap-2">
@@ -1592,6 +1744,28 @@ function TriageRow({
         </span>
       </span>
       <span className="shrink-0 text-xs tabular-nums text-ink-2">{fmtDuration(item.seconds)}</span>
+      {/* Its own button rather than a pre-filled trigger below. The control
+          beside it shows no value on purpose — see its note — and a suggestion
+          rendered as the current selection would say this row is already
+          Communication when it is still uncategorized. A separate button is the
+          honest shape: one click accepts, and nothing claims to have happened
+          until it is pressed. */}
+      {suggested && (
+        <button
+          type="button"
+          title={`${suggestion?.reason}. Classifies ${item.displayName} in all history.`}
+          onClick={() => onAssign(item, suggested.id)}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-edge-2 px-2 py-1 text-xs text-ink-2 transition-colors hover:border-accent/40 hover:text-ink"
+        >
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ background: suggested.color }}
+          />
+          {suggested.name}
+          <span className="text-micro text-ink-3">suggested</span>
+        </button>
+      )}
       {/* A placeholder trigger, not a value: every row here is uncategorized, so
           showing that as the current selection would print the same word five
           times and call it information. The verb is what the control does. */}
@@ -1600,7 +1774,7 @@ function TriageRow({
         variant="resting"
         align="end"
         label={`Classify ${item.displayName}`}
-        placeholder="Classify"
+        placeholder={suggested ? "Other" : "Classify"}
         value=""
         onChange={(value) => onAssign(item, Number(value))}
         options={triageCategoryOptions(categories)}
@@ -3993,6 +4167,172 @@ function ActivityExportMenu({
         )}
       </div>
     </details>
+  );
+}
+
+/**
+ * The starter list, offered in one screen.
+ *
+ * Everything is on the surface: no disclosure, no "advanced", every row already
+ * ticked and every row individually changeable or removable. That is the whole
+ * bargain — Time recognized these apps, it has not decided anything, and one
+ * button turns the recognition into rules the user could have written by hand.
+ *
+ * The apps it recognizes but will not place sit below, stated rather than
+ * omitted. A gap looks like an oversight; a sentence explaining that a browser
+ * or Discord means different things to different people is the part of this
+ * feature most worth reading.
+ */
+function StarterSuggestionDialog({
+  suggestions,
+  recognized,
+  categories,
+  pendingTotal,
+  onClose,
+  onDismiss,
+  onApply,
+}: {
+  suggestions: StarterSuggestion<ActivityTriageItem>[];
+  recognized: { entity: ActivityTriageItem; reason: string }[];
+  categories: Category[];
+  pendingTotal: number;
+  onClose: () => void;
+  onDismiss: (item: ActivityTriageItem) => void;
+  onApply: (accepted: StarterSuggestion<ActivityTriageItem>[]) => void;
+}) {
+  // Ticked by default; unticking is the exception, so the set tracks what has
+  // been turned off rather than what has been turned on.
+  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
+  const [moved, setMoved] = useState<Record<string, number>>({});
+  const [applying, setApplying] = useState(false);
+  const accepted = suggestions
+    .filter((suggestion) => !excluded.has(suggestion.entity.id))
+    .map((suggestion) => ({
+      ...suggestion,
+      categoryId: moved[suggestion.entity.id] ?? suggestion.categoryId,
+    }));
+  const remaining = pendingTotal - accepted.length;
+  const toggle = (id: string) =>
+    setExcluded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="starter-suggestions-title"
+    >
+      <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-panel sm:max-h-[calc(100dvh-2rem)] sm:p-5">
+        <h2 id="starter-suggestions-title" className="text-sm font-semibold">
+          Classify {suggestions.length} recognized app{suggestions.length === 1 ? "" : "s"}
+        </h2>
+        {/* Where this came from, in the one place it matters, before any of it
+            is applied. "Never leaves your machine" because a list of common apps
+            is exactly the kind of thing a reader might assume was fetched. */}
+        <p className="mt-2 text-xs leading-relaxed text-ink-3">
+          These come from a short list of common Windows apps that ships with Time. It never
+          leaves your machine and nothing changes until you apply it. Each one becomes an
+          ordinary rule you can edit or delete afterwards.
+        </p>
+
+        <div className="mt-4 space-y-1">
+          {suggestions.map((suggestion) => {
+            const item = suggestion.entity;
+            const categoryId = moved[item.id] ?? suggestion.categoryId;
+            const on = !excluded.has(item.id);
+            return (
+              <div
+                key={item.id}
+                className="flex items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-hover"
+              >
+                <Checkbox checked={on} onChange={() => toggle(item.id)} align="start">
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-xs font-medium text-ink">
+                      {item.displayName}
+                    </span>
+                    <span className="text-micro text-ink-3">
+                      {suggestion.reason} · {fmtDuration(item.seconds)}
+                    </span>
+                  </span>
+                </Checkbox>
+                <span className="ml-auto shrink-0">
+                  <MenuSelect
+                    size="compact"
+                    variant="resting"
+                    align="end"
+                    label={`Category for ${item.displayName}`}
+                    value={String(categoryId)}
+                    onChange={(value) =>
+                      setMoved((current) => ({ ...current, [item.id]: Number(value) }))}
+                    options={triageCategoryOptions(categories)}
+                  />
+                </span>
+                {/* Permanent, like the consolidation notice's. A suggestion that
+                    returned after being turned down is what stops the next one
+                    from being read. */}
+                <button
+                  type="button"
+                  onClick={() => onDismiss(item)}
+                  title={`Never suggest a category for ${item.displayName}`}
+                  aria-label={`Never suggest a category for ${item.displayName}`}
+                  className="shrink-0 rounded-md px-1.5 py-1 text-xs text-ink-3 hover:text-ink"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {recognized.length > 0 && (
+          <div className="mt-4 border-t border-edge pt-3">
+            <p className="text-xs font-medium text-ink-2">
+              Time recognizes these but won't guess what they mean to you
+            </p>
+            <ul className="mt-1.5 space-y-1">
+              {recognized.map(({ entity, reason }) => (
+                <li key={entity.id} className="flex items-baseline gap-2 text-micro text-ink-3">
+                  <span className="shrink-0 font-medium text-ink-2">{entity.displayName}</span>
+                  <span className="min-w-0 flex-1 truncate">{reason}</span>
+                  <span className="shrink-0 tabular-nums">{fmtDuration(entity.seconds)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* What is left, stated before the button rather than after it. The
+            starter list reaches work apps far better than it reaches games, so a
+            screen that implied this finished the job would leave the reader
+            with a productive share flattered by whatever it could not name. */}
+        {remaining > 0 && (
+          <p className="mt-4 text-xs text-ink-3">
+            {remaining} item{remaining === 1 ? "" : "s"} would still be unclassified afterwards —
+            games and less common apps mostly have to be classified by hand.
+          </p>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button disabled={applying} onClick={onClose}>Not now</Button>
+          <Button
+            variant="primary"
+            disabled={applying || accepted.length === 0}
+            onClick={() => {
+              setApplying(true);
+              onApply(accepted);
+            }}
+          >
+            {applying
+              ? "Classifying…"
+              : `Classify ${accepted.length} app${accepted.length === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -426,6 +426,12 @@ export interface ActivityTriageItem {
 export interface ActivityTriage {
   /** The busiest pending items, longest first, capped at TRIAGE_VISIBLE. */
   items: ActivityTriageItem[];
+  /** Every pending app, longest first and uncapped — what the starter list is
+   *  offered against. Deliberately not the capped `items`: the review sheet
+   *  exists to sweep the tail, and a tail that stopped at five would leave the
+   *  small tedious rows this feature is for. Apps only, since the starter list
+   *  says nothing about websites. */
+  pendingApps: ActivityTriageItem[];
   /** Every pending item, not only the listed ones. */
   total: number;
   seconds: number;
@@ -877,23 +883,24 @@ function triageSummary(index: ActivityIndex, policy: NoisePolicy | undefined): A
       entity.status === "uncategorized"
       && (!policy || classifyNoise(entity, policy) === null),
   );
+  // Longest first: the section is triage, so it spends its five rows on the
+  // decisions that move the most time. Name and id only break ties, to keep
+  // the order stable across the re-sort every assignment causes.
+  const ranked = [...pending]
+    .sort((left, right) =>
+      right.seconds - left.seconds
+      || left.displayName.localeCompare(right.displayName)
+      || left.id.localeCompare(right.id))
+    .map((entity) => ({
+      id: entity.id,
+      kind: entity.kind,
+      key: entity.key,
+      displayName: entity.displayName,
+      seconds: entity.seconds,
+    }));
   return {
-    // Longest first: the section is triage, so it spends its five rows on the
-    // decisions that move the most time. Name and id only break ties, to keep
-    // the order stable across the re-sort every assignment causes.
-    items: [...pending]
-      .sort((left, right) =>
-        right.seconds - left.seconds
-        || left.displayName.localeCompare(right.displayName)
-        || left.id.localeCompare(right.id))
-      .slice(0, TRIAGE_VISIBLE)
-      .map((entity) => ({
-        id: entity.id,
-        kind: entity.kind,
-        key: entity.key,
-        displayName: entity.displayName,
-        seconds: entity.seconds,
-      })),
+    items: ranked.slice(0, TRIAGE_VISIBLE),
+    pendingApps: ranked.filter((entity) => entity.kind === "app"),
     total: pending.length,
     seconds: pending.reduce((total, entity) => total + entity.seconds, 0),
   };

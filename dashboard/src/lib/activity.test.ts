@@ -194,7 +194,50 @@ describe("Activity index", () => {
       ...source,
       rules: [...rules, { id: 9, matchType: "process", pattern: "unknown.exe", categoryId: 1, priority: 3 }],
     });
-    expect(queryActivityIndex(index, baseQuery).triage).toEqual({ items: [], total: 0, seconds: 0 });
+    expect(queryActivityIndex(index, baseQuery).triage).toEqual({
+      items: [],
+      pendingApps: [],
+      total: 0,
+      seconds: 0,
+    });
+  });
+
+  // What the starter list is offered against. It has to reach past the five
+  // rows the section lists, because the small tedious apps a suggestion saves
+  // the most effort on are exactly the ones ranked below the fold.
+  it("offers every pending app for suggestions, uncapped and without websites", () => {
+    const many: ActivitySource = {
+      ...source,
+      sessions: Array.from({ length: TRIAGE_VISIBLE + 3 }, (_, index) => ({
+        id: index + 100,
+        start: 1000 + index * 100,
+        // Descending durations keep the order deterministic.
+        end: 1000 + index * 100 + (90 - index),
+        process: `pending${index}.exe`,
+        title: "",
+        domain: null,
+        isAfk: false,
+      })),
+    };
+    const { triage } = queryActivityIndex(buildActivityIndex(many), baseQuery);
+    expect(triage.items).toHaveLength(TRIAGE_VISIBLE);
+    expect(triage.pendingApps).toHaveLength(TRIAGE_VISIBLE + 3);
+    expect(triage.pendingApps[0].key).toBe("pending0.exe");
+  });
+
+  // The starter list says nothing about websites, so they stay in the backlog
+  // and out of the list suggestions are computed from.
+  it("keeps websites out of the suggestible list while still counting them", () => {
+    const withPendingSite: ActivitySource = {
+      ...source,
+      sessions: [
+        ...source.sessions,
+        { id: 20, start: 300, end: 400, process: "chrome.exe", title: "Reading", domain: "nobody.test", isAfk: false },
+      ],
+    };
+    const { triage } = queryActivityIndex(buildActivityIndex(withPendingSite), baseQuery);
+    expect(triage.items.map((item) => item.id)).toContain("website:nobody.test");
+    expect(triage.pendingApps.map((item) => item.id)).toEqual(["app:unknown.exe"]);
   });
 
   it("treats an entity as ignored when every applied category is excluded", () => {
