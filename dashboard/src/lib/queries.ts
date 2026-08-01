@@ -156,7 +156,7 @@ export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
   heartbeat_seconds: "15",
   week_start: "auto",
   browser_processes:
-    "chrome.exe,msedge.exe,firefox.exe,brave.exe,opera.exe,vivaldi.exe,arc.exe,chromium.exe",
+    "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe",
   min_app_seconds_per_day: "0",
   activity_noise_filter: "utilities",
   activity_noise_max_seconds: "120",
