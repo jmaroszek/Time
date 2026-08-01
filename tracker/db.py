@@ -127,15 +127,34 @@ END;
 # A small, broadly applicable starter taxonomy reduces first-run setup without
 # guessing which applications or sites serve those purposes. Every category is
 # editable/deletable except the functional Ignored row; no rules are preloaded.
+#
+# Every name here describes a kind of *application*, never a kind of intent. That
+# is what lets anything but the user populate one: an executable can say it is a
+# mail client, but nothing about it says whether reading mail was focus or
+# avoidance. The productivity flags carry that judgment, and the user owns them.
+# An earlier set mixed the two — "Focus" and "Learning" beside "Communication" —
+# which left one productive destination that had to absorb editors, spreadsheets,
+# design tools and note apps alike, describing none of them.
+#
+# "Focus" also already means something computed in the dashboard: the Longest
+# focus KPI and the focus-chain gap setting measure the longest run of productive
+# time, which is not the same hours as any one category.
+#
+# Browsing exists because browser time is the largest single block of a typical
+# day and the one thing Time must never classify on the user's behalf — domains
+# are only visible with a third-party extension, so a browser rule would swallow
+# the rest. A neutral home the user can accept keeps that time honest, and
+# Website rules (priority 1) still outrank the App rule (priority 3) later.
+#
 # Colors come from the dashboard's category swatch list and must stay out of the
 # hue arcs productivity reserves (green ~150-165deg, red-orange ~10-25deg), or a
 # category renders in charts with the hue that means productive/unproductive.
 _SEED_CATEGORIES = [
-    ("Focus", "#2f6fc0", 1, 0, 1),
-    ("Learning", "#9c8ff0", 1, 0, 2),
-    ("Communication", "#56c8d8", 0, 1, 3),
+    ("Work", "#2f6fc0", 1, 0, 1),
+    ("Communication", "#56c8d8", 0, 1, 2),
+    ("Browsing", "#e0a53a", 0, 1, 3),
     ("Entertainment", "#e75fa0", 0, 0, 4),
-    ("Utilities", "#828994", 0, 1, 5),
+    ("System", "#828994", 0, 1, 5),
     ("Ignored", "#44474e", 0, 0, 99),
 ]
 
