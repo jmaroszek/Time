@@ -38,7 +38,7 @@ how that is changing over time.
   contain no personal categories or classification rules. Changes apply to all history, and the tracker
   picks them up within seconds — no config files, no restarts.
 - **Friendly app names.** Cryptic executable names can be
-  renamed in Insights' Top Apps or the Activity Library, and the friendly name
+  renamed in Insights' Top Apps or Activity's Apps & Websites, and the friendly name
   shows everywhere with the recorded executable still available in Activity.
 - **Tells you what actually changed.** Week-over-week shifts in app usage are
   highlighted only when they're statistically real (a Welch's t-test on daily

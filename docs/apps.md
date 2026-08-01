@@ -12,12 +12,13 @@ does not reset it. Every Activity total and result uses that visible range; a
 quiet **Try All time** action appears when a search finds nothing in a narrower
 range.
 
-The tab is one card with two faces, chosen from its title: **Activity Library**
-and **Categories & Rules**.
+The tab is one card with two faces, chosen from its title: **Apps & Websites**
+and **Categories & Rules**. The things you recorded on one side, the labels you
+sort them into on the other.
 
-## Activity Library
+## Apps & Websites
 
-With no search text, the Library is a complete catalog of Apps and Websites in
+With no search text, this face is a complete catalog of Apps and Websites in
 the visible range. It includes ignored activity, excludes AFK identities, and
 never uses Insights' minimum-app threshold. Four columns, all sortable:
 
@@ -54,6 +55,36 @@ Rows the noise filter hides are left out of that count as well as the list, so
 the two always agree, and the count follows the Apps/Websites filter for the
 same reason.
 
+### Unclassified
+
+Above the table, and only while something is waiting, sits the pending
+classification work: the apps and websites that have recorded time but no
+category yet. Time in them is left out of every category total in Insights
+until they are classified, which is what makes the section worth a minute.
+
+It reads **all history**, not the visible range, and says so beside its
+heading — a backlog that emptied when the date picker moved would be a to-do
+list nobody could finish. Rows the noise filter hides are left out, so an
+installer that ran once cannot hold the list open.
+
+Five rows at a time, longest first, so the section spends itself on the
+decisions that move the most time; the rest arrive as those are made. Each row
+carries a **Classify** menu listing every category, Ignored ones last. Choosing
+one writes a rule for that app or website across all history and from now on —
+the same write the item's details make — and the confirmation offers **Undo**.
+Past five rows, **Show all** hands the remainder to the table below under the
+**Uncategorized** filter over all time.
+
+Clearing the last item takes the section off the page, and the confirmation for
+that assignment says everything is classified rather than letting the section
+disappear without comment.
+
+The **Activity** tab carries a dot while an hour or more of unclassified time is
+waiting. It is deliberately a higher bar than the section's, which shows from a
+single item: the section is already on the page you came to, while the dot
+reaches across the app to say a different tab wants you. It is a dot and not a
+number because the number belongs where you can act on it.
+
 ### Hidden rows
 
 A tracker records every foreground window, so the raw catalog carries rows
@@ -70,10 +101,10 @@ nobody wants to track. Two tests can hide those from the list:
   These are hidden regardless of duration, because an install can run for twenty
   minutes.
 
-This is a view filter over the Activity Library only. It never changes a total, an
+This is a view filter over Apps & Websites only. It never changes a total, an
 Insights figure, or what an entity contributes to its category, and anything
 already carrying a category or rule is never hidden — an explicit decision
-outranks the heuristic. The Library header reports how many rows are hidden and
+outranks the heuristic. The list header reports how many rows are hidden and
 shows them on demand, tagged **Rare** or **Utility**; searching reaches past
 the filter, so a search for `setup` still finds the installers. Settings ▸
 Activity list sets the mode and both limits, or turns filtering off.
@@ -202,7 +233,13 @@ exclusions exist.
 
 ## Categories & Rules
 
-The second face of the card manages classification. Categories start collapsed;
+The second face of the card manages classification. Its header counts the
+categories and rules defined, and adds **N unclassified** whenever the backlog
+is not empty — the tab's dot cannot serve this face, since both faces share a
+tab and the dot is already on the tab being read. Following it returns to
+[Unclassified](#unclassified).
+
+Categories start collapsed;
 the chevron opens their rules. Double-click a name to rename it — Enter or
 focus-out saves and Escape cancels — and the opened category repeats **Rename**
 as a labeled button, which is what keeps renaming reachable from the keyboard.
@@ -214,7 +251,7 @@ names at once, and opens every category that has a hit — the fastest way to
 answer "where did I classify this" without remembering which category it went
 into.
 
-The two order menus beside search follow the same pattern as Activity Library.
+The two order menus beside search follow the same pattern as Apps & Websites.
 Categories can sort by name or group by productivity. Rules can sort by type or
 by name; the Type view sorts names within each rule kind.
 
@@ -222,6 +259,39 @@ A category is productive, neutral, or unproductive. Ignoring is not one of
 these states: the built-in Ignored category is the single ignore mechanism.
 A category left flagged ignored by an older release keeps showing that state
 until one of the three is chosen for it.
+
+### Combining Website rules
+
+Classifying a site writes an exact Website rule for it, so a long-lived
+database collects near-duplicates: nine separate rules under one company, all
+saying the same thing. Because a Website rule already covers every subdomain
+beneath it — and a more specific rule still beats it — those nine can usually
+become one.
+
+When that has happened, a notice at the top of this face offers the swap. It
+names the parent, the category the rules agree on, and any sites that have no
+rule yet and would start being classified. **Replace** writes the parent rule
+and removes the ones it covers, with **Undo** on the confirmation. **Dismiss**
+retires that parent for good.
+
+Nothing already recorded changes: the suggestion is only offered when every
+affected session classifies the same way afterwards, checked against the real
+rule precedence rather than assumed. Sites with no rule are the exception, and
+those are listed by name rather than counted, because they are the one thing
+the swap does alter. What changes going forward is that new sites under the
+parent are classified automatically instead of appearing in
+[Unclassified](#unclassified).
+
+The offer is deliberately hard to earn, since a suggestion that is often wrong
+is worse than none. It needs at least three rules agreeing on one category, an
+hour of recorded time beneath the parent, and a parent that is a real
+registrable name — `bbc.co.uk` qualifies, `co.uk` and `github.io` never can. It
+is also withheld when the parent would pull in more unruled sites than the
+rules that suggested it, which means the parent is broader than anything you
+have actually decided.
+
+There is no equivalent for apps. App rules match an exact process name with no
+wildcard, so a group of them has no single rule to become.
 
 The pencil on a rule—or a double-click on its row—loads it into the category's
 editor below the list, with the same match preview and duplicate protection used

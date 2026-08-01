@@ -83,6 +83,12 @@ import {
   type CategoryListOrder,
   type RuleListOrder,
 } from "../lib/categoryRules";
+import {
+  findConsolidation,
+  parseDismissed,
+  serializeDismissed,
+  type ConsolidationSuggestion,
+} from "../lib/domainConsolidation";
 import { canonicalSwatch, type Palette } from "../lib/palettes";
 import type { ThemeName } from "../lib/theme";
 import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
@@ -896,10 +902,18 @@ export default function ActivityTab({
       await writeEntityRule(item, categoryId);
       const category = meta.categories.find((option) => option.id === categoryId);
       if (category) {
-        banner.show(`${item.displayName} is now ${category.name}.`, {
-          label: "Undo",
-          run: () => void undoTriageAssign(item),
-        });
+        // The section is a state, so the last assignment takes it off the page.
+        // Vanishing furniture reads as a fault rather than as finishing, and the
+        // banner is already on screen saying what the click did — so it says
+        // this too. Counted before the write, because the model behind the
+        // section has not been rebuilt yet at this point.
+        const clearedTheLast = (result?.triage.total ?? 0) === 1;
+        banner.show(
+          clearedTheLast
+            ? `${item.displayName} is now ${category.name}. Everything is classified.`
+            : `${item.displayName} is now ${category.name}.`,
+          { label: "Undo", run: () => void undoTriageAssign(item) },
+        );
       }
     } catch (error) {
       banner.report(error, "classification");
@@ -1031,6 +1045,10 @@ export default function ActivityTab({
   if (error && !result) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
 
   const showingExclusions = classificationFilter === "excluded";
+  // Read from the same triage the section renders, not recounted: the two are
+  // the same backlog seen from the card's two faces, and a header that
+  // disagreed with the list one click away would be worse than no header.
+  const pendingTriage = result?.triage.total ?? 0;
   const hasActiveLibraryFilters = typeFilter !== "all" || classificationFilter !== "all";
   const clearLibraryFilters = () => {
     setTypeFilter("all");
@@ -1153,7 +1171,30 @@ export default function ActivityTab({
             )}
           </span>
         ) : (
-          <span className="text-xs text-ink-3">{meta.categories.length} categories · {meta.rules.length} rules</span>
+          <span className="flex flex-wrap items-baseline gap-x-1.5 text-xs text-ink-3">
+            <span>{meta.categories.length} categories · {meta.rules.length} rules</span>
+            {/* The backlog's only route out of this face. The tab's mark cannot
+                serve it: both faces share a tab, so while this one is up the
+                mark is on the tab already being read. Text in the header rather
+                than a second mark on the switcher — a badge pointing at a
+                control that is one click away and already visible is a chain
+                that says nothing the count does not. Counted like the section
+                itself, from one item: the tab's mark holds out for an hour
+                because it interrupts a different tab, and this does not. */}
+            {pendingTriage > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <button
+                  type="button"
+                  onClick={() => switchView("library")}
+                  title="Show these in Apps & Websites"
+                  className="tabular-nums underline-offset-2 hover:text-ink-2 hover:underline"
+                >
+                  {pendingTriage} unclassified
+                </button>
+              </>
+            )}
+          </span>
         )}
       >
         {view === "library" ? (
@@ -1306,7 +1347,12 @@ export default function ActivityTab({
 function ViewSwitcher({ view, onView }: { view: ActivityView; onView: (view: ActivityView) => void }) {
   return (
     <span className="flex flex-wrap items-center gap-2.5">
-      <ViewButton active={view === "library"} onClick={() => onView("library")}>Activity Library</ViewButton>
+      {/* Named for what it lists, not for what it is. "Library" promised an
+          archive, which made the Unclassified queue above the table read as
+          somebody else's business; against "Categories & Rules" it also states
+          the split the two faces actually make — the things on one side, the
+          labels on the other. */}
+      <ViewButton active={view === "library"} onClick={() => onView("library")}>Apps &amp; Websites</ViewButton>
       <span aria-hidden="true" className="text-edge-2">|</span>
       <ViewButton active={view === "rules"} onClick={() => onView("rules")}>Categories &amp; Rules</ViewButton>
     </span>
@@ -4962,6 +5008,74 @@ function storeListOrder(key: string, value: string): void {
   }
 }
 
+/**
+ * An offer to replace several exact Website rules with the one parent they have
+ * turned into.
+ *
+ * Three sentences, in the order the reader needs them: what it replaces, that
+ * nothing recorded moves, and what changes from here. The last is the only real
+ * consequence — new sites under the parent stop arriving in Unclassified — and
+ * burying it would make this the kind of suggestion that gets accepted once and
+ * regretted later.
+ *
+ * Absorbed sites are listed by name and never summarized as a count. They are
+ * the sole change to recorded history, the check refuses to raise a suggestion
+ * where they outnumber the rules behind it, and a number would ask the reader
+ * to take on trust the one thing they are here to judge.
+ */
+function ConsolidationNotice({
+  suggestion,
+  categoryName,
+  busy,
+  onApply,
+  onDismiss,
+}: {
+  suggestion: ConsolidationSuggestion;
+  categoryName: string | null;
+  busy: boolean;
+  onApply: () => void;
+  onDismiss: () => void;
+}) {
+  const count = suggestion.childRules.length;
+  const absorbed = suggestion.absorbedDomains;
+  return (
+    <section
+      aria-labelledby="consolidation-heading"
+      className="mb-3 rounded-lg border border-edge bg-surface-dim px-3 py-2.5 text-xs leading-relaxed text-ink-2"
+    >
+      <h3 id="consolidation-heading" className="font-semibold text-ink">
+        {count} Website rules under {suggestion.parent} all say{" "}
+        {categoryName ?? "the same thing"}
+      </h3>
+      <p className="mt-1">
+        Replacing them with one rule for <span className="text-ink">{suggestion.parent}</span>{" "}
+        changes nothing already recorded.
+        {absorbed.length > 0 && (
+          <>
+            {" "}
+            {absorbed.length === 1 ? "One site has" : `${absorbed.length} sites have`} no rule yet
+            and would become {categoryName ?? "that category"}:{" "}
+            <span className="text-ink">{absorbed.join(", ")}</span>.
+          </>
+        )}{" "}
+        New sites under {suggestion.parent} will be classified automatically instead of waiting
+        in Unclassified.
+      </p>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <Button variant="primary" onClick={onApply} disabled={busy}>
+          {busy ? "Replacing…" : "Replace"}
+        </Button>
+        {/* Dismissal is per-parent and permanent. A suggestion that came back
+            after being turned down would be the thing that makes the next one
+            not worth reading. */}
+        <Button onClick={onDismiss} disabled={busy} title="Never suggest this again">
+          Dismiss
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function CategoriesAndRules({
   source,
   appliedRuleIds,
@@ -5194,6 +5308,84 @@ function CategoriesAndRules({
       banner.report(error, "Window rule notice");
     }
   };
+  // See undoConsolidation for why the rules are read through a ref.
+  const rulesRef = useRef(meta.rules);
+  rulesRef.current = meta.rules;
+  // Parents already turned down. Read through the same settings map the reset
+  // notice uses, so a dismissal survives a restart the way the reader expects.
+  const dismissedConsolidations = useMemo(
+    () => parseDismissed(meta.settings.rule_consolidation_dismissed),
+    [meta.settings.rule_consolidation_dismissed],
+  );
+  // Only ever one suggestion, and only on this face. The check classifies every
+  // session twice per candidate it examines, which is the same order of work
+  // the rule composer's live preview already does on every keystroke — but it
+  // is not worth repeating while the reader is typing in the search field, so
+  // it hangs off the source and the rules rather than off any of this view's
+  // own state.
+  const consolidation = useMemo(
+    () => (source ? findConsolidation(source, dismissedConsolidations) : null),
+    [source, dismissedConsolidations],
+  );
+  const [consolidating, setConsolidating] = useState(false);
+
+  /**
+   * Parent in, children out — in that order. Between the two writes the parent
+   * already covers every domain the children did, so a failure part-way leaves
+   * classification intact rather than stripping it.
+   */
+  const applyConsolidation = async (suggestion: ConsolidationSuggestion) => {
+    setConsolidating(true);
+    try {
+      await addRule("domain", suggestion.parent, suggestion.categoryId);
+      for (const rule of suggestion.childRules) await deleteRule(rule.id);
+      await onChanged();
+      const category = meta.categories.find((option) => option.id === suggestion.categoryId);
+      banner.show(
+        `${suggestion.childRules.length} rules replaced by one for ${suggestion.parent}`
+        + `${category ? `, in ${category.name}` : ""}.`,
+        { label: "Undo", run: () => void undoConsolidation(suggestion) },
+      );
+    } catch (error) {
+      banner.report(error, "rule");
+    } finally {
+      setConsolidating(false);
+    }
+  };
+
+  /** The reverse, in the reverse order for the same reason: the children are
+   *  back before the parent they replaced goes away.
+   *
+   *  Every child is a Website rule by construction — candidateParents only
+   *  groups those — so nothing here has a Window rule's scope fields to carry.
+   *  Rules come from the ref because this runs from a banner, long after the
+   *  render that offered it; `meta` in that closure predates the write it has
+   *  to reverse and does not contain the parent to delete. */
+  const undoConsolidation = async (suggestion: ConsolidationSuggestion) => {
+    try {
+      for (const rule of suggestion.childRules) {
+        await addRule("domain", rule.pattern, rule.categoryId, { priority: rule.priority });
+      }
+      const parent = findDuplicateRule(rulesRef.current, "domain", suggestion.parent);
+      if (parent) await deleteRule(parent.id);
+      await onChanged();
+    } catch (error) {
+      banner.report(error, "rule");
+    }
+  };
+
+  const dismissConsolidation = async (suggestion: ConsolidationSuggestion) => {
+    try {
+      await updateSetting(
+        "rule_consolidation_dismissed",
+        serializeDismissed([...dismissedConsolidations, suggestion.parent]),
+      );
+      await onChanged();
+    } catch (error) {
+      banner.report(error, "rule suggestion");
+    }
+  };
+
   const chooseCategoryOrder = (next: CategoryListOrder) => {
     setCategoryOrder(next);
     storeListOrder(CATEGORY_ORDER_STORAGE_KEY, next);
@@ -5253,6 +5445,17 @@ function CategoriesAndRules({
             Dismiss
           </button>
         </div>
+      )}
+      {consolidation && (
+        <ConsolidationNotice
+          suggestion={consolidation}
+          categoryName={
+            meta.categories.find((option) => option.id === consolidation.categoryId)?.name ?? null
+          }
+          busy={consolidating}
+          onApply={() => void applyConsolidation(consolidation)}
+          onDismiss={() => void dismissConsolidation(consolidation)}
+        />
       )}
       <p className="mb-3 text-xs leading-relaxed text-ink-3">
         Rules classify matching historical and future activity. Website rules normally

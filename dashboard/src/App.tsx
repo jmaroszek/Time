@@ -33,6 +33,10 @@ type Tab = "insights" | "activity" | "settings";
  *  the button, where it would become part of the tab's accessible name. */
 const BACKLOG_HINT_ID = "activity-backlog-hint";
 
+/** One sentence, spent twice — as the tab's description and as its tooltip — so
+ *  the dot means the same thing however a reader arrives at it. */
+const BACKLOG_HINT = "Unclassified activity is waiting";
+
 /** How long the welcome panel waits for a heartbeat before admitting it cannot
  *  tell whether the tracker came up. Comfortably past the status poll's ten
  *  seconds, so a slow first heartbeat is not reported as a failure. */
@@ -358,6 +362,10 @@ function TabBar({
             tab === t.id ? "text-ink" : "text-ink-2 hover:text-ink"
           }`}
           aria-describedby={t.id === "activity" && backlog ? BACKLOG_HINT_ID : undefined}
+          // The same sentence the hint below carries, for the reader who has
+          // neither a screen reader to read it nor any other way to find out
+          // what a bare dot means.
+          title={t.id === "activity" && backlog ? BACKLOG_HINT : undefined}
         >
           {t.label}
           {/* A dot, not a count: the number belongs where you can act on it, and
@@ -379,7 +387,7 @@ function TabBar({
           different control to anyone finding it by name. */}
       {backlog && (
         <span id={BACKLOG_HINT_ID} className="sr-only">
-          Unclassified activity is waiting
+          {BACKLOG_HINT}
         </span>
       )}
     </div>
