@@ -66,6 +66,40 @@ const recentSessions = Array.from({ length: 21 * processes.length }, (_, index) 
     isCorrected: false,
   };
 });
+/**
+ * A consolidatable set for the rule-combining notice: three subdomains under
+ * one parent that all carry the same rule, plus one sibling with no rule for
+ * the notice to name as absorbed.
+ *
+ * Deliberately not added to `processes`. Both the length and the start offset
+ * of every session there are derived from that array's length, so appending to
+ * it silently restates every app total the layout tests read. These carry small
+ * totals for the same reason — the first row of the Activity table has to stay
+ * Explorer, which two workflows depend on.
+ */
+const consolidationDomains = [
+  "mail.corp.example",
+  "docs.corp.example",
+  "files.corp.example",
+  "metrics.corp.example",
+];
+const consolidationSessions = consolidationDomains.flatMap((domain, domainIndex) =>
+  Array.from({ length: 3 }, (_, visit) => {
+    const start = now - (visit + 1) * day - (domainIndex + 1) * 900;
+    return {
+      id: 20_000 + domainIndex * 10 + visit,
+      start,
+      end: start + 700,
+      process: "chrome.exe",
+      title: `Weekly review — ${domain} — Google Chrome`,
+      domain,
+      isAfk: false,
+      categoryOverrideId: null,
+      isCorrected: false,
+    };
+  }),
+);
+
 /** The welcome panel exists only while the database holds no sessions at all,
  *  so seeing it at all requires a fixture that has none. Pair with
  *  `tracker=missing` for the variant that offers to start tracking. */
@@ -86,6 +120,7 @@ let sessions = firstRun
         isCorrected: false,
       },
       ...recentSessions,
+      ...consolidationSessions,
     ].sort((a, b) => a.start - b.start);
 
 const categoryRows = [
@@ -129,6 +164,20 @@ const ruleRows = [
     title_match_mode: "",
     title_anchor: "",
   },
+  // The consolidatable set. Priority 1 is what addRule actually writes for a
+  // Website rule — the three above predate that and keep their own numbers,
+  // which still order correctly against each other.
+  ...["mail.corp.example", "docs.corp.example", "files.corp.example"].map((pattern, index) => ({
+    id: 4 + index,
+    match_type: "domain",
+    pattern,
+    category_id: 1,
+    priority: 1,
+    scope_kind: "",
+    scope_value: "",
+    title_match_mode: "",
+    title_anchor: "",
+  })),
 ];
 
 /** Ids for rules written during a session, past the seeded three. */

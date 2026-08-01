@@ -172,7 +172,7 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   await assertNoHorizontalOverflow(page);
 
   await page.getByRole("button", { name: "Activity", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Activity Library", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Apps & Websites", exact: true })).toBeVisible();
   if (width < 768) {
     await expect(page.getByRole("columnheader", { name: "Days seen" })).toHaveCount(0);
   } else {
@@ -340,10 +340,10 @@ test("@minimum every primary tab stays reachable at the minimum viewport", async
   await expect(page.locator("canvas").first()).toBeVisible();
   await assertChartsHaveGeometry(page);
 
-  // Activity keeps its last sub-view, so return to the library explicitly
+  // Activity keeps its last sub-view, so return to the catalog explicitly
   // before reaching for a row.
   await page.getByRole("button", { name: "Activity", exact: true }).click();
-  await page.getByRole("button", { name: "Activity Library", exact: true }).click();
+  await page.getByRole("button", { name: "Apps & Websites", exact: true }).click();
   const rowTrigger = page.locator("tbody button").first();
   await expect(rowTrigger).toBeVisible();
   await rowTrigger.click();
