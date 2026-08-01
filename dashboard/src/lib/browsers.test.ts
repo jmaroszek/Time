@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { displayBrowserProcesses, normalizeBrowserProcesses } from "./browsers";
+import {
+  DEFAULT_BROWSER_PROCESSES,
+  displayBrowserProcesses,
+  normalizeBrowserProcesses,
+} from "./browsers";
+
+describe("DEFAULT_BROWSER_PROCESSES", () => {
+  it("ships only the five supported mainstream Windows browsers", () => {
+    expect(DEFAULT_BROWSER_PROCESSES).toBe(
+      "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe",
+    );
+  });
+});
 
 describe("normalizeBrowserProcesses", () => {
   it("supplies the extension the process list is matched on", () => {
