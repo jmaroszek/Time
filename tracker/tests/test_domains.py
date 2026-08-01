@@ -1,9 +1,25 @@
 import ipaddress
+import json
+from pathlib import Path
 import random
 import re
 import string
 
-from tracker.domains import parse_domain, sanitize_browser_title
+import pytest
+
+from tracker.domains import (
+    browser_privacy_fields,
+    parse_browser_title,
+    parse_domain,
+    sanitize_browser_title,
+)
+
+
+PROTOCOL_FIXTURE = json.loads(
+    (Path(__file__).parent / "fixtures" / "browser_title_protocol.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 def test_full_url_in_title():
@@ -108,3 +124,86 @@ def test_seeded_hostile_title_fuzz_never_raises_or_returns_malformed_hosts():
             ipaddress.ip_address(result)
         except ValueError:
             assert result == "localhost" or all(label_re.fullmatch(x) for x in result.split("."))
+
+
+@pytest.mark.parametrize("case", PROTOCOL_FIXTURE["validV1"])
+def test_v1_protocol_fixture_accepts_valid_terminal_markers(case):
+    parsed = parse_browser_title(case["rawTitle"])
+    assert parsed.marker_version == 1
+    assert parsed.original_title == case["originalTitle"]
+    assert parsed.reduced_url == case["reducedUrl"]
+
+
+@pytest.mark.parametrize("title", PROTOCOL_FIXTURE["invalidOrOrdinary"])
+def test_v1_protocol_fixture_fails_closed_for_invalid_or_ordinary_titles(title):
+    parsed = parse_browser_title(title)
+    assert parsed.marker_version is None
+    assert parsed.original_title == title
+    assert parsed.reduced_url is None
+    assert parse_domain(title) is None
+
+
+def test_v1_fields_derive_only_normalized_domain_and_clean_title():
+    raw = (
+        "  Pull request  "
+        " [[TIME_URL_V1:https://www.GitHub.com:8443/openai/example/pull/42]]"
+    )
+    parsed = parse_browser_title(raw)
+    fields = browser_privacy_fields(raw)
+
+    assert parsed.original_title == "  Pull request  "
+    assert parsed.reduced_url == "https://www.GitHub.com:8443/openai/example/pull/42"
+    assert fields.title == "Pull request"
+    assert fields.domain == "github.com"
+    assert not hasattr(fields, "reduced_url")
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "",
+        "not a url",
+        "ftp://example.com/a",
+        "https://example.com/a?secret=1",
+        "https://example.com/a#secret",
+        "https://user@example.com/a",
+        "https://example.com:bad/a",
+        "https://[broken/a",
+        "https://example.com/a b",
+        "https://example.com/a\x00b",
+        "https://example.com/" + "a" * 8_173,
+    ],
+)
+def test_v1_parser_rejects_hostile_candidates_without_throwing(candidate):
+    raw = f"Page [[TIME_URL_V1:{candidate}]]"
+    assert parse_browser_title(raw).reduced_url is None
+    assert browser_privacy_fields(raw).domain is None
+
+
+def test_v1_parser_accepts_candidate_at_total_length_ceiling():
+    candidate = "https://example.com/" + "a" * (8_192 - len("https://example.com/"))
+    parsed = parse_browser_title(f"Page [[TIME_URL_V1:{candidate}]]")
+    assert parsed.reduced_url == candidate
+    assert parse_domain(f"Page [[TIME_URL_V1:{candidate}]]") == "example.com"
+
+
+def test_v1_parser_removes_only_one_owned_separator_and_terminal_marker():
+    raw = (
+        "Report  [[TIME_URL_V1:https://old.example/path]] "
+        "[[TIME_URL_V1:https://new.example/current]]"
+    )
+    parsed = parse_browser_title(raw)
+    assert parsed.original_title == "Report  [[TIME_URL_V1:https://old.example/path]]"
+    assert parsed.reduced_url == "https://new.example/current"
+
+
+def test_non_terminal_and_unknown_markers_bypass_legacy_url_parsing_and_sanitizing():
+    titles = [
+        "Page [[TIME_URL_V1:https://example.com/path]] after",
+        "Page [[TIME_URL_V2:https://example.com/path]]",
+        "Page [[TIME_URL_V1:https://example.com/path?secret=1]]",
+    ]
+    for title in titles:
+        fields = browser_privacy_fields(title)
+        assert fields.domain is None
+        assert fields.title == title

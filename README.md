@@ -28,11 +28,13 @@ how that is changing over time.
   immediately, and sleep records no timeline block. Awake away rows retain the
   foreground app/site identity for inspection, but replace the window title
   with the away reason; locked rows retain no foreground identity.
-- **Optional site-level browser time.** Domains can be derived from browser
-  titles produced by a third-party URL-title extension. URL paths, queries,
-  fragments, and credentials are stripped before storage. No extension is
-  required for app-level browser tracking. The same domain signal lets Time
-  distinguish foreground browser playback from media in a background tab.
+- **Optional site-level browser time.** The first-party Time Website
+  Integration extension adds the current origin and path to the browser title
+  while excluding queries and fragments. Time derives only the normalized
+  domain and immediately discards the raw origin/path; credentials are never
+  exposed by the extension. No extension is required for app-level browser
+  tracking. The same domain signal lets Time distinguish foreground browser
+  playback from media in a background tab.
 - **Your own definition of productive.** Apps and websites are grouped into
   custom categories and simple rules, all edited in the dashboard. New installs
   contain no personal categories or classification rules. Changes apply to all history, and the tracker

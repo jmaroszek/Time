@@ -1,0 +1,30 @@
+{
+  "validV1": [
+    {
+      "rawTitle": "GitHub - Pull Request #42 [[TIME_URL_V1:https://github.com/openai/example/pull/42]]",
+      "originalTitle": "GitHub - Pull Request #42",
+      "reducedUrl": "https://github.com/openai/example/pull/42"
+    },
+    {
+      "rawTitle": "[[TIME_URL_V1:https://example.com/]]",
+      "originalTitle": "",
+      "reducedUrl": "https://example.com/"
+    },
+    {
+      "rawTitle": "Report  [[TIME_URL_V1:https://example.com:8443/my%20documents/report]]",
+      "originalTitle": "Report ",
+      "reducedUrl": "https://example.com:8443/my%20documents/report"
+    }
+  ],
+  "invalidOrOrdinary": [
+    "Ordinary browser title",
+    "Marker [[TIME_URL_V1:https://example.com/a]] in the middle",
+    "Unknown [[TIME_URL_V2:https://example.com/a]]",
+    "Malformed [[TIME_URL_V1:not a url]]",
+    "Query [[TIME_URL_V1:https://example.com/a?secret=1]]",
+    "Fragment [[TIME_URL_V1:https://example.com/a#secret]]",
+    "Credentials [[TIME_URL_V1:https://user:secret@example.com/a]]",
+    "Unsupported [[TIME_URL_V1:ftp://example.com/a]]"
+  ]
+}
+

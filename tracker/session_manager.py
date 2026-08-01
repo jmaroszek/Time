@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from tracker.domains import parse_domain, sanitize_browser_title
+from tracker.domains import browser_privacy_fields
 
 LOCK_PROCESS = "lockapp.exe"
 AFK_PROCESS = "afk"
@@ -328,11 +328,17 @@ class SessionManager:
 
     def _privacy_fields(self, process: str, raw_title: str) -> tuple[str, str | None]:
         is_browser = process in self.settings.browser_processes
-        domain = parse_domain(raw_title) if is_browser else None
-        if not self.settings.record_window_titles:
-            return "", domain
         if is_browser:
-            return sanitize_browser_title(raw_title), domain
+            # Parse once so the title and domain cannot disagree about whether
+            # a V1 marker was valid. browser_privacy_fields discards the raw
+            # origin/path before returning from the privacy boundary.
+            fields = browser_privacy_fields(raw_title)
+            return (
+                fields.title if self.settings.record_window_titles else "",
+                fields.domain,
+            )
+        if not self.settings.record_window_titles:
+            return "", None
         return raw_title.replace("\x00", "")[:512], None
 
     def _reset_pending(self) -> None:
