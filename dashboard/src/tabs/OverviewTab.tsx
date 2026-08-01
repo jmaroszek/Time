@@ -84,12 +84,19 @@ export default function OverviewTab({
   preset,
   firstSessionSec,
   view,
+  historyRevision,
   onOpenSettings,
 }: {
   range: Range;
   preset: PresetOrCustom;
   firstSessionSec: number | null;
   view: InsightsViewState;
+  /** Bumped when history changes underneath a mounted tab. Insights is normally
+   *  unmounted when that happens — every mutation lives on Activity or
+   *  Settings — but the first session of a fresh install arrives while this tab
+   *  is the one on screen, and without this it would keep rendering the empty
+   *  snapshot it fetched before the tracker had written anything. */
+  historyRevision: number;
   onOpenSettings: () => void;
 }) {
   const meta = useMeta();
@@ -101,7 +108,7 @@ export default function OverviewTab({
   const { topN, setTopN, blockMinutes, setBlockMinutes, aggregateView, setAggregateView, metric, setMetric, stackBy, setStackBy } = view;
 
   const { startSec: fetchStart, endSec: fetchEnd } = insightsFetchWindow(range);
-  const sessionData = useSessions(fetchStart, fetchEnd);
+  const sessionData = useSessions(fetchStart, fetchEnd, historyRevision);
   const request = useMemo<InsightsRequest | null>(() => {
     if (!sessionData.ready) return null;
     return {

@@ -5,7 +5,11 @@ import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePick
 import { Button, Checkbox, Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
-import { currentHistoryRevision, subscribeHistoryInvalidation } from "./lib/historyInvalidation";
+import {
+  currentHistoryRevision,
+  invalidateHistory,
+  subscribeHistoryInvalidation,
+} from "./lib/historyInvalidation";
 import { deleteCategory, fetchEarliestSessionStart, fetchTrackerStatus, takeRestoreNotice, updateSetting, type TrackerStatus } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
 import { allTimeRange, isRollingPreset, rangeForCalendarPreset, rangeForPreset, type Range } from "./lib/time";
@@ -72,6 +76,9 @@ function Shell() {
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [firstSessionSec, setFirstSessionSec] = useState<number | null>(null);
   const [historyRevision, setHistoryRevision] = useState(currentHistoryRevision);
+  /** The last session count this session-count poll observed, so the 0 → n
+   *  transition can be told apart from a first reading on a populated database. */
+  const sessionCountRef = useRef<number | null>(null);
   // Insights view controls live here, above the tab switch, so a change made on
   // the Insights tab survives leaving for another tab and coming back.
   const insightsView = useInsightsView();
@@ -140,7 +147,22 @@ function Shell() {
     const load = () =>
       void fetchTrackerStatus()
         .then((s) => {
-          if (!cancelled) setStatus(s);
+          if (cancelled) return;
+          // The tracker writes sessions straight to SQLite and has no way to
+          // tell the renderer. This poll is the only thing watching, so the
+          // moment it sees a count leave zero is the app's one chance to drop
+          // the caches built while the database was empty — otherwise the
+          // reader is left on an empty Insights tab that only fills in once
+          // something remounts it.
+          //
+          // Compare against the previous observation rather than a "have I
+          // fired yet" flag: on a database that already has history the first
+          // reading is a large number, and treating that as the transition
+          // would clear every cache on each launch.
+          const previousCount = sessionCountRef.current;
+          sessionCountRef.current = s.totalSessionCount;
+          setStatus(s);
+          if (previousCount === 0 && s.totalSessionCount > 0) invalidateHistory();
         })
         .catch(() => {});
     load();
@@ -239,6 +261,7 @@ function Shell() {
             preset={preset}
             firstSessionSec={firstSessionSec}
             view={insightsView}
+            historyRevision={historyRevision}
             onOpenSettings={() => {
               setHighlightSection("Goals");
               setTab("settings");
@@ -412,7 +435,7 @@ function PrivacyOnboarding() {
     <div className="flex min-h-full items-center justify-center p-3 sm:p-8">
       <section className="scroll-well max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-[18px] border border-edge bg-surface px-4 py-5 shadow-panel sm:max-h-[calc(100dvh-4rem)] sm:px-7 sm:py-6">
         <p className="text-micro font-bold uppercase tracking-[.12em] text-accent">Private by design</p>
-        <h1 className="mt-2 text-lg font-semibold text-ink">Choose what Time may record</h1>
+        <h1 className="mt-2 text-lg font-semibold text-ink">Choose what Time can record</h1>
         <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-2">
           Time has no accounts, servers, or telemetry. All activity is recorded and analyzed
           locally. Your data stays yours forever.
@@ -423,7 +446,7 @@ function PrivacyOnboarding() {
             <p className="font-medium">When tracking is enabled</p>
             <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
               Time tracks which apps you use and for how long. In your browser, it can also track
-              the websites you visit, but never the specific pages.
+              the websites you visit, but not the specific pages.
             </p>
           </div>
           {/* Ordered by default state, not importance: the two boxes that ship
