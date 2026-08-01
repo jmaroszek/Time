@@ -18,7 +18,7 @@ async function fixtureSettings(page: Page): Promise<Record<string, string>> {
 
 test("@workflow onboarding commits consent before starting the tracker", async ({ page }) => {
   await page.goto("/?fixture=onboarding");
-  await page.getByRole("button", { name: "Enable private tracking" }).click();
+  await page.getByRole("button", { name: "Start tracking" }).click();
   await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeVisible();
 
   const names = await invocationNames(page);
@@ -50,7 +50,7 @@ test("@workflow onboarding Not now never starts or registers tracking", async ({
 
 test("@workflow onboarding rolls back consent when tracker startup fails", async ({ page }) => {
   await page.goto("/?fixture=onboarding&fail=start_tracker");
-  await page.getByRole("button", { name: "Enable private tracking" }).click();
+  await page.getByRole("button", { name: "Start tracking" }).click();
   await expect(page.getByText("device fixture forced start_tracker failure")).toBeVisible();
 
   const settings = await fixtureSettings(page);
@@ -62,6 +62,47 @@ test("@workflow onboarding rolls back consent when tracker startup fails", async
       .map((entry) => entry.args)
   );
   expect(launchCalls).toEqual([{ enabled: true }, { enabled: false }]);
+});
+
+// The welcome panel is the only screen a user reaches by declining at the
+// consent step, and the only place tracking can be started without visiting
+// Settings. Both of its states are covered here because the quiet failure it
+// guards against — tracking that never starts, or starts and then stops for
+// good at the next shutdown — produces an app that simply shows nothing.
+test("@workflow first run starts tracking, then offers to register startup", async ({ page }) => {
+  await page.goto("/?fixture=firstrun&tracker=missing");
+  await expect(page.getByText("nothing is being recorded")).toBeVisible();
+
+  await page.getByRole("button", { name: "Start tracking" }).click();
+  await expect(page.getByText("Tracking is on")).toBeVisible();
+
+  // Consent has to travel with the launch: a tracker started while consent is
+  // "0" runs and records nothing, which reads as a button that did nothing.
+  const started = await fixtureSettings(page);
+  expect(started.recording_consent).toBe("1");
+  // ...but starting must not register startup behind the user's back.
+  expect(started.launch_at_login).toBe("0");
+  const names = await invocationNames(page);
+  expect(names).toContain("start_tracker");
+  expect(names).not.toContain("set_launch_at_login");
+
+  await page.getByRole("button", { name: "Start at sign-in" }).click();
+  await expect.poll(async () => (await fixtureSettings(page)).launch_at_login).toBe("1");
+  const launchCall = await page.evaluate(() =>
+    window.__TIME_DEVICE_TEST__.invocations.find(
+      (entry) => entry.command === "set_launch_at_login",
+    )
+  );
+  expect(launchCall?.args).toEqual({ enabled: true });
+  await expect(page.getByRole("button", { name: "Start at sign-in" })).toHaveCount(0);
+});
+
+test("@workflow first run with a live tracker asks for nothing", async ({ page }) => {
+  await page.goto("/?fixture=firstrun");
+  await expect(page.getByText("Tracking is on")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start tracking" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Start at sign-in" })).toHaveCount(0);
+  expect(await invocationNames(page)).not.toContain("start_tracker");
 });
 
 test("@workflow restore dispatches only after an explicit backup selection", async ({ page }) => {

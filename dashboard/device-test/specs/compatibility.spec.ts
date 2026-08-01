@@ -295,7 +295,7 @@ test("@minimum onboarding and restore dialog fit the minimum viewport", async ({
   await page.goto("/?fixture=onboarding");
   await expect(page.getByRole("heading", { name: "Choose what Time may record" })).toBeVisible();
   await assertNoHorizontalOverflow(page);
-  await expect(page.getByRole("button", { name: "Enable private tracking" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start tracking" })).toBeVisible();
 
   await page.goto("/");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
