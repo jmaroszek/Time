@@ -201,6 +201,9 @@ jobs:
       - name: Compare the shared protocol fixture
         env:
           TIME_EXTENSION_REPO: ${{ github.workspace }}/extension-checkout
+          # Refuse to skip: pytest exits 0 on a skip, so without this a broken
+          # checkout would report a green gate that compared nothing.
+          TIME_PARITY_REQUIRED: "1"
         run: python -m pytest tracker/tests/test_protocol_parity.py -q
 
   quality-gate:
