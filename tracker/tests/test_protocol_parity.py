@@ -46,10 +46,16 @@ def _find_extension_fixture() -> Path | None:
 def test_shared_protocol_fixture_matches_the_extension_repository():
     extension_fixture = _find_extension_fixture()
     if extension_fixture is None:
-        pytest.skip(
+        unverified = (
             "Time Website Integration checkout not found; protocol parity "
             "unverified. Set TIME_EXTENSION_REPO to check it."
         )
+        # CI sets TIME_PARITY_REQUIRED because pytest exits 0 on a skip: a
+        # mistyped checkout path would otherwise turn this gate green without
+        # comparing anything, failing open exactly where it must fail closed.
+        if os.environ.get("TIME_PARITY_REQUIRED"):
+            pytest.fail(unverified)
+        pytest.skip(unverified)
 
     assert DESKTOP_FIXTURE.read_text(encoding="utf-8") == extension_fixture.read_text(
         encoding="utf-8"
