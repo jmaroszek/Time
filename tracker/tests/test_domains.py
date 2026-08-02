@@ -146,7 +146,7 @@ def test_v1_protocol_fixture_fails_closed_for_invalid_or_ordinary_titles(title):
 def test_v1_fields_derive_only_normalized_domain_and_clean_title():
     raw = (
         "  Pull request  "
-        " [[TIME_URL_V1:https://www.GitHub.com:8443/openai/example/pull/42]]"
+        " [[https://www.GitHub.com:8443/openai/example/pull/42:TIME_URL_V1]]"
     )
     parsed = parse_browser_title(raw)
     fields = browser_privacy_fields(raw)
@@ -175,33 +175,33 @@ def test_v1_fields_derive_only_normalized_domain_and_clean_title():
     ],
 )
 def test_v1_parser_rejects_hostile_candidates_without_throwing(candidate):
-    raw = f"Page [[TIME_URL_V1:{candidate}]]"
+    raw = f"Page [[{candidate}:TIME_URL_V1]]"
     assert parse_browser_title(raw).reduced_url is None
     assert browser_privacy_fields(raw).domain is None
 
 
 def test_v1_parser_accepts_candidate_at_total_length_ceiling():
     candidate = "https://example.com/" + "a" * (8_192 - len("https://example.com/"))
-    parsed = parse_browser_title(f"Page [[TIME_URL_V1:{candidate}]]")
+    parsed = parse_browser_title(f"Page [[{candidate}:TIME_URL_V1]]")
     assert parsed.reduced_url == candidate
-    assert parse_domain(f"Page [[TIME_URL_V1:{candidate}]]") == "example.com"
+    assert parse_domain(f"Page [[{candidate}:TIME_URL_V1]]") == "example.com"
 
 
 def test_v1_parser_removes_only_one_owned_separator_and_terminal_marker():
     raw = (
-        "Report  [[TIME_URL_V1:https://old.example/path]] "
-        "[[TIME_URL_V1:https://new.example/current]]"
+        "Report  [[https://old.example/path:TIME_URL_V1]] "
+        "[[https://new.example/current:TIME_URL_V1]]"
     )
     parsed = parse_browser_title(raw)
-    assert parsed.original_title == "Report  [[TIME_URL_V1:https://old.example/path]]"
+    assert parsed.original_title == "Report  [[https://old.example/path:TIME_URL_V1]]"
     assert parsed.reduced_url == "https://new.example/current"
 
 
 def test_non_terminal_and_unknown_markers_bypass_legacy_url_parsing_and_sanitizing():
     titles = [
-        "Page [[TIME_URL_V1:https://example.com/path]] after",
-        "Page [[TIME_URL_V2:https://example.com/path]]",
-        "Page [[TIME_URL_V1:https://example.com/path?secret=1]]",
+        "Page [[https://example.com/path:TIME_URL_V1]] after",
+        "Page [[https://example.com/path:TIME_URL_V2]]",
+        "Page [[https://example.com/path?secret=1:TIME_URL_V1]]",
     ]
     for title in titles:
         fields = browser_privacy_fields(title)

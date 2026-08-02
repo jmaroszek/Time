@@ -1,30 +1,40 @@
 {
   "validV1": [
     {
-      "rawTitle": "GitHub - Pull Request #42 [[TIME_URL_V1:https://github.com/openai/example/pull/42]]",
+      "rawTitle": "GitHub - Pull Request #42 [[https://github.com/openai/example/pull/42:TIME_URL_V1]]",
       "originalTitle": "GitHub - Pull Request #42",
       "reducedUrl": "https://github.com/openai/example/pull/42"
     },
     {
-      "rawTitle": "[[TIME_URL_V1:https://example.com/]]",
+      "rawTitle": "[[https://example.com/:TIME_URL_V1]]",
       "originalTitle": "",
       "reducedUrl": "https://example.com/"
     },
     {
-      "rawTitle": "Report  [[TIME_URL_V1:https://example.com:8443/my%20documents/report]]",
+      "rawTitle": "Report  [[https://example.com:8443/my%20documents/report:TIME_URL_V1]]",
       "originalTitle": "Report ",
       "reducedUrl": "https://example.com:8443/my%20documents/report"
+    },
+    {
+      "rawTitle": "Notes [[draft]] [[https://example.com/a:TIME_URL_V1]]",
+      "originalTitle": "Notes [[draft]]",
+      "reducedUrl": "https://example.com/a"
+    },
+    {
+      "rawTitle": "Wiki [[https://example.com/[[page]]:TIME_URL_V1]]",
+      "originalTitle": "Wiki",
+      "reducedUrl": "https://example.com/[[page]]"
     }
   ],
   "invalidOrOrdinary": [
     "Ordinary browser title",
-    "Marker [[TIME_URL_V1:https://example.com/a]] in the middle",
-    "Unknown [[TIME_URL_V2:https://example.com/a]]",
-    "Malformed [[TIME_URL_V1:not a url]]",
-    "Query [[TIME_URL_V1:https://example.com/a?secret=1]]",
-    "Fragment [[TIME_URL_V1:https://example.com/a#secret]]",
-    "Credentials [[TIME_URL_V1:https://user:secret@example.com/a]]",
-    "Unsupported [[TIME_URL_V1:ftp://example.com/a]]"
+    "Marker [[https://example.com/a:TIME_URL_V1]] in the middle",
+    "Unknown [[https://example.com/a:TIME_URL_V2]]",
+    "Malformed [[not a url:TIME_URL_V1]]",
+    "Query [[https://example.com/a?secret=1:TIME_URL_V1]]",
+    "Fragment [[https://example.com/a#secret:TIME_URL_V1]]",
+    "Credentials [[https://user:secret@example.com/a:TIME_URL_V1]]",
+    "Unsupported [[ftp://example.com/a:TIME_URL_V1]]",
+    "Superseded prefix grammar [[TIME_URL_V1:https://example.com/a]]"
   ]
 }
-

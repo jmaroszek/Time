@@ -355,8 +355,8 @@ def test_v1_browser_session_stores_clean_title_and_normalized_domain(manager, st
             1000.0,
             process="chrome.exe",
             title=(
-                "Pull request [[TIME_URL_V1:"
-                "https://www.GitHub.com/openai/example/pull/42]]"
+                "Pull request [[https://www.GitHub.com/openai/example"
+                "/pull/42:TIME_URL_V1]]"
             ),
         )
     )
@@ -384,7 +384,7 @@ def test_v1_browser_domain_is_kept_when_titles_are_disabled(store):
         active(
             1000.0,
             process="firefox.exe",
-            title="Account [[TIME_URL_V1:https://example.com/private/path]]",
+            title="Account [[https://example.com/private/path:TIME_URL_V1]]",
         )
     )
     assert store.opened[0][3] == ""
@@ -396,21 +396,21 @@ def test_v1_path_only_change_does_not_create_a_session_boundary(manager, store):
         active(
             1000.0,
             process="chrome.exe",
-            title="Docs [[TIME_URL_V1:https://example.com/a]]",
+            title="Docs [[https://example.com/a:TIME_URL_V1]]",
         )
     )
     manager.tick(
         active(
             1001.0,
             process="chrome.exe",
-            title="Docs [[TIME_URL_V1:https://example.com/b]]",
+            title="Docs [[https://example.com/b:TIME_URL_V1]]",
         )
     )
     manager.tick(
         active(
             1002.0,
             process="chrome.exe",
-            title="Docs [[TIME_URL_V1:https://example.com/b]]",
+            title="Docs [[https://example.com/b:TIME_URL_V1]]",
         )
     )
     assert len(store.opened) == 1
@@ -418,14 +418,14 @@ def test_v1_path_only_change_does_not_create_a_session_boundary(manager, store):
 
 
 def test_malformed_v1_marker_fails_closed_without_legacy_domain(manager, store):
-    raw = "Account [[TIME_URL_V1:https://example.com/private?secret=1]]"
+    raw = "Account [[https://example.com/private?secret=1:TIME_URL_V1]]"
     manager.tick(active(1000.0, process="chrome.exe", title=raw))
     assert store.opened[0][3] == raw
     assert store.opened[0][4] is None
 
 
 def test_non_browser_process_does_not_interpret_v1_marker(manager, store):
-    raw = "Editor [[TIME_URL_V1:https://example.com/private]]"
+    raw = "Editor [[https://example.com/private:TIME_URL_V1]]"
     manager.tick(active(1000.0, process="code.exe", title=raw))
     assert store.opened[0][3] == raw
     assert store.opened[0][4] is None
@@ -483,7 +483,7 @@ def test_v1_website_exclusion_works_when_title_storage_is_disabled(store):
         active(
             1000.0,
             process="chrome.exe",
-            title="Private [[TIME_URL_V1:https://example.com/path]]",
+            title="Private [[https://example.com/path:TIME_URL_V1]]",
         )
     )
     assert store.opened == []

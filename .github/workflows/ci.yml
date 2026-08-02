@@ -170,6 +170,39 @@ jobs:
       - name: Build debug application
         run: npm run build:debug-app
 
+  protocol-parity:
+    name: Shared protocol parity
+    # Time and the browser extension parse one marker grammar from separate
+    # repositories, and each keeps its own copy of the conformance fixture. A
+    # check inside one repository can only prove self-consistency, so the two
+    # copies must be compared against each other.
+    #
+    # Inert until EXTENSION_REPOSITORY is set to the extension's "owner/repo".
+    # That repository has no remote yet, so CI cannot fetch it; until then the
+    # comparison runs locally through tracker/tests/test_protocol_parity.py and
+    # is a hard gate in the extension's own `npm run verify:release`. A private
+    # extension repository additionally needs a PAT in EXTENSION_REPO_TOKEN.
+    if: vars.EXTENSION_REPOSITORY != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check out the extension repository
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ vars.EXTENSION_REPOSITORY }}
+          token: ${{ secrets.EXTENSION_REPO_TOKEN || github.token }}
+          path: extension-checkout
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Compare the shared protocol fixture
+        env:
+          TIME_EXTENSION_REPO: ${{ github.workspace }}/extension-checkout
+        run: python -m pytest tracker/tests/test_protocol_parity.py -q
+
   quality-gate:
     name: Required quality gate
     if: always()
@@ -178,6 +211,7 @@ jobs:
       - dashboard
       - renderer-compatibility
       - windows-backend
+      - protocol-parity
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -187,8 +221,14 @@ jobs:
           DASHBOARD_RESULT: ${{ needs.dashboard.result }}
           RENDERER_RESULT: ${{ needs.renderer-compatibility.result }}
           WINDOWS_RESULT: ${{ needs.windows-backend.result }}
+          PARITY_RESULT: ${{ needs.protocol-parity.result }}
         run: |
           test "$TRACKER_RESULT" = success
           test "$DASHBOARD_RESULT" = success
           test "$RENDERER_RESULT" = success
           test "$WINDOWS_RESULT" = success
+          # "skipped" while EXTENSION_REPOSITORY is unset; must pass once it is.
+          case "$PARITY_RESULT" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
