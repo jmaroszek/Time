@@ -35,6 +35,11 @@
     "Fragment [[https://example.com/a#secret:TIME_URL_V1]]",
     "Credentials [[https://user:secret@example.com/a:TIME_URL_V1]]",
     "Unsupported [[ftp://example.com/a:TIME_URL_V1]]",
-    "Superseded prefix grammar [[TIME_URL_V1:https://example.com/a]]"
+    "Superseded prefix grammar [[TIME_URL_V1:https://example.com/a]]",
+    "[[not a url:TIME_URL_V1]]",
+    "[[ftp://example.com/a:TIME_URL_V1]]",
+    "[[[not a url:TIME_URL_V1]]",
+    "[[:TIME_URL_V1]]",
+    ":TIME_URL_V1]]"
   ]
 }
