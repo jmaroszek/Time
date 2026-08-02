@@ -26,9 +26,12 @@ _TRAILING_DOMAIN_RE = re.compile(
 _HOST_LABEL_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _URL_TRAILING_PUNCTUATION = ").,;!?]}>"
 
-_TIME_MARKER_PREFIX = "[[TIME_URL_"
-_TIME_V1_PREFIX = "[[TIME_URL_V1:"
-_TIME_MARKER_SUFFIX = "]]"
+# The version token trails the reduced URL so a truncated browser tab shows the
+# site rather than the marker's own name. The sentinel stays deliberately loose
+# so any marker-like text fails closed instead of reaching the legacy heuristics.
+_TIME_MARKER_SENTINEL = "TIME_URL_V"
+_TIME_MARKER_OPEN = "[["
+_TIME_V1_SUFFIX = ":TIME_URL_V1]]"
 _TIME_V1_MAX_CANDIDATE_LENGTH = 8_192
 
 
@@ -102,28 +105,40 @@ def _parse_browser_title(
     title: str,
 ) -> tuple[ParsedBrowserTitle, SplitResult | None]:
     ordinary = ParsedBrowserTitle(None, title, None)
-    if not title.endswith(_TIME_MARKER_SUFFIX):
+    if not title.endswith(_TIME_V1_SUFFIX):
         return ordinary, None
 
-    marker_start = title.rfind(_TIME_V1_PREFIX)
-    if marker_start < 0:
-        return ordinary, None
-    candidate = title[
-        marker_start + len(_TIME_V1_PREFIX) : -len(_TIME_MARKER_SUFFIX)
-    ]
-    reduced = _split_reduced_url(candidate)
-    if reduced is None:
-        return ordinary, None
+    # "[[" alone is not distinctive, so a page-authored title or a pathname may
+    # contain it. Walk candidate openings right to left and let strict candidate
+    # validation decide; widening candidates can only get longer, so an
+    # over-length candidate ends the search.
+    candidate_end = len(title) - len(_TIME_V1_SUFFIX)
+    search_from = candidate_end
 
-    separator_length = 1 if marker_start > 0 and title[marker_start - 1] == " " else 0
-    return (
-        ParsedBrowserTitle(
-            1,
-            title[: marker_start - separator_length],
-            candidate,
-        ),
-        reduced,
-    )
+    while True:
+        marker_start = title.rfind(_TIME_MARKER_OPEN, 0, search_from)
+        if marker_start < 0:
+            return ordinary, None
+
+        candidate = title[marker_start + len(_TIME_MARKER_OPEN) : candidate_end]
+        if len(candidate) > _TIME_V1_MAX_CANDIDATE_LENGTH:
+            return ordinary, None
+
+        reduced = _split_reduced_url(candidate)
+        if reduced is not None:
+            separator_length = (
+                1 if marker_start > 0 and title[marker_start - 1] == " " else 0
+            )
+            return (
+                ParsedBrowserTitle(
+                    1,
+                    title[: marker_start - separator_length],
+                    candidate,
+                ),
+                reduced,
+            )
+
+        search_from = marker_start
 
 
 def parse_browser_title(title: str) -> ParsedBrowserTitle:
@@ -187,7 +202,7 @@ def browser_privacy_fields(title: str) -> BrowserPrivacyFields:
             domain,
         )
 
-    if _TIME_MARKER_PREFIX in title:
+    if _TIME_MARKER_SENTINEL in title:
         return BrowserPrivacyFields(_sanitize_ordinary_title(title), None)
     return BrowserPrivacyFields(
         _sanitize_legacy_browser_title(title),

@@ -501,7 +501,7 @@ export default function SettingsTab({
     // here — which is what the rail beside it addresses, without taking width
     // from the column or reflowing it.
     <FlashedSection.Provider value={flashedSection}>
-    <div className="settings-panel mr-auto flex w-full max-w-[774px] gap-6 pt-2">
+    <div className="settings-panel mr-auto flex w-full max-w-[774px] gap-9 pt-2">
       <div className="flex min-w-0 w-full max-w-[600px] flex-col gap-[26px]">
       <SettingsSection title="Tracker status">
         <div className="flex flex-wrap items-center justify-between gap-2">
