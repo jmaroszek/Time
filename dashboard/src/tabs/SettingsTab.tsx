@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { Button, ConfirmDialog, Spinner, TrashButton } from "../components/ui";
 import { ExtensionLinks } from "../components/ExtensionLinks";
@@ -53,6 +54,7 @@ import {
   type DatabaseBackup,
   type TrackerStatus,
 } from "../lib/queries";
+import { SUPPORT_EMAIL, supportEmailUrl } from "../lib/support";
 import { useBanner } from "../state/banner";
 import { useMeta } from "../state/meta";
 
@@ -614,8 +616,13 @@ export default function SettingsTab({
         <ExclusionSummary onManage={onManageExclusions} />
       </Section>
 
-      <Section title="Goals">
+      <Section title="Insights">
         <Row label="Weekly productive goal" help="Set 0 to leave goal pace unset." control={numberControl(SPECS.goal, "Weekly productive goal", "h")} />
+        <Row
+          label="Minimum app time"
+          help="Hides apps averaging less than this per tracked day from Insights' Top Apps."
+          control={numberControl(SPECS.minimum, "Minimum app time", "min/day")}
+        />
       </Section>
 
       <Section title="Timeline window">
@@ -793,11 +800,6 @@ export default function SettingsTab({
       </Section>
 
       <Section title="Advanced">
-        <Row
-          label="Minimum app time"
-          help="Hides apps averaging less than this per tracked day from Insights' Top Apps."
-          control={numberControl(SPECS.minimum, "Minimum app time", "min/day")}
-        />
         <Row label="Heartbeat interval" help="How often the current session is saved; a crash can lose up to this much recent activity." control={numberControl(SPECS.heartbeat, "Heartbeat interval", "s")} />
         <Row
           stacked
@@ -823,6 +825,7 @@ export default function SettingsTab({
         disabled={savingKeys.size > 0}
         onRestored={() => setPause({ paused: false, until: 0 })}
       />
+      <HelpAndFeedbackSection trackerVersion={meta.settings.tracker_version} />
       <DataSection settingsBusy={savingKeys.size > 0} />
       </div>
       <SectionRail />
@@ -872,20 +875,61 @@ function ExclusionSummary({ onManage }: { onManage: () => void }) {
   );
 }
 
-/** Both halves' versions, for diagnosing mismatched installs. The
- *  tracker stamps tracker_version into settings at startup. */
-function VersionsLine({ trackerVersion }: { trackerVersion: string | undefined }) {
+/** Support belongs near the app versions that make a report actionable, not
+ *  inside Data management merely because that was once the only quiet footer.
+ *  The tracker stamps tracker_version into settings at startup. */
+function HelpAndFeedbackSection({ trackerVersion }: { trackerVersion: string | undefined }) {
+  const banner = useBanner();
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     void import("@tauri-apps/api/app")
       .then(({ getVersion }) => getVersion())
       .then(setAppVersion)
       .catch(() => {});
   }, []);
+
+  const emailSupport = async () => {
+    try {
+      await openUrl(supportEmailUrl({ dashboardVersion: appVersion, trackerVersion }));
+    } catch (error) {
+      banner.report(error, "opening an email to Time support");
+    }
+  };
+
+  const copyAddress = async () => {
+    try {
+      await navigator.clipboard.writeText(SUPPORT_EMAIL);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1_500);
+    } catch (error) {
+      banner.report(error, "copying the Time support address");
+    }
+  };
+
   return (
-    <p className="mt-2 text-xs text-ink-3">
-      Dashboard {appVersion ?? "—"} · Tracker {trackerVersion ?? "not stamped yet"}
-    </p>
+    <Section
+      title="Help & feedback"
+      intro="Questions, bugs, or ideas? Time support is handled by email."
+    >
+      <Row
+        label={SUPPORT_EMAIL}
+        help="Email support uses your configured “mailto” handler and includes Time's versions. If it does not open a new message, copy the address and start an email the way you normally do."
+        control={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" onClick={() => void emailSupport()}>
+              Email support
+            </Button>
+            <Button onClick={() => void copyAddress()}>
+              {copied ? "Copied" : "Copy address"}
+            </Button>
+          </div>
+        }
+      />
+      <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-3">
+        Dashboard {appVersion ?? "—"} · Tracker {trackerVersion ?? "not stamped yet"}
+      </p>
+    </Section>
   );
 }
 
@@ -1118,7 +1162,6 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
           <p className="mt-3 text-xs leading-snug text-ink-3">
             Backups are stored in a Backups folder beside this database. Everything stays on your machine.
           </p>
-          <VersionsLine trackerVersion={meta.settings.tracker_version} />
         </div>
         <Row
           label="Delete history older than"
@@ -1465,13 +1508,14 @@ function Section({ title, intro, children }: { title: string; intro?: string; ch
 const SETTINGS_SECTIONS = [
   "Tracker status",
   "Recording & startup",
-  "Goals",
+  "Insights",
   "Timeline window",
   "Focus & idle",
   "Appearance",
   "Activity list",
   "Advanced",
   "Defaults",
+  "Help & feedback",
   "Data management",
 ] as const;
 
@@ -1509,7 +1553,7 @@ function SettingsSection({ title, children }: { title: string; children: ReactNo
 }
 
 /**
- * Settings is ten sections in one column, and the column was correct — any
+ * Settings is eleven sections in one column, and the column was correct — any
  * masonry layout re-balances every time a section changes height. The problem
  * was never width, it was length: there is no way to see what is on the page
  * without scrolling all of it.

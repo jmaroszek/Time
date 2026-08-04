@@ -18,7 +18,8 @@
       "allow": [
         { "url": "https://chromewebstore.google.com/*" },
         { "url": "https://microsoftedge.microsoft.com/addons/*" },
-        { "url": "https://addons.mozilla.org/*" }
+        { "url": "https://addons.mozilla.org/*" },
+        { "url": "mailto:support@trackwithtime.com?subject=Time%20support%20or%20feedback&body=*" }
       ]
     }
   ]

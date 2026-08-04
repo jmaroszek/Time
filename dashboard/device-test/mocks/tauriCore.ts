@@ -463,6 +463,9 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
         },
       ];
       break;
+    case "plugin:opener|open_url":
+      result = undefined;
+      break;
     default:
       throw new Error(`Device fixture has no invoke response for command: ${command}`);
   }

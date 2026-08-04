@@ -171,6 +171,34 @@ test("@workflow tray visibility changes without changing tracker lifecycle", asy
   expect(settings.launch_at_login).toBe("1");
 });
 
+test("@workflow support email includes the installed component versions", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const support = page.locator("#settings-help-feedback");
+
+  await expect(support.getByText("support@trackwithtime.com", { exact: true })).toBeVisible();
+  await expect(
+    support.getByText(
+      "Dashboard 0.1.0-device-fixture · Tracker 0.1.0-device-fixture",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await support.getByRole("button", { name: "Email support" }).click();
+
+  const openedUrl = await page.evaluate(() => {
+    const call = window.__TIME_DEVICE_TEST__.invocations.find(
+      (entry) => entry.command === "plugin:opener|open_url",
+    );
+    return String(call?.args?.url ?? "");
+  });
+  const email = new URL(openedUrl);
+  expect(`${email.protocol}${email.pathname}`).toBe("mailto:support@trackwithtime.com");
+  expect(email.searchParams.get("subject")).toBe("Time support or feedback");
+  expect(email.searchParams.get("body")).toContain(
+    "Time versions: Dashboard 0.1.0-device-fixture · Tracker 0.1.0-device-fixture",
+  );
+});
+
 test("@workflow backup and restore failures remain actionable", async ({ page }) => {
   await page.goto("/?fail=backup_database");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
