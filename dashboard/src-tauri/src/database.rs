@@ -513,16 +513,37 @@ impl TimeDatabase {
         {
             return Err("Invalid session window".into());
         }
+        // Split by whether a correction exists, rather than filtering on
+        // COALESCE over the joined column. COALESCE is not sargable, so the
+        // single-query form scanned every row of `sessions` no matter how
+        // narrow the window: on a ten-year database a one-row live-edge refresh
+        // cost ~138 ms, all of it scan. Filtering the uncorrected branch on
+        // s.start_ts directly lets idx_sessions_start drive it — the same
+        // refresh measures ~0.2 ms — and the corrected branch stays exact by
+        // keeping the COALESCE, driven from session_corrections, which holds
+        // one row per *edited* session rather than one per session.
+        //
+        // session_corrections.session_id is the primary key, so the branches
+        // are disjoint and UNION ALL needs no deduplication.
         let rows = sqlx::query(
-            "SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
-             COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end,s.process,s.title,s.domain, \
-             s.is_afk,c.category_id,c.session_id IS NOT NULL AS is_corrected \
-             FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
+            "SELECT s.id,s.start_ts AS effective_start,s.end_ts AS effective_end, \
+             s.process,s.title,s.domain,s.is_afk,NULL AS category_id,0 AS is_corrected \
+             FROM sessions s \
+             WHERE s.end_ts>? AND s.start_ts<? AND s.start_ts>? \
+             AND NOT EXISTS (SELECT 1 FROM session_corrections c WHERE c.session_id=s.id) \
+             UNION ALL \
+             SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts), \
+             COALESCE(c.corrected_end_ts,s.end_ts),s.process,s.title,s.domain, \
+             s.is_afk,c.category_id,1 \
+             FROM session_corrections c JOIN sessions s ON s.id=c.session_id \
              WHERE COALESCE(c.corrected_end_ts,s.end_ts)>? \
              AND COALESCE(c.corrected_start_ts,s.start_ts)<? \
              AND COALESCE(c.corrected_start_ts,s.start_ts)>? \
-             ORDER BY effective_start ASC,s.id ASC",
+             ORDER BY effective_start ASC,id ASC",
         )
+        .bind(start_sec)
+        .bind(end_sec)
+        .bind(min_start_sec)
         .bind(start_sec)
         .bind(end_sec)
         .bind(min_start_sec)
@@ -2061,6 +2082,64 @@ pub(crate) mod tests {
                     .await
                     .unwrap()
                     .is_corrected
+            );
+        });
+    }
+
+    #[test]
+    fn session_windows_follow_corrected_spans_not_raw_ones() {
+        // fetch_sessions filters the uncorrected rows on the raw columns so the
+        // start_ts index can drive them, and the corrected rows on their
+        // effective spans. A correction that moves a session across a window
+        // boundary is what tells those two branches apart: filtering everything
+        // on raw columns would place session 1 in the wrong window, and
+        // filtering everything through COALESCE would give up the index.
+        let path = scratch_database("database-corrected-window-test");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            let now = super::unix_now().unwrap();
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process,is_afk) VALUES \
+                 (1,?,?,'moved.exe',0),(2,?,?,'stayed.exe',0)",
+            )
+            .bind(now - 10_000)
+            .bind(now - 9_900)
+            .bind(now - 500)
+            .bind(now - 400)
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            // Drag session 1 forward, out of its raw window and into session 2's.
+            database
+                .correct_session(&SessionCorrectionRequest {
+                    session_id: 1,
+                    start_sec: (now - 300) as f64,
+                    end_sec: (now - 200) as f64,
+                    category_id: None,
+                })
+                .await
+                .unwrap();
+
+            let recent = database
+                .fetch_sessions((now - 600) as f64, now as f64, (now - 600 - 604_800) as f64)
+                .await
+                .unwrap();
+            assert_eq!(recent.ids, vec![2, 1], "ordered by effective start");
+            assert_eq!(recent.starts, vec![now - 500, now - 300]);
+            assert_eq!(recent.is_corrected, vec![false, true]);
+
+            // Its raw span is now empty: the correction moved it out entirely.
+            let raw_window = database
+                .fetch_sessions(
+                    (now - 10_100) as f64,
+                    (now - 9_800) as f64,
+                    (now - 10_100 - 604_800) as f64,
+                )
+                .await
+                .unwrap();
+            assert!(
+                raw_window.ids.is_empty(),
+                "a corrected session must not answer for where its raw row sat",
             );
         });
     }

@@ -6,7 +6,10 @@ export const MAX_SESSION_SPAN_SEC = 7 * 86_400;
 const LIVE_EDGE_GRACE_SEC = 120;
 const DEFAULT_FRESH_FOR_SEC = 5;
 const DEFAULT_MAX_ENTRIES = 2;
-const LIVE_REFRESH_OVERLAP_SEC = 60;
+/** Slack subtracted from the last refresh time before refetching the live edge.
+ *  Absorbs clock skew and the gap between a session opening and its row landing;
+ *  it is not the width of the refresh, which is measured from that last refresh. */
+const LIVE_REFRESH_LOOKBACK_SEC = 60;
 
 export type SessionFetcher = (startSec: number, endSec: number) => Promise<Session[]>;
 
@@ -162,7 +165,15 @@ export class SessionWindowCache {
     const refreshLiveEdge = endSec <= oldEnd && this.needsLiveRefresh(entry, endSec);
     if (refreshLiveEdge) {
       const refreshEnd = Math.min(endSec, oldEnd);
-      const refreshStart = Math.max(startSec, this.nowSec() - LIVE_REFRESH_OVERLAP_SEC);
+      // Refetch back to the last refresh, not a fixed slice of the recent past.
+      // A constant window silently lost history: nothing starts a fetch while a
+      // tab sits open, so an entry could go an hour without refreshing and then
+      // pick up only the last minute of it. Sessions that opened *and* closed
+      // inside that hour never overlapped the refetched slice, so they stayed
+      // missing until an invalidation or a restart. Measuring from
+      // refreshedAtSec makes the cost proportional to the time actually skipped.
+      const refreshedAtSec = Math.min(entry.refreshedAtSec, this.nowSec());
+      const refreshStart = Math.max(startSec, refreshedAtSec - LIVE_REFRESH_LOOKBACK_SEC);
       if (refreshEnd > refreshStart) segments.push([refreshStart, refreshEnd]);
     }
 

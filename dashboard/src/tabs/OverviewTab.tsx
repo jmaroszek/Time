@@ -85,6 +85,7 @@ export default function OverviewTab({
   firstSessionSec,
   view,
   historyRevision,
+  liveTick,
   onOpenSettings,
 }: {
   range: Range;
@@ -97,6 +98,10 @@ export default function OverviewTab({
    *  is the one on screen, and without this it would keep rendering the empty
    *  snapshot it fetched before the tracker had written anything. */
   historyRevision: number;
+  /** Advances when the app returns to the foreground, so a tab left open picks
+   *  up sessions recorded while the reader was elsewhere. Unlike historyRevision
+   *  this keeps the cached rows and refetches only the live edge. */
+  liveTick: number;
   onOpenSettings: () => void;
 }) {
   const meta = useMeta();
@@ -108,7 +113,7 @@ export default function OverviewTab({
   const { topN, setTopN, blockMinutes, setBlockMinutes, aggregateView, setAggregateView, metric, setMetric, stackBy, setStackBy } = view;
 
   const { startSec: fetchStart, endSec: fetchEnd } = insightsFetchWindow(range);
-  const sessionData = useSessions(fetchStart, fetchEnd, historyRevision);
+  const sessionData = useSessions(fetchStart, fetchEnd, historyRevision, liveTick);
   const request = useMemo<InsightsRequest | null>(() => {
     if (!sessionData.ready) return null;
     return {

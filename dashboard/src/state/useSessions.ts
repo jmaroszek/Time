@@ -13,9 +13,9 @@ export interface SessionData {
   loading: boolean;
   /** Cached data is usable now while an in-flight load refreshes its live edge.
    *  Staleness alone must never set this: the cache marks any live-edge window
-   *  stale seconds after its last refresh, but only a window or history change
-   *  starts a fetch, so a stale peek with no fetch behind it would latch on
-   *  forever. */
+   *  stale seconds after its last refresh, but only a window, history, or
+   *  foreground change starts a fetch, so a stale peek with no fetch behind it
+   *  would latch on forever. */
   refreshing: boolean;
   error: string | null;
 }
@@ -30,7 +30,20 @@ interface SettledSessionData {
   error: string | null;
 }
 
-export function useSessions(startSec: number, endSec: number, bump = 0): SessionData {
+/**
+ * @param bump      Forces a full refetch and discards overlapping cache entries.
+ *                  For history that changed shape underneath us — edits, deletes.
+ * @param liveTick  Re-runs the fetch without forcing it, letting the cache
+ *                  decide whether its live edge is stale enough to refetch.
+ *                  For returning to the foreground, where the old rows are
+ *                  still valid and only the newest ones are missing.
+ */
+export function useSessions(
+  startSec: number,
+  endSec: number,
+  bump = 0,
+  liveTick = 0,
+): SessionData {
   const [state, setState] = useState<SettledSessionData>(() => {
     const initial = peekSessionWindow(startSec, endSec);
     return {
@@ -95,7 +108,7 @@ export function useSessions(startSec: number, endSec: number, bump = 0): Session
     return () => {
       cancelled = true;
     };
-  }, [startSec, endSec, bump]);
+  }, [startSec, endSec, bump, liveTick]);
 
   if (cached) {
     return {

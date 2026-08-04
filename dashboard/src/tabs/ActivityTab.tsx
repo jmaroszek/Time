@@ -549,6 +549,7 @@ export default function ActivityTab({
   range,
   firstSessionSec,
   historyRevision,
+  liveTick,
   isAllTime,
   onTryAllTime,
   openExclusions = false,
@@ -559,6 +560,10 @@ export default function ActivityTab({
   range: Range;
   firstSessionSec: number | null;
   historyRevision: number;
+  /** Advances when the app returns to the foreground, so a tab left open picks
+   *  up sessions recorded while the reader was elsewhere. Unlike historyRevision
+   *  this keeps the cached rows and refetches only the live edge. */
+  liveTick: number;
   isAllTime: boolean;
   onTryAllTime: () => void;
   /** Settings asked for the exclusion list; honored once, on mount. */
@@ -612,11 +617,15 @@ export default function ActivityTab({
     if (openExclusions) onExclusionsOpened?.();
   }, []);
 
-  const allRange = useMemo(() => allTimeRange(firstSessionSec), [firstSessionSec, historyRevision]);
+  const allRange = useMemo(
+    () => allTimeRange(firstSessionSec),
+    [firstSessionSec, historyRevision, liveTick],
+  );
   const sessionData = useSessions(
     allRange.start.getTime() / 1000,
     allRange.end.getTime() / 1000,
     historyRevision,
+    liveTick,
   );
   const browserProcesses = useMemo(() => [...meta.browserSet].sort(), [meta.browserSet]);
   const source = useMemo<ActivitySource | null>(() => {
