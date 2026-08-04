@@ -22,6 +22,7 @@ import { BannerProvider, useBanner } from "./state/banner";
 import { MetaProvider, useMeta } from "./state/meta";
 import { useActivityModel } from "./state/useActivityModel";
 import { useInsightsView } from "./state/useInsightsView";
+import { useLiveRefresh } from "./state/useLiveRefresh";
 import { useSessions } from "./state/useSessions";
 import ActivityTab, { type ActivityView } from "./tabs/ActivityTab";
 import OverviewTab from "./tabs/OverviewTab";
@@ -86,6 +87,7 @@ function Shell() {
   // Insights view controls live here, above the tab switch, so a change made on
   // the Insights tab survives leaving for another tab and coming back.
   const insightsView = useInsightsView();
+  const liveTick = useLiveRefresh();
 
   useEffect(() => {
     void takeRestoreNotice()
@@ -97,12 +99,16 @@ function Shell() {
       .catch(() => {});
   }, [banner]);
 
+  // liveTick is a dependency for its timing, not its value: every preset here
+  // except "custom" is anchored on today, and nothing else in this memo changes
+  // when the date does. Without it, an app left open overnight keeps reporting
+  // yesterday as "Today" until something unrelated re-renders.
   const range = useMemo<Range>(() => {
     if (preset === "custom") return customRange ?? rangeForPreset("last7");
     if (preset === "alltime") return allTimeRange(firstSessionSec);
     if (!rolling && isRollingPreset(preset)) return rangeForCalendarPreset(preset, meta.weekStart);
     return rangeForPreset(preset);
-  }, [preset, rolling, customRange, firstSessionSec, meta.weekStart]);
+  }, [preset, rolling, customRange, firstSessionSec, meta.weekStart, liveTick]);
 
   // An empty DB (the tracker hasn't run yet) is a waiting state, not an
   // error. Retry until the tracker's first bootstrap creates the schema.
@@ -188,12 +194,13 @@ function Shell() {
   // serves both from one fetch, and the worker reuses its index across them.
   const backlogRange = useMemo(
     () => allTimeRange(firstSessionSec),
-    [firstSessionSec, historyRevision],
+    [firstSessionSec, historyRevision, liveTick],
   );
   const backlogSessions = useSessions(
     backlogRange.start.getTime() / 1000,
     backlogRange.end.getTime() / 1000,
     historyRevision,
+    liveTick,
   );
   const backlogSource = useMemo<ActivitySource | null>(() => {
     if (!backlogSessions.ready) return null;
@@ -276,6 +283,7 @@ function Shell() {
             firstSessionSec={firstSessionSec}
             view={insightsView}
             historyRevision={historyRevision}
+            liveTick={liveTick}
             onOpenSettings={() => {
               setHighlightSection("Goals");
               setTab("settings");
@@ -289,6 +297,7 @@ function Shell() {
             range={range}
             firstSessionSec={firstSessionSec}
             historyRevision={historyRevision}
+            liveTick={liveTick}
             isAllTime={preset === "alltime"}
             onTryAllTime={() => setPreset("alltime")}
             openExclusions={openExclusions}

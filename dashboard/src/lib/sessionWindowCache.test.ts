@@ -53,9 +53,31 @@ describe("SessionWindowCache", () => {
     expect(cache.peek(800, 1_100)?.stale).toBe(true);
     const rows = await cache.load(800, 1_100, fetcher);
 
-    expect(fetcher.mock.calls[1]).toEqual([950, 1_100]);
+    // Back to the last refresh (1_000) less the lookback, not to a fixed slice
+    // of the recent past.
+    expect(fetcher.mock.calls[1]).toEqual([940, 1_100]);
     expect(rows.map((row) => [row.id, row.end])).toEqual([[1, 1_005], [2, 1_006]]);
     expect(cache.peek(800, 1_100)?.stale).toBe(false);
+  });
+
+  it("refetches the whole skipped span, not a fixed recent slice", async () => {
+    let now = 1_000;
+    const cache = new SessionWindowCache(() => now, 5);
+    // Opened and closed entirely within the gap: it overlaps neither the
+    // original window's contents nor the last minute before the refresh, so a
+    // constant-width tail refresh could never see it.
+    const missed = session(2, 3_000, 3_400);
+    const fetcher = vi
+      .fn<(start: number, end: number) => Promise<Session[]>>()
+      .mockResolvedValueOnce([session(1, 900, 950)])
+      .mockResolvedValueOnce([missed]);
+
+    await cache.load(800, 90_000, fetcher);
+    now = 5_000; // an hour of the app sitting open on one tab
+    const rows = await cache.load(800, 90_000, fetcher);
+
+    expect(fetcher.mock.calls[1]).toEqual([940, 90_000]);
+    expect(rows.map((row) => row.id)).toEqual([1, 2]);
   });
 
   it("drops all reusable data when cleared", async () => {
