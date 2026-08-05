@@ -65,10 +65,40 @@ off-screen recovery logic; the clean-VM checklist covers the rest by eye. Do not
 rebuild an automated replacement without a failure it would have caught.
 
 Build the tracker from the dedicated, git-ignored `data/tracker-build-env`
-environment described in the README. Reusing a broad Conda or development
-environment can expose unrelated PyInstaller hooks and native packages to the
-build. The builder also refuses mismatched runtime packages rather than
-producing an unreproducible sidecar.
+environment. Reusing a broad Conda or development environment can expose
+unrelated PyInstaller hooks and native packages to the build. The builder also
+refuses mismatched runtime packages rather than producing an unreproducible
+sidecar.
+
+```powershell
+python -m venv data\tracker-build-env
+data\tracker-build-env\Scripts\python -m pip install -r tracker\requirements-build.txt
+data\tracker-build-env\Scripts\python scripts\build_tracker.py
+```
+
+The builder starts the bundle once against a scratch profile and fails rather
+than emitting a sidecar that cannot run. A conda interpreter keeps the DLLs its
+extension modules link against in `Library\bin` instead of beside the modules,
+so the build puts that directory on PATH; without it the bundle builds cleanly
+and then dies on its first `import ctypes`.
+
+Both halves default the database to `%LOCALAPPDATA%\Time\time_log.db`, creating
+it on first run. Debug dashboard builds accept `TIME_DB_PATH`; the tracker uses
+`TIME_DATA_DIR`. Release builds ignore database-path overrides.
+
+```powershell
+py scripts/make_demo_db.py     # writes data/demo.db, ~12 weeks of fake life
+$env:TIME_DB_PATH = "$PWD/data/demo.db"; cd dashboard; npm run tauri dev
+```
+
+Before shipping an artifact, complete the owner-run clean-VM release checklist on
+Windows 10 and Windows 11 — automated source checks do not replace that evidence
+— and give invited testers the [beta invite note](docs/beta-invite.md) with the
+build's SHA-256 hash filled in. During a beta soak, run
+`scripts/check_db_anomalies.py` weekly against an explicit database path or a
+fresh backup: it opens SQLite read-only, runs `integrity_check`, and reports
+duration, AFK-identity, overlap, rule, foreign-key, and schema-contract
+violations. Exit code 0 means every check passed; `--json` is machine-readable.
 
 ## Branches
 
