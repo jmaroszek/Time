@@ -30,28 +30,28 @@ def test_tray_pause_resume_callbacks_persist_state(tmp_path, monkeypatch):
     paused = _settings(path)
     assert paused["tracking_paused"] == "0"
     assert paused["tracking_paused_until"] == "1900"
-    assert icon.title.startswith("Time — Paused until ")
+    assert icon.title.startswith("Time: Paused until ")
 
     actions.pause_indefinitely(icon, None)
     paused = _settings(path)
     assert paused["tracking_paused"] == "1"
     assert paused["tracking_paused_until"] == "0"
-    assert icon.title == "Time — Paused"
+    assert icon.title == "Time: Paused"
 
     actions.resume(icon, None)
     resumed = _settings(path)
     assert resumed["tracking_paused"] == "0"
     assert resumed["tracking_paused_until"] == "0"
-    assert icon.title == "Time — Recording"
+    assert icon.title == "Time: Recording"
 
 
 def test_tray_tooltip_distinguishes_recording_and_pause_states():
     one_pm = tray._dt.datetime(2026, 7, 30, 13, 0).timestamp()
-    assert tray._tooltip_text(False, 0, now=1_000) == "Time — Recording"
-    assert tray._tooltip_text(True, 0, now=1_000) == "Time — Paused"
+    assert tray._tooltip_text(False, 0, now=1_000) == "Time: Recording"
+    assert tray._tooltip_text(True, 0, now=1_000) == "Time: Paused"
     assert (
         tray._tooltip_text(True, one_pm, now=one_pm - 60)
-        == "Time — Paused until 1:00 PM"
+        == "Time: Paused until 1:00 PM"
     )
 
 
@@ -227,7 +227,7 @@ def test_tray_controller_hides_and_recreates_without_stopping_tracker(
     assert len(pystray_fake.icons) == 1
 
     controller.sync_state(True, 0)
-    assert first.title == "Time — Paused"
+    assert first.title == "Time: Paused"
     assert first.menu_updates == 1
 
     assert controller.set_enabled(False) is False
