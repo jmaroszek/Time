@@ -1,75 +1,76 @@
-Required Notice: Copyright (c) 2026 Jonah Maroszek
+Copyright (c) 2026 Jonah Maroszek. All rights reserved.
 
-# PolyForm Noncommercial License 1.0.0
+# Time Source-Available License 1.0
 
-<https://polyformproject.org/licenses/noncommercial/1.0.0>
+Time is commercial software. This source code is published so that anyone can
+read it and see exactly what Time does with their data. Publishing it is not a
+grant of the right to use it.
 
-## Acceptance
+These terms cover **this source code**. An installed copy of Time is covered by
+the terms supplied with that copy, not by this document.
 
-In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
+## What you may do
 
-## Copyright License
+You may view, read, and study this source code.
 
-The licensor grants you a copyright license for the software to do everything you might do with the software that would otherwise infringe the licensor's copyright in it for any permitted purpose.  However, you may only distribute the software according to [Distribution License](#distribution-license) and make changes or new works based on the software according to [Changes and New Works License](#changes-and-new-works-license).
+You may compile this source code for the sole purpose of verifying that it
+corresponds to an official release of Time. A build produced under this
+permission may not be used for any other purpose, may not be given to anyone
+else, and should be deleted once the verification is finished.
 
-## Distribution License
+You may quote short excerpts for commentary, review, security reporting,
+teaching, or news reporting, with attribution.
 
-The licensor grants you an additional copyright license to distribute copies of the software.  Your license to distribute covers distributing the software with changes and new works permitted by [Changes and New Works License](#changes-and-new-works-license).
+## What you may not do
 
-## Notices
+No other rights are granted. Without separate written permission from the
+copyright holder, you may not:
 
-You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms or the URL for them above, as well as copies of any plain-text lines beginning with `Required Notice:` that the licensor provided with the software.  For example:
+- use, run, or install Time, or any work based on this source code, for any
+  practical purpose;
+- copy, publish, distribute, sell, sublicense, rent, lend, or host this source
+  code, any build of it, or any work based on it;
+- modify this source code or create derivative works from it;
+- remove or alter any copyright, license, or attribution notice.
 
-> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
+Forking this repository on a hosting platform, where that platform's terms of
+service allow it, does not grant any of the rights withheld above.
 
-## Changes and New Works License
+## Copies supplied by the copyright holder
 
-The licensor grants you an additional copyright license to make changes and new works based on the software for any permitted purpose.
+If Jonah Maroszek supplies you with a build of Time directly — as a beta tester
+or otherwise — you may install and use that build on whatever terms accompany
+it. Absent other terms, that permission is personal to you, non-transferable,
+and may be withdrawn at any time.
 
-## Patent License
+When Time is offered for sale, the right to install and use a purchased copy is
+granted by the end-user licence agreement supplied with it. See
+<https://trackwithtime.com>.
 
-The licensor grants you a patent license for the software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the software.
+## The shared browser-title protocol
 
-## Noncommercial Purposes
+`tracker/tests/fixtures/browser_title_protocol.json` describes the marker
+grammar that Time and the Time Website Integration browser extension both parse.
+That file, and that file alone, is also available under the MIT License, so that
+anyone may implement the protocol. The extension repository carries the matching
+copy under the same terms.
 
-Any noncommercial purpose is a permitted purpose.
+## Third-party components
 
-## Personal Uses
+This repository incorporates third-party components — Rust crates, npm packages,
+and Python distributions — which remain subject to their own licenses. Nothing
+here changes those terms, and their attribution requirements apply to any
+distributed build of Time.
 
-Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or religious observance, without any anticipated commercial application, is use for a permitted purpose.
+## Contributions
 
-## Noncommercial Organizations
+This project does not accept outside contributions. Please open an issue rather
+than a pull request. Code submitted without a signed contributor agreement
+cannot be merged, because the project must remain licensable by its owner.
 
-Use by any charitable organization, educational institution, public research organization, public safety or health organization, environmental protection organization, or government institution is use for a permitted purpose regardless of the source of funding or obligations resulting from the funding.
+## No warranty
 
-## Fair Use
-
-You may have "fair use" rights for the software under the law. These terms do not limit them.
-
-## No Other Rights
-
-These terms do not allow you to sublicense or transfer any of your licenses to anyone else, or prevent the licensor from granting licenses to anyone else.  These terms do not imply any other licenses.
-
-## Patent Defense
-
-If you make any written claim that the software infringes or contributes to infringement of any patent, your patent license for the software granted under these terms ends immediately. If your company makes such a claim, your patent license ends immediately for work on behalf of your company.
-
-## Violations
-
-The first time you are notified in writing that you have violated any of these terms, or done anything with the software not covered by your licenses, your licenses can nonetheless continue if you come into full compliance with these terms, and take practical steps to correct past violations, within 32 days of receiving notice.  Otherwise, all your licenses end immediately.
-
-## No Liability
-
-***As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.***
-
-## Definitions
-
-The **licensor** is the individual or entity offering these terms, and the **software** is the software the licensor makes available under these terms.
-
-**You** refers to the individual or entity agreeing to these terms.
-
-**Your company** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all organizations that have control over, are under the control of, or are under common control with that organization.  **Control** means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise.  Control can be direct or indirect.
-
-**Your licenses** are all the licenses granted to you for the software under these terms.
-
-**Use** means anything you do with the software requiring one of your licenses.
+**As far as the law allows, this source code is provided as is, without any
+warranty or condition, and the copyright holder will not be liable to you for
+any damages arising out of these terms or the use or nature of the source code,
+under any kind of legal claim.**

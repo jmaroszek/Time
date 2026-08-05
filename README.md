@@ -73,74 +73,12 @@ independently. Settings written by the dashboard are re-read by the tracker
 every heartbeat. Both executables verify `schema_version` and refuse unsafe
 writes; new schemas are bootstrapped directly at the current public contract.
 
-## Running it
+## Installing it
 
-```powershell
-pythonw tracker/tracker.py          # tracker (headless)
-cd dashboard; npm run tauri dev     # dashboard (dev)
-cd dashboard; npm run tauri build   # one NSIS installer with packaged tracker
-
-py -m coverage run -m pytest tracker/tests scripts/tests
-py -m coverage report                       # Python branch-coverage ratchet
-cd dashboard; npm run test:coverage         # dashboard V8 branch coverage
-cd dashboard; npm run test:device           # deterministic renderer suite
-py scripts/check_db_anomalies.py <backup-or-beta-db>  # read-only health check
-```
-
-Building the application needs the sidecar on disk first, because every cargo
-invocation runs the Tauri build script and that script requires it:
-
-```powershell
-python -m venv data\tracker-build-env
-data\tracker-build-env\Scripts\python -m pip install -r tracker\requirements-build.txt
-data\tracker-build-env\Scripts\python scripts\build_tracker.py
-cd dashboard
-npm run build:debug-app               # src-tauri\target\debug\Time.exe
-```
-
-The builder starts the bundle once against a scratch profile and fails rather
-than emitting a sidecar that cannot run. A conda interpreter keeps the DLLs its
-extension modules link against in `Library\bin` instead of beside the modules,
-so the build puts that directory on PATH; without it the bundle builds cleanly
-and then dies on its first `import ctypes`.
-
-The packaged sidecar has its own smoke check, which redirects `LOCALAPPDATA` and
-takes a distinct mutex so it is safe to run beside a live tracker:
-
-```powershell
-.\scripts\smoke_packaged_tracker.ps1 `
-    -TrackerExecutable .\dashboard\src-tauri\binaries\time-tracker-x86_64-pc-windows-msvc.exe `
-    -OutputDirectory "$env:TEMP\time-smoke-$(Get-Random)"
-```
-
-The release build runs PyInstaller automatically, carries its one-dir tracker
-runtime as a Tauri sidecar, and produces one current-user NSIS installer. The
-installer bootstraps the local database but records nothing and creates no
-startup entry until the user opts in. Uninstall removes the process/autostart
-entry while keeping the user's database.
-Complete the owner-run clean-VM release checklist on Windows 10 and Windows 11
-before shipping an artifact. Automated source checks do not replace that
-evidence. Invited testers should receive the
-[beta invite note](docs/beta-invite.md) with the build's SHA-256 hash filled in.
-
-During a beta soak, run the anomaly checker weekly against an explicit database
-path (or, more conservatively, a fresh backup). It opens SQLite read-only, runs
-`integrity_check`, and reports duration, AFK-identity, overlap, rule, foreign-key,
-and schema-contract violations. Exit code 0 means every check passed; `--json`
-produces machine-readable output.
-
-For source development, the tracker can still run through
-`pythonw.exe tracker\tracker.py`; the single-instance mutex makes duplicate
-launches harmless.
-
-Both halves default the database to `%LOCALAPPDATA%\Time\time_log.db`, creating
-it on first run. Debug dashboard builds accept `TIME_DB_PATH`; the tracker uses
-`TIME_DATA_DIR`. Release builds ignore database-path overrides:
-
-```powershell
-py scripts/make_demo_db.py     # writes data/demo.db, ~12 weeks of fake life
-$env:TIME_DB_PATH = "$PWD/data/demo.db"; cd dashboard; npm run tauri dev
-```
+Time is distributed as a signed installer for Windows from
+[trackwithtime.com](https://trackwithtime.com). It bootstraps the local database
+but records nothing and creates no startup entry until you opt in; uninstalling
+removes the app and its autostart entry while keeping your database.
 
 ## Privacy and security
 
@@ -151,3 +89,19 @@ or telemetry. The dashboard uses a restrictive content-security policy and a
 fixed-path, least-authority database bridge. See [SECURITY.md](SECURITY.md) for
 the threat model, at-rest limitations, vulnerability reporting, and the signed
 release requirements.
+
+## About this source code
+
+This repository is public so anyone can read the code and see exactly what Time
+does with their data. A time tracker asks for a lot of trust, and being able to
+check the claims is worth more than any wording on a privacy page.
+
+Readable is not the same as free. Time is commercial software: the source is
+published for inspection, not licensed for use. The [license](LICENSE.md)
+permits reading it, and compiling it to confirm that a release matches the
+source, but the right to install and run Time comes with a copy supplied by its
+author. Copies given directly to beta testers carry their own permission.
+
+Please open an issue rather than a pull request — outside contributions cannot
+be merged without a contributor agreement, because the project has to stay
+licensable by its owner.
