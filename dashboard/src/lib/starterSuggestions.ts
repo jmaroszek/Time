@@ -15,7 +15,7 @@
 // Three things deliberately get no suggestion:
 //
 //   browsers    A browser's category would cover every site visited inside it.
-//               Domains are only visible when Time Website Integration (or a
+//               Domains are only visible when Time Web Extension (or a
 //               compatible legacy extension) is installed, so most browser time
 //               carries none, and a browser rule would swallow it *and* take the
 //               browser out of the queue that would have prompted a fix.
@@ -246,14 +246,14 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
  * not helpfully add discord.exe to the catalog above.
  */
 export const RECOGNIZED_NOT_SUGGESTED: Readonly<Record<string, string>> = {
-  "chrome.exe": "Time can't tell which sites without Time Website Integration",
-  "msedge.exe": "Time can't tell which sites without Time Website Integration",
-  "firefox.exe": "Time can't tell which sites without Time Website Integration",
-  "brave.exe": "Time can't tell which sites without Time Website Integration",
-  "opera.exe": "Time can't tell which sites without Time Website Integration",
-  "vivaldi.exe": "Time can't tell which sites without Time Website Integration",
-  "arc.exe": "Time can't tell which sites without Time Website Integration",
-  "chromium.exe": "Time can't tell which sites without Time Website Integration",
+  "chrome.exe": "Time can't tell which sites without Time Web Extension",
+  "msedge.exe": "Time can't tell which sites without Time Web Extension",
+  "firefox.exe": "Time can't tell which sites without Time Web Extension",
+  "brave.exe": "Time can't tell which sites without Time Web Extension",
+  "opera.exe": "Time can't tell which sites without Time Web Extension",
+  "vivaldi.exe": "Time can't tell which sites without Time Web Extension",
+  "arc.exe": "Time can't tell which sites without Time Web Extension",
+  "chromium.exe": "Time can't tell which sites without Time Web Extension",
   "discord.exe": "Work chat for some people, leisure for others",
   "obs64.exe": "Screen recording is work for some people, streaming is not for others",
   "obs32.exe": "Screen recording is work for some people, streaming is not for others",
@@ -398,7 +398,7 @@ export function recognizedWithoutSuggestion<T extends SuggestibleEntity>(
     const name = entity.key.trim().toLowerCase();
     const reason = RECOGNIZED_NOT_SUGGESTED[name]
       ?? (browserProcesses.has(name)
-        ? "Time can't tell which sites without Time Website Integration"
+        ? "Time can't tell which sites without Time Web Extension"
         : null);
     if (reason) recognized.push({ entity, reason });
   }

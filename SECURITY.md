@@ -30,7 +30,7 @@ device encryption or BitLocker when protection at rest matters.
 
 Window titles can contain document names, message subjects, or other sensitive
 text. Leave title storage off unless that detail is worth the privacy cost.
-The optional first-party Time Website Integration extension requires broad
+The optional first-party Time Web Extension requires broad
 HTTP/HTTPS site access so it can add the current origin and path to the
 OS-visible browser title. It excludes queries, fragments, and private browsing;
 it has no storage, network, telemetry, or named browser API permission. Time
