@@ -207,3 +207,61 @@ def test_non_terminal_and_unknown_markers_bypass_legacy_url_parsing_and_sanitizi
         fields = browser_privacy_fields(title)
         assert fields.domain is None
         assert fields.title == title
+
+
+# The extension writes a marker that is terminal in ``document.title``. The
+# window title this module actually receives is what the browser renders around
+# that page title, so the marker arrives non-terminal on the desktop. These
+# cases are deliberately absent from the shared protocol fixture: the fixture
+# defines the marker grammar both repositories implement, and a browser's own
+# window-title suffix is not part of that grammar.
+BROWSER_WINDOW_SUFFIXES = [
+    " - Google Chrome",
+    " - Mozilla Firefox",
+    " - Microsoft Edge",
+    " - Brave",
+]
+
+
+@pytest.mark.parametrize("suffix", BROWSER_WINDOW_SUFFIXES)
+def test_marker_is_recognized_behind_a_browser_window_suffix(suffix):
+    title = f"Docs [[https://developer.chrome.com/:TIME_URL_V1]]{suffix}"
+    fields = browser_privacy_fields(title)
+    assert fields.domain == "developer.chrome.com"
+    assert fields.title == "Docs"
+    assert "[[" not in fields.title
+    assert "TIME_URL_V" not in fields.title
+
+
+@pytest.mark.parametrize("suffix", BROWSER_WINDOW_SUFFIXES)
+def test_path_marker_from_an_older_extension_still_yields_only_a_domain(suffix):
+    title = f"Report [[https://example.com/patients/12345:TIME_URL_V1]]{suffix}"
+    fields = browser_privacy_fields(title)
+    assert fields.domain == "example.com"
+    assert fields.title == "Report"
+    assert "12345" not in fields.title
+
+
+def test_truncated_marker_leaves_no_orphaned_opening_in_the_title():
+    # A window title cut inside the marker loses the ":TIME_URL_V1]]" tail, so
+    # the strict parser cannot claim it and the legacy URL strip used to leave
+    # the marker's own "[[" behind in stored titles.
+    truncated = "Google [[https://www.google.com/search"
+    fields = browser_privacy_fields(truncated)
+    assert fields.title == "Google"
+    assert not fields.title.endswith("[[")
+    assert fields.domain == "google.com"
+
+
+def test_browser_suffix_retry_does_not_invent_a_marker():
+    for title in [
+        "Reviewing - Google Chrome",
+        "Page [[https://example.com/a:TIME_URL_V2]] - Google Chrome",
+        "Page [[not a url:TIME_URL_V1]] - Google Chrome",
+    ]:
+        assert browser_privacy_fields(title).domain is None
+
+
+def test_page_authored_double_bracket_survives_when_no_url_is_stripped():
+    fields = browser_privacy_fields("Notes [[ - Google Chrome")
+    assert fields.title == "Notes [["

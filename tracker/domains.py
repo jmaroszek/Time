@@ -33,6 +33,7 @@ _TIME_MARKER_SENTINEL = "TIME_URL_V"
 _TIME_MARKER_OPEN = "[["
 _TIME_V1_SUFFIX = ":TIME_URL_V1]]"
 _TIME_V1_MAX_CANDIDATE_LENGTH = 8_192
+_ORPHAN_MARKER_OPEN_RE = re.compile(r"\s*\[\[\s*$")
 
 
 @dataclass(frozen=True)
@@ -101,12 +102,12 @@ def _split_reduced_url(candidate: str) -> SplitResult | None:
     return parsed
 
 
-def _parse_browser_title(
+def _parse_terminal_marker(
     title: str,
-) -> tuple[ParsedBrowserTitle, SplitResult | None]:
-    ordinary = ParsedBrowserTitle(None, title, None)
+) -> tuple[ParsedBrowserTitle, SplitResult | None] | None:
+    """Parse one marker that ends ``title``, or return None if there is none."""
     if not title.endswith(_TIME_V1_SUFFIX):
-        return ordinary, None
+        return None
 
     # "[[" alone is not distinctive, so a page-authored title or a pathname may
     # contain it. Walk candidate openings right to left and let strict candidate
@@ -118,11 +119,11 @@ def _parse_browser_title(
     while True:
         marker_start = title.rfind(_TIME_MARKER_OPEN, 0, search_from)
         if marker_start < 0:
-            return ordinary, None
+            return None
 
         candidate = title[marker_start + len(_TIME_MARKER_OPEN) : candidate_end]
         if len(candidate) > _TIME_V1_MAX_CANDIDATE_LENGTH:
-            return ordinary, None
+            return None
 
         reduced = _split_reduced_url(candidate)
         if reduced is not None:
@@ -139,6 +140,29 @@ def _parse_browser_title(
             )
 
         search_from = marker_start
+
+
+def _parse_browser_title(
+    title: str,
+) -> tuple[ParsedBrowserTitle, SplitResult | None]:
+    parsed = _parse_terminal_marker(title)
+    if parsed is not None:
+        return parsed
+
+    # The extension writes a terminal marker to ``document.title``, but the
+    # window title the tracker samples is what the browser renders around it --
+    # Chrome appends " - Google Chrome", Firefox " - Mozilla Firefox". The
+    # marker is therefore terminal in the page and non-terminal on the desktop,
+    # so retry once against the title with that browser suffix removed. A title
+    # with no valid marker after the retry is returned untouched, so a
+    # page-authored title that merely looks like a browser suffix is unaffected.
+    without_browser_suffix = _BROWSER_SUFFIX_RE.sub("", title)
+    if without_browser_suffix != title:
+        parsed = _parse_terminal_marker(without_browser_suffix)
+        if parsed is not None:
+            return parsed
+
+    return ParsedBrowserTitle(None, title, None), None
 
 
 def parse_browser_title(title: str) -> ParsedBrowserTitle:
@@ -174,7 +198,14 @@ def _parse_legacy_domain(title: str) -> str | None:
 
 def _sanitize_legacy_browser_title(title: str) -> str:
     cleaned = _BROWSER_SUFFIX_RE.sub("", title.replace("\x00", "").strip())
-    cleaned = _ANY_URL_RE.sub("", cleaned)
+    without_url = _ANY_URL_RE.sub("", cleaned)
+    if without_url != cleaned:
+        # A window title truncated inside the marker loses the
+        # ":TIME_URL_V1]]" tail, so the strict parser cannot claim it and the
+        # URL strip above leaves the marker's own "[[" behind. Drop that orphan
+        # instead of storing it as page-authored text.
+        without_url = _ORPHAN_MARKER_OPEN_RE.sub("", without_url)
+    cleaned = without_url
     cleaned = _TRAILING_DOMAIN_RE.sub("", cleaned)
     cleaned = re.sub(r"(?:\s*[-–—•·|]\s*)+$", "", cleaned)
     cleaned = re.sub(r"^(?:\s*[-–—•·|]\s*)+", "", cleaned)
