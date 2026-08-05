@@ -1,4 +1,4 @@
-// First-party Time Website Integration listings. Store pages do not exist
+// First-party Time Web Extension listings. Store pages do not exist
 // until their owners publish the separately versioned extension packages, so
 // an unpublished listing has no URL and the UI cannot open a placeholder.
 // When a URL is supplied here, its origin must already be present in
@@ -21,7 +21,7 @@ export type PublishedTimeExtensionListing = TimeExtensionListing & {
   storeUrl: string;
 };
 
-export const TIME_EXTENSION_NAME = "Time Website Integration";
+export const TIME_EXTENSION_NAME = "Time Web Extension";
 
 export const TIME_EXTENSION_LISTINGS: readonly TimeExtensionListing[] = [
   {

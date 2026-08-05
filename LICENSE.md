@@ -50,7 +50,7 @@ granted by the end-user licence agreement supplied with it. See
 ## The shared browser-title protocol
 
 `tracker/tests/fixtures/browser_title_protocol.json` describes the marker
-grammar that Time and the Time Website Integration browser extension both parse.
+grammar that Time and the Time Web Extension both parse.
 That file, and that file alone, is also available under the MIT License, so that
 anyone may implement the protocol. The extension repository carries the matching
 copy under the same terms.

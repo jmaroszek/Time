@@ -475,9 +475,9 @@ function PrivacyOnboarding() {
           <div className="rounded-xl border border-edge bg-surface-dim p-4">
             <p className="font-medium">When tracking is enabled</p>
             <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
-              Time tracks which apps you use and for how long. With Time Website Integration, the
-              browser locally hands Time the current website origin and path through its title.
-              Time keeps the website domain and discards the path instead of retaining specific pages.
+              Time tracks which apps you use and for how long. With Time Web Extension, the
+              browser locally hands Time the current website address through its title. The
+              extension never reads the page path, so specific pages are never recorded.
             </p>
           </div>
           {/* Ordered by default state, not importance: the two boxes that ship

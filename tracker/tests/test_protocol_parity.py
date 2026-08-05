@@ -1,6 +1,6 @@
 """Compare the shared browser-title fixture against the extension repository.
 
-Time and the Time Website Integration extension parse one marker grammar from
+Time and the Time Web Extension parse one marker grammar from
 separate repositories, and each keeps its own copy of the conformance fixture.
 Each copy is already checked against its own parser, so a check confined to one
 repository proves only self-consistency: editing a fixture together with its own
@@ -47,7 +47,7 @@ def test_shared_protocol_fixture_matches_the_extension_repository():
     extension_fixture = _find_extension_fixture()
     if extension_fixture is None:
         unverified = (
-            "Time Website Integration checkout not found; protocol parity "
+            "Time Web Extension checkout not found; protocol parity "
             "unverified. Set TIME_EXTENSION_REPO to check it."
         )
         # CI sets TIME_PARITY_REQUIRED because pytest exits 0 on a skip: a

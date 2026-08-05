@@ -20,7 +20,7 @@ describe("Time browser extension listings", () => {
         "brave.exe",
       ]),
     );
-    expect(TIME_EXTENSION_NAME).toBe("Time Website Integration");
+    expect(TIME_EXTENSION_NAME).toBe("Time Web Extension");
   });
 
   it("never exposes an unpublished placeholder as a clickable listing", () => {

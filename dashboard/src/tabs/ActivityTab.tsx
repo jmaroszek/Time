@@ -1216,7 +1216,7 @@ export default function ActivityTab({
         <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2">
           <p>
             Browser time is not being split by website. Time reads websites from browser window
-            titles; install the first-party Time Website Integration extension to add that signal.
+            titles; install the first-party Time Web Extension to add that signal.
           </p>
           <div className="mt-2.5">
             <ExtensionLinks />
