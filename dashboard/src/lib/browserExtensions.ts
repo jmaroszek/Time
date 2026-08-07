@@ -28,7 +28,8 @@ export const TIME_EXTENSION_LISTINGS: readonly TimeExtensionListing[] = [
     browsers: "Chrome, Brave, and Opera",
     processes: ["chrome.exe", "brave.exe", "opera.exe"],
     store: "Chrome Web Store",
-    storeUrl: null,
+    storeUrl:
+      "https://chromewebstore.google.com/detail/time-web-extension/gnlfnddpjedjehaeofdbpfmmjghieoke",
   },
   {
     browsers: "Edge",
