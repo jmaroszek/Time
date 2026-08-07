@@ -83,6 +83,10 @@ describe("storeGateForProgId", () => {
     expect(gate).toContain("other stores");
   });
 
+  it("warns Opera readers that its own add-on comes first", () => {
+    expect(storeGateForProgId("OperaStable")).toContain("Install Chrome Extensions");
+  });
+
   it("stays silent for browsers that install from the store directly", () => {
     for (const progId of ["ChromeHTML", "BraveHTML", "VivaldiHTM", "FirefoxURL"]) {
       expect(storeGateForProgId(progId)).toBeNull();

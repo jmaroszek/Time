@@ -76,7 +76,13 @@ const PROG_ID_ROUTES: readonly ProgIdRoute[] = [
     gate: "Edge asks you to allow extensions from other stores the first time. Its banner appears at the top of the page.",
   },
   { prefix: "BraveHTML", store: "Chrome Web Store" },
-  { prefix: "OperaStable", store: "Chrome Web Store" },
+  {
+    prefix: "OperaStable",
+    store: "Chrome Web Store",
+    // A harder gate than Edge's: Opera cannot install from this store at all
+    // until its own add-on is in place, so the store page alone is a dead end.
+    gate: "Opera installs from this store only after you add its own “Install Chrome Extensions” add-on first.",
+  },
   { prefix: "VivaldiHTM", store: "Chrome Web Store" },
   { prefix: "ChromiumHTM", store: "Chrome Web Store" },
   { prefix: "FirefoxURL", store: "Firefox Add-ons" },
