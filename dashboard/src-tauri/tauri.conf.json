@@ -32,6 +32,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "externalBin": ["binaries/time-tracker"],
     "resources": {
       "binaries/_internal/": "_internal/"
@@ -49,5 +50,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY",
+      "endpoints": ["https://trackwithtime.com/updates/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

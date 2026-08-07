@@ -1,6 +1,8 @@
+use serde::Serialize;
 use std::{fs, path::PathBuf, process::Command};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_updater::UpdaterExt;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 #[cfg(windows)]
@@ -429,6 +431,72 @@ fn set_launch_at_login(enabled: bool) -> Result<(), String> {
     SystemRuntimeControl.set_launch_at_login(enabled)
 }
 
+/// Progress channel for the one long operation Time performs over the network.
+/// The installer is the whole application, so a bare spinner would sit there for
+/// tens of seconds with nothing to say.
+const UPDATE_PROGRESS_EVENT: &str = "update://progress";
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AvailableUpdate {
+    version: String,
+    /// Release notes as published in the update manifest, when it carries any.
+    notes: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct UpdateProgress {
+    downloaded: usize,
+    /// Absent until the endpoint declares a length; the control shows an
+    /// indeterminate bar rather than inventing a denominator.
+    total: Option<u64>,
+}
+
+/// Time's only outbound request: an unconditional GET of a static version file.
+/// The check runs in Rust rather than through the JavaScript plugin so the
+/// WebView never reaches the network and the content-security policy stays shut.
+///
+/// Every failure collapses to `None`. A check that cannot reach the endpoint is
+/// a non-event — offline, asleep, DNS, a hotel captive portal — and reporting it
+/// would turn the one network call Time makes into a recurring alarm about a
+/// machine that is working perfectly.
+#[tauri::command]
+async fn check_for_update(app: tauri::AppHandle) -> Option<AvailableUpdate> {
+    let update = app.updater().ok()?.check().await.ok()??;
+    Some(AvailableUpdate {
+        version: update.version.clone(),
+        notes: update.body.clone(),
+    })
+}
+
+/// Downloads the new installer and runs it. Never called on a timer: installing
+/// stops the sidecar and takes the window away, which a tool whose value is
+/// continuous recording must not do unasked.
+///
+/// The NSIS package handles both halves by itself — the pre-install hook stops
+/// the tracker, and the post-install hook starts it again, so recording resumes
+/// without help. Windows exits this process during the install step, which is
+/// why nothing here restarts the app.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(|error| error.to_string())?;
+    let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
+        return Err("Time is already up to date.".into());
+    };
+    let mut downloaded = 0usize;
+    let reporter = app.clone();
+    update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk;
+                let _ = reporter.emit(UPDATE_PROGRESS_EVENT, UpdateProgress { downloaded, total });
+            },
+            || {},
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn open_database_with_pending_restore_using(
     path: PathBuf,
     runtime: &dyn RuntimeControl,
@@ -534,6 +602,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 // Visibility, decorations, and fullscreen are application
@@ -596,7 +665,9 @@ pub fn run() {
             save_activity_export,
             start_tracker,
             stop_tracker,
-            set_launch_at_login
+            set_launch_at_login,
+            check_for_update,
+            install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

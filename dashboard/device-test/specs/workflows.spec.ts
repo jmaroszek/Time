@@ -346,3 +346,57 @@ test("@workflow Top Apps totals processes that share a display name as one row",
   await rows.first().dblclick();
   await expect(rows.getByRole("textbox")).toHaveCount(0);
 });
+
+// The update control is the whole update feature as far as a user is concerned:
+// if it does not appear, nobody updates, and if it moves the header when it
+// appears or expands, it breaks the one rule this header has — the date-range
+// picker sits at the far end of it and must not wander.
+test("@workflow the update control appears only when a version is waiting", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /^Update to/ })).toHaveCount(0);
+
+  await page.goto("/?update=available");
+  await expect(page.getByRole("button", { name: "Update to 0.2.0" })).toBeVisible();
+});
+
+test("@workflow the update control names its version without moving the header", async ({
+  page,
+}) => {
+  await page.goto("/?update=available");
+  const control = page.getByRole("button", { name: "Update to 0.2.0" });
+  await expect(control).toBeVisible();
+
+  const tabs = page.getByRole("button", { name: "Settings", exact: true });
+  const before = await tabs.boundingBox();
+  await control.hover();
+  // The label is revealed over the header, not within it: the button grows and
+  // the tabs beside it do not.
+  await expect(control).toContainText("Update to 0.2.0");
+  expect(await tabs.boundingBox()).toEqual(before);
+
+  // Reachable without a mouse, which is the whole reason the label is tied to
+  // focus as well as hover.
+  await control.focus();
+  await expect(control).toBeFocused();
+});
+
+test("@workflow installing an update reports progress and cannot be started twice", async ({
+  page,
+}) => {
+  await page.goto("/?update=available");
+  await page.getByRole("button", { name: "Update to 0.2.0" }).click();
+
+  const downloading = page.getByRole("button", { name: /^Downloading update/ });
+  await expect(downloading).toBeDisabled();
+
+  await page.evaluate(() =>
+    window.__TIME_DEVICE_EVENTS__.emit("update://progress", { downloaded: 25, total: 100 }),
+  );
+  await expect(page.getByRole("button", { name: "Downloading update… 25%" })).toBeVisible();
+
+  const calls = await page.evaluate(() =>
+    window.__TIME_DEVICE_TEST__.invocations.filter((entry) => entry.command === "install_update")
+      .length,
+  );
+  expect(calls).toBe(1);
+});

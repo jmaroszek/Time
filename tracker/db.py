@@ -204,6 +204,11 @@ DEFAULT_SETTINGS = {
     # startup remain independent so hiding the icon cannot silently change
     # capture behavior.
     "show_tray_icon": "1",
+    # Dashboard-only. Time's one outbound request: an unconditional GET of a
+    # static version file, carrying nothing about the machine that asks. On by
+    # default because an unpatchable bug on a local-history app is the worse
+    # risk; the tracker never checks, and installing is always a user action.
+    "check_updates_automatically": "1",
 }
 
 

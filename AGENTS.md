@@ -142,6 +142,18 @@ nobody can resolve is worse than no comment.
 - **Settings defaults are mirrored in three places**: `DEFAULT_SETTINGS`
   (`tracker/db.py`), `BOOTSTRAP_SQL` (`database.rs`), and the clamp ranges in
   `dashboard/src/tabs/SettingsTab.tsx`. Comments at each site say so.
+- **The update check is the only network request Time makes, and the README
+  says so.** It runs in Rust (`check_for_update` in `lib.rs`) rather than
+  through the JavaScript updater plugin, so the WebView never reaches the
+  network and the CSP stays shut. Keep the endpoint a constant URL: Tauri
+  supports `{{current_version}}`/`{{target}}`/`{{arch}}` templating, and using
+  it would put every user's version in a web server log beside their IP. If you
+  add a second request anywhere, the README claim has to change with it.
+- **The updater signature must be generated after Authenticode signing**, not
+  before — it covers the installer's bytes, and signing rewrites them. A stale
+  signature fails on user machines and nowhere else.
+  `scripts/publish_release.ps1` regenerates it last for this reason; do not
+  reorder those steps.
 - **Privacy is enforced by tests, not by convention.** Window titles and
   browser domains must never reach an INFO log line.
   `tracker/tests/test_logging.py` drives real writes and fails if they do.

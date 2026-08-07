@@ -172,6 +172,7 @@ export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
   record_window_titles: "0",
   launch_at_login: "0",
   show_tray_icon: "1",
+  check_updates_automatically: "1",
 };
 
 /** Restore only settings represented on the Settings tab. Runtime metadata,
