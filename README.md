@@ -84,11 +84,20 @@ removes the app and its autostart entry while keeping your database.
 
 Tracking is disabled until an explicit first-run choice. Window titles are a
 separate opt-in and are off by default; browser URLs are sanitized before a
-session is written. Time has no account, network client, cloud sync, analytics,
-or telemetry. The dashboard uses a restrictive content-security policy and a
-fixed-path, least-authority database bridge. See [SECURITY.md](SECURITY.md) for
-the threat model, at-rest limitations, vulnerability reporting, and the signed
-release requirements.
+session is written. Time has no account, cloud sync, analytics, or telemetry.
+
+Time makes exactly one network request: once a day, it asks
+`trackwithtime.com` whether a newer version exists. The request is an
+unconditional fetch of a static file — it carries no identifier, no version, and
+nothing about your activity, so the only thing the server can log is that some
+computer asked, which is what any web server records for any visitor. Nothing is
+ever installed without you clicking Update, and the whole check can be turned off
+under Settings → Recording & startup.
+
+The dashboard uses a restrictive content-security policy and a fixed-path,
+least-authority database bridge. See [SECURITY.md](SECURITY.md) for the threat
+model, at-rest limitations, vulnerability reporting, and the signed release
+requirements.
 
 ## About this source code
 

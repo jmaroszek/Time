@@ -15,6 +15,23 @@ column longer and never rearranges it.
 | **Record activity** | Allows the tracker to record app names and times |
 | **Store window titles** | Stores window titles in the database. This enables window-based classification rules, but stored data may contain sensitive information. |
 | **Start at Windows sign-in** | Start the tracker when you sign into this Windows account. |
+| **Show tray icon** | Show tracker controls in the Windows notification area. |
+| **Check for updates** | Asks trackwithtime.com once a day whether a newer version of Time exists. |
+
+**Show tray icon** controls the notification-area icon and nothing else. Hiding
+it does not stop recording and does not change whether Time starts with Windows
+— those two are separate switches above, and they stay exactly as you set them.
+
+**Check for updates** is the only time Time uses the network, so it is worth
+being precise about. The request fetches one small file and sends nothing with
+it — not an identifier, not your version, not a word about what you have been
+doing. When a newer version is found, a download icon appears next to the tabs
+at the top of the window; hovering it names the version, and clicking it
+installs. Nothing is downloaded or installed until you click.
+
+Installing closes Time, replaces it, and starts it again. Recording resumes on
+its own if it was on, and your history is untouched — the database lives outside
+the application and is never part of an update.
 
 A summary line reports how many apps and websites are excluded from tracking
 outright — a count rather than a list, so the row reads the same at three

@@ -166,7 +166,8 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('record_window_titles','0'),
     ('privacy_onboarding_complete','0'),
     ('launch_at_login','0'),
-    ('show_tray_icon','1');
+    ('show_tray_icon','1'),
+    ('check_updates_automatically','1');
 COMMIT;
 "#;
 
@@ -2296,6 +2297,12 @@ pub(crate) mod tests {
             .fetch_one(&database.pool)
             .await
             .unwrap();
+            let update_checks: String = sqlx::query_scalar(
+                "SELECT value FROM settings WHERE key='check_updates_automatically'",
+            )
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
             assert_eq!(
                 (
                     categories,
@@ -2303,9 +2310,10 @@ pub(crate) mod tests {
                     consent.as_str(),
                     titles.as_str(),
                     tray_icon.as_str(),
-                    starter_pending.as_str()
+                    starter_pending.as_str(),
+                    update_checks.as_str()
                 ),
-                (6, 0, "0", "0", "1", "1")
+                (6, 0, "0", "0", "1", "1", "1")
             );
             // The same list test_seed_categories_and_settings_present asserts on
             // the Python side. Either half may create the database first, so the

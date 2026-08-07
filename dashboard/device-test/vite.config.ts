@@ -12,6 +12,7 @@ export default defineConfig({
       "@tauri-apps/api/core": fileURLToPath(new URL("./mocks/tauriCore.ts", import.meta.url)),
       "@tauri-apps/api/window": fileURLToPath(new URL("./mocks/tauriWindow.ts", import.meta.url)),
       "@tauri-apps/api/app": fileURLToPath(new URL("./mocks/tauriApp.ts", import.meta.url)),
+      "@tauri-apps/api/event": fileURLToPath(new URL("./mocks/tauriEvent.ts", import.meta.url)),
       "@tauri-apps/plugin-opener": fileURLToPath(
         new URL("./mocks/tauriOpener.ts", import.meta.url),
       ),

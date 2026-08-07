@@ -46,6 +46,7 @@ def test_seed_categories_and_settings_present(conn):
     assert raw["recording_consent"] == "0"
     assert raw["record_window_titles"] == "0"
     assert raw["show_tray_icon"] == "1"
+    assert raw["check_updates_automatically"] == "1"
     assert raw["privacy_onboarding_complete"] == "0"
     assert raw["starter_categories_pending"] == "1"
     assert raw["schema_version"] == str(db.SCHEMA_VERSION)

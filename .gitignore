@@ -19,3 +19,9 @@ time_log.db-wal
 # Owner-only working documents (audits, roadmaps, runbooks). One rule, not a
 # per-file list — see AGENTS.md.
 docs/personal/
+# The updater's Ed25519 private key belongs outside this repository entirely;
+# these are a backstop for a `tauri signer generate` run in the wrong directory.
+# Committing one would let anyone sign an update that every installed copy of
+# Time accepts, and rotating it strands every install that already exists.
+/*.key
+/*.key.pub

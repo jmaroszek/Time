@@ -466,6 +466,18 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
     case "plugin:opener|open_url":
       result = undefined;
       break;
+    // Null is the ordinary answer and also the answer a failed check gives, so
+    // the header control is absent in every fixture but the one that asks for
+    // it. Installing resolves nowhere on purpose: the real command exits the
+    // process, and a spec that clicks it wants the downloading state to hold.
+    case "check_for_update":
+      result =
+        fixtureParams.get("update") === "available"
+          ? { version: "0.2.0", notes: "Fixture release notes." }
+          : null;
+      break;
+    case "install_update":
+      return new Promise<T>(() => {});
     default:
       throw new Error(`Device fixture has no invoke response for command: ${command}`);
   }

@@ -613,6 +613,30 @@ export default function SettingsTab({
             />
           }
         />
+        {/* The only network request Time makes, so the row says exactly what it
+            is rather than "check for updates" — someone reading this list to
+            find out whether Time talks to the internet deserves the answer
+            here, not in a privacy policy. Installing stays a separate, manual
+            act: the control for it appears beside the tabs when a version is
+            waiting. */}
+        <Row
+          label="Check for updates"
+          help="Asks trackwithtime.com whether a newer version exists, once a day. The request sends nothing about you or your activity, and Time never installs anything without you clicking Update."
+          control={
+            <PrivacyToggle
+              label="Check for updates"
+              enabled={
+                (drafts.check_updates_automatically
+                  ?? meta.settings.check_updates_automatically
+                  ?? "1") !== "0"
+              }
+              disabled={savingKeys.has("check_updates_automatically")}
+              onChange={(enabled) =>
+                selectSetting("check_updates_automatically", enabled ? "1" : "0")
+              }
+            />
+          }
+        />
         <ExclusionSummary onManage={onManageExclusions} />
       </Section>
 
