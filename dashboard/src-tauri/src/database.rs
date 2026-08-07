@@ -149,7 +149,7 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('idle_threshold_seconds','300'),
     ('heartbeat_seconds','15'),
     ('week_start','auto'),
-    ('browser_processes','chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe'),
+    ('browser_processes','chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe'),
     ('min_app_seconds_per_day','0'),
     ('activity_noise_filter','utilities'),
     ('activity_noise_max_seconds','120'),

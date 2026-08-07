@@ -10,6 +10,7 @@ import {
   type Rule,
   type TitleRuleSpec,
 } from "./classify";
+import { DEFAULT_BROWSER_PROCESSES } from "./browsers";
 import { normalizeTitleRuleSpec } from "./titleRules";
 import { invoke } from "@tauri-apps/api/core";
 import { getDb } from "./db";
@@ -155,8 +156,7 @@ export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
   idle_threshold_seconds: "300",
   heartbeat_seconds: "15",
   week_start: "auto",
-  browser_processes:
-    "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe",
+  browser_processes: DEFAULT_BROWSER_PROCESSES,
   min_app_seconds_per_day: "0",
   activity_noise_filter: "utilities",
   activity_noise_max_seconds: "120",

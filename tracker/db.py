@@ -173,7 +173,7 @@ DEFAULT_SETTINGS = {
     "heartbeat_seconds": "15",
     "week_start": "auto",
     "browser_processes": (
-        "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe"
+        "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe"
     ),
     "min_app_seconds_per_day": "0",
     # Activity Library noise filtering (dashboard-only; the tracker records
