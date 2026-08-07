@@ -25,8 +25,8 @@ export const TIME_EXTENSION_NAME = "Time Web Extension";
 
 export const TIME_EXTENSION_LISTINGS: readonly TimeExtensionListing[] = [
   {
-    browsers: "Chrome, Brave, and Opera",
-    processes: ["chrome.exe", "brave.exe", "opera.exe"],
+    browsers: "Chrome, Brave, Opera, and Vivaldi",
+    processes: ["chrome.exe", "brave.exe", "opera.exe", "vivaldi.exe"],
     store: "Chrome Web Store",
     storeUrl:
       "https://chromewebstore.google.com/detail/time-web-extension/gnlfnddpjedjehaeofdbpfmmjghieoke",
@@ -45,7 +45,7 @@ export const TIME_EXTENSION_LISTINGS: readonly TimeExtensionListing[] = [
   },
 ];
 
-function isPublished(
+export function isPublished(
   listing: TimeExtensionListing,
 ): listing is PublishedTimeExtensionListing {
   return listing.storeUrl !== null;
@@ -53,6 +53,67 @@ function isPublished(
 
 export const PUBLISHED_TIME_EXTENSION_LISTINGS =
   TIME_EXTENSION_LISTINGS.filter(isPublished);
+
+type ProgIdRoute = {
+  /** Matched against the ProgId's start, not the whole value. */
+  prefix: string;
+  store: string;
+  /** What this browser puts between the store page and an installed
+   *  extension, when it puts anything there at all. A reader who is not
+   *  warned reads the extra step as Time having sent them somewhere wrong. */
+  gate?: string;
+};
+
+// Windows names the https handler by ProgId, which is how Time learns which
+// store to offer without asking. Firefox and its forks append an
+// install-specific suffix -- "FirefoxURL-308046B0AF4A39CB" -- so these match by
+// prefix, case-insensitively, rather than by equality.
+const PROG_ID_ROUTES: readonly ProgIdRoute[] = [
+  { prefix: "ChromeHTML", store: "Chrome Web Store" },
+  {
+    prefix: "MSEdgeHTM",
+    store: "Chrome Web Store",
+    gate: "Edge asks you to allow extensions from other stores the first time. Its banner appears at the top of the page.",
+  },
+  { prefix: "BraveHTML", store: "Chrome Web Store" },
+  { prefix: "OperaStable", store: "Chrome Web Store" },
+  { prefix: "VivaldiHTM", store: "Chrome Web Store" },
+  { prefix: "ChromiumHTM", store: "Chrome Web Store" },
+  { prefix: "FirefoxURL", store: "Firefox Add-ons" },
+];
+
+function routeForProgId(progId: string | null | undefined): ProgIdRoute | null {
+  if (!progId) return null;
+  const normalized = progId.toLowerCase();
+  return (
+    PROG_ID_ROUTES.find((route) =>
+      normalized.startsWith(route.prefix.toLowerCase()),
+    ) ?? null
+  );
+}
+
+/** The listing serving the browser Windows opens https with, or null when the
+ *  ProgId is missing or belongs to a browser Time has no package for.
+ *
+ *  A returned listing may still be unpublished. Resolving which store *should*
+ *  serve a reader is a separate question from whether that store has the
+ *  package yet, and collapsing the two would silently offer a Firefox reader
+ *  the Chrome listing. */
+export function listingForProgId(
+  progId: string | null | undefined,
+): TimeExtensionListing | null {
+  const route = routeForProgId(progId);
+  if (route === null) return null;
+  return TIME_EXTENSION_LISTINGS.find(({ store }) => store === route.store) ?? null;
+}
+
+/** The extra step this browser puts between the store page and an installed
+ *  extension, or null when it installs directly. */
+export function storeGateForProgId(
+  progId: string | null | undefined,
+): string | null {
+  return routeForProgId(progId)?.gate ?? null;
+}
 
 /** Open one published first-party listing in the user's default browser. */
 export async function openExtensionStorePage(

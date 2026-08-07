@@ -6,6 +6,15 @@ import { Button, Checkbox, Spinner } from "./components/ui";
 import { getDbPath } from "./lib/db";
 import { isMissingSchemaError } from "./lib/dbErrors";
 import {
+  PUBLISHED_TIME_EXTENSION_LISTINGS,
+  TIME_EXTENSION_NAME,
+  isPublished,
+  listingForProgId,
+  openExtensionStorePage,
+  storeGateForProgId,
+  type TimeExtensionListing,
+} from "./lib/browserExtensions";
+import {
   currentHistoryRevision,
   invalidateHistory,
   subscribeHistoryInvalidation,
@@ -524,8 +533,35 @@ function PrivacyOnboarding() {
   const [windowTitles, setWindowTitles] = useState(false);
   const [startAtLogin, setStartAtLogin] = useState(true);
   const [startWithEssentials, setStartWithEssentials] = useState(true);
+  const [installExtension, setInstallExtension] = useState(true);
+  // Undefined until the ProgId lookup answers, so the row appears once rather
+  // than flickering through a wrong browser's name on first paint.
+  const [extensionListing, setExtensionListing] = useState<
+    TimeExtensionListing | null | undefined
+  >(undefined);
+  const [storeGate, setStoreGate] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void invoke<string | null>("default_browser_prog_id")
+      .catch(() => null)
+      .then((progId) => {
+        if (cancelled) return;
+        // An unreadable or unrecognized ProgId falls back to the store that
+        // serves most browsers rather than hiding the offer. Guessing wrong
+        // costs a reader one glance at a store page they can close; hiding it
+        // costs them the feature.
+        setExtensionListing(
+          listingForProgId(progId) ?? PUBLISHED_TIME_EXTENSION_LISTINGS[0] ?? null,
+        );
+        setStoreGate(storeGateForProgId(progId));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const complete = async (enable: boolean) => {
     setSaving(true);
@@ -555,6 +591,11 @@ function PrivacyOnboarding() {
       await invoke("set_launch_at_login", { enabled: enable && startAtLogin });
       if (enable) await invoke("start_tracker");
       await updateSetting("privacy_onboarding_complete", "1");
+      // Last, and never able to fail the flow: consent is already committed, so
+      // a browser that will not launch must not roll back the settings below.
+      if (enable && installExtension && extensionListing && isPublished(extensionListing)) {
+        await openExtensionStorePage(extensionListing).catch(() => {});
+      }
       await meta.refresh();
     } catch (cause) {
       // Do not leave a partially completed first-run flow recording activity.
@@ -586,7 +627,7 @@ function PrivacyOnboarding() {
               extension never reads the page path, so specific pages are never recorded.
             </p>
           </div>
-          {/* Ordered by default state, not importance: the two boxes that ship
+          {/* Ordered by default state, not importance: the boxes that ship
               checked come first, so the one setting a reader has to opt into is
               also the last thing they pass on the way to the button. */}
           <ConsentCheck
@@ -602,6 +643,30 @@ function PrivacyOnboarding() {
               title="Start with essential categories"
               detail="Adds Work, Communication, Browsing, Entertainment, and System without classifying any apps or sites. You can rename, change, or delete them later."
             />
+          )}
+          {extensionListing !== undefined && extensionListing !== null && (
+            isPublished(extensionListing) ? (
+              <ConsentCheck
+                checked={installExtension}
+                onChange={setInstallExtension}
+                title={`Install ${TIME_EXTENSION_NAME}`}
+                detail={`Splits browser time by website instead of logging one long stretch of ${extensionListing.browsers}. Opens the ${extensionListing.store} in your browser after this screen; nothing is installed without your say-so there.${storeGate === null ? "" : ` ${storeGate}`}`}
+              />
+            ) : (
+              // Published-only is the invariant the whole registry is built on:
+              // a link that opens successfully but cannot install anything turns
+              // a release-metadata gap into a user-facing failure.
+              <div className="rounded-xl border border-edge bg-surface-dim p-4">
+                <p className="font-medium text-ink">
+                  {TIME_EXTENSION_NAME} for {extensionListing.browsers}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-ink-3">
+                  Coming soon to the {extensionListing.store}. Time still records{" "}
+                  {extensionListing.browsers} as an app in the meantime, and
+                  Settings will carry the link once it is published.
+                </p>
+              </div>
+            )
           )}
           <ConsentCheck
             checked={windowTitles}

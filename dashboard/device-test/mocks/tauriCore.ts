@@ -466,6 +466,17 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
     case "plugin:opener|open_url":
       result = undefined;
       break;
+    // Chrome by default so the onboarding extension row renders its published
+    // state. "?browser=firefox" exercises the not-yet-published branch, and
+    // "?browser=unknown" the fallback for a ProgId Time does not recognize.
+    case "default_browser_prog_id":
+      result =
+        fixtureParams.get("browser") === "firefox"
+          ? "FirefoxURL-308046B0AF4A39CB"
+          : fixtureParams.get("browser") === "unknown"
+            ? "SomeOtherBrowserURL"
+            : "ChromeHTML";
+      break;
     // Null is the ordinary answer and also the answer a failed check gives, so
     // the header control is absent in every fixture but the one that asks for
     // it. Installing resolves nowhere on purpose: the real command exits the

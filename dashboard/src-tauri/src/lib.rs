@@ -431,6 +431,32 @@ fn set_launch_at_login(enabled: bool) -> Result<(), String> {
     SystemRuntimeControl.set_launch_at_login(enabled)
 }
 
+/// The ProgId Windows records as the handler for https — "ChromeHTML",
+/// "FirefoxURL", "VivaldiHTM", and so on. Time uses it for exactly one thing:
+/// choosing which extension store to offer during onboarding, so that the
+/// listing opens in the browser that will install it.
+///
+/// Every failure collapses to `None`, matching `check_for_update`. A machine
+/// with no UserChoice key, a policy-locked hive, or a ProgId Time has never
+/// heard of is not a problem to report — the caller falls back to the store
+/// that serves most browsers, and the reader can always decline.
+#[tauri::command]
+fn default_browser_prog_id() -> Option<String> {
+    #[cfg(windows)]
+    {
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        return hkcu
+            .open_subkey(
+                "Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice",
+            )
+            .ok()?
+            .get_value::<String, _>("ProgId")
+            .ok();
+    }
+    #[cfg(not(windows))]
+    None
+}
+
 /// Progress channel for the one long operation Time performs over the network.
 /// The installer is the whole application, so a bare spinner would sit there for
 /// tens of seconds with nothing to say.
@@ -666,6 +692,7 @@ pub fn run() {
             start_tracker,
             stop_tracker,
             set_launch_at_login,
+            default_browser_prog_id,
             check_for_update,
             install_update
         ])
