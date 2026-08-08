@@ -5633,12 +5633,12 @@ function readCategoryListOrder(): CategoryListOrder {
 }
 
 function readRuleListOrder(): RuleListOrder {
-  if (typeof window === "undefined") return "type-name";
+  if (typeof window === "undefined") return "use";
   try {
     const stored = window.localStorage.getItem(RULE_ORDER_STORAGE_KEY);
-    return stored === "name" || stored === "use" ? stored : "type-name";
+    return stored === "name" || stored === "type-name" ? stored : "use";
   } catch {
-    return "type-name";
+    return "use";
   }
 }
 
