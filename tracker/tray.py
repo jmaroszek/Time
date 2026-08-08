@@ -138,12 +138,12 @@ class _TrayActions:
 
 def _tooltip_text(paused: bool, until: float, now: float | None = None) -> str:
     if not paused:
-        return "Time: Recording"
+        return "Time: recording"
     current = _time.time() if now is None else now
     if until > current:
         short_time = _dt.datetime.fromtimestamp(until).strftime("%I:%M %p").lstrip("0")
-        return f"Time: Paused until {short_time}"
-    return "Time: Paused"
+        return f"Time: paused until {short_time}"
+    return "Time: paused"
 
 
 def _build_menu(pystray, actions: _TrayActions):

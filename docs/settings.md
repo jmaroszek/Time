@@ -12,11 +12,11 @@ column longer and never rearranges it.
 
 | Setting | What it controls |
 | --- | --- |
-| **Record activity** | Allows the tracker to record app names and times |
+| **Record activity** | Allows the tracker to record app names and times. |
 | **Store window titles** | Stores window titles in the database. This enables window-based classification rules, but stored data may contain sensitive information. |
 | **Start at Windows sign-in** | Start the tracker when you sign into this Windows account. |
-| **Show tray icon** | Show tracker controls in the Windows notification area. |
-| **Check for updates** | Asks trackwithtime.com once a day whether a newer version of Time exists. |
+| **Show tray icon** | Show tracker icon, status, and controls in the Windows system tray. |
+| **Check for updates** | Check for updates once per day. Time will not install a new version without your consent. |
 
 **Show tray icon** controls the notification-area icon and nothing else. Hiding
 it does not stop recording and does not change whether Time starts with Windows
@@ -43,16 +43,16 @@ to the other per-item curation.
 
 | Setting | What it controls |
 | --- | --- |
-| **Weekly productive goal** | The target the Insights goal-pace card measures against. |
+| **Weekly productivity goal** | The target the Insights goal-pace card measures against. Set to 0 hours to leave your goal unset. |
 | **Day starts/ends at** | The hour window drawn on the Timeline and Hour-of-Day plots. Activity outside the window still counts in all totals. |
 | **Week starts on** | Affects weekly presets, bucketing, and goal pacing. |
-| **AFK idle threshold** | No input for this long marks you as Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use. |
-| **Focus chain max gap** | Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration; unproductive or AFK time ends it immediately. |
+| **AFK idle threshold** | No input for this long marks you Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use. |
+| **Focus chain max gap** | Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration, while unproductive or AFK time ends it immediately. |
 | **Hide system utilities** | Hides uncategorized installers, drivers, and temporary files. |
 | **Hide rare items** | Hides uncategorized items only when their all-history time and session count are both below the configured limits. Grouped in Settings with the two limits that define "rare", since neither reads correctly alone. |
 | **Rare-item time limit** / **Rare-item session limit** | An item counts as rare only when its all-history time is under the time limit *and* its all-history session count is at or under the session limit. The result does not change with the visible date range. |
 | **Minimum app time** | A rate: apps averaging less than this per tracked day are hidden only from Insights' Top Apps. Because it scales with the days that recorded activity, the same apps clear the bar on Today and on Year. Activity always shows the complete catalog. |
-| **Heartbeat interval** | How often the open session's end time is flushed to disk; this is the upper bound on data lost in a crash. |
+| **Heartbeat interval** | How often data is saved to the database. |
 | **Browser processes** | Which apps can be split into Websites and use Website or Window rules. Each process appears as a removable chip; type or paste a name or installation path and press Enter to add another. Several comma-separated or line-separated names can be pasted at once. Common browsers ship without `.exe` suffixes, while matching keeps canonical executable names internally. |
 
 Switches, selectors, and browser-process removals save immediately; numeric

@@ -87,6 +87,10 @@ const TRACKER_HEALTH_STALE_SECONDS = 8;
 const TRACKER_STATUS_POLL_MS = 2_000;
 const TRACKER_START_TIMEOUT_MS = 10_000;
 
+// A century comfortably exceeds any real retention need and keeps the cutoff
+// computation (days * 86_400 seconds) far from anything that could misbehave.
+const MAX_RETENTION_DAYS = 36_500;
+
 function trackerHeartbeatIsLive(status: TrackerStatus): boolean {
   return status.lastHeartbeat !== null
     && status.lastHeartbeat > 0
@@ -100,6 +104,21 @@ function wait(ms: number): Promise<void> {
 function displayValue(spec: NumericSpec, raw: string | undefined): string {
   const value = Number(raw);
   return Number.isFinite(value) ? String(Math.round((value / spec.scale) * 100) / 100) : "";
+}
+
+/** Strips a numeric draft down to what a number field could ever mean here —
+ *  digits, and (only where the spec steps in fractions) a single decimal
+ *  point. Every spec's minimum is non-negative, so a minus sign is never
+ *  valid; scientific notation isn't either. Runs on every keystroke and
+ *  paste, ahead of the min/max clamp saveNumeric applies on blur. */
+function sanitizeNumericDraft(raw: string, allowDecimal: boolean): string {
+  let value = raw.replace(/[^0-9.]/g, "");
+  if (!allowDecimal) return value.replace(/\./g, "");
+  const firstDot = value.indexOf(".");
+  if (firstDot !== -1) {
+    value = value.slice(0, firstDot + 1) + value.slice(firstDot + 1).replace(/\./g, "");
+  }
+  return value;
 }
 
 function settingDraftValue(
@@ -199,6 +218,13 @@ export default function SettingsTab({
   const optimisticDraftsRef = useRef(new Map<string, string>());
   const immediateActionsRef = useRef(new Set<string>());
   const saveOutcomeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    void import("@tauri-apps/api/app")
+      .then(({ getVersion }) => getVersion())
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const next = { ...meta.settings };
@@ -489,7 +515,15 @@ export default function SettingsTab({
       display={hour ? clockHour(Number(drafts[spec.key]) || 0) : undefined}
       unit={unit}
       readOnly={hour}
-      onChange={(value) => setDrafts((current) => ({ ...current, [spec.key]: value }))}
+      min={spec.min}
+      max={spec.max}
+      step={spec.step ?? 1}
+      onChange={(value) =>
+        setDrafts((current) => ({
+          ...current,
+          [spec.key]: sanitizeNumericDraft(value, !Number.isInteger(spec.step ?? 1)),
+        }))
+      }
       onBlur={() => void saveNumeric(spec)}
       onMinus={() => step(spec, -1)}
       onPlus={() => step(spec, 1)}
@@ -562,7 +596,7 @@ export default function SettingsTab({
       <Section title="Recording & startup">
         <Row
           label="Record activity"
-          help="Allows the tracker to record app names and times"
+          help="Allows the tracker to record app names and times."
           control={<PrivacyToggle label="Record activity" enabled={trackingEnabled} disabled={savingKeys.has("recording_consent") || savingKeys.has("launch_at_login")} onChange={(enabled) => void setTrackingEnabled(enabled)} />}
         />
         <Row
@@ -603,7 +637,7 @@ export default function SettingsTab({
         />
         <Row
           label="Show tray icon"
-          help="Show tracker controls in the Windows notification area."
+          help="Show tracker icon, status, and controls in the Windows system tray."
           control={
             <PrivacyToggle
               label="Show tray icon"
@@ -613,15 +647,12 @@ export default function SettingsTab({
             />
           }
         />
-        {/* The only network request Time makes, so the row says exactly what it
-            is rather than "check for updates" — someone reading this list to
-            find out whether Time talks to the internet deserves the answer
-            here, not in a privacy policy. Installing stays a separate, manual
-            act: the control for it appears beside the tabs when a version is
-            waiting. */}
+        {/* The only network request Time makes. Installing stays a separate,
+            manual act: the control for it appears beside the tabs when a
+            version is waiting. */}
         <Row
           label="Check for updates"
-          help="Asks trackwithtime.com whether a newer version exists, once a day. The request sends nothing about you or your activity, and Time never installs anything without you clicking Update."
+          help="Check for updates once per day. Time will not install a new version without your consent."
           control={
             <PrivacyToggle
               label="Check for updates"
@@ -641,7 +672,7 @@ export default function SettingsTab({
       </Section>
 
       <Section title="Insights">
-        <Row label="Weekly productive goal" help="Set 0 to leave goal pace unset." control={numberControl(SPECS.goal, "Weekly productive goal", "h")} />
+        <Row label="Weekly productivity goal" help="Set to 0 hours to leave your goal unset." control={numberControl(SPECS.goal, "Weekly productivity goal", "h")} />
         <Row
           label="Minimum app time"
           help="Hides apps averaging less than this per tracked day from Insights' Top Apps."
@@ -660,13 +691,13 @@ export default function SettingsTab({
       </Section>
 
       <Section title="Focus & idle">
-        <Row label="AFK idle threshold" help="No input for this long marks you as Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use." control={numberControl(SPECS.idle, "AFK idle threshold", "min")} />
-        <Row label="Focus chain max gap" help="Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration; unproductive or AFK time ends it immediately." control={numberControl(SPECS.focus, "Focus chain max gap", "min")} />
+        <Row label="AFK idle threshold" help="No input for this long marks you Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use." control={numberControl(SPECS.idle, "AFK idle threshold", "min")} />
+        <Row label="Focus chain max gap" help="Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration, while unproductive or AFK time ends it immediately." control={numberControl(SPECS.focus, "Focus chain max gap", "min")} />
       </Section>
 
       <Section
         title="Appearance"
-        intro="The app's theme, and the category and productivity colors used across every chart. Switching palettes changes the swatches offered for new categories."
+        intro="The app's theme, and the category and productivity colors used across every chart. Switching palettes changes the swatches offered for new categories, but does not change their existing colors."
       >
         <Row
           label="Theme"
@@ -824,7 +855,7 @@ export default function SettingsTab({
       </Section>
 
       <Section title="Advanced">
-        <Row label="Heartbeat interval" help="How often the current session is saved; a crash can lose up to this much recent activity." control={numberControl(SPECS.heartbeat, "Heartbeat interval", "s")} />
+        <Row label="Heartbeat interval" help="How often data is saved to the database." control={numberControl(SPECS.heartbeat, "Heartbeat interval", "s")} />
         <Row
           stacked
           label="Browser processes"
@@ -840,16 +871,19 @@ export default function SettingsTab({
           stacked
           compact
           label="Website detection"
-          help="Time Web Extension adds the site's address to the browser title, and never reads the page path. Time uses that address for Website rules; without the extension, browser time is not split by site."
+          help="Time Web Extension allows you to track activity in web browsers. Download in the Chrome or Firefox web store."
           control={<ExtensionLinks />}
         />
+        <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-3">
+          Dashboard {appVersion ?? "—"} · Tracker {meta.settings.tracker_version ?? "not stamped yet"}
+        </p>
       </Section>
 
       <RestoreDefaultsSection
         disabled={savingKeys.size > 0}
         onRestored={() => setPause({ paused: false, until: 0 })}
       />
-      <HelpAndFeedbackSection trackerVersion={meta.settings.tracker_version} />
+      <HelpAndFeedbackSection appVersion={appVersion} trackerVersion={meta.settings.tracker_version} />
       <DataSection settingsBusy={savingKeys.size > 0} />
       </div>
       <SectionRail />
@@ -899,19 +933,19 @@ function ExclusionSummary({ onManage }: { onManage: () => void }) {
   );
 }
 
-/** Support belongs near the app versions that make a report actionable, not
- *  inside Data management merely because that was once the only quiet footer.
- *  The tracker stamps tracker_version into settings at startup. */
-function HelpAndFeedbackSection({ trackerVersion }: { trackerVersion: string | undefined }) {
+/** The app versions that make a report actionable travel with the email
+ *  itself rather than sitting in this section — the one place they're worth
+ *  reading on their own is beside the update control in Recording & startup,
+ *  which already reports what's installed. */
+function HelpAndFeedbackSection({
+  appVersion,
+  trackerVersion,
+}: {
+  appVersion: string | null;
+  trackerVersion: string | undefined;
+}) {
   const banner = useBanner();
-  const [appVersion, setAppVersion] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    void import("@tauri-apps/api/app")
-      .then(({ getVersion }) => getVersion())
-      .then(setAppVersion)
-      .catch(() => {});
-  }, []);
 
   const emailSupport = async () => {
     try {
@@ -932,27 +966,24 @@ function HelpAndFeedbackSection({ trackerVersion }: { trackerVersion: string | u
   };
 
   return (
-    <Section
-      title="Help & feedback"
-      intro="Questions, bugs, or ideas? Time support is handled by email."
-    >
-      <Row
-        label={SUPPORT_EMAIL}
-        help="Email support uses your configured “mailto” handler and includes Time's versions. If it does not open a new message, copy the address and start an email the way you normally do."
-        control={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="primary" onClick={() => void emailSupport()}>
-              Email support
-            </Button>
-            <Button onClick={() => void copyAddress()}>
-              {copied ? "Copied" : "Copy address"}
-            </Button>
-          </div>
-        }
-      />
-      <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-3">
-        Dashboard {appVersion ?? "—"} · Tracker {trackerVersion ?? "not stamped yet"}
-      </p>
+    <Section title="Help & feedback">
+      <div className="flex flex-col items-start gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <p className="max-w-[420px] text-meta leading-snug text-ink-3">
+          Questions, bugs, or ideas? Email{" "}
+          <span className="font-medium text-ink">{SUPPORT_EMAIL}</span>. Clicking
+          “Email support” opens your email client and helps you draft a message. If
+          that doesn't work, hit “Copy address” and send one the way you
+          normally do.
+        </p>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button variant="primary" onClick={() => void emailSupport()}>
+            Email support
+          </Button>
+          <Button onClick={() => void copyAddress()}>
+            {copied ? "Copied" : "Copy address"}
+          </Button>
+        </div>
+      </div>
     </Section>
   );
 }
@@ -1049,6 +1080,12 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
   const [busyAction, setBusyAction] = useState<"older" | "erase" | null>(null);
   const restoreButtonRef = useRef<HTMLButtonElement>(null);
 
+  const normalizeOlderDays = () => {
+    const parsed = Math.floor(Number(olderDays));
+    const clamped = Math.min(Math.max(Number.isFinite(parsed) ? parsed : 365, 1), MAX_RETENTION_DAYS);
+    setOlderDays(String(clamped));
+  };
+
   const copyPath = () => void navigator.clipboard.writeText(getDbPath()).then(() => {
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -1076,7 +1113,7 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
   // only ever say "older than 365 days", never how many sessions that is.
   const deleteOlder = async () => {
     const days = Math.floor(Number(olderDays));
-    if (!Number.isFinite(days) || days < 1) {
+    if (!Number.isFinite(days) || days < 1 || days > MAX_RETENTION_DAYS) {
       setOlderDays("365");
       return;
     }
@@ -1194,10 +1231,18 @@ function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
             <span className="flex flex-wrap items-center gap-2">
               <input
                 type="number"
+                inputMode="numeric"
                 min={1}
+                max={MAX_RETENTION_DAYS}
+                step={1}
                 value={olderDays}
                 aria-label="Days of history to keep"
-                onChange={(event) => setOlderDays(event.target.value)}
+                onChange={(event) => setOlderDays(sanitizeNumericDraft(event.target.value, false))}
+                onBlur={normalizeOlderDays}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") { event.currentTarget.blur(); return; }
+                  blockNonNumericKeys(event);
+                }}
                 className="w-[64px] rounded-[9px] border border-control-edge bg-control px-[11px] py-2 text-right text-xs text-ink outline-none focus:border-accent/60"
               />
               <span className="text-xs text-ink-3">days</span>
@@ -1842,12 +1887,22 @@ function BrowserProcessEditor({
   );
 }
 
+/** Keys a native number input would otherwise accept but no spec here ever
+ *  wants: scientific notation and an explicit sign. Every spec's minimum is
+ *  non-negative, so "-" is never valid either. */
+function blockNonNumericKeys(event: KeyboardEvent<HTMLInputElement>) {
+  if (["e", "E", "+", "-"].includes(event.key)) event.preventDefault();
+}
+
 function NumberStepper({
   label,
   value,
   display,
   unit,
   readOnly = false,
+  min,
+  max,
+  step,
   onChange,
   onBlur,
   onMinus,
@@ -1858,6 +1913,9 @@ function NumberStepper({
   display?: string;
   unit?: string;
   readOnly?: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
   onChange: (value: string) => void;
   onBlur: () => void;
   onMinus: () => void;
@@ -1869,13 +1927,20 @@ function NumberStepper({
       <div className={`flex items-baseline justify-center ${display ? "w-[46px]" : unit ? "min-w-[34px] gap-1" : "min-w-[34px]"}`}>
         <input
           type={readOnly ? "text" : "number"}
+          inputMode={readOnly ? undefined : "decimal"}
           readOnly={readOnly}
+          min={readOnly ? undefined : min}
+          max={readOnly ? undefined : max}
+          step={readOnly ? undefined : step}
           aria-label={label}
           value={display ?? value}
           style={unit ? { width: `${Math.max((display ?? value).length, 1)}ch` } : undefined}
           onChange={(event) => onChange(event.target.value)}
           onBlur={onBlur}
-          onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") { event.currentTarget.blur(); return; }
+            if (!readOnly) blockNonNumericKeys(event);
+          }}
           className={`${unit ? "text-right" : "w-full text-center"} bg-transparent text-row font-semibold tabular-nums text-ink outline-none`}
         />
         {unit && <span className="text-xs text-ink-3">{unit}</span>}
