@@ -1,3 +1,4 @@
+import datetime as dt
 import sqlite3
 from pathlib import Path
 
@@ -449,6 +450,18 @@ def test_get_settings_reads_pause_state(conn):
     assert db.get_settings(conn).tracking_paused is False
     conn.execute("UPDATE settings SET value='1' WHERE key='tracking_paused'")
     assert db.get_settings(conn).tracking_paused is True
+
+
+def test_get_settings_applies_schedule_without_overwriting_manual_pause(conn):
+    monday_noon = dt.datetime(2026, 8, 3, 12).timestamp()
+    conn.execute("UPDATE settings SET value='1' WHERE key='tracking_schedule_enabled'")
+    settings = db.get_settings(conn, monday_noon)
+    assert settings.recording_schedule_allowed is True
+    assert settings.recording_schedule_window_start == dt.datetime(2026, 8, 3, 9).timestamp()
+    assert settings.tracking_paused is False
+
+    conn.execute("UPDATE settings SET value='' WHERE key='tracking_schedule_days'")
+    assert db.get_settings(conn, monday_noon).recording_schedule_allowed is False
 
 
 def test_tray_pause_roundtrip(tmp_path):

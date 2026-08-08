@@ -4,6 +4,7 @@ import time
 import pystray
 
 from tracker import db, tray
+from tracker.tracking_schedule import schedule_state
 
 
 def _settings(path):
@@ -52,6 +53,17 @@ def test_tray_tooltip_distinguishes_recording_and_pause_states():
     assert (
         tray._tooltip_text(True, one_pm, now=one_pm - 60)
         == "Time: paused until 1:00 PM"
+    )
+    outside = schedule_state(
+        {
+            "tracking_schedule_enabled": "1",
+            "tracking_schedule_days": "",
+        },
+        now=1_000,
+    )
+    assert (
+        tray._tooltip_text(False, 0, outside, now=1_000)
+        == "Time: outside scheduled hours"
     )
 
 
@@ -226,7 +238,7 @@ def test_tray_controller_hides_and_recreates_without_stopping_tracker(
     assert controller.set_enabled(True) is True
     assert len(pystray_fake.icons) == 1
 
-    controller.sync_state(True, 0)
+    controller.sync_state(True, 0, schedule_state({}))
     assert first.title == "Time: paused"
     assert first.menu_updates == 1
 

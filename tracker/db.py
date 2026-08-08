@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Callable, TypeVar
 
 from tracker.session_manager import Settings
+from tracker.tracking_schedule import (
+    DEFAULT_DAYS,
+    DEFAULT_END_MINUTE,
+    DEFAULT_START_MINUTE,
+    schedule_state,
+)
 
 T = TypeVar("T")
 SCHEMA_VERSION = 4
@@ -194,6 +200,12 @@ DEFAULT_SETTINGS = {
     # seconds pauses until that moment (self-resuming).
     "tracking_paused": "0",
     "tracking_paused_until": "0",
+    # One recurring local-time recording window. For overnight ranges, a day
+    # identifies when the window starts (Monday 22:00 continues into Tuesday).
+    "tracking_schedule_enabled": "0",
+    "tracking_schedule_days": DEFAULT_DAYS,
+    "tracking_schedule_start_minute": str(DEFAULT_START_MINUTE),
+    "tracking_schedule_end_minute": str(DEFAULT_END_MINUTE),
     # Tracking requires an explicit first-run choice. Window titles are a
     # separate opt-in because they can contain document names or message text.
     "recording_consent": "0",
@@ -518,7 +530,7 @@ def read_settings_raw(conn: sqlite3.Connection) -> dict[str, str]:
     return {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM settings")}
 
 
-def get_settings(conn: sqlite3.Connection) -> Settings:
+def get_settings(conn: sqlite3.Connection, now: float | None = None) -> Settings:
     """Tracker-relevant settings, parsed and validated with safe fallbacks."""
     raw = read_settings_raw(conn)
 
@@ -541,12 +553,15 @@ def get_settings(conn: sqlite3.Connection) -> Settings:
     excluded_domains = frozenset(
         row["pattern"].lower() for row in exclusions if row["kind"] == "website"
     )
+    recording_schedule = schedule_state(raw, now)
     return Settings(
         idle_threshold_seconds=_float("idle_threshold_seconds", 300.0, 30.0, 3600.0),
         heartbeat_seconds=_float("heartbeat_seconds", 15.0, 5.0, 300.0),
         browser_processes=browsers
         or normalize_browser_processes(DEFAULT_SETTINGS["browser_processes"]),
-        tracking_paused=is_paused(raw),
+        tracking_paused=is_paused(raw, now),
+        recording_schedule_allowed=recording_schedule.recording_allowed,
+        recording_schedule_window_start=recording_schedule.current_window_start or 0.0,
         recording_consent=raw.get("recording_consent") == "1",
         record_window_titles=raw.get("record_window_titles") == "1",
         excluded_processes=excluded_processes,

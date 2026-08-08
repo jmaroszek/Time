@@ -20,6 +20,8 @@ import threading
 import time as _time
 from pathlib import Path
 
+from tracker.tracking_schedule import ScheduleState, schedule_state
+
 _DEV_ICON_PATH = Path(__file__).resolve().parent.parent / "dashboard/src-tauri/icons/icon.ico"
 
 
@@ -66,12 +68,19 @@ def _write_pause(db_path: str | Path, paused: str, until: float) -> None:
 
 
 def _read_pause_state(db_path: str | Path) -> tuple[bool, float]:
+    paused, until, _schedule = _read_tracker_state(db_path)
+    return paused, until
+
+
+def _read_tracker_state(db_path: str | Path) -> tuple[bool, float, ScheduleState]:
     conn = sqlite3.connect(db_path, timeout=30, isolation_level=None)
     try:
         rows = dict(
             conn.execute(
                 "SELECT key, value FROM settings WHERE key IN"
-                " ('tracking_paused','tracking_paused_until')"
+                " ('tracking_paused','tracking_paused_until',"
+                "'tracking_schedule_enabled','tracking_schedule_days',"
+                "'tracking_schedule_start_minute','tracking_schedule_end_minute')"
             )
         )
     finally:
@@ -81,7 +90,7 @@ def _read_pause_state(db_path: str | Path) -> tuple[bool, float]:
     except ValueError:
         until = 0.0
     paused = rows.get("tracking_paused") == "1" or _time.time() < until
-    return paused, until
+    return paused, until, schedule_state(rows)
 
 
 class _TrayActions:
@@ -101,8 +110,8 @@ class _TrayActions:
         return not self.is_paused()
 
     def tooltip_text(self) -> str:
-        paused, until = _read_pause_state(self.db_path)
-        return _tooltip_text(paused, until)
+        paused, until, recording_schedule = _read_tracker_state(self.db_path)
+        return _tooltip_text(paused, until, recording_schedule)
 
     def _refresh_icon_title(self, icon) -> None:
         icon.title = self.tooltip_text()
@@ -136,14 +145,26 @@ class _TrayActions:
         icon.stop()
 
 
-def _tooltip_text(paused: bool, until: float, now: float | None = None) -> str:
-    if not paused:
-        return "Time: recording"
+def _tooltip_text(
+    paused: bool,
+    until: float,
+    recording_schedule: ScheduleState | None = None,
+    now: float | None = None,
+) -> str:
     current = _time.time() if now is None else now
-    if until > current:
-        short_time = _dt.datetime.fromtimestamp(until).strftime("%I:%M %p").lstrip("0")
-        return f"Time: paused until {short_time}"
-    return "Time: paused"
+    if paused:
+        if until > current:
+            short_time = _dt.datetime.fromtimestamp(until).strftime("%I:%M %p").lstrip("0")
+            return f"Time: paused until {short_time}"
+        return "Time: paused"
+    if recording_schedule is not None and not recording_schedule.recording_allowed:
+        if recording_schedule.next_start is not None:
+            next_start = _dt.datetime.fromtimestamp(recording_schedule.next_start)
+            day = next_start.strftime("%a")
+            short_time = next_start.strftime("%I:%M %p").lstrip("0")
+            return f"Time: scheduled - resumes {day} at {short_time}"
+        return "Time: outside scheduled hours"
+    return "Time: recording"
 
 
 def _build_menu(pystray, actions: _TrayActions):
@@ -221,7 +242,7 @@ class TrayController:
         self._enabled = False
         self._icon = None
         self._thread: threading.Thread | None = None
-        self._state: tuple[bool, float] | None = None
+        self._state: tuple[bool, float, bool, float | None] | None = None
 
     @property
     def enabled(self) -> bool:
@@ -287,16 +308,26 @@ class TrayController:
             icon_to_stop.stop()
         return False
 
-    def sync_state(self, paused: bool, until: float) -> None:
-        """Refresh native state only when pause state actually changes."""
-        state = (paused, until)
+    def sync_state(
+        self,
+        paused: bool,
+        until: float,
+        recording_schedule: ScheduleState,
+    ) -> None:
+        """Refresh native state only when pause or schedule state changes."""
+        state = (
+            paused,
+            until,
+            recording_schedule.recording_allowed,
+            recording_schedule.next_start,
+        )
         with self._lock:
             if self._state == state:
                 return
             self._state = state
             icon = self._icon
         if icon is not None:
-            icon.title = _tooltip_text(paused, until)
+            icon.title = _tooltip_text(paused, until, recording_schedule)
             icon.update_menu()
 
     def close(self) -> None:

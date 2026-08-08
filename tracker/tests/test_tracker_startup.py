@@ -14,8 +14,10 @@ class FakeController:
         self.enabled.append(enabled)
         return enabled
 
-    def sync_state(self, paused, until):
-        self.states.append((paused, until))
+    def sync_state(self, paused, until, recording_schedule):
+        self.states.append(
+            (paused, until, recording_schedule.recording_allowed, recording_schedule.next_start)
+        )
 
 
 def _forbid_background_components(monkeypatch) -> None:
@@ -49,7 +51,7 @@ def test_tray_sync_keeps_visibility_separate_from_pause_state():
 
     assert visible is False
     assert controller.enabled == [False]
-    assert controller.states == [(True, 2_000)]
+    assert controller.states == [(True, 2_000, True, None)]
     assert tracker._sync_tray(None, {}, now=1_000) is False
 
 
@@ -69,7 +71,7 @@ def test_tray_sync_reports_an_expired_timed_pause_as_recording():
 
     assert visible is True
     assert controller.enabled == [True]
-    assert controller.states == [(False, 500)]
+    assert controller.states == [(False, 500, True, None)]
 
 
 def test_tray_sync_treats_an_indefinite_pause_as_paused_without_a_boundary():
@@ -81,7 +83,23 @@ def test_tray_sync_treats_an_indefinite_pause_as_paused_without_a_boundary():
         now=1_000,
     )
 
-    assert controller.states == [(True, 0.0)]
+    assert controller.states == [(True, 0.0, True, None)]
+
+
+def test_tray_sync_reports_outside_scheduled_hours_separately_from_pause():
+    controller = FakeController()
+
+    tracker._sync_tray(
+        controller,
+        {
+            "show_tray_icon": "1",
+            "tracking_schedule_enabled": "1",
+            "tracking_schedule_days": "",
+        },
+        now=1_000,
+    )
+
+    assert controller.states == [(False, 0.0, False, None)]
 
 
 def test_tray_sync_defaults_a_missing_visibility_setting_to_visible():

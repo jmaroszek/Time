@@ -10,6 +10,7 @@
 //! tracker's first run, or the reverse). The two must stay identical; the
 //! Python side owns migrations.
 
+use chrono::{Datelike, Local, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use sqlx::{
@@ -25,6 +26,43 @@ use std::{
 
 pub(crate) const SCHEMA_VERSION: i64 = 4;
 const MAX_SESSION_SPAN_SEC: i64 = 7 * 86_400;
+
+fn schedule_minute(raw: &str, fallback: u32) -> u32 {
+    raw.parse::<u32>()
+        .ok()
+        .filter(|minute| *minute < 24 * 60)
+        .unwrap_or(fallback)
+}
+
+fn schedule_allows_local(
+    enabled: bool,
+    days_raw: &str,
+    start_raw: &str,
+    end_raw: &str,
+    weekday: u32,
+    minute: u32,
+) -> bool {
+    if !enabled {
+        return true;
+    }
+    let days = days_raw
+        .split(',')
+        .filter_map(|value| value.trim().parse::<u32>().ok())
+        .filter(|day| *day <= 6)
+        .collect::<HashSet<_>>();
+    let start = schedule_minute(start_raw, 9 * 60);
+    let end = schedule_minute(end_raw, 17 * 60);
+    if days.is_empty() || start == end {
+        return false;
+    }
+    if start < end {
+        days.contains(&weekday) && start <= minute && minute < end
+    } else {
+        (days.contains(&weekday) && minute >= start)
+            || (days.contains(&((weekday + 6) % 7)) && minute < end)
+    }
+}
+
 const BOOTSTRAP_SQL: &str = r#"
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS sessions (
@@ -162,6 +200,10 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('day_end_hour','24'),
     ('tracking_paused','0'),
     ('tracking_paused_until','0'),
+    ('tracking_schedule_enabled','0'),
+    ('tracking_schedule_days','0,1,2,3,4'),
+    ('tracking_schedule_start_minute','540'),
+    ('tracking_schedule_end_minute','1020'),
     ('recording_consent','0'),
     ('record_window_titles','0'),
     ('privacy_onboarding_complete','0'),
@@ -816,7 +858,9 @@ impl TimeDatabase {
     async fn protected_live_session_id(&self) -> Result<Option<i64>, String> {
         let rows = sqlx::query(
             "SELECT key,value FROM settings WHERE key IN \
-             ('recording_consent','tracking_paused','tracking_paused_until','heartbeat_seconds')",
+             ('recording_consent','tracking_paused','tracking_paused_until','heartbeat_seconds',\
+              'tracking_schedule_enabled','tracking_schedule_days',\
+              'tracking_schedule_start_minute','tracking_schedule_end_minute')",
         )
         .fetch_all(&self.pool)
         .await
@@ -825,6 +869,10 @@ impl TimeDatabase {
         let mut paused = false;
         let mut paused_until = 0_i64;
         let mut heartbeat = 15_i64;
+        let mut schedule_enabled = false;
+        let mut schedule_days = "0,1,2,3,4".to_string();
+        let mut schedule_start = "540".to_string();
+        let mut schedule_end = "1020".to_string();
         for row in rows {
             let key: String = row.try_get("key").map_err(|error| error.to_string())?;
             let value: String = row.try_get("value").map_err(|error| error.to_string())?;
@@ -833,6 +881,10 @@ impl TimeDatabase {
                 "tracking_paused" => paused = value == "1",
                 "tracking_paused_until" => paused_until = value.parse().unwrap_or(0),
                 "heartbeat_seconds" => heartbeat = value.parse().unwrap_or(15),
+                "tracking_schedule_enabled" => schedule_enabled = value == "1",
+                "tracking_schedule_days" => schedule_days = value,
+                "tracking_schedule_start_minute" => schedule_start = value,
+                "tracking_schedule_end_minute" => schedule_end = value,
                 _ => {}
             }
         }
@@ -840,7 +892,16 @@ impl TimeDatabase {
             .duration_since(UNIX_EPOCH)
             .map_err(|error| error.to_string())?
             .as_secs() as i64;
-        if !consent || paused || paused_until > now {
+        let local_now = Local::now();
+        let schedule_allows = schedule_allows_local(
+            schedule_enabled,
+            &schedule_days,
+            &schedule_start,
+            &schedule_end,
+            local_now.weekday().num_days_from_monday(),
+            local_now.hour() * 60 + local_now.minute(),
+        );
+        if !consent || paused || paused_until > now || !schedule_allows {
             return Ok(None);
         }
         let row = sqlx::query(
@@ -2084,8 +2145,8 @@ pub fn database_path(base: &Path) -> PathBuf {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::{
-        ActivityDeleteRequest, SessionClassificationRequest, SessionCorrectionRequest,
-        TimeDatabase, BOOTSTRAP_SQL, SCHEMA_VERSION,
+        schedule_allows_local, ActivityDeleteRequest, SessionClassificationRequest,
+        SessionCorrectionRequest, TimeDatabase, BOOTSTRAP_SQL, SCHEMA_VERSION,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2933,5 +2994,35 @@ pub(crate) mod tests {
             let deleted = database.delete_activity(&request).await.unwrap();
             assert_eq!(deleted.deleted_count, 1);
         });
+    }
+
+    #[test]
+    fn recording_schedule_handles_daytime_and_overnight_windows() {
+        assert!(schedule_allows_local(
+            true,
+            "0,1,2,3,4",
+            "540",
+            "1020",
+            0,
+            540
+        ));
+        assert!(!schedule_allows_local(
+            true,
+            "0,1,2,3,4",
+            "540",
+            "1020",
+            0,
+            1020
+        ));
+        assert!(schedule_allows_local(true, "0", "1320", "360", 0, 1380));
+        assert!(schedule_allows_local(true, "0", "1320", "360", 1, 359));
+        assert!(!schedule_allows_local(true, "0", "1320", "360", 1, 360));
+    }
+
+    #[test]
+    fn recording_schedule_fails_closed_when_enabled_but_invalid() {
+        assert!(!schedule_allows_local(true, "", "540", "1020", 0, 600));
+        assert!(!schedule_allows_local(true, "0", "540", "540", 0, 600));
+        assert!(schedule_allows_local(false, "", "540", "540", 0, 600));
     }
 }

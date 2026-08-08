@@ -57,6 +57,10 @@ class Settings:
     # Set from the tray (or dashboard) via the tracking_paused settings keys;
     # picked up by the live tracker on its next one-second poll.
     tracking_paused: bool = False
+    # Scheduling is a separate gate so reaching the start of a work window can
+    # never undo a manual pause. The window start clamps AFK backdating.
+    recording_schedule_allowed: bool = True
+    recording_schedule_window_start: float = 0.0
     # Exact, normalized identities that must never produce a stored session.
     # Domains are still derived when title storage is disabled, so website
     # exclusions do not weaken the title-privacy default.
@@ -97,6 +101,7 @@ class SessionManager:
     _last_observed_ts: float = 0.0
     _system_suspended: bool = False
     _media_protected_idle: bool = False
+    _recording_blocked: bool | None = None
     # Highest end_ts this run has written via close. Opens clamp to it so a
     # wall clock stepped backwards while no session is current (post-pause,
     # post-AFK-unknown) cannot open a row overlapping an already-closed one
@@ -109,15 +114,33 @@ class SessionManager:
         if self._system_suspended:
             return
         self._last_observed_ts = snap.now
-        if self.settings.tracking_paused or not self.settings.recording_consent:
-            # Pause = finalize the open session and open nothing new. Resuming
-            # simply lets the next tick open a fresh session.
+        blocked = (
+            self.settings.tracking_paused
+            or not self.settings.recording_consent
+            or not self.settings.recording_schedule_allowed
+        )
+        if blocked:
+            # Every recording gate finalizes the open session and opens nothing
+            # new. A schedule never mutates the independent manual-pause keys.
             if self._current is not None:
                 self._close(self._current.id, max(snap.now, self._current.start_ts))
                 self._current = None
             self._reset_pending()
             self._media_protected_idle = False
+            self._recording_blocked = True
             return
+
+        if self._recording_blocked:
+            # A resume must not let idle backdating reach into a manual pause or
+            # the off-hours window that just ended.
+            self._floor_ts = max(self._floor_ts, snap.now)
+        elif self._recording_blocked is None:
+            # On tracker startup inside a window, retain normal idle backdating
+            # but never let it cross the schedule's opening boundary.
+            self._floor_ts = max(
+                self._floor_ts, self.settings.recording_schedule_window_start
+            )
+        self._recording_blocked = False
 
         locked = snap.process == LOCK_PROCESS
         idle = snap.idle_seconds >= self.settings.idle_threshold_seconds

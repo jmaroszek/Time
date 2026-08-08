@@ -546,6 +546,41 @@ def test_resume_opens_a_fresh_session(store):
     assert store.closed == {1: 1010.0}  # the pause gap is not recorded
 
 
+def test_schedule_end_closes_current_without_mutating_manual_pause(store):
+    manager = SessionManager(store=store, settings=Settings())
+    manager.tick(active(1000.0))
+    manager.settings = Settings(recording_schedule_allowed=False)
+    manager.tick(active(1010.0))
+    assert store.closed == {1: 1010.0}
+    assert manager.settings.tracking_paused is False
+
+
+def test_schedule_start_prevents_idle_backdating_into_off_hours(store):
+    manager = SessionManager(
+        store=store,
+        settings=Settings(recording_schedule_allowed=False),
+    )
+    manager.tick(active(1000.0, idle=500.0))
+    manager.settings = Settings(
+        recording_schedule_allowed=True,
+        recording_schedule_window_start=1010.0,
+    )
+    manager.tick(active(1010.0, idle=510.0))
+    assert store.opened[0][1] == 1010.0
+
+
+def test_startup_idle_backdating_is_clamped_to_schedule_window(store):
+    manager = SessionManager(
+        store=store,
+        settings=Settings(
+            recording_schedule_allowed=True,
+            recording_schedule_window_start=900.0,
+        ),
+    )
+    manager.tick(active(1000.0, idle=500.0))
+    assert store.opened[0][1] == 900.0
+
+
 def test_pause_clears_title_debounce(store):
     manager = SessionManager(store=store, settings=Settings())
     manager.tick(active(1000.0))

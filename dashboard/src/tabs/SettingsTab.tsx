@@ -38,6 +38,16 @@ import {
   THEME_PREFERENCES,
 } from "../lib/theme";
 import {
+  DEFAULT_TRACKING_SCHEDULE_DAYS,
+  DEFAULT_TRACKING_SCHEDULE_END_MINUTE,
+  DEFAULT_TRACKING_SCHEDULE_START_MINUTE,
+  formatScheduleResume,
+  parseTrackingScheduleDays,
+  scheduleInputToMinute,
+  scheduleMinuteToInput,
+  trackingScheduleState,
+} from "../lib/trackingSchedule";
+import {
   backupDatabase,
   chooseDatabaseBackupFile,
   countSessionsOlderThan,
@@ -86,6 +96,15 @@ const SPECS_BY_KEY = new Map(
 const TRACKER_HEALTH_STALE_SECONDS = 8;
 const TRACKER_STATUS_POLL_MS = 2_000;
 const TRACKER_START_TIMEOUT_MS = 10_000;
+const TRACKING_SCHEDULE_DAYS = [
+  { value: 0, short: "M", label: "Monday" },
+  { value: 1, short: "T", label: "Tuesday" },
+  { value: 2, short: "W", label: "Wednesday" },
+  { value: 3, short: "T", label: "Thursday" },
+  { value: 4, short: "F", label: "Friday" },
+  { value: 5, short: "S", label: "Saturday" },
+  { value: 6, short: "S", label: "Sunday" },
+] as const;
 
 // A century comfortably exceeds any real retention need and keeps the cutoff
 // computation (days * 86_400 seconds) far from anything that could misbehave.
@@ -440,12 +459,21 @@ export default function SettingsTab({
     : Date.now() / 1000 - status.lastHeartbeat;
   const trackerLive = heartbeatAge !== null && heartbeatAge < TRACKER_HEALTH_STALE_SECONDS;
   const trackingEnabled = meta.settings.recording_consent === "1";
+  const scheduleSettings = { ...meta.settings, ...drafts };
+  const schedule = trackingScheduleState(scheduleSettings);
+  const selectedScheduleDays = parseTrackingScheduleDays(
+    scheduleSettings.tracking_schedule_days ?? DEFAULT_TRACKING_SCHEDULE_DAYS,
+  );
+  const scheduleEnabled = schedule.enabled;
+  const scheduleOutside = scheduleEnabled && !schedule.recordingAllowed;
   const trackerLabel = !trackingEnabled
     ? "Tracking disabled"
     : !trackerLive
       ? "Tracker not detected"
       : pause.paused
         ? "Tracking paused"
+        : scheduleOutside
+          ? "Outside scheduled hours"
         : "Tracker is live";
   const trackerDetail = !trackingEnabled
     ? "No new activity is being recorded"
@@ -457,6 +485,12 @@ export default function SettingsTab({
         ? pause.until > Date.now() / 1000
           ? `Resumes at ${new Date(pause.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — or sooner from the tray icon`
           : "Resume from the tray icon"
+        : scheduleOutside
+          ? !schedule.valid
+            ? "Choose at least one day and different start and end times"
+            : schedule.nextStart
+              ? `Scheduled to resume ${formatScheduleResume(schedule.nextStart)}`
+              : "No recording days are selected"
         : "Collecting activity in real time";
   const noiseMode = resolvedNoiseMode(drafts.activity_noise_filter);
   const hideRare = hidesRareItems(noiseMode);
@@ -467,8 +501,13 @@ export default function SettingsTab({
   const setTrackingEnabled = async (enabled: boolean) => {
     await runImmediateSettingAction("recording_consent", async () => {
       await updateSetting("recording_consent", enabled ? "1" : "0");
-      if (enabled) await invoke("start_tracker");
-      else {
+      if (enabled) {
+        if (scheduleEnabled && meta.settings.launch_at_login !== "1") {
+          await invoke("set_launch_at_login", { enabled: true });
+          await updateSetting("launch_at_login", "1");
+        }
+        await invoke("start_tracker");
+      } else {
         await updateSetting("launch_at_login", "0");
         await invoke("set_launch_at_login", { enabled: false });
       }
@@ -480,6 +519,44 @@ export default function SettingsTab({
       await invoke("set_launch_at_login", { enabled });
       await updateSetting("launch_at_login", enabled ? "1" : "0");
     }, "startup preference");
+  };
+
+  const setScheduleEnabled = async (enabled: boolean) => {
+    await runImmediateSettingAction("tracking_schedule_enabled", async () => {
+      let enabledStartup = false;
+      try {
+        if (enabled && meta.settings.launch_at_login !== "1") {
+          await invoke("set_launch_at_login", { enabled: true });
+          enabledStartup = true;
+          await updateSetting("launch_at_login", "1");
+        }
+        await updateSetting("tracking_schedule_enabled", enabled ? "1" : "0");
+      } catch (error) {
+        if (enabledStartup) {
+          await invoke("set_launch_at_login", { enabled: false }).catch(() => {});
+          await updateSetting("launch_at_login", "0").catch(() => {});
+        }
+        throw error;
+      }
+    }, "tracking schedule");
+  };
+
+  const toggleScheduleDay = (day: number) => {
+    const selected = new Set(parseTrackingScheduleDays(
+      drafts.tracking_schedule_days ?? meta.settings.tracking_schedule_days ?? DEFAULT_TRACKING_SCHEDULE_DAYS,
+    ));
+    if (selected.has(day)) {
+      if (selected.size === 1) return;
+      selected.delete(day);
+    } else {
+      selected.add(day);
+    }
+    selectSetting("tracking_schedule_days", [...selected].sort((a, b) => a - b).join(","));
+  };
+
+  const setScheduleTime = (key: string, value: string) => {
+    const minute = scheduleInputToMinute(value);
+    if (minute !== null) selectSetting(key, String(minute));
   };
 
   const startTracker = async () => {
@@ -564,7 +641,7 @@ export default function SettingsTab({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-4 py-4 sm:px-[18px]">
-          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : !trackerLive ? "alert-pulse bg-bad" : pause.paused ? "bg-warn" : "live-pulse bg-good-data"}`} />
+          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : !trackerLive ? "alert-pulse bg-bad" : pause.paused || scheduleOutside ? "bg-warn" : "live-pulse bg-good-data"}`} />
           <div className="min-w-0">
             <p className="text-row font-semibold text-ink">
               {trackerLabel}
@@ -624,7 +701,7 @@ export default function SettingsTab({
               <PrivacyToggle
                 label="Start at Windows sign-in"
                 enabled={meta.settings.launch_at_login === "1"}
-                disabled={!trackingEnabled || savingKeys.has("recording_consent") || savingKeys.has("launch_at_login")}
+                disabled={!trackingEnabled || scheduleEnabled || savingKeys.has("recording_consent") || savingKeys.has("launch_at_login")}
                 onChange={(enabled) => void setStartAtLogin(enabled)}
               />
               {!trackingEnabled && (
@@ -632,9 +709,78 @@ export default function SettingsTab({
                   Enable Record activity first
                 </span>
               )}
+              {trackingEnabled && scheduleEnabled && (
+                <span className="text-xs text-ink-3 text-right max-sm:text-left">
+                  Required while scheduling is on
+                </span>
+              )}
             </span>
           }
         />
+        <Row
+          label="Only record on a schedule"
+          help="Keep the tracker running, but record only during the selected local work hours."
+          control={
+            <PrivacyToggle
+              label="Only record on a schedule"
+              enabled={scheduleEnabled}
+              disabled={!trackingEnabled || savingKeys.has("tracking_schedule_enabled")}
+              onChange={(enabled) => void setScheduleEnabled(enabled)}
+            />
+          }
+        />
+        {scheduleEnabled && (
+          <div className="border-t border-surface-2 px-4 py-4">
+            <div className="flex flex-wrap gap-1.5" aria-label="Scheduled recording days">
+              {TRACKING_SCHEDULE_DAYS.map((day) => {
+                const selected = selectedScheduleDays.includes(day.value);
+                return (
+                  <button
+                    key={day.label}
+                    type="button"
+                    aria-label={day.label}
+                    aria-pressed={selected}
+                    onClick={() => toggleScheduleDay(day.value)}
+                    className={`h-8 min-w-8 rounded-[8px] border px-2 text-xs font-semibold transition-colors ${
+                      selected
+                        ? "border-accent bg-accent text-on-accent"
+                        : "border-edge-2 bg-surface-2 text-ink-3 hover:text-ink"
+                    }`}
+                  >
+                    {day.short}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <ScheduleTimeInput
+                label="From"
+                value={scheduleMinuteToInput(
+                  drafts.tracking_schedule_start_minute ?? meta.settings.tracking_schedule_start_minute,
+                  DEFAULT_TRACKING_SCHEDULE_START_MINUTE,
+                )}
+                onChange={(value) => setScheduleTime("tracking_schedule_start_minute", value)}
+              />
+              <ScheduleTimeInput
+                label="Until"
+                value={scheduleMinuteToInput(
+                  drafts.tracking_schedule_end_minute ?? meta.settings.tracking_schedule_end_minute,
+                  DEFAULT_TRACKING_SCHEDULE_END_MINUTE,
+                )}
+                onChange={(value) => setScheduleTime("tracking_schedule_end_minute", value)}
+              />
+              <p className={`pb-2 text-xs ${schedule.valid ? "text-ink-3" : "text-bad"}`}>
+                {!schedule.valid
+                  ? selectedScheduleDays.length === 0
+                    ? "Select at least one day."
+                    : "Start and end must differ."
+                  : Number(scheduleSettings.tracking_schedule_start_minute) > Number(scheduleSettings.tracking_schedule_end_minute)
+                    ? "Runs overnight into the next day."
+                    : "Uses this computer’s local time."}
+              </p>
+            </div>
+          </div>
+        )}
         <Row
           label="Show tray icon"
           help="Show tracker icon, status, and controls in the Windows system tray."
@@ -1499,6 +1645,28 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function ScheduleTimeInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1.5 text-xs font-semibold text-ink-2">
+      {label}
+      <input
+        type="time"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 rounded-[8px] border border-edge-2 bg-surface-2 px-2.5 text-xs font-semibold tabular-nums text-ink outline-none focus:border-accent"
+      />
+    </label>
   );
 }
 

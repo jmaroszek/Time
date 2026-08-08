@@ -171,6 +171,36 @@ test("@workflow tray visibility changes without changing tracker lifecycle", asy
   expect(settings.launch_at_login).toBe("1");
 });
 
+test("@workflow scheduling restores sign-in startup and saves an overnight window", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  const startup = page.getByRole("switch", { name: "Start at Windows sign-in" });
+  await startup.click();
+  await expect.poll(async () => (await fixtureSettings(page)).launch_at_login).toBe("0");
+
+  await page.getByRole("switch", { name: "Only record on a schedule" }).click();
+  await expect.poll(async () => (await fixtureSettings(page)).tracking_schedule_enabled).toBe("1");
+  await expect.poll(async () => (await fixtureSettings(page)).launch_at_login).toBe("1");
+  await expect(startup).toBeDisabled();
+  await expect(page.getByText("Required while scheduling is on")).toBeVisible();
+
+  await page.getByLabel("Saturday").click();
+  await expect.poll(async () => (await fixtureSettings(page)).tracking_schedule_days).toBe("0,1,2,3,4,5");
+  await page.getByRole("textbox", { name: "From", exact: true }).fill("22:00");
+  await page.getByRole("textbox", { name: "Until", exact: true }).fill("06:00");
+  await expect.poll(async () => (await fixtureSettings(page)).tracking_schedule_start_minute).toBe("1320");
+  await expect.poll(async () => (await fixtureSettings(page)).tracking_schedule_end_minute).toBe("360");
+  await expect(page.getByText("Runs overnight into the next day.")).toBeVisible();
+
+  const launchCalls = await page.evaluate(() =>
+    window.__TIME_DEVICE_TEST__.invocations
+      .filter((entry) => entry.command === "set_launch_at_login")
+      .map((entry) => entry.args)
+  );
+  expect(launchCalls).toEqual([{ enabled: false }, { enabled: true }]);
+});
+
 test("@workflow support email includes the installed component versions", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Settings", exact: true }).click();

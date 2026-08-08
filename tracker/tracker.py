@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tracker import config, db, media_playback, power_events, tray, win32_probe
 from tracker.domains import parse_domain
 from tracker.session_manager import SessionManager
+from tracker.tracking_schedule import schedule_state
 
 _ERROR_ALREADY_EXISTS = 183
 _mutex_handle = None  # keep a module-level reference so the handle lives forever
@@ -133,6 +134,7 @@ def _sync_tray(
     controller.sync_state(
         db.is_paused(raw_settings, now),
         db.pause_until(raw_settings),
+        schedule_state(raw_settings, now),
     )
     return visible
 
@@ -260,10 +262,10 @@ def run() -> None:
                             event.suspend_observed,
                         )
             now = time.time()
-            # Consent, pause, and title-privacy switches take effect within one
-            # poll instead of waiting for the database heartbeat interval.
+            # Consent, pause, schedule, and title-privacy switches take effect
+            # within one poll instead of waiting for the database heartbeat.
             if now - last_settings_refresh >= poll:
-                manager.settings = db.get_settings(conn)
+                manager.settings = db.get_settings(conn, now)
                 if tray_controller is not None:
                     raw_settings = db.read_settings_raw(conn)
                     _sync_tray(tray_controller, raw_settings, now)

@@ -215,6 +215,10 @@ const settings: Record<string, string> = {
   day_end_hour: "24",
   tracking_paused: "0",
   tracking_paused_until: "0",
+  tracking_schedule_enabled: "0",
+  tracking_schedule_days: "0,1,2,3,4",
+  tracking_schedule_start_minute: "540",
+  tracking_schedule_end_minute: "1020",
   process_aliases: JSON.stringify({
     "code.exe": "Visual Studio Code with an intentionally long friendly application name",
     ...(mergedApps ? { "time.exe": "Time", "time-tracker.exe": "Time" } : {}),

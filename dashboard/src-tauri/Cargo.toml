@@ -25,6 +25,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
