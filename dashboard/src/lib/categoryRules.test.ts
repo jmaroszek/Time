@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Rule } from "./classify";
 import {
   describeTitleRule,
+  explainTitleMatchAgainstTitle,
   findDuplicateRule,
   isBuiltInIgnored,
   NEW_CATEGORY_DEFAULT_STATE,
@@ -10,6 +11,7 @@ import {
   ruleMatchesSearch,
   sortCategoriesForRules,
   sortRulesForCategory,
+  titleMatchModeHelp,
   titleRuleScopeLabel,
 } from "./categoryRules";
 import type { Category } from "./classify";
@@ -87,14 +89,14 @@ describe("ruleMatchesSearch", () => {
   });
 
   it("searches every matching-behavior label shown on a Window rule", () => {
-    expect(ruleMatchesSearch(rules[1], "exact part")).toBe(true);
-    expect(ruleMatchesSearch(rules[1], "start of title")).toBe(true);
+    expect(ruleMatchesSearch(rules[1], "whole section")).toBe(true);
+    expect(ruleMatchesSearch(rules[1], "first in title")).toBe(true);
     expect(ruleMatchesSearch({
       ...rules[1],
       titleMatchMode: "phrase",
       scopeKind: "browsers",
       scopeValue: "",
-    }, "whole words")).toBe(true);
+    }, "word phrase")).toBe(true);
     expect(ruleMatchesSearch({
       ...rules[1],
       titleMatchMode: "contains",
@@ -122,9 +124,9 @@ describe("ruleMatchesSearch", () => {
       categoryId: 2,
       priority: 2,
     };
-    expect(ruleMatchesSearch(legacyRule, "whole words")).toBe(true);
+    expect(ruleMatchesSearch(legacyRule, "word phrase")).toBe(true);
     expect(ruleMatchesSearch(legacyRule, "any app")).toBe(true);
-    expect(ruleMatchesSearch(legacyRule, "exact part")).toBe(false);
+    expect(ruleMatchesSearch(legacyRule, "whole section")).toBe(false);
   });
 });
 
@@ -133,7 +135,7 @@ describe("saved Window rule labels", () => {
     expect(describeTitleRule({
       titleMatchMode: "segment",
       titleAnchor: "interior",
-    })).toBe("exact part, middle of title");
+    })).toBe("whole section, interior in title");
   });
 
   it("names broad and specific scopes as they appear on rule rows", () => {
@@ -145,6 +147,37 @@ describe("saved Window rule labels", () => {
       scopeKind: "domain",
       scopeValue: "youtube.com",
     })).toBe("youtube.com");
+  });
+});
+
+describe("Window match explanations", () => {
+  it("states substring behavior even when scope can make it reasonable", () => {
+    expect(titleMatchModeHelp("contains")).toContain("inside longer words");
+    expect(explainTitleMatchAgainstTitle({
+      pattern: "time",
+      titleMatchMode: "contains",
+      titleAnchor: "any",
+    }, "Runtime — Visual Studio Code")).toContain("can also match inside longer words");
+  });
+
+  it("makes phrase punctuation and separator behavior explicit", () => {
+    expect(explainTitleMatchAgainstTitle({
+      pattern: "list notepad",
+      titleMatchMode: "phrase",
+      titleAnchor: "any",
+    }, "Grocery list — Notepad")).toBe(
+      "Matches “list notepad” as consecutive whole words. Punctuation and title separators count as word boundaries.",
+    );
+  });
+
+  it("explains why an interior anchor cannot match a two-section title", () => {
+    expect(explainTitleMatchAgainstTitle({
+      pattern: "grocery list",
+      titleMatchMode: "segment",
+      titleAnchor: "interior",
+    }, "Grocery list — Notepad")).toBe(
+      "Does not match: this title has no interior section between its first and last sections.",
+    );
   });
 });
 

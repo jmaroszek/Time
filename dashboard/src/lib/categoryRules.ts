@@ -9,7 +9,12 @@ import {
   type TitleRuleMatchMode,
   type TitleRuleScopeKind,
 } from "./classify";
-import { normalizeTitleRuleSpec } from "./titleRules";
+import {
+  normalizeTitleRuleSpec,
+  normalizeWindowTitle,
+  splitWindowTitle,
+  titlePatternMatches,
+} from "./titleRules";
 
 /** Neutral is the least presumptive judgment for a category the user has only
  * named; productivity becomes an explicit choice rather than a hidden default. */
@@ -98,6 +103,73 @@ export interface RuleIdentityOptions {
   titleAnchor?: TitleRuleAnchor;
 }
 
+export const TITLE_MATCH_MODE_OPTIONS: ReadonlyArray<{
+  value: TitleRuleMatchMode;
+  label: string;
+}> = [
+  { value: "contains", label: "Text fragment" },
+  { value: "phrase", label: "Word phrase" },
+  { value: "segment", label: "Whole section" },
+];
+
+/** A stable explanation belongs beside the mode even when a narrow scope makes
+ * the rule reasonable. Scope can reduce reach; it cannot change how text is
+ * compared or make a substring stop matching inside a longer word. */
+export function titleMatchModeHelp(mode: TitleRuleMatchMode): string {
+  if (mode === "contains") {
+    return "Matches anywhere in the normalized title, including inside longer words.";
+  }
+  if (mode === "phrase") {
+    return "Matches the same consecutive whole words; punctuation and title separators count as word boundaries.";
+  }
+  return "Matches one complete title section separated by marks such as “ — ”, “ - ”, or “ | ”.";
+}
+
+/** Explain the current rule against the concrete title that opened the dialog.
+ * Counts describe historical reach; this line teaches the text semantics that
+ * produced the count, including an anchor retained by a generated or old rule. */
+export function explainTitleMatchAgainstTitle(
+  spec: Pick<Rule, "pattern" | "titleMatchMode" | "titleAnchor">,
+  title: string,
+): string {
+  const pattern = normalizeWindowTitle(spec.pattern);
+  if (!pattern) return "Enter text to see how it matches this title.";
+
+  const mode = spec.titleMatchMode ?? "phrase";
+  const anchor = spec.titleAnchor ?? "any";
+  const matches = titlePatternMatches({
+    pattern,
+    titleMatchMode: mode,
+    titleAnchor: anchor,
+  }, title);
+
+  if (mode === "contains") {
+    return matches
+      ? `Matches “${pattern}” as a text fragment. Text fragments can also match inside longer words.`
+      : `Does not contain “${pattern}” as a text fragment.`;
+  }
+  if (mode === "phrase") {
+    return matches
+      ? `Matches “${pattern}” as consecutive whole words. Punctuation and title separators count as word boundaries.`
+      : `Does not contain “${pattern}” as the same consecutive whole words.`;
+  }
+
+  const sections = splitWindowTitle(title);
+  if (anchor === "interior" && sections.length < 3) {
+    return "Does not match: this title has no interior section between its first and last sections.";
+  }
+  const position = anchor === "first"
+    ? "the first"
+    : anchor === "interior"
+      ? "an interior"
+      : anchor === "last"
+        ? "the last"
+        : "a complete";
+  return matches
+    ? `Matches “${pattern}” as ${position} title section.`
+    : `Does not match ${position} title section exactly.`;
+}
+
 /** The words the builder uses for a Window rule's matching behavior. Keeping
  * this beside rule search means every label shown on a saved row is searchable. */
 export function describeTitleRule(
@@ -105,12 +177,12 @@ export function describeTitleRule(
 ): string {
   const mode = spec.titleMatchMode ?? "phrase";
   const anchor = spec.titleAnchor ?? "any";
-  if (mode === "phrase") return "whole words";
-  if (mode === "contains") return "contains";
-  if (anchor === "first") return "exact part, start of title";
-  if (anchor === "interior") return "exact part, middle of title";
-  if (anchor === "last") return "exact part, end of title";
-  return "exact part";
+  if (mode === "phrase") return "word phrase";
+  if (mode === "contains") return "text fragment";
+  if (anchor === "first") return "whole section, first in title";
+  if (anchor === "interior") return "whole section, interior in title";
+  if (anchor === "last") return "whole section, last in title";
+  return "whole section";
 }
 
 export function titleRuleScopeLabel(

@@ -352,7 +352,7 @@ The interface uses plain rule names while keeping the same matching behavior:
 | Rule | What it matches |
 | --- | --- |
 | **Website** | A detected site such as `github.com`; paths and searches are not stored. |
-| **Window** | Words in a stored window title. Title capture is optional and off by default. |
+| **Window** | Normalized text in a stored window title. Title capture is optional and off by default. |
 | **App** | The foreground executable, such as `code.exe`. |
 
 When several rules match, Website normally wins, then Window, then App. A Window
@@ -375,6 +375,20 @@ program holding several genuinely different activities, told apart only by what
 the window says. One editor covers two unrelated projects, and only its title
 separates them.
 
+The **Match** control chooses how the rule reads that title:
+
+| Match | What it means |
+| --- | --- |
+| **Text fragment** | The same characters anywhere in the normalized title, including inside a longer word. `time` therefore matches `Runtime`. |
+| **Word phrase** | The same consecutive whole words. Punctuation and title separators count as word boundaries, so `list notepad` matches `Grocery list — Notepad`, while `time` does not match `Runtime`. |
+| **Whole section** | One complete section separated by spaced marks such as ` — `, ` - `, or ` | `. A hyphen inside a word does not split it. |
+
+Suggestions can make a Whole section rule more precise by anchoring it to the
+first, last, or an interior section. An interior section exists only in a title
+with at least three sections. The saved rule's label states that anchor; existing
+anchored rules remain editable even though manual rule composition does not add
+a separate Position decision.
+
 General Window rules are strongest outside the browser, for exactly that reason.
 Inside one, a Website rule wins over a Window rule scoped to Any app, Browsers,
 or one browser app. Those broader Window rules can still catch pages whose site
@@ -385,7 +399,7 @@ A Window rule scoped to one website is different: it can carve that site into
 parts. The website boundary keeps the title match from reaching elsewhere, so
 this narrower Window rule wins over the Website rule it refines. For example, a
 Website rule can classify all of `youtube.com`, while a Window rule scoped to
-`youtube.com` classifies only pages whose stored title contains a chosen phrase.
+`youtube.com` classifies only pages whose stored title matches the chosen text.
 
 That ordering preserves the reliable claim. A detected domain is stronger than
 arbitrary title text, so a broad Window rule does not displace it. A
@@ -395,7 +409,7 @@ narrower condition.
 Because a title says as much about work in an editor as in a browser, every
 Window rule carries a **scope** naming where it may match:
 
-- **Any app** — anywhere a stored title contains the words.
+- **Any app** — anywhere the selected title match succeeds.
 - **Browsers** — only in the browsers listed in Settings, so adding a browser
   later keeps the rule correct.
 - **One app** — only in a named executable, such as `obsidian.exe`.

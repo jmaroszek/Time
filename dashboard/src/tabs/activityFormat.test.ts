@@ -263,19 +263,19 @@ describe("previewRule", () => {
 
 describe("describeTitleRule", () => {
   it("names a saved rule with the words its builder used", () => {
-    expect(describeTitleRule({ titleMatchMode: "phrase", titleAnchor: "any" })).toBe("whole words");
-    expect(describeTitleRule({ titleMatchMode: "contains", titleAnchor: "any" })).toBe("contains");
-    expect(describeTitleRule({ titleMatchMode: "segment", titleAnchor: "any" })).toBe("exact part");
+    expect(describeTitleRule({ titleMatchMode: "phrase", titleAnchor: "any" })).toBe("word phrase");
+    expect(describeTitleRule({ titleMatchMode: "contains", titleAnchor: "any" })).toBe("text fragment");
+    expect(describeTitleRule({ titleMatchMode: "segment", titleAnchor: "any" })).toBe("whole section");
     expect(describeTitleRule({ titleMatchMode: "segment", titleAnchor: "first" }))
-      .toBe("exact part, start of title");
+      .toBe("whole section, first in title");
     expect(describeTitleRule({ titleMatchMode: "segment", titleAnchor: "interior" }))
-      .toBe("exact part, middle of title");
+      .toBe("whole section, interior in title");
     expect(describeTitleRule({ titleMatchMode: "segment", titleAnchor: "last" }))
-      .toBe("exact part, end of title");
+      .toBe("whole section, last in title");
   });
 
   it("ignores an anchor the mode cannot use", () => {
-    expect(describeTitleRule({ titleMatchMode: "phrase", titleAnchor: "last" })).toBe("whole words");
+    expect(describeTitleRule({ titleMatchMode: "phrase", titleAnchor: "last" })).toBe("word phrase");
   });
 });
 

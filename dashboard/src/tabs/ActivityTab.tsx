@@ -76,12 +76,15 @@ import {
 import { uncategorizedMark } from "../lib/chartTheme";
 import {
   describeTitleRule,
+  explainTitleMatchAgainstTitle,
   findDuplicateRule,
   isBuiltInIgnored,
   NEW_CATEGORY_DEFAULT_STATE,
   ruleMatchesSearch,
   sortCategoriesForRules,
   sortRulesForCategory,
+  TITLE_MATCH_MODE_OPTIONS,
+  titleMatchModeHelp,
   titleRuleScopeLabel,
   type CategoryListOrder,
   type RuleListOrder,
@@ -198,20 +201,9 @@ const RULE_HELP: Record<MatchType, string> = {
   process: "Matches time spent in an app, such as Spotify (spotify.exe).",
 };
 
-/** Both places a Window rule can be written offer the same four positions, in
- *  the same words. A reader who learns them in one builder should not have to
- *  re-learn them in the other. */
-const TITLE_ANCHOR_OPTIONS = [
-  { value: "any", label: "Anywhere" },
-  { value: "first", label: "Start of title" },
-  { value: "interior", label: "Middle of title" },
-  { value: "last", label: "End of title" },
-];
-
-/** Contains is the one match mode that reaches into unrelated titles and inside
- *  longer words. Naming a single app or website is the fix the warning asks
- *  for, so the warning retires once the reader has applied it — a caution that
- *  survives being heeded teaches the reader to stop reading cautions. */
+/** A broad scope and substring comparison are separate decisions. The stable
+ *  mode help always explains inside-word matching; this caution can therefore
+ *  retire once the rule is limited to one app or website. */
 export function showBroadMatchWarning(
   spec: Pick<TitleRuleSpec, "titleMatchMode" | "scopeKind">,
 ): boolean {
@@ -225,9 +217,9 @@ export function showBroadMatchWarning(
 function BroadMatchWarning({ className = "" }: { className?: string }) {
   return (
     <p className={`text-xs leading-snug text-ink-3 ${className}`}>
-      <span className="font-medium text-ink-2">Broad match:</span> this can also
-      match unrelated titles or text inside longer words. Limit it to one app or
-      website when possible.
+      <span className="font-medium text-ink-2">Broad scope:</span> this text
+      fragment can match unrelated titles. Limit it to one app or website when
+      possible.
     </p>
   );
 }
@@ -5010,13 +5002,9 @@ function WindowRuleDialog({
               />
             </label>
             <div className="mt-3">
-              <span className="text-xs text-ink-3">Match as</span>
+              <span className="text-xs text-ink-3">Match</span>
               <span className="mt-1 flex w-fit rounded-lg border border-edge bg-surface p-0.5">
-                {([
-                  ["phrase", "Whole words"],
-                  ["segment", "Exact part"],
-                  ["contains", "Contains"],
-                ] as Array<[TitleRuleMatchMode, string]>).map(([mode, label]) => (
+                {TITLE_MATCH_MODE_OPTIONS.map(({ value: mode, label }) => (
                   <button
                     key={mode}
                     type="button"
@@ -5033,19 +5021,6 @@ function WindowRuleDialog({
               </span>
               {showBroadMatchWarning(spec) && <BroadMatchWarning className="mt-1.5" />}
             </div>
-            {spec.titleMatchMode === "segment" && (
-              <div className="mt-3 text-xs text-ink-3">
-                <span>Position</span>
-                <MenuSelect
-                  size="field"
-                  className="mt-1 w-full"
-                  value={spec.titleAnchor}
-                  onChange={(value) => changeSpec({ titleAnchor: value as TitleRuleAnchor })}
-                  label="Title-part position"
-                  options={TITLE_ANCHOR_OPTIONS}
-                />
-              </div>
-            )}
             <div className="mt-3 text-xs text-ink-3">
               <span>Applies to</span>
               <MenuSelect
@@ -5062,6 +5037,11 @@ function WindowRuleDialog({
             </div>
           </div>
         )}
+
+        <p className="mt-2 rounded-lg border border-edge/60 bg-surface-2 px-3 py-2 text-xs leading-snug text-ink-3">
+          <span className="font-medium text-ink-2">On this title:</span>{" "}
+          {explainTitleMatchAgainstTitle(spec, group.title)}
+        </p>
 
         {/* The safety net for a pattern aimed too widely: say what it takes
             before it takes it. */}
@@ -5551,13 +5531,9 @@ function CategoryRuleForm({
       {draft.type === "title" && (
         <div className="mt-2 rounded-lg border border-edge/60 bg-surface/45 p-2.5">
           <div className="flex items-center gap-2">
-            <span className="w-[64px] shrink-0 text-xs text-ink-3">Match as</span>
+            <span className="w-[64px] shrink-0 text-xs text-ink-3">Match</span>
             <span className="flex rounded-lg border border-edge bg-surface p-0.5">
-              {([
-                ["phrase", "Whole words"],
-                ["segment", "Exact part"],
-                ["contains", "Contains"],
-              ] as Array<[TitleRuleMatchMode, string]>).map(([mode, label]) => (
+              {TITLE_MATCH_MODE_OPTIONS.map(({ value: mode, label }) => (
                 <button
                   key={mode}
                   type="button"
@@ -5576,21 +5552,6 @@ function CategoryRuleForm({
               ))}
             </span>
           </div>
-          {draft.titleMatchMode === "segment" && (
-            <div className="mt-2 flex items-center gap-2">
-              <span className="w-[64px] shrink-0 text-xs text-ink-3">Position</span>
-              <MenuSelect
-                size="compact"
-                className="w-44"
-                value={draft.titleAnchor}
-                onChange={(value) => onChange({
-                  titleAnchor: value as TitleRuleAnchor,
-                })}
-                label="Title-part position"
-                options={TITLE_ANCHOR_OPTIONS}
-              />
-            </div>
-          )}
           <div className="mt-2 flex flex-wrap items-center gap-2 sm:flex-nowrap">
             <span className="w-[64px] shrink-0 text-xs text-ink-3">Applies to</span>
             <span className="flex rounded-lg border border-edge bg-surface p-0.5">
@@ -5636,8 +5597,8 @@ function CategoryRuleForm({
         </div>
       )}
       <p className="mt-2 text-xs text-ink-3">
-        {draft.type === "title" && draft.titleMatchMode === "segment"
-          ? "Matches one complete section of a title, such as “Grocery list” in “Grocery list — Notepad”."
+        {draft.type === "title"
+          ? titleMatchModeHelp(draft.titleMatchMode)
           : RULE_HELP[draft.type]}
         {draft.type === "domain"
           && " Website rules require a supported browser and detected website information."}
