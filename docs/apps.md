@@ -175,33 +175,67 @@ time, rules in use, and its windows.
 
 Windows are grouped there exactly as they are in search results — one row per
 title, with its visit count and total time — because an item's own list is one
-app's worth of the same fragmentation. Each row expands to the individual
-visits, and carries the same **Rule…** action. **Show titles** hides the title
-text without hiding the rows, for anyone working on a shared screen; it is a
-display toggle only, and whether titles are captured at all remains a Settings
-choice that is off by default.
+app's worth of the same fragmentation. Opening a row opens that Window's own
+details, where its individual visits are.
+
+Each row also has a checkbox, and ticking one enrols every visit that window
+stands for. The box beside the **Windows** heading takes the rows currently
+loaded — never the unloaded remainder, since a checkbox should only promise
+what it can be seen to tick. With anything ticked, the filter and order controls
+give way to **Delete selected** and **Classify**, which do to a set of windows
+exactly what the same two controls do to a set of visits one level down; the
+heading reports how many visits are in scope. Filtering clears the selection,
+which is why the two never share the row.
 
 Set an App default or Website category from here; the resulting rule applies to
 all matching historical and future activity, not just the range being inspected.
 A more-specific Website or Window rule can still leave an App with Mixed
 classification.
 
-## Correcting a session
+## Editing one visit
 
-**Edit** on any individual visit opens that one session for correction. Its
-**Category** leads, because overriding one session's classification is the
-routine reason to open it and always succeeds; the override outranks every rule.
+**Edit** on any individual visit opens it on its own. Its **Category** leads,
+because setting one visit's category is the routine reason to open it and always
+succeeds; the override outranks every rule.
 
 **Adjust recorded times** is folded away beneath it, being a repair for the rare
-occasion the clock was wrong rather than a routine edit. A corrected span may
+occasion the clock was wrong rather than a routine edit. An adjusted span may
 not overlap another recording, and since the tracker records continuously the
-neighbouring sessions usually sit flush against it — so in practice a session
-can be shortened but not lengthened. The panel states the free gap on each side
-before anything is typed, and the fields are bounded by it. Times use the local
-timezone and cannot end in the future. AFK sessions and the live session cannot
-be edited at all.
+neighbouring visits usually sit flush against it — so in practice a visit can be
+shortened but not lengthened. The panel states the free gap on each side before
+anything is typed, and the fields are bounded by it. Times use the local timezone
+and cannot end in the future. Away time and the visit in progress cannot be
+edited at all.
 
-**Reset corrections** returns a session to exactly what was captured.
+**Reset edits** returns a visit to exactly what was recorded.
+
+A visit that no longer matches what was captured says so at the right of its
+row: **Reclassified** where its category was set by hand, and **Time edited**
+where its clock was adjusted. A visit that had both reads as Reclassified, that
+being the part worth naming; **Edit** shows the whole of it either way.
+
+### Reclassifying several visits at once
+
+A window's visits are listed under a heading per day, and both the heading and
+the **Select all** button above tick a group of them: the heading takes the
+visits shown beneath it, while the button takes every visit the window stands
+for, including any not yet loaded — which is why it says how many.
+
+With anything ticked, **Classify** applies one category to all of them. This
+writes the same per-session override that **Edit** writes, one per visit, and no
+rule: it changes the visits you picked and nothing else, leaves future activity
+alone, and outranks whatever the rules would otherwise say. It is the tool for an
+afternoon that went differently from the usual — a site you normally read for
+fun but spent Tuesday working in.
+
+The menu's first entry, **Use automatic classification**, removes those
+overrides and hands the visits back to the rules. Selecting everything and
+choosing it is how a batch is cleared later; **Undo** on the confirmation is how
+it is taken back immediately, and it returns every visit to its own previous
+category rather than to a single shared one. Recorded times are untouched either
+way, so a visit whose clock was adjusted keeps that adjustment. Away time and
+the visit in progress cannot be edited and are reported as skipped rather than
+failing the batch.
 
 ## Exact deletion
 
@@ -252,8 +286,16 @@ answer "where did I classify this" without remembering which category it went
 into.
 
 The two order menus beside search follow the same pattern as Apps & Websites.
-Categories can sort by name or group by productivity. Rules can sort by type or
-by name; the Type view sorts names within each rule kind.
+Categories can sort by name or group by productivity. Rules can sort by type, by
+name, or by use; the Type view sorts names within each rule kind.
+
+**Use** orders each category's rules by how much of your history they actually
+decided, heaviest first, and prints that time on the row — so the rules carrying
+the classification lead, and the ones carrying none collect at the bottom beside
+their **unused** tags. Like that tag it counts all of history rather than the
+visible range, since a rule that classified a hundred hours in one month is not
+unused in the next. A rule outranked by a more specific one counts nothing here,
+which is the same measure that decides **unused**.
 
 A category is productive, neutral, or unproductive. Ignoring is not one of
 these states: the built-in Ignored category is the single ignore mechanism.
@@ -320,7 +362,7 @@ so edits reclassify existing and future activity — which is also why **unused*
 is measured against all of history and not the visible range.
 
 Because a new rule reaches backwards as well as forwards, the builder reports
-what it would claim before it is saved: how many sessions and hours across all
+what it would claim before it is saved: how many visits and hours across all
 of your history, and how many of those currently classify differently and would
 change. A pattern that cannot be used — a website rule with no usable domain in
 it — says so there rather than at the point of saving.

@@ -332,6 +332,11 @@ const VARIANTS = {
   bare: "border-transparent text-ink-3 hover:bg-surface-3 disabled:hover:bg-transparent",
   resting: "border-control-edge bg-control text-ink-3 hover:border-edge-2 hover:text-ink-2 focus-visible:border-accent/60",
   engaged: "border-accent/45 bg-accent/[.06] text-ink hover:border-accent/65 focus-visible:border-accent/60",
+  // Deliberately Button's `default` string, weight included. This trigger's
+  // neighbours are buttons rather than other fields, and a control that reads
+  // as a form input beside them looks disabled next to the verbs it belongs
+  // with. Pair with size "control", which is the shape Button draws.
+  action: "border-edge bg-surface-2 text-ink-2 font-medium hover:border-edge-2 hover:text-ink",
 } as const;
 /** Windows list views forget a typeahead buffer after roughly a second. */
 const TYPEAHEAD_RESET_MS = 900;
@@ -379,8 +384,12 @@ export function MenuSelect({
    *  "all" is a label for an absence and must not outshout the data it is not
    *  narrowing, while one that *is* narrowing is state the reader has to be
    *  able to see. Pick between them at the call site, which is the only place
-   *  that knows which of its values means "no filter". */
-  variant?: "default" | "quiet" | "bare" | "resting" | "engaged";
+   *  that knows which of its values means "no filter".
+   *
+   *  "action" is for a menu that fires a command and keeps no selection, sat in
+   *  a row of buttons: it borrows Button's resting style, and its placeholder —
+   *  a verb rather than an empty value — keeps full strength. */
+  variant?: "default" | "quiet" | "bare" | "resting" | "engaged" | "action";
   /** "field" matches the taller text inputs, for menus that sit in a row
    *  beside one. Passing the padding through className instead would leave
    *  which utility wins up to Tailwind's ordering rather than the call site. */
@@ -538,7 +547,15 @@ export function MenuSelect({
           open ? "border-accent/60 bg-surface-3 text-ink" : VARIANTS[variant]
         } ${className}`}
       >
-        <span className={`flex min-w-0 items-center gap-1.5 ${current ? "" : "text-ink-3"}`}>
+        {/* A placeholder is normally dimmed because it stands for a value not
+            yet chosen. An action menu's placeholder is not that — it is the
+            command the control performs, and dimming it permanently is the one
+            state this trigger is always in. */}
+        <span
+          className={`flex min-w-0 items-center gap-1.5 ${
+            current || variant === "action" ? "" : "text-ink-3"
+          }`}
+        >
           {current ? (
             <>
               {current.dot && <CategoryDot color={current.dot} />}
@@ -653,7 +670,9 @@ export function Checkbox({
   onChange: (checked: boolean) => void;
   /** Visible text beside the box, styled by the caller through className. */
   children?: ReactNode;
-  /** Accessible name where there is no visible text — a selection cell, say. */
+  /** The accessible name. Required where there is no visible text — a selection
+   *  cell, say — and it also overrides visible text that does not say what
+   *  ticking the box will do, as long as it still contains that text. */
   label?: string;
   /** "md" is for standalone hit targets like a row selector, where a 12px box
    *  is a small thing to ask someone to hit repeatedly. */
@@ -678,7 +697,7 @@ export function Checkbox({
         ref={input}
         type="checkbox"
         checked={checked}
-        aria-label={children === undefined ? label : undefined}
+        aria-label={label}
         onChange={(event) => onChange(event.target.checked)}
         className="peer sr-only"
       />

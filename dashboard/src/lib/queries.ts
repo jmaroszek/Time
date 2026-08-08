@@ -507,6 +507,57 @@ export async function correctSession(
   }
 }
 
+/** One session's override as it stood before a batch replaced it. */
+export interface SessionClassification {
+  sessionId: number;
+  categoryId: number | null;
+}
+
+export interface SessionClassificationResult {
+  changedCount: number;
+  /** AFK rows and the live session, which cannot be edited. */
+  skippedCount: number;
+  previous: SessionClassification[];
+}
+
+/**
+ * Applies one category to many sessions, or clears theirs, without touching
+ * their recorded times.
+ *
+ * A loop over correctSession would be one round trip and a full overlap scan
+ * per visit, and would leave a failure part-way through as a half-applied
+ * batch. This is one statement per five hundred, in one transaction.
+ */
+export async function classifySessions(
+  sessionIds: number[],
+  categoryId: number | null,
+): Promise<SessionClassificationResult> {
+  try {
+    return await invoke<SessionClassificationResult>("classify_sessions", {
+      request: { sessionIds, categoryId },
+    });
+  } finally {
+    invalidateHistory();
+  }
+}
+
+/** Puts back what a batch replaced. Sessions rarely came from more than one or
+ *  two categories, so grouping them is a handful of calls rather than one per
+ *  visit — and each session lands back on its own previous value. */
+export async function restoreSessionClassifications(
+  previous: SessionClassification[],
+): Promise<void> {
+  const byCategory = new Map<number | null, number[]>();
+  for (const entry of previous) {
+    const ids = byCategory.get(entry.categoryId);
+    if (ids) ids.push(entry.sessionId);
+    else byCategory.set(entry.categoryId, [entry.sessionId]);
+  }
+  for (const [categoryId, sessionIds] of byCategory) {
+    await classifySessions(sessionIds, categoryId);
+  }
+}
+
 export async function resetSessionCorrection(sessionId: number): Promise<number> {
   try {
     return await invoke<number>("reset_session_correction", { sessionId });

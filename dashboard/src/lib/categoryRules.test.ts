@@ -176,4 +176,30 @@ describe("category and rule ordering", () => {
     expect(sortRulesForCategory(unsorted, "name").map((rule) => rule.pattern))
       .toEqual(["amazon.com", "Standup", "youtube.com", "zoom.exe"]);
   });
+
+  describe("by use", () => {
+    const unsorted: Rule[] = [
+      { id: 3, matchType: "process", pattern: "zoom.exe", categoryId: 1, priority: 3 },
+      { id: 2, matchType: "domain", pattern: "youtube.com", categoryId: 1, priority: 1 },
+      { id: 1, matchType: "domain", pattern: "amazon.com", categoryId: 1, priority: 1 },
+      { id: 4, matchType: "title", pattern: "Standup", categoryId: 1, priority: 2 },
+    ];
+
+    it("puts the heaviest rule first and the unused ones last", () => {
+      const usage = new Map([[3, 7200], [2, 600], [1, 36000]]);
+      expect(sortRulesForCategory(unsorted, "use", usage).map((rule) => rule.pattern))
+        .toEqual(["amazon.com", "zoom.exe", "youtube.com", "Standup"]);
+    });
+
+    it("falls back to the default order within a tie", () => {
+      // Every rule unused, so nothing separates them but type and name.
+      expect(sortRulesForCategory(unsorted, "use", new Map()).map((rule) => rule.pattern))
+        .toEqual(["amazon.com", "youtube.com", "Standup", "zoom.exe"]);
+    });
+
+    it("keeps the default order until history has been read", () => {
+      expect(sortRulesForCategory(unsorted, "use", null).map((rule) => rule.pattern))
+        .toEqual(["amazon.com", "youtube.com", "Standup", "zoom.exe"]);
+    });
+  });
 });

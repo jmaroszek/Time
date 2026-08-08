@@ -33,6 +33,7 @@ import {
   type ActivityEntitySummary,
   type ActivityQuery,
   type ActivityQueryResult,
+  type ActivitySessionRow,
   type ActivityTitleGroup,
   type ActivityTitleGroupPage,
   type ActivitySort,
@@ -42,6 +43,7 @@ import {
   type ActivityTriageItem,
   type ActivityTypeFilter,
   type ActivityWindowSort,
+  type RuleUsageEntry,
 } from "../lib/activity";
 import { buildActivityExport, type ActivityExportKind } from "../lib/activityExport";
 import {
@@ -113,6 +115,7 @@ import {
   addRule,
   addTrackingExclusion,
   backupDatabase,
+  classifySessions,
   correctSession,
   deleteActivity,
   deleteCategory,
@@ -124,6 +127,7 @@ import {
   type TrackingExclusionPreview,
   removeTrackingExclusion,
   resetSessionCorrection,
+  restoreSessionClassifications,
   saveActivityExport,
   saveProcessAliases,
   updateSetting,
@@ -131,6 +135,7 @@ import {
   updateRule,
   type ActivityDeletePreview,
   type ActivityDeleteRequest,
+  type SessionClassification,
   type SessionCorrection,
   type TrackingExclusion,
   type TrackingExclusionKind,
@@ -180,6 +185,12 @@ const RULE_LABELS: Record<MatchType, string> = {
   title: "Window",
   process: "App",
 };
+
+/** The "no category of its own" entry in the bulk Classify menu. A sentinel
+ *  rather than the empty string, because MenuSelect reads "" as "nothing is
+ *  selected" — which is exactly what an action menu passes as its value, and
+ *  an option sharing it would render permanently checked. */
+const AUTOMATIC_CLASSIFICATION = "auto";
 
 const RULE_HELP: Record<MatchType, string> = {
   domain: "Matches a website such as youtube.com. Page paths and searches are not stored.",
@@ -234,7 +245,7 @@ function RulePreviewText({ preview }: { preview: TitleRulePreview | null }) {
   if (preview.sessions === 0) return null;
   return (
     <>
-      Claims <span className="text-ink-2">{preview.sessions}</span> session
+      Claims <span className="text-ink-2">{preview.sessions}</span> visit
       {preview.sessions === 1 ? "" : "s"}
       {preview.titles > 0 && (
         <> with <span className="text-ink-2">{preview.titles}</span> distinct title
@@ -601,6 +612,11 @@ export default function ActivityTab({
   // discovers a Window; it never silently turns one row into hundreds of
   // selected sessions.
   const [panelSessionIds, setPanelSessionIds] = useState<Set<number>>(() => new Set());
+  // The entity panel's own selection, one level up: whole Windows rather than
+  // individual visits. Kept apart from the visit selection above so that
+  // opening a Window and coming back does not discard the batch being built —
+  // and so the two can never half-overlap on the same session.
+  const [selectedWindowKeys, setSelectedWindowKeys] = useState<Set<string>>(() => new Set());
   const [deleteScope, setDeleteScope] = useState<DeleteScope | null>(null);
   const [excludeScope, setExcludeScope] = useState<{
     kind: TrackingExclusionKind;
@@ -716,6 +732,7 @@ export default function ActivityTab({
     setDetailSearch("");
     setDetailLimit(PANEL_WINDOW_PAGE);
     setPanelSessionIds(new Set());
+    setSelectedWindowKeys(new Set());
   }, [selectedEntityId]);
 
   useEffect(() => {
@@ -723,10 +740,17 @@ export default function ActivityTab({
     setWindowVisitLimit(GROUP_SESSION_SAMPLE);
   }, [selectedWindow?.key]);
 
+  // The window selection goes with the filter, not with the order: filtering
+  // changes which rows exist, so a selection that survived it would act on
+  // windows the reader can no longer see. Re-ordering moves the same rows.
   useEffect(() => {
     setDetailLimit(PANEL_WINDOW_PAGE);
     setPanelSessionIds(new Set());
   }, [detailSearch, detailSort, detailDirection]);
+
+  useEffect(() => {
+    setSelectedWindowKeys(new Set());
+  }, [detailSearch]);
 
   const dialogOpen = deleteScope !== null
     || excludeScope !== null
@@ -1065,11 +1089,105 @@ export default function ActivityTab({
     return next;
   });
   const toggleAllPanelSessions = toggleAll(setPanelSessionIds);
-  const requestSessionDeletion = (ids: Set<number>) => {
+  const toggleWindow = (group: ActivityTitleGroup) => setSelectedWindowKeys((current) => {
+    const next = new Set(current);
+    if (next.has(group.key)) next.delete(group.key); else next.add(group.key);
+    return next;
+  });
+  const toggleWindows = (groups: ActivityTitleGroup[]) => setSelectedWindowKeys((current) => {
+    const next = new Set(current);
+    if (groups.every((group) => next.has(group.key))) {
+      for (const group of groups) next.delete(group.key);
+    } else {
+      for (const group of groups) next.add(group.key);
+    }
+    return next;
+  });
+  /** The visits behind the selected windows. Read from the rows on screen, so a
+   *  key left over from a window the current page no longer carries contributes
+   *  nothing rather than acting on visits nobody can see. */
+  const selectedWindowSessionIds = (): { ids: number[]; windows: number } => {
+    const rows = (result?.detailGroups.rows ?? []).filter(
+      (group) => selectedWindowKeys.has(group.key),
+    );
+    return { ids: rows.flatMap((group) => group.sessionIds), windows: rows.length };
+  };
+  /**
+   * Reclassify the ticked visits, without writing a rule.
+   *
+   * Every count in the banner comes from the write itself rather than from the
+   * selection: visits already in the target category are not changes, and AFK
+   * rows and the live session cannot be edited at all. Saying "40 visits" over
+   * a batch that moved four would be the one sentence a reader has to trust.
+   *
+   * The selection survives, because the rows do — unlike a deletion, the
+   * obvious next act is picking a different category for the same visits.
+   */
+  const classifySelection = async (ids: Set<number>, categoryId: number | null) => {
+    if (ids.size === 0) return;
+    const name = categoryId === null
+      ? null
+      : meta.categories.find((category) => category.id === categoryId)?.name;
+    try {
+      const outcome = await classifySessions([...ids], categoryId);
+      const moved = outcome.previous.length;
+      const subject = countNoun(moved, "visit");
+      const skipped = outcome.skippedCount > 0
+        ? ` ${countNoun(outcome.skippedCount, "visit")} could not be edited: AFK time and the live session are fixed.`
+        : "";
+      if (moved === 0) {
+        banner.show(
+          (outcome.skippedCount > 0
+            ? "Nothing was reclassified."
+            : `Already ${name === null ? "classified by rule" : `in ${name}`}.`)
+          + skipped,
+        );
+        return;
+      }
+      banner.show(
+        (name === null
+          ? `${subject} returned to automatic classification.`
+          : `${subject} reclassified as ${name}.`)
+        + skipped,
+        { label: "Undo", run: () => void undoClassification(outcome.previous) },
+      );
+    } catch (error) {
+      banner.report(error, "classification");
+    }
+  };
+
+  /** The same two verbs as the Window panel, one level up. A window stands for
+   *  every visit to it, so both act on the visits the ticked rows represent. */
+  const classifySelectedWindows = (categoryId: number | null) => {
+    const { ids } = selectedWindowSessionIds();
+    void classifySelection(new Set(ids), categoryId);
+  };
+  const deleteSelectedWindows = () => {
+    const { ids, windows } = selectedWindowSessionIds();
+    requestSessionDeletion(
+      new Set(ids),
+      `${countNoun(windows, "selected window")} · ${countNoun(ids.length, "visit")}`,
+    );
+  };
+
+  /** Each visit goes back to its own previous category, which is rarely the
+   *  one category the batch replaced them all with. */
+  const undoClassification = async (previous: SessionClassification[]) => {
+    try {
+      await restoreSessionClassifications(previous);
+    } catch (error) {
+      banner.report(error, "classification");
+    }
+  };
+
+  /** `label` names the scope in the reader's own terms. A batch chosen by
+   *  window was never picked visit by visit, and a confirmation that reported
+   *  "412 selected visits" would be describing an act nobody performed. */
+  const requestSessionDeletion = (ids: Set<number>, label?: string) => {
     if (ids.size === 0) return;
     setDeleteScope({
       request: { mode: "sessions", sessionIds: [...ids] },
-      label: `${ids.size} selected visit${ids.size === 1 ? "" : "s"}`,
+      label: label ?? `${ids.size} selected visit${ids.size === 1 ? "" : "s"}`,
       span: null,
       // Already an explicit list of rows, so there is no range to widen.
       allHistory: null,
@@ -1104,6 +1222,7 @@ export default function ActivityTab({
   };
   const historyDeleted = (closeEntity: boolean) => {
     setPanelSessionIds(new Set());
+    setSelectedWindowKeys(new Set());
     if (closeEntity) {
       setWindowOrigin(null);
       setSelectedWindow(null);
@@ -1165,8 +1284,10 @@ export default function ActivityTab({
       selectedSessionIds={panelSessionIds}
       onToggleSession={togglePanelSession}
       onToggleAllSessions={toggleAllPanelSessions}
+      onClassifySelected={(categoryId) => void classifySelection(panelSessionIds, categoryId)}
       onDeleteSelected={() => requestSessionDeletion(panelSessionIds)}
       onEditSession={setEditingSessionId}
+      categories={meta.categories}
       onMakeRule={setRuleDraft}
       onOpenParent={openWindowParent}
       onBack={windowOrigin === "entity-detail" ? openWindowParent : undefined}
@@ -1202,6 +1323,11 @@ export default function ActivityTab({
         label: result.selectedEntity!.displayName,
       })}
       onOpenWindow={(group) => openWindow(group, "entity-detail")}
+      selectedWindowKeys={selectedWindowKeys}
+      onToggleWindow={toggleWindow}
+      onToggleWindows={toggleWindows}
+      onClassifyWindows={classifySelectedWindows}
+      onDeleteWindows={deleteSelectedWindows}
       onAssign={(categoryId) => assignEntity(result.selectedEntity!, categoryId)}
       onSaveAlias={(alias) => saveAlias(result.selectedEntity!.key, alias)}
       onRemoveExactRule={() => removeExactRules(result.selectedEntity!)}
@@ -1386,7 +1512,7 @@ export default function ActivityTab({
         ) : (
           <CategoriesAndRules
             source={source}
-            appliedRuleIds={result?.appliedRuleIds ?? null}
+            ruleUsageSeconds={result?.ruleUsageSeconds ?? null}
             onChanged={refreshMeta}
           />
         )}
@@ -2693,18 +2819,42 @@ export function formatVisitDay(seconds: number, now = new Date()): string {
   return formatShortDate(seconds);
 }
 
+/**
+ * How one visit differs from what was captured, in a word — or null when it
+ * does not.
+ *
+ * "Corrected" covered both kinds of edit and named neither. It also carried an
+ * accusation the data does not support: reclassifying an afternoon is not
+ * repairing a mistake, it is saying what that afternoon was, and by far the
+ * commoner of the two.
+ *
+ * A session override implies the category was set, which is the fact worth
+ * naming; a correction row without one can only be an adjusted clock, since
+ * a row carrying neither is deleted rather than stored. An edit that did both
+ * reads as "Reclassified" — true, if not the whole story, and the exact split
+ * is one Edit click away.
+ */
+export function visitEditLabel(
+  session: Pick<ActivitySessionRow, "isCorrected" | "classificationSource">,
+): string | null {
+  if (session.classificationSource === "session_override") return "Reclassified";
+  return session.isCorrected ? "Time edited" : null;
+}
+
 /** The intervals behind one window, for the rare case that needs them: which
  *  exact visit to correct, or proof of when something actually happened. */
 function GroupSessions({
   group,
   selected,
   onToggle,
+  onToggleMany,
   onEdit,
   onLoadMore,
 }: {
   group: ActivityTitleGroup;
   selected: Set<number>;
   onToggle: (id: number) => void;
+  onToggleMany: (ids: number[]) => void;
   onEdit: (id: number) => void;
   onLoadMore: () => void;
 }) {
@@ -2717,12 +2867,28 @@ function GroupSessions({
           `first:` matched every time — a heading is always the first child of
           its own group — so the rule that was meant to separate the days never
           applied to any of them. */}
-      {groupVisitsByDay(group.sessions).map((day) => (
+      {groupVisitsByDay(group.sessions).map((day) => {
+        const dayIds = day.visits.map((visit) => visit.id);
+        const wholeDay = dayIds.every((id) => selected.has(id));
+        return (
         <div key={day.key} className="mt-4 flex flex-col gap-1 first:mt-0">
-          <p className="text-micro uppercase tracking-[.04em] text-ink-3">
+          {/* The heading ticks its own rows and no others. A day can hold more
+              visits than the sample carries, and a checkbox that quietly took
+              the unloaded remainder would promise more than it shows — the
+              whole-group promise is made once, by the button above, where the
+              count is stated. */}
+          <Checkbox
+            checked={wholeDay}
+            indeterminate={dayIds.some((id) => selected.has(id))}
+            onChange={() => onToggleMany(dayIds)}
+            label={`Select the ${countNoun(dayIds.length, "visit")} shown on ${formatVisitDay(day.visits[0].start)}`}
+            className="text-micro uppercase tracking-[.04em] text-ink-3"
+          >
             {formatVisitDay(day.visits[0].start)}
-          </p>
-          {day.visits.map((session) => (
+          </Checkbox>
+          {day.visits.map((session) => {
+            const edited = visitEditLabel(session);
+            return (
             <div key={session.id} className="flex items-center gap-2 text-xs">
               <Checkbox
                 checked={selected.has(session.id)}
@@ -2732,21 +2898,40 @@ function GroupSessions({
               <span className="w-[62px] shrink-0 tabular-nums text-ink-2">
                 {new Date(session.start * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
               </span>
-              <span className="tabular-nums text-ink-3">{fmtDuration(session.seconds)}</span>
-              {session.isCorrected && (
-                <span className="rounded-full bg-accent/10 px-1.5 py-[1px] text-xs text-accent">Corrected</span>
-              )}
-              <button
-                type="button"
-                onClick={() => onEdit(session.id)}
-                className="ml-auto rounded px-1.5 py-0.5 text-xs text-ink-3 hover:bg-accent/10 hover:text-accent"
-              >
-                Edit
-              </button>
+              <span className="shrink-0 tabular-nums text-ink-3">
+                {fmtDuration(session.seconds)}
+              </span>
+              {/* The tag is aligned by anchoring, not by padding the column in
+                  front of it. Durations run "3s" to "2h 28m", so a tag placed
+                  after them lands somewhere different on every row unless the
+                  column is widened to its longest case — which buys the
+                  alignment with a stripe of dead space on every short row, and
+                  still loses it to the one duration that overruns the width.
+                  Against the right edge there is nothing to overrun.
+
+                  Edit is last so that it, not the tag, is the fixed anchor:
+                  rows carrying no tag must not shift the control that every
+                  row has. */}
+              <span className="ml-auto flex shrink-0 items-center gap-2">
+                {edited && (
+                  <span className="rounded-full bg-accent/10 px-1.5 py-[1px] text-xs text-accent">
+                    {edited}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onEdit(session.id)}
+                  className="rounded px-1.5 py-0.5 text-xs text-ink-3 hover:bg-accent/10 hover:text-accent"
+                >
+                  Edit
+                </button>
+              </span>
             </div>
-          ))}
+            );
+          })}
         </div>
-      ))}
+        );
+      })}
       {group.sessionCount > group.sessions.length && (
         // Never silently truncated, and no longer a dead end: the older visits
         // used to be unreachable one at a time, so a correction to anything
@@ -2857,7 +3042,7 @@ function ExcludedPanel() {
     try {
       const result = await addTrackingExclusion(kind, draft, deleteHistory);
       banner.show(deleteHistory
-        ? `Excluded ${result.normalizedPattern} and deleted ${result.deletedCount} historical session${result.deletedCount === 1 ? "" : "s"}.`
+        ? `Excluded ${result.normalizedPattern} and deleted ${result.deletedCount} recorded visit${result.deletedCount === 1 ? "" : "s"}.`
         : `Excluded ${result.normalizedPattern} from future tracking.`);
       setDraft("");
       setDeleteHistory(false);
@@ -2953,7 +3138,10 @@ function ExcludedPanel() {
             </>
           }
           metrics={[
-            { label: "Sessions", value: String(pendingHistoryDelete.count) },
+            // The tile counts the thing, so it takes the app's word for it.
+            // The note below stays in the storage register on purpose: it is
+            // describing what leaves the database, not what you were looking at.
+            { label: "Visits", value: String(pendingHistoryDelete.count) },
             { label: "Recorded time", value: fmtDuration(pendingHistoryDelete.seconds) },
           ]}
           note="Complete session rows are removed and cannot be restored unless you have a backup. The exclusion itself can be lifted later, but deleted history does not come back with it."
@@ -3193,14 +3381,23 @@ export function windowRowCategory(
   return group.categoryName ?? "Uncategorized";
 }
 
-/** One Window in an entity's list. Visit-level actions live in the Window
- * panel, so this row has one verb and cannot expand the list in place. */
+/**
+ * One Window in an entity's list.
+ *
+ * The row is a checkbox beside a button rather than one whole-row button: a
+ * checkbox cannot be nested inside a button, and the two do different things —
+ * one opens the Window, the other enrols every visit it stands for in a batch.
+ * The border, hover and focus ring therefore belong to the wrapper, so the row
+ * still lights as one object whichever half the pointer is over.
+ */
 function PanelWindowRow({
   group,
   search,
   maxSeconds,
   totalSeconds,
   category,
+  selected,
+  onToggle,
   onOpen,
 }: {
   group: ActivityTitleGroup;
@@ -3209,13 +3406,33 @@ function PanelWindowRow({
   totalSeconds: number;
   /** Null when it matches the app's own, and so is not worth the words. */
   category: string | null;
+  selected: boolean;
+  onToggle: (group: ActivityTitleGroup) => void;
   onOpen: (group: ActivityTitleGroup) => void;
 }) {
   return (
+    <div
+      // The tint the catalog table already uses for a selected row, and only
+      // that: the tick states the selection, so a second accent on the border
+      // says it twice — and with every row selected the panel read as one
+      // continuous glow rather than a list.
+      className={`flex items-start gap-2 rounded-lg border border-edge/60 px-2.5 py-2 transition-colors focus-within:border-accent/60 ${
+        selected ? "bg-accent/[.09]" : "hover:border-edge-2 hover:bg-hover"
+      }`}
+    >
+      {/* Nudged onto the title's line rather than the row's top edge: the row
+          is three lines tall and a box aligned to the block reads as belonging
+          to the bar beneath the title as much as to the title itself. */}
+      <Checkbox
+        checked={selected}
+        onChange={() => onToggle(group)}
+        label={`Select every visit to ${group.title || "this untitled window"}`}
+        className="mt-[3px] shrink-0"
+      />
     <button
       type="button"
       onClick={() => onOpen(group)}
-      className="w-full rounded-lg border border-edge/60 px-2.5 py-2 text-left text-xs outline-none transition-colors hover:border-edge-2 hover:bg-hover focus-visible:border-accent/60"
+      className="min-w-0 flex-1 text-left text-xs outline-none"
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-ink-2">
@@ -3252,6 +3469,7 @@ function PanelWindowRow({
         <span className="ml-auto shrink-0 tabular-nums">{formatLastSeen(group.lastSeen)}</span>
       </span>
     </button>
+    </div>
   );
 }
 
@@ -3265,8 +3483,10 @@ function WindowPanel({
   selectedSessionIds,
   onToggleSession,
   onToggleAllSessions,
+  onClassifySelected,
   onDeleteSelected,
   onEditSession,
+  categories,
   onMakeRule,
   onOpenParent,
   onBack,
@@ -3282,8 +3502,11 @@ function WindowPanel({
   selectedSessionIds: Set<number>;
   onToggleSession: (id: number) => void;
   onToggleAllSessions: (ids: number[]) => void;
+  /** Null returns the ticked visits to whatever the rules decide. */
+  onClassifySelected: (categoryId: number | null) => void;
   onDeleteSelected: () => void;
   onEditSession: (id: number) => void;
+  categories: Category[];
   onMakeRule: (group: ActivityTitleGroup) => void;
   onOpenParent: () => void;
   onBack?: () => void;
@@ -3367,18 +3590,56 @@ function WindowPanel({
       <section className="mt-6">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-row font-semibold">Visits</h3>
+          {/* Order runs safest-last, against the app's usual reading order,
+              because this row rearranges itself under the pointer. The button
+              that selects everything is also the button that clears it, so it
+              is pinned to the right-hand end where it cannot move: the two new
+              controls appear to its left, and the hand that just pressed
+              "Select all" is still over "Clear selection" rather than over a
+              delete that materialized beneath it. Destructive lands furthest
+              from that spot for the same reason. */}
+          {selectedSessionIds.size > 0 && (
+            <>
+              <Button variant="danger" onClick={onDeleteSelected}>Delete selected</Button>
+              {/* Classifying here writes an override on each ticked visit, not
+                  a rule: a rule is a standing statement about everything that
+                  ever matches it, and the reason to reach for this control is
+                  that one afternoon went differently from the rest. */}
+              <MenuSelect
+                variant="action"
+                size="control"
+                align="end"
+                value=""
+                placeholder={`Classify ${selectedSessionIds.size}…`}
+                label={`Classify the ${countNoun(selectedSessionIds.size, "selected visit")}`}
+                onChange={(value) =>
+                  onClassifySelected(value === AUTOMATIC_CLASSIFICATION ? null : Number(value))}
+                options={[
+                  // Also the way back: ticking everything and choosing this
+                  // clears overrides in bulk, which is otherwise one dialog
+                  // per visit. It leads for that reason as much as for parity
+                  // with the correction dialog's own first entry.
+                  { value: AUTOMATIC_CLASSIFICATION, label: "Use automatic classification" },
+                  ...categories.map((category, i) => ({
+                    value: String(category.id),
+                    label: category.name,
+                    dot: category.color,
+                    divider: i === 0,
+                  })),
+                ]}
+              />
+            </>
+          )}
           <Button onClick={() => onToggleAllSessions(group.sessionIds)}>
             {allSelected ? "Clear selection" : `Select all ${group.sessionCount} visits`}
           </Button>
-          {selectedSessionIds.size > 0 && (
-            <Button variant="danger" onClick={onDeleteSelected}>Delete selected</Button>
-          )}
         </div>
         <div className="mt-3 rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-2.5">
           <GroupSessions
             group={group}
             selected={selectedSessionIds}
             onToggle={onToggleSession}
+            onToggleMany={onToggleAllSessions}
             onEdit={onEditSession}
             onLoadMore={onLoadMoreVisits}
           />
@@ -3585,6 +3846,11 @@ function EntityPanel({
   onDeleteEntity,
   onExclude,
   onOpenWindow,
+  selectedWindowKeys,
+  onToggleWindow,
+  onToggleWindows,
+  onClassifyWindows,
+  onDeleteWindows,
   onAssign,
   onSaveAlias,
   onRemoveExactRule,
@@ -3612,6 +3878,15 @@ function EntityPanel({
   onDeleteEntity: () => void;
   onExclude: () => void;
   onOpenWindow: (group: ActivityTitleGroup) => void;
+  /** Windows whose visits are enrolled in the batch, keyed as the rows are.
+   *  Keys rather than session ids so a row can report its own state without
+   *  re-deriving it from a set of several hundred numbers on every render. */
+  selectedWindowKeys: Set<string>;
+  onToggleWindow: (group: ActivityTitleGroup) => void;
+  onToggleWindows: (groups: ActivityTitleGroup[]) => void;
+  /** Null returns the selected windows' visits to whatever the rules decide. */
+  onClassifyWindows: (categoryId: number | null) => void;
+  onDeleteWindows: () => void;
   onAssign: (categoryId: number) => Promise<void>;
   onSaveAlias: (alias: string) => Promise<void>;
   onRemoveExactRule: () => Promise<void>;
@@ -3667,6 +3942,16 @@ function EntityPanel({
   const baselineCategoryId = entity.status === "single"
     ? entity.categories[0]?.categoryId ?? null
     : null;
+  const allWindowsSelected =
+    groups.rows.length > 0 && groups.rows.every((group) => selectedWindowKeys.has(group.key));
+  const selectedWindowCount = selectedWindowKeys.size;
+  // Counted from the loaded rows, so it can only report windows still on
+  // screen. A selection made before the filter narrowed is cleared with it, so
+  // the two cannot disagree.
+  const selectedVisitCount = groups.rows.reduce(
+    (total, group) => total + (selectedWindowKeys.has(group.key) ? group.sessionCount : 0),
+    0,
+  );
 
   return (
     <DetailPanel
@@ -3905,23 +4190,63 @@ function EntityPanel({
             away. The negative margins carry the background across the scroll
             well's padding so rows pass underneath rather than beside. */}
         <div className="sticky top-0 z-10 -mx-5 -mt-2 bg-surface px-5 pb-2.5 pt-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* A box at the head of the column its rows carry, rather than a
+                button spelling the same thing in a hundred and forty pixels of
+                the one row that has to stay readable. Only ever the loaded
+                rows: the list pages, and a control that swept up windows
+                nobody has seen would select from a list it cannot show. */}
+            {titlesReadable && groups.rows.length > 0 && (
+              <Checkbox
+                checked={allWindowsSelected}
+                indeterminate={selectedWindowCount > 0}
+                onChange={() => onToggleWindows(groups.rows)}
+                label={allWindowsSelected
+                  ? "Clear the window selection"
+                  : `Select all ${countNoun(groups.rows.length, "window")}`}
+              />
+            )}
             <h3 className="text-row font-semibold">Windows</h3>
             {/* Labelled counts, phrased so the heading is not repeated back at
                 the reader — "Windows · 2 windows · 309 visits" was three
-                sayings of two facts. */}
+                sayings of two facts. The selected count joins it here rather
+                than riding beside the batch controls, for the same reason. */}
             <span className="min-w-0 truncate text-xs tabular-nums text-ink-3">
-              {groups.sessionTotal > groups.total
-                ? `${countNoun(groups.sessionTotal, "visit")} in ${countNoun(groups.total, "window")}`
-                : countNoun(groups.total, "window")}
+              {selectedWindowCount > 0
+                ? `${countNoun(selectedVisitCount, "visit")} selected`
+                : groups.sessionTotal > groups.total
+                  ? `${countNoun(groups.sessionTotal, "visit")} in ${countNoun(groups.total, "window")}`
+                  : countNoun(groups.total, "window")}
             </span>
           </div>
-          {/* Narrowing and ordering sit together, because they are the same
-              kind of act on the same list. The privacy toggle that used to
-              take this row is gone: consent to seeing titles is given once, by
-              turning capture on, and re-asking it here every session bought a
-              control that mostly sat checked. */}
-          {titlesReadable && (
+          {/* One row, whichever state the list is in. Narrowing and ordering
+              are the same kind of act on the same list and sit together; the
+              batch verbs take their place rather than stacking under them,
+              because filtering clears the selection anyway — showing both at
+              once offers a control that destroys what the other row acts on. */}
+          {titlesReadable && (selectedWindowCount > 0 ? (
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <Button variant="danger" onClick={onDeleteWindows}>Delete selected</Button>
+              <MenuSelect
+                variant="action"
+                size="control"
+                value=""
+                placeholder={`Classify ${countNoun(selectedWindowCount, "window")}…`}
+                label={`Classify every visit in the ${countNoun(selectedWindowCount, "selected window")}`}
+                onChange={(value) =>
+                  onClassifyWindows(value === AUTOMATIC_CLASSIFICATION ? null : Number(value))}
+                options={[
+                  { value: AUTOMATIC_CLASSIFICATION, label: "Use automatic classification" },
+                  ...categories.map((category, i) => ({
+                    value: String(category.id),
+                    label: category.name,
+                    dot: category.color,
+                    divider: i === 0,
+                  })),
+                ]}
+              />
+            </div>
+          ) : (
             <div className="mt-2.5 flex items-center gap-2">
               <ClearableInput
                 value={detailSearch}
@@ -3947,7 +4272,7 @@ function EntityPanel({
                 </span>
               )}
             </div>
-          )}
+          ))}
         </div>
         {!titlesReadable ? (
           // A list of identical "—" rows, one per entity, is what this used to
@@ -3968,6 +4293,8 @@ function EntityPanel({
                   maxSeconds={groups.maxSeconds}
                   totalSeconds={entity.seconds}
                   category={windowRowCategory(group, baselineCategoryId)}
+                  selected={selectedWindowKeys.has(group.key)}
+                  onToggle={onToggleWindow}
                   onOpen={onOpenWindow}
                 />
               ))}
@@ -4372,7 +4699,7 @@ function TrackingExclusionDialog({
       const result = await addTrackingExclusion(scope.kind, scope.pattern, deleteHistory);
       banner.show(
         deleteHistory
-          ? `Future tracking stopped and ${result.deletedCount} historical session${result.deletedCount === 1 ? " was" : "s were"} deleted.`
+          ? `Future tracking stopped and ${result.deletedCount} recorded visit${result.deletedCount === 1 ? " was" : "s were"} deleted.`
           : `Time will no longer track ${scope.label}.`,
       );
       onAdded(deleteHistory);
@@ -4394,7 +4721,7 @@ function TrackingExclusionDialog({
           align="start"
           className="mt-4 rounded-lg border border-bad/20 bg-bad/[.035] p-3 text-xs leading-snug text-ink-2"
         >
-          <span><span className="block font-medium">Also delete existing history</span>{preview ? `${preview.count} session${preview.count === 1 ? "" : "s"} · ${fmtDuration(preview.seconds)}. This cannot be undone without a backup.` : "Checking matching history…"}</span>
+          <span><span className="block font-medium">Also delete existing history</span>{preview ? `${preview.count} visit${preview.count === 1 ? "" : "s"} · ${fmtDuration(preview.seconds)}. This cannot be undone without a backup.` : "Checking matching history…"}</span>
         </Checkbox>
         <div className="mt-5 flex justify-end gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || !preview} onClick={() => void save()}>{saving ? "Saving…" : "Add exclusion"}</Button></div>
       </div>
@@ -4407,7 +4734,7 @@ function TrackingExclusionDialog({
  *
  * A corrected span may not overlap another recording. Because the tracker
  * records continuously while the machine is on, the neighbours usually sit
- * flush against the session, so the honest answer is normally "you can shorten
+ * flush against the visit, so the honest answer is normally "you can shorten
  * this, not lengthen it" — which is exactly what someone needs to know first
  * and what the old dialog only revealed by rejecting the save.
  */
@@ -4429,18 +4756,18 @@ export function describeCorrectionWindow(
   // mechanism first — which recording abuts which — makes the reader work for
   // the one thing they opened the panel to find out.
   if (earliestStart == null && latestEnd == null) {
-    return "Nothing else is recorded around this session, so its times can move freely.";
+    return "Nothing else is recorded around this visit, so its times can move freely.";
   }
   if (earliestStart === session.start && latestEnd === session.end) {
-    return "You can shorten this session but not extend it — the sessions before and after leave no gap.";
+    return "You can shorten this visit but not extend it — the visits before and after leave no gap.";
   }
   if (earliestStart == null) {
-    return `Nothing is recorded before this session, and it can end as late as ${clock(latestEnd!)}.`;
+    return `Nothing is recorded before this visit, and it can end as late as ${clock(latestEnd!)}.`;
   }
   if (latestEnd == null) {
-    return `This session can start as early as ${clock(earliestStart)}, and nothing is recorded after it.`;
+    return `This visit can start as early as ${clock(earliestStart)}, and nothing is recorded after it.`;
   }
-  return `This session can run from ${clock(earliestStart)} to ${clock(latestEnd)} at most, before it would overlap another.`;
+  return `This visit can run from ${clock(earliestStart)} to ${clock(latestEnd)} at most, before it would overlap another.`;
 }
 
 function localInputValue(seconds: number): string {
@@ -4892,7 +5219,7 @@ function SessionCorrectionDialog({
         setEnd(localInputValue(value.end));
         setCategoryId(value.categoryId == null ? "" : String(value.categoryId));
       },
-      (error) => { if (!cancelled) { banner.report(error, "session"); onClose(); } },
+      (error) => { if (!cancelled) { banner.report(error, "visit"); onClose(); } },
     );
     return () => { cancelled = true; };
   }, [sessionId]);
@@ -4908,10 +5235,10 @@ function SessionCorrectionDialog({
         endSec,
         categoryId: categoryId ? Number(categoryId) : null,
       });
-      banner.show("Session correction saved.");
+      banner.show("Visit updated.");
       onClose();
     } catch (error) {
-      banner.report(error, "session correction");
+      banner.report(error, "visit");
       setSaving(false);
     }
   };
@@ -4919,21 +5246,28 @@ function SessionCorrectionDialog({
     setSaving(true);
     try {
       await resetSessionCorrection(sessionId);
-      banner.show("Session restored to its captured values.");
+      banner.show("Visit restored to what was recorded.");
       onClose();
     } catch (error) {
-      banner.report(error, "session correction");
+      banner.report(error, "visit");
       setSaving(false);
     }
   };
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="correction-title">
       <div className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-edge bg-surface p-4 shadow-panel sm:max-h-[calc(100dvh-2rem)] sm:p-5">
-        <h2 id="correction-title" className="text-sm font-semibold">Correct session</h2>
+        {/* "Correct" named the rare half of this dialog and misnamed the
+            common one. Setting a category on an afternoon is not repairing a
+            mistake, and the row this writes to says "Reclassified" — so the
+            button that opens it, the dialog, and the tag it produces are one
+            vocabulary now. "Visit" for the same reason: "session" is the
+            tracker's storage unit, and every list this dialog is opened from
+            counts visits. */}
+        <h2 id="correction-title" className="text-sm font-semibold">Edit visit</h2>
         {!session ? <div className="py-10"><Spinner /></div> : (
           <>
             <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs"><p className="font-medium">{session.domain ?? session.process}</p>{session.title && <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>}</div>
-            {(session.isLive || session.isAfk) && <p className="mt-3 rounded-lg border border-bad/30 bg-bad/[.04] px-3 py-2 text-xs text-bad">{session.isLive ? "The current live session cannot be edited." : "AFK sessions are not editable in this version."}</p>}
+            {(session.isLive || session.isAfk) && <p className="mt-3 rounded-lg border border-bad/30 bg-bad/[.04] px-3 py-2 text-xs text-bad">{session.isLive ? "The visit in progress cannot be edited." : "Away time cannot be edited."}</p>}
             {/* Category leads: it is why this dialog is normally opened, it
                 always succeeds, and it is the app's actual subject. */}
             <div className="mt-4 text-xs text-ink-3">
@@ -4988,7 +5322,7 @@ function SessionCorrectionDialog({
                 </>
               )}
             </div>
-            <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="danger" disabled={saving} onClick={() => void reset()}>Reset corrections</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</Button></span></div>
+            <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="danger" disabled={saving} onClick={() => void reset()}>Reset edits</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</Button></span></div>
           </>
         )}
       </div>
@@ -5340,9 +5674,8 @@ function readCategoryListOrder(): CategoryListOrder {
 function readRuleListOrder(): RuleListOrder {
   if (typeof window === "undefined") return "type-name";
   try {
-    return window.localStorage.getItem(RULE_ORDER_STORAGE_KEY) === "name"
-      ? "name"
-      : "type-name";
+    const stored = window.localStorage.getItem(RULE_ORDER_STORAGE_KEY);
+    return stored === "name" || stored === "use" ? stored : "type-name";
   } catch {
     return "type-name";
   }
@@ -5427,15 +5760,16 @@ function ConsolidationNotice({
 
 function CategoriesAndRules({
   source,
-  appliedRuleIds,
+  ruleUsageSeconds,
   onChanged,
 }: {
   /** All of history, for the match preview under the rule being written. Null
    *  until the sessions have loaded. */
   source: ActivitySource | null;
-  /** null while history is still being read — no rule is "unused" until we
-   *  have looked, and a tag that flashes on and off is worse than none. */
-  appliedRuleIds: number[] | null;
+  /** How much of all history each rule decided. Null while history is still
+   *  being read — no rule is "unused" until we have looked, and a tag that
+   *  flashes on and off is worse than none. */
+  ruleUsageSeconds: RuleUsageEntry[] | null;
   onChanged: () => Promise<void>;
 }) {
   const meta = useMeta();
@@ -5462,7 +5796,10 @@ function CategoriesAndRules({
   const [ruleConflict, setRuleConflict] = useState<RuleConflict | null>(null);
   const [editingRule, setEditingRule] = useState<RuleEditState | null>(null);
   const categoryEditorRefs = useRef(new Map<number, HTMLDivElement>());
-  const applied = appliedRuleIds === null ? null : new Set(appliedRuleIds);
+  const usage = useMemo(
+    () => (ruleUsageSeconds === null ? null : new Map(ruleUsageSeconds)),
+    [ruleUsageSeconds],
+  );
 
   const draftFor = (id: number): CategoryRuleDraft =>
     drafts[id] ?? {
@@ -5752,6 +6089,7 @@ function CategoriesAndRules({
     const allRules = sortRulesForCategory(
       meta.rules.filter((rule) => rule.categoryId === category.id),
       ruleOrder,
+      usage,
     );
     const categoryMatches =
       normalizedRuleSearch !== ""
@@ -5842,6 +6180,7 @@ function CategoriesAndRules({
           options={[
             { value: "type-name", label: "Type", triggerLabel: "Rules by Type" },
             { value: "name", label: "Name", triggerLabel: "Rules by Name" },
+            { value: "use", label: "Use", triggerLabel: "Rules by Use" },
           ]}
         />
         {normalizedRuleSearch !== "" && (
@@ -5988,7 +6327,21 @@ function CategoriesAndRules({
                             </span>
                           </>
                         )}
-                        {applied !== null && !applied.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-xs text-ink-3" title="This rule has not been the winning rule for any stored activity.">unused</span>}
+                        {usage !== null && !usage.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-xs text-ink-3" title="This rule has not been the winning rule for any stored activity.">unused</span>}
+                        {/* Only in the order that sorts by it. A sort by a
+                            quantity the rows do not show is unreadable, but
+                            the row is already dense enough that carrying the
+                            figure in the other two orders is not worth it. An
+                            unused rule prints its tag instead, so no row shows
+                            both and none of them says "0s". */}
+                        {ruleOrder === "use" && usage?.has(rule.id) && (
+                          <span
+                            className="shrink-0 tabular-nums text-ink-3"
+                            title="Time this rule decided across all of your history. A rule outranked by a more specific one counts nothing here."
+                          >
+                            {fmtDuration(usage.get(rule.id) ?? 0)}
+                          </span>
+                        )}
                         <EditRuleButton rule={rule} onClick={() => beginRuleEdit(rule)} />
                         <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
                       </div>

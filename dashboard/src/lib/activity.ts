@@ -481,7 +481,7 @@ export interface ActivityQueryResult {
   /** The same, for the one window being inspected. Empty when none is. */
   selectedWindowUsage: ActivityDayBucket[];
   hasStoredTitles: boolean;
-  appliedRuleIds: number[];
+  ruleUsageSeconds: RuleUsageEntry[];
 }
 
 interface IndexedSession extends ActivitySessionRow {
@@ -498,11 +498,19 @@ export interface ActivityIndex {
   /** Earliest visit for each normalized Window identity in all history. */
   lifetimeWindowFirstSeen: Map<string, number>;
   hasStoredTitles: boolean;
-  /** Rules that won at least one session in all of history. A rule missing here
-   *  is the one actionable usage signal left: nothing matches it, so it is a
-   *  deletion candidate. Per-rule detail lives in the entity panel instead. */
-  appliedRuleIds: number[];
+  /** How much of all history each rule actually decided. A rule missing here
+   *  won nothing, which is the one actionable usage signal a rule list has:
+   *  nothing matches it, so it is a deletion candidate.
+   *
+   *  All of history rather than the query's range, because this answers a
+   *  question about the rule rather than about the dates on screen — a rule
+   *  that classified a hundred hours in June is not unused in August. */
+  ruleUsageSeconds: RuleUsageEntry[];
 }
+
+/** One rule's id and the seconds it won, as a pair rather than a Map: this
+ *  crosses the worker boundary, where the result is a plain cloned object. */
+export type RuleUsageEntry = [ruleId: number, seconds: number];
 
 interface MutableEntity {
   id: string;
@@ -631,7 +639,7 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
   const browserProcesses = new Set(source.browserProcesses.map((process) => process.toLowerCase()));
   const explain = buildClassificationExplainer(source.categories, source.rules, browserProcesses);
   const indexed: IndexedSession[] = [];
-  const appliedRuleIds = new Set<number>();
+  const ruleSeconds = new Map<number, number>();
   let hasStoredTitles = false;
 
   for (const session of source.sessions) {
@@ -640,7 +648,10 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
     const explanation = explain(session);
     const seconds = session.end - session.start;
     if (session.title) hasStoredTitles = true;
-    if (explanation.winningRule) appliedRuleIds.add(explanation.winningRule.id);
+    if (explanation.winningRule) {
+      const ruleId = explanation.winningRule.id;
+      ruleSeconds.set(ruleId, (ruleSeconds.get(ruleId) ?? 0) + seconds);
+    }
     indexed.push({
       id: session.id,
       start: session.start,
@@ -692,7 +703,7 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
     lifetimeEntities: new Map(),
     lifetimeWindowFirstSeen,
     hasStoredTitles,
-    appliedRuleIds: [...appliedRuleIds],
+    ruleUsageSeconds: [...ruleSeconds],
   };
   index.lifetimeEntities = new Map(
     aggregateEntities(index, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY)
@@ -1102,7 +1113,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     selectedWindowUsage,
     detailTotal: detailRows.length,
     hasStoredTitles: index.hasStoredTitles,
-    appliedRuleIds: index.appliedRuleIds,
+    ruleUsageSeconds: index.ruleUsageSeconds,
   };
 }
 

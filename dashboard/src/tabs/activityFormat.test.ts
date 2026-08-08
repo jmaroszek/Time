@@ -12,6 +12,7 @@ import {
   entityClassification,
   formatLastSeen,
   titleMatchParts,
+  visitEditLabel,
 } from "./ActivityTab";
 import { describeTitleRule } from "../lib/categoryRules";
 import { previewRule, previewTitleRule } from "../lib/titleRuleAnalysis";
@@ -303,13 +304,13 @@ describe("describeCorrectionWindow", () => {
     // dialog used to reveal only by rejecting the save.
     const text = describeCorrectionWindow({ ...base, earliestStart: 1_000, latestEnd: 2_000 });
     expect(text).toBe(
-      "You can shorten this session but not extend it — the sessions before and after leave no gap.",
+      "You can shorten this visit but not extend it — the visits before and after leave no gap.",
     );
   });
 
   it("gives the outer bounds when there is room on both sides", () => {
     const text = describeCorrectionWindow({ ...base, earliestStart: 400, latestEnd: 2_600 });
-    expect(text).toMatch(/^This session can run from .+ to .+ at most, before it would overlap another\.$/);
+    expect(text).toMatch(/^This visit can run from .+ to .+ at most, before it would overlap another\.$/);
   });
 
   it("still gives bounds when only one side has room", () => {
@@ -321,14 +322,14 @@ describe("describeCorrectionWindow", () => {
 
   it("says when nothing is recorded on one side", () => {
     expect(describeCorrectionWindow({ ...base, earliestStart: null, latestEnd: 2_600 }))
-      .toContain("Nothing is recorded before this session");
+      .toContain("Nothing is recorded before this visit");
     expect(describeCorrectionWindow({ ...base, earliestStart: 400, latestEnd: null }))
       .toContain("nothing is recorded after it");
   });
 
-  it("says the times move freely when the session stands alone", () => {
+  it("says the times move freely when the visit stands alone", () => {
     expect(describeCorrectionWindow({ ...base, earliestStart: null, latestEnd: null })).toBe(
-      "Nothing else is recorded around this session, so its times can move freely.",
+      "Nothing else is recorded around this visit, so its times can move freely.",
     );
   });
 
@@ -347,7 +348,9 @@ describe("describeCorrectionWindow", () => {
 
   it("never uses vocabulary the rest of the app does not", () => {
     // "Recordings sit flush" was carpentry, and introduced a third noun for a
-    // thing the app calls a session everywhere else.
+    // thing the reader is looking at a list of visits of. "Session" is the
+    // second: it is the tracker's storage unit and belongs in prose about what
+    // leaves the database, not in a dialog opened from a row.
     for (const bounds of [
       { earliestStart: 1_000, latestEnd: 2_000 },
       { earliestStart: 400, latestEnd: 2_600 },
@@ -356,7 +359,7 @@ describe("describeCorrectionWindow", () => {
       { earliestStart: 400, latestEnd: null },
     ]) {
       const text = describeCorrectionWindow({ ...base, ...bounds });
-      expect(text).not.toMatch(/flush|recordings/i);
+      expect(text).not.toMatch(/flush|recordings|sessions?\b/i);
     }
   });
 });
@@ -602,5 +605,29 @@ describe("formatVisitDay", () => {
 
   it("falls back to the date beyond that", () => {
     expect(formatVisitDay(new Date(2026, 6, 25, 12, 0).getTime() / 1000, now)).toMatch(/25/);
+  });
+});
+
+describe("visitEditLabel", () => {
+  it("names a reclassification rather than calling it a correction", () => {
+    // The commonest edit by far, and not a repair: saying what an afternoon
+    // was is different from fixing a mistake, which is what "Corrected" read
+    // as against every row it appeared on.
+    expect(visitEditLabel({ isCorrected: true, classificationSource: "session_override" }))
+      .toBe("Reclassified");
+  });
+
+  it("names an adjusted clock separately", () => {
+    // A correction row with no category can only be a time edit: a row
+    // carrying neither is deleted rather than stored.
+    expect(visitEditLabel({ isCorrected: true, classificationSource: "rule" }))
+      .toBe("Time edited");
+    expect(visitEditLabel({ isCorrected: true, classificationSource: "none" }))
+      .toBe("Time edited");
+  });
+
+  it("says nothing about a visit that stands as captured", () => {
+    expect(visitEditLabel({ isCorrected: false, classificationSource: "rule" })).toBeNull();
+    expect(visitEditLabel({ isCorrected: false, classificationSource: "none" })).toBeNull();
   });
 });

@@ -406,6 +406,89 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
       result = { deletedCount: before - sessions.length, protectedCount: 0 };
       break;
     }
+    // The single-visit editor, whose dialog could not be opened here at all
+    // before: without these it reported a missing command and closed itself.
+    case "fetch_session_correction": {
+      const id = Number(args?.sessionId);
+      const at = sessions.findIndex((session) => session.id === id);
+      if (at === -1) throw new Error(`device fixture has no session ${id}`);
+      const session = sessions[at];
+      result = {
+        sessionId: id,
+        originalStart: session.start,
+        originalEnd: session.end,
+        start: session.start,
+        end: session.end,
+        process: session.process,
+        title: session.title,
+        domain: session.domain,
+        categoryId: session.categoryOverrideId,
+        isAfk: session.isAfk,
+        isLive: false,
+        isCorrected: session.isCorrected,
+        // The real gap either side, so the dialog's bounds line is exercised
+        // rather than always taking its "nothing recorded around this" branch.
+        earliestStart: sessions[at - 1]?.end ?? null,
+        latestEnd: sessions[at + 1]?.start ?? null,
+      };
+      break;
+    }
+    case "correct_session": {
+      const request = (args?.request ?? {}) as {
+        sessionId?: number;
+        startSec?: number;
+        endSec?: number;
+        categoryId?: number | null;
+      };
+      const session = sessions.find((row) => row.id === Number(request.sessionId));
+      if (!session) throw new Error("Session no longer exists");
+      const movedTimes =
+        (Number.isFinite(request.startSec) && Number(request.startSec) !== session.start)
+        || (Number.isFinite(request.endSec) && Number(request.endSec) !== session.end);
+      if (Number.isFinite(request.startSec)) session.start = Number(request.startSec);
+      if (Number.isFinite(request.endSec)) session.end = Number(request.endSec);
+      session.categoryOverrideId = request.categoryId ?? null;
+      // Matches the real rule: a row with neither a category nor moved times is
+      // deleted rather than stored, so the visit stops reporting as edited.
+      session.isCorrected = session.categoryOverrideId !== null || movedTimes;
+      result = { sessionId: session.id };
+      break;
+    }
+    case "reset_session_correction": {
+      const session = sessions.find((row) => row.id === Number(args?.sessionId));
+      if (session) {
+        session.categoryOverrideId = null;
+        session.isCorrected = false;
+      }
+      result = 1;
+      break;
+    }
+    // Overrides land on the same rows fetch_sessions reads, so a bulk
+    // reclassification here actually reclassifies — which is the only way to
+    // drive a control whose subject is a list that changes as you act on it.
+    case "classify_sessions": {
+      const request = (args?.request ?? {}) as {
+        sessionIds?: number[];
+        categoryId?: number | null;
+      };
+      const wanted = new Set(request.sessionIds ?? []);
+      const categoryId = request.categoryId ?? null;
+      const previous: { sessionId: number; categoryId: number | null }[] = [];
+      let skippedCount = 0;
+      for (const session of sessions) {
+        if (!wanted.has(session.id)) continue;
+        if (session.isAfk) {
+          skippedCount += 1;
+          continue;
+        }
+        if (session.categoryOverrideId === categoryId) continue;
+        previous.push({ sessionId: session.id, categoryId: session.categoryOverrideId });
+        session.categoryOverrideId = categoryId;
+        session.isCorrected = categoryId !== null;
+      }
+      result = { changedCount: previous.length, skippedCount, previous };
+      break;
+    }
     case "list_tracking_exclusions":
       result = trackingExclusions;
       break;

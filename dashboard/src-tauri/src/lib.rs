@@ -21,9 +21,10 @@ fn saved_window_state_flags() -> StateFlags {
 
 use database::{
     database_path, ActivityDeletePreview, ActivityDeleteRequest, ActivityDeleteResult,
-    DatabaseBackup, ExecuteResult, RestoreNotice, SessionColumns, SessionCorrection,
-    SessionCorrectionRequest, TimeDatabase, TrackingExclusion, TrackingExclusionPreview,
-    TrackingExclusionResult, SCHEMA_VERSION,
+    DatabaseBackup, ExecuteResult, RestoreNotice, SessionClassificationRequest,
+    SessionClassificationResult, SessionColumns, SessionCorrection, SessionCorrectionRequest,
+    TimeDatabase, TrackingExclusion, TrackingExclusionPreview, TrackingExclusionResult,
+    SCHEMA_VERSION,
 };
 
 #[cfg(windows)]
@@ -259,6 +260,14 @@ async fn reset_session_correction(
     session_id: i64,
 ) -> Result<u64, String> {
     database.reset_session_correction(session_id).await
+}
+
+#[tauri::command]
+async fn classify_sessions(
+    database: tauri::State<'_, TimeDatabase>,
+    request: SessionClassificationRequest,
+) -> Result<SessionClassificationResult, String> {
+    database.classify_sessions(&request).await
 }
 
 #[tauri::command]
@@ -688,6 +697,7 @@ pub fn run() {
             fetch_session_correction,
             correct_session,
             reset_session_correction,
+            classify_sessions,
             save_activity_export,
             start_tracker,
             stop_tracker,

@@ -499,15 +499,38 @@ describe("Activity index", () => {
     expect(result.uncategorized).toEqual({ entities: 2, seconds: 60 });
   });
 
-  it("reports a rule as applied only while something in history matches it", () => {
-    const applied = queryActivityIndex(buildActivityIndex(source), baseQuery).appliedRuleIds;
-    expect([...applied].sort()).toEqual([1, 3, 4, 5]);
+  it("totals the time each rule decided, omitting one nothing matches", () => {
+    const usage = new Map(
+      queryActivityIndex(buildActivityIndex(source), baseQuery).ruleUsageSeconds,
+    );
+    expect([...usage.keys()].sort()).toEqual([1, 3, 4, 5]);
+    expect(usage.get(1)).toBe(30);
 
     const unmatched = buildActivityIndex({
       ...source,
       rules: [...rules, { id: 9, matchType: "process", pattern: "never.exe", categoryId: 1, priority: 3 }],
     });
-    expect(queryActivityIndex(unmatched, baseQuery).appliedRuleIds).not.toContain(9);
+    expect(new Map(queryActivityIndex(unmatched, baseQuery).ruleUsageSeconds).has(9)).toBe(false);
+  });
+
+  it("measures rule use over all history rather than the queried range", () => {
+    // Session 1 runs 10..40, so a range-clipped total would be 10 seconds here.
+    const narrow = queryActivityIndex(buildActivityIndex(source), {
+      ...baseQuery,
+      endSec: 20,
+    });
+    expect(new Map(narrow.ruleUsageSeconds).get(1)).toBe(30);
+  });
+
+  it("adds up every session one rule wins", () => {
+    const index = buildActivityIndex({
+      ...source,
+      sessions: [
+        { id: 1, start: 10, end: 40, process: "code.exe", title: "A", domain: null, isAfk: false },
+        { id: 2, start: 50, end: 110, process: "code.exe", title: "B", domain: null, isAfk: false },
+      ],
+    });
+    expect(new Map(index.ruleUsageSeconds).get(1)).toBe(90);
   });
 
   it("groups an entity's windows with provenance, paging by title", () => {

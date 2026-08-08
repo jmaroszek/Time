@@ -16,7 +16,7 @@ import { normalizeTitleRuleSpec } from "./titleRules";
 export const NEW_CATEGORY_DEFAULT_STATE: Productivity = "neutral";
 
 export type CategoryListOrder = "name" | "productivity";
-export type RuleListOrder = "type-name" | "name";
+export type RuleListOrder = "type-name" | "name" | "use";
 
 /** The seeded category is structural, while an ignored category left behind by
  * an older release is still user-owned. Only the seeded one stays pinned. */
@@ -63,18 +63,31 @@ const RULE_TYPE_ORDER: Record<MatchType, number> = {
 
 /** Rule order is visual only; classification continues to use fixed rule
  * precedence. The default mirrors that precedence, then makes each group easy
- * to scan by name. */
+ * to scan by name.
+ *
+ * `usageSeconds` is how much of all history each rule actually decided, and is
+ * only consulted by the "use" order. It is absent until the sessions have been
+ * read, which falls back to the default order rather than to an arbitrary one:
+ * a list that claims to be sorted by use before anything is known about use
+ * would be sorted by nothing at all. */
 export function sortRulesForCategory(
   rules: Rule[],
   order: RuleListOrder,
+  usageSeconds?: ReadonlyMap<number, number> | null,
 ): Rule[] {
   return [...rules].sort((left, right) => {
     const byName = compareNames(left.pattern, right.pattern);
-    if (order === "name") {
-      return byName || RULE_TYPE_ORDER[left.matchType] - RULE_TYPE_ORDER[right.matchType];
+    const byType = RULE_TYPE_ORDER[left.matchType] - RULE_TYPE_ORDER[right.matchType];
+    if (order === "use" && usageSeconds) {
+      // Heaviest first, and every unused rule collects at the bottom — which is
+      // the pile this order exists to find. Ties fall through to the default,
+      // so the many rules sharing a total of zero stay in a readable order.
+      const byUse = (usageSeconds.get(right.id) ?? 0) - (usageSeconds.get(left.id) ?? 0);
+      if (byUse !== 0) return byUse;
+    } else if (order === "name") {
+      return byName || byType;
     }
-    return RULE_TYPE_ORDER[left.matchType] - RULE_TYPE_ORDER[right.matchType]
-      || byName;
+    return byType || byName;
   });
 }
 

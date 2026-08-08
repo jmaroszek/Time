@@ -296,6 +296,39 @@ pub struct SessionCorrection {
     pub latest_end: Option<i64>,
 }
 
+/// A category applied to many sessions at once, leaving their recorded times
+/// alone. `correct_session` is the one-session form and takes a span with it,
+/// which drags in the overlap and future-time checks a reclassification has no
+/// business re-running — and would re-run per session, over the whole timeline.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionClassificationRequest {
+    pub session_ids: Vec<i64>,
+    /// `None` clears the override, returning each session to the rules.
+    pub category_id: Option<i64>,
+}
+
+/// One session's override as it stood before a batch changed it. The caller
+/// keeps these to offer an undo; they are the only record of the previous
+/// state, since a correction row stores no history of its own.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionClassification {
+    pub session_id: i64,
+    pub category_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionClassificationResult {
+    pub changed_count: u64,
+    /// AFK rows and the live session, which are not editable. Counted rather
+    /// than refused: a selection is made over what was on screen, and one
+    /// untouchable row in it should not cost the other three hundred.
+    pub skipped_count: u64,
+    pub previous: Vec<SessionClassification>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityDeleteRequest {
@@ -1225,6 +1258,176 @@ impl TimeDatabase {
             .map_err(|error| error.to_string())
     }
 
+    /// Applies one category to many sessions, or clears theirs.
+    ///
+    /// Recorded times are never touched, so an existing time correction on a
+    /// reclassified session survives — which is why the upsert names only the
+    /// two columns it owns instead of writing the whole row.
+    pub async fn classify_sessions(
+        &self,
+        request: &SessionClassificationRequest,
+    ) -> Result<SessionClassificationResult, String> {
+        self.ensure_writable_schema()?;
+        if request.session_ids.is_empty() {
+            return Err("Select at least one session".into());
+        }
+        if request.session_ids.len() > 100_000 {
+            return Err("Too many sessions selected at once".into());
+        }
+        if let Some(category_id) = request.category_id {
+            let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories WHERE id=?")
+                .bind(category_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|error| error.to_string())?;
+            if exists == 0 {
+                return Err("The selected category no longer exists".into());
+            }
+        }
+        let mut unique = request
+            .session_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
+        unique.retain(|id| *id > 0);
+        let ids = unique.into_iter().collect::<Vec<_>>();
+        let protected = self.protected_live_session_id().await?;
+
+        // Reading the prior state first serves two purposes: it is the undo the
+        // result carries, and it is what decides which sessions are actually
+        // changing — a session already in the target category is not a change,
+        // and counting it as one would make the confirmation a lie.
+        let mut skipped_count = 0_u64;
+        let mut previous = Vec::new();
+        let mut writable = Vec::new();
+        for chunk in ids.chunks(500) {
+            let placeholders = std::iter::repeat_n("?", chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT s.id,s.is_afk,c.category_id,c.corrected_start_ts FROM sessions s \
+                 LEFT JOIN session_corrections c ON c.session_id=s.id \
+                 WHERE s.id IN ({placeholders})"
+            );
+            let mut query = sqlx::query(&sql);
+            for id in chunk {
+                query = query.bind(id);
+            }
+            for row in query
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                let id: i64 = row.try_get("id").map_err(|error| error.to_string())?;
+                let is_afk: i64 = row.try_get("is_afk").map_err(|error| error.to_string())?;
+                if is_afk != 0 || Some(id) == protected {
+                    skipped_count += 1;
+                    continue;
+                }
+                let category_id: Option<i64> =
+                    row.try_get("category_id").map_err(|error| error.to_string())?;
+                if category_id == request.category_id {
+                    continue;
+                }
+                let corrected_start: Option<i64> = row
+                    .try_get("corrected_start_ts")
+                    .map_err(|error| error.to_string())?;
+                previous.push(SessionClassification {
+                    session_id: id,
+                    category_id,
+                });
+                writable.push((id, corrected_start.is_some()));
+            }
+        }
+        if writable.is_empty() {
+            return Ok(SessionClassificationResult {
+                changed_count: 0,
+                skipped_count,
+                previous,
+            });
+        }
+
+        let now = unix_now()?;
+        let mut transaction = self.pool.begin().await.map_err(|error| error.to_string())?;
+        let mut changed_count = 0_u64;
+        if let Some(category_id) = request.category_id {
+            for chunk in writable.chunks(500) {
+                let values = std::iter::repeat_n("(?,NULL,NULL,?,?)", chunk.len())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                // Only the two columns this call owns. `excluded` would carry
+                // the NULL times above into an existing row and silently drop a
+                // correction someone made to the clock.
+                let sql = format!(
+                    "INSERT INTO session_corrections \
+                     (session_id,corrected_start_ts,corrected_end_ts,category_id,updated_ts) \
+                     VALUES {values} ON CONFLICT(session_id) DO UPDATE SET \
+                     category_id=excluded.category_id,updated_ts=excluded.updated_ts"
+                );
+                let mut query = sqlx::query(&sql);
+                for (id, _) in chunk {
+                    query = query.bind(id).bind(category_id).bind(now);
+                }
+                changed_count += query
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .rows_affected();
+            }
+        } else {
+            // Clearing leaves a row behind only where it still carries a time
+            // correction. An override-only row with no category is what
+            // correct_session deletes rather than store, and an empty row here
+            // would report a session as corrected forever after.
+            let (timed, bare): (Vec<_>, Vec<_>) =
+                writable.iter().partition(|(_, has_times)| *has_times);
+            for chunk in timed.chunks(500) {
+                let placeholders = std::iter::repeat_n("?", chunk.len())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!(
+                    "UPDATE session_corrections SET category_id=NULL,updated_ts=? \
+                     WHERE session_id IN ({placeholders})"
+                );
+                let mut query = sqlx::query(&sql).bind(now);
+                for (id, _) in chunk {
+                    query = query.bind(id);
+                }
+                changed_count += query
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .rows_affected();
+            }
+            for chunk in bare.chunks(500) {
+                let placeholders = std::iter::repeat_n("?", chunk.len())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!(
+                    "DELETE FROM session_corrections WHERE session_id IN ({placeholders})"
+                );
+                let mut query = sqlx::query(&sql);
+                for (id, _) in chunk {
+                    query = query.bind(id);
+                }
+                changed_count += query
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .rows_affected();
+            }
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(SessionClassificationResult {
+            changed_count,
+            skipped_count,
+            previous,
+        })
+    }
+
     pub async fn delete_history_before(&self, cutoff_sec: f64) -> Result<u64, String> {
         self.ensure_writable_schema()?;
         if !cutoff_sec.is_finite() {
@@ -1881,8 +2084,8 @@ pub fn database_path(base: &Path) -> PathBuf {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::{
-        ActivityDeleteRequest, SessionCorrectionRequest, TimeDatabase, BOOTSTRAP_SQL,
-        SCHEMA_VERSION,
+        ActivityDeleteRequest, SessionClassificationRequest, SessionCorrectionRequest,
+        TimeDatabase, BOOTSTRAP_SQL, SCHEMA_VERSION,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2084,6 +2287,119 @@ pub(crate) mod tests {
                     .unwrap()
                     .is_corrected
             );
+        });
+    }
+
+    #[test]
+    fn bulk_classification_spares_recorded_times_afk_rows_and_unchanged_sessions() {
+        let path = scratch_database("database-classify-test");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            let now = super::unix_now().unwrap();
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process,is_afk) VALUES \
+                 (1,?,?,'code.exe',0),(2,?,?,'code.exe',0),(3,?,?,'afk',1)",
+            )
+            .bind(now - 300)
+            .bind(now - 250)
+            .bind(now - 200)
+            .bind(now - 150)
+            .bind(now - 100)
+            .bind(now - 50)
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            let categories: Vec<i64> =
+                sqlx::query_scalar("SELECT id FROM categories ORDER BY id LIMIT 2")
+                    .fetch_all(&database.pool)
+                    .await
+                    .unwrap();
+            let (first, second) = (categories[0], categories[1]);
+
+            // Session 1 carries a time correction the reclassification must not
+            // disturb; session 3 is AFK and can only ever be skipped.
+            database
+                .correct_session(&SessionCorrectionRequest {
+                    session_id: 1,
+                    start_sec: (now - 290) as f64,
+                    end_sec: (now - 260) as f64,
+                    category_id: None,
+                })
+                .await
+                .unwrap();
+            let applied = database
+                .classify_sessions(&SessionClassificationRequest {
+                    session_ids: vec![1, 2, 3],
+                    category_id: Some(first),
+                })
+                .await
+                .unwrap();
+            assert_eq!((applied.changed_count, applied.skipped_count), (2, 1));
+            assert_eq!(applied.previous.len(), 2);
+            let corrected = database.fetch_session_correction(1).await.unwrap();
+            assert_eq!(corrected.category_id, Some(first));
+            assert_eq!((corrected.start, corrected.end), (now - 290, now - 260));
+
+            // Only what actually moves is reported: session 1 is already there.
+            let partial = database
+                .classify_sessions(&SessionClassificationRequest {
+                    session_ids: vec![1, 2],
+                    category_id: Some(first),
+                })
+                .await
+                .unwrap();
+            assert_eq!(partial.changed_count, 0);
+            assert!(partial.previous.is_empty());
+
+            // Undo restores each session's own prior value, not one shared one.
+            database
+                .classify_sessions(&SessionClassificationRequest {
+                    session_ids: vec![2],
+                    category_id: Some(second),
+                })
+                .await
+                .unwrap();
+            for entry in applied.previous {
+                database
+                    .classify_sessions(&SessionClassificationRequest {
+                        session_ids: vec![entry.session_id],
+                        category_id: entry.category_id,
+                    })
+                    .await
+                    .unwrap();
+            }
+            let restored = database.fetch_session_correction(1).await.unwrap();
+            assert_eq!(restored.category_id, None);
+            // The time correction outlives a cleared category; session 2 had
+            // nothing else to keep, so its row goes rather than sitting empty
+            // and reporting the session as corrected forever.
+            assert_eq!((restored.start, restored.end), (now - 290, now - 260));
+            assert!(restored.is_corrected);
+            assert!(!database.fetch_session_correction(2).await.unwrap().is_corrected);
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM session_corrections WHERE session_id=2"
+                )
+                .fetch_one(&database.pool)
+                .await
+                .unwrap(),
+                0
+            );
+
+            let empty = database
+                .classify_sessions(&SessionClassificationRequest {
+                    session_ids: vec![],
+                    category_id: Some(first),
+                })
+                .await;
+            assert!(empty.unwrap_err().contains("at least one"));
+            let missing = database
+                .classify_sessions(&SessionClassificationRequest {
+                    session_ids: vec![2],
+                    category_id: Some(9_999),
+                })
+                .await;
+            assert!(missing.unwrap_err().contains("no longer exists"));
         });
     }
 
