@@ -4,6 +4,7 @@ import {
   addDays,
   allTimeRange,
   calendarDays,
+  clampRangeStart,
   dayKey,
   listDays,
   parseDateInput,
@@ -109,6 +110,27 @@ describe("allTimeRange", () => {
     expect(r.start).toEqual(new Date(2026, 5, 9));
     expect(r.end).toEqual(new Date(2026, 5, 10));
     expect(calendarDays(r)).toBe(1);
+  });
+});
+
+describe("clampRangeStart", () => {
+  it("pulls the start forward to the first tracked day when the range reaches earlier", () => {
+    const r = rangeForPreset("last365", NOW); // starts 2025-06-10
+    const firstSec = new Date(2026, 2, 15).getTime() / 1000; // Mar 15 2026
+    const clamped = clampRangeStart(r, firstSec);
+    expect(clamped.start).toEqual(new Date(2026, 2, 15));
+    expect(clamped.end).toEqual(r.end);
+  });
+
+  it("leaves the range untouched when data predates it", () => {
+    const r = rangeForPreset("last30", NOW);
+    const firstSec = new Date(2022, 0, 1).getTime() / 1000;
+    expect(clampRangeStart(r, firstSec)).toEqual(r);
+  });
+
+  it("leaves the range untouched with no sessions yet", () => {
+    const r = rangeForPreset("last365", NOW);
+    expect(clampRangeStart(r, null)).toEqual(r);
   });
 });
 

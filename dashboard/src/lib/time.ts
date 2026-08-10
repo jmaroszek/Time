@@ -83,6 +83,17 @@ export function allTimeRange(firstSessionSec: number | null, now: Date = new Dat
   return { start, end };
 }
 
+/**
+ * Clamp a range's start to the first tracked day, so fixed-length presets
+ * (Year, Quarter, ...) don't stretch back into history the user doesn't have
+ * — matching how the "All time" preset already anchors on first data.
+ */
+export function clampRangeStart(range: Range, firstSessionSec: number | null): Range {
+  if (firstSessionSec == null) return range;
+  const firstDay = startOfDay(new Date(firstSessionSec * 1000));
+  return firstDay > range.start ? { start: firstDay, end: range.end } : range;
+}
+
 export function calendarDays(r: Range): number {
   const days = Math.round((r.end.getTime() - r.start.getTime()) / 86_400_000);
   return Math.max(days, 1);

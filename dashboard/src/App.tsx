@@ -22,7 +22,14 @@ import {
   type TrackerStatus,
 } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
-import { allTimeRange, isRollingPreset, rangeForCalendarPreset, rangeForPreset, type Range } from "./lib/time";
+import {
+  allTimeRange,
+  clampRangeStart,
+  isRollingPreset,
+  rangeForCalendarPreset,
+  rangeForPreset,
+  type Range,
+} from "./lib/time";
 import {
   BACKLOG_BADGE_SECONDS,
   backlogOnlyQuery,
@@ -112,8 +119,10 @@ function Shell() {
   const range = useMemo<Range>(() => {
     if (preset === "custom") return customRange ?? rangeForPreset("last7");
     if (preset === "alltime") return allTimeRange(firstSessionSec);
-    if (!rolling && isRollingPreset(preset)) return rangeForCalendarPreset(preset, meta.weekStart);
-    return rangeForPreset(preset);
+    const fixed = !rolling && isRollingPreset(preset)
+      ? rangeForCalendarPreset(preset, meta.weekStart)
+      : rangeForPreset(preset);
+    return clampRangeStart(fixed, firstSessionSec);
   }, [preset, rolling, customRange, firstSessionSec, meta.weekStart, liveTick]);
 
   // An empty DB (the tracker hasn't run yet) is a waiting state, not an
