@@ -35,7 +35,7 @@ import {
   type ConsolidationSuggestion,
 } from "../../lib/domainConsolidation";
 import { fmtDuration } from "../../lib/format";
-import { canonicalSwatch } from "../../lib/palettes";
+import { canonicalSwatch, previewSwatches } from "../../lib/palettes";
 import {
   addCategory,
   addRule,
@@ -865,7 +865,7 @@ export default function CategoriesAndRules({
           style={{ left: colorMenu.left, top: colorMenu.top, width: SWATCH_MENU_WIDTH }}
           className="menu-pop fixed z-50 grid grid-cols-5 gap-2 rounded-[11px] border border-edge-2 bg-surface-2 p-2.5 shadow-menu"
         >
-          {meta.palette.swatches.map((swatch) => {
+          {previewSwatches(meta.palette).map((swatch) => {
             const category = meta.categories.find((item) => item.id === colorMenu.id);
             return (
               <button
