@@ -106,6 +106,11 @@ export function dayKey(d: Date): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+/** Padded local-calendar identity for a Unix timestamp. */
+export function dayKeyFromSeconds(seconds: number): string {
+  return dayKey(new Date(seconds * 1000));
+}
+
 export function parseDateInput(value: string): Date | null {
   // Accepts YYYY-MM-DD (native date input format).
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());

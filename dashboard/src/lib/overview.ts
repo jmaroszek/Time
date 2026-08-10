@@ -1,4 +1,4 @@
-import { categoryKind, type Classifier } from "./classify";
+import { categoryKind, type Classifier, type Productivity } from "./classify";
 import {
   addTopAppSeconds,
   forEachClippedSession,
@@ -70,6 +70,17 @@ export interface ActivityTotals {
   unproductiveSeconds: number;
 }
 
+/** Route one classified duration into the shared productivity taxonomy. */
+export function addProductivitySeconds(
+  totals: Pick<ActivityTotals, "productiveSeconds" | "neutralSeconds" | "unproductiveSeconds">,
+  kind: Productivity,
+  seconds: number,
+): void {
+  if (kind === "productive") totals.productiveSeconds += seconds;
+  else if (kind === "neutral") totals.neutralSeconds += seconds;
+  else totals.unproductiveSeconds += seconds;
+}
+
 function addCategorySeconds(
   into: Map<string, number>,
   categoryName: string | undefined,
@@ -122,13 +133,9 @@ export function overviewGranularity(range: Range): OverviewGranularity {
  *  stays on days, and the buffer keeps a range from flipping the day after. */
 export const MONTH_CALENDAR_MIN_DAYS = 425;
 
-export interface DailyActivitySummary {
+export interface DailyActivitySummary extends ActivityTotals {
   date: Date;
   key: string;
-  trackedSeconds: number;
-  productiveSeconds: number;
-  neutralSeconds: number;
-  unproductiveSeconds: number;
   uncategorizedSeconds: number;
   /** Seconds per category name, UNCATEGORIZED_LABEL for unmatched sessions. */
   categorySeconds: Map<string, number>;
@@ -138,11 +145,8 @@ export interface DailyActivitySummary {
   longestFocusSeconds: number;
 }
 
-export interface HourlyActivitySummary {
+export interface HourlyActivitySummary extends ActivityTotals {
   hour: number;
-  productiveSeconds: number;
-  neutralSeconds: number;
-  unproductiveSeconds: number;
   uncategorizedSeconds: number;
   categorySeconds: Map<string, number>;
 }
@@ -158,6 +162,7 @@ export function hourlyActivitySummaries(
 ): HourlyActivitySummary[] {
   const hours = Array.from({ length: endHour - startHour }, (_, index) => ({
     hour: startHour + index,
+    trackedSeconds: 0,
     productiveSeconds: 0,
     neutralSeconds: 0,
     unproductiveSeconds: 0,
@@ -185,12 +190,11 @@ export function hourlyActivitySummaries(
       const bucket = byHour.get(date.getHours());
       if (bucket) {
         const seconds = chunkEnd - cursor;
+        bucket.trackedSeconds += seconds;
         if (!category) bucket.uncategorizedSeconds += seconds;
         else {
           const kind = categoryKind(category);
-          if (kind === "productive") bucket.productiveSeconds += seconds;
-          else if (kind === "neutral") bucket.neutralSeconds += seconds;
-          else bucket.unproductiveSeconds += seconds;
+          addProductivitySeconds(bucket, kind, seconds);
         }
         addCategorySeconds(bucket.categorySeconds, category?.name, seconds);
       }
@@ -201,15 +205,11 @@ export function hourlyActivitySummaries(
   return hours;
 }
 
-export interface RhythmCell {
+export interface RhythmCell extends ActivityTotals {
   /** Local weekday, 0 = Sunday. */
   weekday: number;
   /** Local hour of day. */
   hour: number;
-  trackedSeconds: number;
-  productiveSeconds: number;
-  neutralSeconds: number;
-  unproductiveSeconds: number;
   uncategorizedSeconds: number;
   /** Busiest app row of the bucket, already named and merged. */
   topApp: { name: string; seconds: number } | null;
@@ -279,9 +279,7 @@ export function weekdayRhythmSummaries(
         if (!category) cell.uncategorizedSeconds += seconds;
         else {
           const kind = categoryKind(category);
-          if (kind === "productive") cell.productiveSeconds += seconds;
-          else if (kind === "neutral") cell.neutralSeconds += seconds;
-          else cell.unproductiveSeconds += seconds;
+          addProductivitySeconds(cell, kind, seconds);
         }
         addTopAppSeconds(cell.appSeconds, session.process, aliases, seconds);
       }
@@ -341,9 +339,7 @@ export function dailyActivitySummaries(
       if (!category) day.uncategorizedSeconds += seconds;
       else {
         const kind = categoryKind(category);
-        if (kind === "productive") day.productiveSeconds += seconds;
-        else if (kind === "neutral") day.neutralSeconds += seconds;
-        else day.unproductiveSeconds += seconds;
+        addProductivitySeconds(day, kind, seconds);
       }
       addCategorySeconds(day.categorySeconds, category?.name, seconds);
       addTopAppSeconds(day.appSeconds, session.process, aliases, seconds);
@@ -358,15 +354,11 @@ export function dailyActivitySummaries(
   }));
 }
 
-export interface MonthlyActivitySummary {
+export interface MonthlyActivitySummary extends ActivityTotals {
   year: number;
   /** Local month, 0 = January. */
   month: number;
   key: string;
-  trackedSeconds: number;
-  productiveSeconds: number;
-  neutralSeconds: number;
-  unproductiveSeconds: number;
   uncategorizedSeconds: number;
   categorySeconds: Map<string, number>;
   /** Busiest app row of the bucket, already named and merged. */
@@ -432,9 +424,7 @@ export function monthlyActivitySummaries(
       if (!category) month.uncategorizedSeconds += seconds;
       else {
         const kind = categoryKind(category);
-        if (kind === "productive") month.productiveSeconds += seconds;
-        else if (kind === "neutral") month.neutralSeconds += seconds;
-        else month.unproductiveSeconds += seconds;
+        addProductivitySeconds(month, kind, seconds);
       }
       addCategorySeconds(month.categorySeconds, category?.name, seconds);
       addTopAppSeconds(month.appSeconds, session.process, aliases, seconds);
@@ -449,7 +439,7 @@ export function monthlyActivitySummaries(
   }));
 }
 
-export interface HoursBucket {
+export interface HoursBucket extends ActivityTotals {
   key: string;
   /** Calendar-aligned start used for the x-axis label. */
   periodStart: Date;
@@ -457,9 +447,6 @@ export interface HoursBucket {
   includedStart: Date;
   /** Exclusive selected-range end represented by this bucket. */
   includedEnd: Date;
-  productiveSeconds: number;
-  neutralSeconds: number;
-  unproductiveSeconds: number;
   uncategorizedSeconds: number;
   categorySeconds: Map<string, number>;
 }
@@ -499,6 +486,7 @@ export function bucketActivityHours(
       periodStart,
       includedStart: periodStart < rangeStart ? rangeStart : periodStart,
       includedEnd: periodEnd > range.end ? range.end : periodEnd,
+      trackedSeconds: 0,
       productiveSeconds: 0,
       neutralSeconds: 0,
       unproductiveSeconds: 0,
@@ -518,6 +506,7 @@ export function bucketActivityHours(
     }
     const bucket = buckets[bucketIndex];
     if (!bucket || day.date < bucket.includedStart || day.date >= bucket.includedEnd) continue;
+    bucket.trackedSeconds += day.trackedSeconds;
     bucket.productiveSeconds += day.productiveSeconds;
     bucket.neutralSeconds += day.neutralSeconds;
     bucket.unproductiveSeconds += day.unproductiveSeconds;

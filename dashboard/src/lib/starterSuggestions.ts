@@ -32,6 +32,7 @@
 // informs a suggestion and the sentence explaining it.
 
 import type { ActivityEntityKind } from "./activity";
+import { entityId } from "./entityIdentity";
 import type { Category } from "./classify";
 
 /** What an app is *for*. Never what it is worth — that judgment belongs to the
@@ -302,10 +303,8 @@ export interface RecognizedEntity<T extends SuggestibleEntity> {
   reason: string;
 }
 
-/** Stable identity for a dismissal. Matches the entity id activity.ts builds, so
- *  an app and a website of the same name cannot dismiss each other. */
 export function suggestionKey(entity: SuggestibleEntity): string {
-  return `${entity.kind}:${entity.key.toLowerCase()}`;
+  return entityId(entity.kind, entity.key);
 }
 
 /**

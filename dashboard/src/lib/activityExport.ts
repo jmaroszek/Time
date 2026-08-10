@@ -7,6 +7,7 @@ import {
 import { buildClassificationExplainer } from "./classify";
 import { cleanDomainName, cleanProcessName } from "./format";
 import { clipSessions } from "./metrics";
+import { dayKeyFromSeconds } from "./time";
 
 export type ActivityExportKind = "summary" | "sessions";
 
@@ -39,11 +40,6 @@ export function formatLocalTimestamp(seconds: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
     + `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
     + `${sign}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`;
-}
-
-function dateKey(seconds: number): string {
-  const date = new Date(seconds * 1000);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 export function buildActivityExport(
@@ -91,7 +87,7 @@ function buildSummaryExport(source: ActivitySource, startSec: number, endSec: nu
     ].join("; "),
   ]);
   return {
-    suggestedName: `time-activity-summary-${dateKey(startSec)}_to_${dateKey(endSec - 1)}.csv`,
+    suggestedName: `time-activity-summary-${dayKeyFromSeconds(startSec)}_to_${dayKeyFromSeconds(endSec - 1)}.csv`,
     contents: encodeCsv(
       ["entity_type", "display_name", "exact_identity", "total_seconds", "session_count", "last_seen_local", "classification_status", "category_breakdown"],
       rows,
@@ -140,7 +136,7 @@ function buildSessionExport(
     ];
   });
   return {
-    suggestedName: `time-session-details-${dateKey(startSec)}_to_${dateKey(endSec - 1)}.csv`,
+    suggestedName: `time-session-details-${dayKeyFromSeconds(startSec)}_to_${dayKeyFromSeconds(endSec - 1)}.csv`,
     contents: encodeCsv(headers, rows),
   };
 }

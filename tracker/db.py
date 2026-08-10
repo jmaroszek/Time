@@ -23,7 +23,16 @@ SCHEMA_VERSION = 4
 class SchemaTooNewError(RuntimeError):
     """Raised before writes when an older tracker sees a newer database."""
 
-_SCHEMA = """
+_DELETE_CATEGORY_RULES_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS delete_category_rules
+BEFORE DELETE ON categories
+FOR EACH ROW
+BEGIN
+    DELETE FROM rules WHERE category_id = OLD.id;
+END;
+"""
+
+_SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY,
     start_ts INTEGER NOT NULL,
@@ -92,12 +101,7 @@ CREATE TABLE IF NOT EXISTS rules (
 );
 
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
-CREATE TRIGGER IF NOT EXISTS delete_category_rules
-BEFORE DELETE ON categories
-FOR EACH ROW
-BEGIN
-    DELETE FROM rules WHERE category_id = OLD.id;
-END;
+{_DELETE_CATEGORY_RULES_TRIGGER}
 
 CREATE TABLE IF NOT EXISTS tracking_exclusions (
     kind       TEXT NOT NULL CHECK(kind IN ('app','website')),
@@ -419,11 +423,7 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         )
         conn.execute("DROP TABLE rules")
         conn.execute("ALTER TABLE rules_scoped RENAME TO rules")
-        conn.execute(
-            "CREATE TRIGGER IF NOT EXISTS delete_category_rules "
-            "BEFORE DELETE ON categories FOR EACH ROW BEGIN "
-            "DELETE FROM rules WHERE category_id = OLD.id; END"
-        )
+        conn.execute(_DELETE_CATEGORY_RULES_TRIGGER)
     if from_version <= 3:
         # A v3 title pattern was only a lowercased substring with a coarse scope.
         # There is no honest way to infer whether its owner meant a whole
@@ -470,11 +470,7 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         )
         conn.execute("DROP TABLE rules")
         conn.execute("ALTER TABLE rules_window_v4 RENAME TO rules")
-        conn.execute(
-            "CREATE TRIGGER IF NOT EXISTS delete_category_rules "
-            "BEFORE DELETE ON categories FOR EACH ROW BEGIN "
-            "DELETE FROM rules WHERE category_id = OLD.id; END"
-        )
+        conn.execute(_DELETE_CATEGORY_RULES_TRIGGER)
         if title_rule_count:
             conn.execute(
                 "INSERT INTO settings (key,value) VALUES "
@@ -528,6 +524,19 @@ def _seed(conn: sqlite3.Connection) -> None:
 
 def read_settings_raw(conn: sqlite3.Connection) -> dict[str, str]:
     return {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM settings")}
+
+
+def set_settings(conn: sqlite3.Connection, values: dict[str, str]) -> None:
+    """Persist settings through the database-owned upsert contract."""
+    conn.executemany(
+        "INSERT INTO settings (key, value) VALUES (?, ?)"
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        values.items(),
+    )
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    set_settings(conn, {key: value})
 
 
 def get_settings(conn: sqlite3.Connection, now: float | None = None) -> Settings:
@@ -635,19 +644,17 @@ class SqliteStore:
             logging.debug("OPEN  %s | %s", process, title[:120])
         return session_id
 
-    def close_session(self, session_id: int, end_ts: float) -> None:
+    def _advance_session_end(self, session_id: int, end_ts: float, *, op: str) -> None:
         _retry(
             lambda: self._conn.execute(
                 "UPDATE sessions SET end_ts = ? WHERE id = ?", (int(end_ts), session_id)
             ),
-            op="close_session",
+            op=op,
         )
+
+    def close_session(self, session_id: int, end_ts: float) -> None:
+        self._advance_session_end(session_id, end_ts, op="close_session")
         logging.debug("CLOSE #%s @ %s", session_id, int(end_ts))
 
     def heartbeat(self, session_id: int, end_ts: float) -> None:
-        _retry(
-            lambda: self._conn.execute(
-                "UPDATE sessions SET end_ts = ? WHERE id = ?", (int(end_ts), session_id)
-            ),
-            op="heartbeat",
-        )
+        self._advance_session_end(session_id, end_ts, op="heartbeat")

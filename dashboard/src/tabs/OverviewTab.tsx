@@ -10,17 +10,7 @@ import ProductiveHoursChart from "../components/ProductiveHoursChart";
 import { Card, MenuSelect, MetricCard, Spinner } from "../components/ui";
 import { fmtDuration, fmtPct } from "../lib/format";
 import type { InsightsRequest } from "../lib/insights";
-import { warmInsightsModel } from "../lib/insightsClient";
-import { fetchSessions } from "../lib/queries";
-import { loadSessionWindow } from "../lib/sessionWindowCache";
-import {
-  addDays,
-  allTimeRange,
-  calendarDays,
-  previousRange,
-  rangeForPreset,
-  type Range,
-} from "../lib/time";
+import { calendarDays, type Range } from "../lib/time";
 import {
   MONTH_CALENDAR_MIN_DAYS,
   ACTIVITY_METRICS,
@@ -32,6 +22,7 @@ import {
 import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
 import { useInsightsModel } from "../state/useInsightsModel";
+import { insightsFetchWindow, useInsightsWarmup } from "../state/useInsightsWarmup";
 import { TOP_APPS_OPTIONS, type InsightsViewState } from "../state/useInsightsView";
 import { useSessions } from "../state/useSessions";
 
@@ -69,14 +60,6 @@ function GoalMetMark() {
       </svg>
     </span>
   );
-}
-
-function insightsFetchWindow(range: Range): { startSec: number; endSec: number } {
-  const previous = previousRange(range);
-  return {
-    startSec: Math.min(previous.start.getTime(), addDays(range.start, -6).getTime()) / 1000,
-    endSec: range.end.getTime() / 1000,
-  };
 }
 
 export default function OverviewTab({
@@ -134,71 +117,7 @@ export default function OverviewTab({
   }, [sessionData.ready, sessionData.sessions, range, meta, preset]);
   const analyzed = useInsightsModel(request);
   const model = analyzed.model;
-
-  // Warm the widest ordinary preset only after the current view is complete.
-  // Its fetch covers the shorter nested presets too; model caching makes a
-  // later Year switch a synchronous lookup rather than first-time work.
-  useEffect(() => {
-    if (!request || !analyzed.current) return;
-    const yearRange = rangeForPreset("last365");
-    const yearWindow = insightsFetchWindow(yearRange);
-    let cancelled = false;
-    const warm = () => {
-      void (async () => {
-        await loadSessionWindow(
-          yearWindow.startSec,
-          yearWindow.endSec,
-          fetchSessions,
-        );
-        if (cancelled) return;
-        // Shorter models reuse binary-searched slices of that one wide fetch.
-        // Warm them smallest-first so the most common choices become ready
-        // quickly while the worker continues with the larger horizons.
-        for (const warmRange of [rangeForPreset("last30"), rangeForPreset("last90"), yearRange]) {
-          const warmWindow = insightsFetchWindow(warmRange);
-          const sessions = await loadSessionWindow(
-            warmWindow.startSec,
-            warmWindow.endSec,
-            fetchSessions,
-          );
-          if (cancelled) return;
-          await warmInsightsModel({
-            ...request,
-            sessions,
-            range: warmRange,
-            labelMode: "date",
-          });
-        }
-
-        // Young databases fit inside the Year fetch. Warm their distinct
-        // All-time model too, but never auto-load an older multi-year history.
-        if (firstSessionSec !== null) {
-          const allRange = allTimeRange(firstSessionSec);
-          const allWindow = insightsFetchWindow(allRange);
-          if (allWindow.startSec < yearWindow.startSec) return;
-          const allSessions = await loadSessionWindow(
-            allWindow.startSec,
-            allWindow.endSec,
-            fetchSessions,
-          );
-          if (cancelled) return;
-          await warmInsightsModel({
-            ...request,
-            sessions: allSessions,
-            range: allRange,
-            labelMode: "date",
-          });
-        }
-      })().catch(() => {});
-    };
-    const idle = window.requestIdleCallback?.(warm, { timeout: 3_000 });
-    const timeout = idle === undefined ? window.setTimeout(warm, 500) : null;
-    return () => {
-      cancelled = true;
-      if (idle !== undefined) window.cancelIdleCallback?.(idle);
-      if (timeout !== null) window.clearTimeout(timeout);
-    };
-  }, [request, analyzed.current, firstSessionSec]);
+  useInsightsWarmup(request, analyzed.current, firstSessionSec);
 
   // Pin the aggregate view the first time the range is long enough to show one.
   // The calendar default is a starting point, not a rule: without this, any

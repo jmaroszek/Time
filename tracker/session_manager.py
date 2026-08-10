@@ -68,6 +68,11 @@ class Settings:
     excluded_domains: frozenset[str] = frozenset()
 
 
+def is_idle(snap: Snapshot, settings: Settings) -> bool:
+    """One idle threshold rule for recording and media-protection gates."""
+    return snap.idle_seconds >= settings.idle_threshold_seconds
+
+
 class Store(Protocol):
     def open_session(
         self, start_ts: float, process: str, title: str, domain: str | None, is_afk: bool
@@ -122,9 +127,7 @@ class SessionManager:
         if blocked:
             # Every recording gate finalizes the open session and opens nothing
             # new. A schedule never mutates the independent manual-pause keys.
-            if self._current is not None:
-                self._close(self._current.id, max(snap.now, self._current.start_ts))
-                self._current = None
+            self._finalize_current(snap.now)
             self._reset_pending()
             self._media_protected_idle = False
             self._recording_blocked = True
@@ -143,7 +146,7 @@ class SessionManager:
         self._recording_blocked = False
 
         locked = snap.process == LOCK_PROCESS
-        idle = snap.idle_seconds >= self.settings.idle_threshold_seconds
+        idle = is_idle(snap, self.settings)
         media_protected = idle and not locked and snap.media_playing
         if locked or (idle and not media_protected):
             self._tick_afk(snap, locked)
@@ -156,9 +159,7 @@ class SessionManager:
         """End the awake interval without inventing a session during sleep."""
         if self._system_suspended:
             return
-        if self._current is not None:
-            self._close(self._current.id, max(now, self._current.start_ts))
-            self._current = None
+        self._finalize_current(now)
         self._reset_pending()
         self._media_protected_idle = False
         self._system_suspended = True
@@ -169,9 +170,7 @@ class SessionManager:
             # A critical or otherwise unpaired resume means Windows did not
             # deliver suspend to this process. Preserve only the time actually
             # observed by the tracker rather than stretching the row to wake.
-            boundary = max(self._last_observed_ts, self._current.start_ts)
-            self._close(self._current.id, boundary)
-            self._current = None
+            self._finalize_current(self._last_observed_ts)
         self._system_suspended = False
         self._floor_ts = max(self._floor_ts, now)
         self._reset_pending()
@@ -179,9 +178,7 @@ class SessionManager:
 
     def shutdown(self, now: float) -> None:
         """Finalize the open session (process exit, ctrl-c, logoff)."""
-        if self._current is not None:
-            self._close(self._current.id, max(now, self._current.start_ts))
-            self._current = None
+        self._finalize_current(now)
 
     # ---------- AFK ----------
 
@@ -204,8 +201,7 @@ class SessionManager:
         else:
             retained_process, retained_domain = self._retained_afk_identity(snap)
         if self._current is not None:
-            boundary = max(boundary, self._current.start_ts)
-            self._close(self._current.id, boundary)
+            boundary = self._finalize_current(boundary) or boundary
         else:
             boundary = max(boundary, 0.0)
         self._open_afk(
@@ -228,9 +224,7 @@ class SessionManager:
             _, domain = self._privacy_fields(snap.process, snap.title)
             if self._is_excluded(snap.process, domain):
                 if cur is not None:
-                    boundary = max(snap.now, cur.start_ts)
-                    self._close(cur.id, boundary)
-                    self._current = None
+                    self._finalize_current(snap.now)
                 self._reset_pending()
                 return
 
@@ -240,23 +234,16 @@ class SessionManager:
             return
 
         if cur.is_afk:
-            # max() clamps against a wall clock stepped backwards mid-session
-            # (NTP step / manual change), which would otherwise write a
-            # negative-duration row that the dashboard silently drops.
-            boundary = max(snap.now, cur.start_ts)
-            self._close(cur.id, boundary)
+            boundary = self._finalize_current(snap.now) or snap.now
             if snap.process is not None:
                 self._open(boundary, snap.process, snap.title)
-            else:
-                self._current = None
             return
 
         if snap.process is None:
             return  # transient unknown foreground: keep current session running
 
         if snap.process != cur.process:
-            boundary = max(snap.now, cur.start_ts)  # clock set-back clamp, as above
-            self._close(cur.id, boundary)
+            boundary = self._finalize_current(snap.now) or snap.now
             self._open(boundary, snap.process, snap.title)
             self._reset_pending()
             return
@@ -271,14 +258,26 @@ class SessionManager:
                 self._pending_first_ts = snap.now
                 self._pending_count = 1
             if self._pending_count >= self.settings.debounce_ticks:
-                boundary = max(self._pending_first_ts, cur.start_ts)
-                self._close(cur.id, boundary)
+                boundary = self._finalize_current(self._pending_first_ts) or self._pending_first_ts
                 self._open(boundary, snap.process, snap.title)
                 self._reset_pending()
         else:
             self._reset_pending()
 
     # ---------- helpers ----------
+
+    def _finalize_current(self, end_ts: float) -> float | None:
+        """Close the current row at a clock-safe boundary and clear it."""
+        current = self._current
+        if current is None:
+            return None
+        # A wall clock can step backwards mid-session (NTP or a manual change).
+        # Writing before the row's start would violate the database contract and
+        # make the dashboard silently drop the negative-duration row.
+        boundary = max(end_ts, current.start_ts)
+        self._close(current.id, boundary)
+        self._current = None
+        return boundary
 
     def _close(self, session_id: int, end_ts: float) -> None:
         self.store.close_session(session_id, end_ts)

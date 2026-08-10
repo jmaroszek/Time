@@ -3,17 +3,25 @@ import { describe, expect, it } from "vitest";
 import {
   defaultRulePattern,
   describeCorrectionWindow,
-  detailPanelBox,
+  countNoun,
+  entityRowDomId,
+  entityRowTriggerDomId,
   formatDateSpan,
+  formatDateTime,
   formatVisitDay,
   groupVisitsByDay,
   showBroadMatchWarning,
   windowRowCategory,
   entityClassification,
   formatLastSeen,
+  formatSharePercent,
+  localInputValue,
   titleMatchParts,
+  updateSortState,
   visitEditLabel,
-} from "./ActivityTab";
+} from "../lib/activityFormat";
+import { toggleSetValue, toggleSetValues } from "../lib/setUpdates";
+import { detailPanelBox } from "../lib/responsive";
 import { describeTitleRule } from "../lib/categoryRules";
 import { previewRule, previewTitleRule } from "../lib/titleRuleAnalysis";
 import type { Category, Rule, TitleRuleSpec } from "../lib/classify";
@@ -28,6 +36,40 @@ function at(year: number, month: number, day: number, hour: number, minute = 0):
 }
 
 const sec = (date: Date) => date.getTime() / 1000;
+
+describe("shared activity primitives", () => {
+  it("keeps sub-percent shares readable and consistent", () => {
+    expect(formatSharePercent(1, 2_000)).toBe("0.1%");
+    expect(formatSharePercent(1, 10)).toBe("10%");
+    expect(formatSharePercent(0, 0)).toBe("0.0%");
+  });
+
+  it("uses one sort transition for entity and window fields", () => {
+    let field = "seconds";
+    let direction: "asc" | "desc" = "desc";
+    updateSortState("name", field, direction, "name", (next) => { field = next; }, (next) => { direction = next; });
+    expect([field, direction]).toEqual(["name", "asc"]);
+    updateSortState("name", field, direction, "name", (next) => { field = next; }, (next) => { direction = next; });
+    expect([field, direction]).toEqual(["name", "desc"]);
+  });
+
+  it("toggles single values and all-or-none groups immutably", () => {
+    const original = new Set([1]);
+    expect([...toggleSetValue(original, 2)]).toEqual([1, 2]);
+    expect([...toggleSetValues(original, [1, 2])]).toEqual([1, 2]);
+    expect([...toggleSetValues(new Set([1, 2, 3]), [1, 2])]).toEqual([3]);
+    expect([...original]).toEqual([1]);
+  });
+
+  it("formats shared input and row identities at their boundaries", () => {
+    expect(formatDateTime(sec(at(2026, 8, 9, 7, 5)))).toMatch(/2026/);
+    expect(localInputValue(sec(at(2026, 8, 9, 7, 5)))).toBe("2026-08-09T07:05:00");
+    expect(countNoun(1, "visit")).toBe("1 visit");
+    expect(countNoun(2, "visit")).toBe("2 visits");
+    expect(entityRowDomId("app:code.exe")).toBe("activity-row-app:code.exe");
+    expect(entityRowTriggerDomId("app:code.exe")).toBe("activity-row-app:code.exe-trigger");
+  });
+});
 
 describe("formatLastSeen", () => {
   const now = at(2026, 7, 24, 9, 37);

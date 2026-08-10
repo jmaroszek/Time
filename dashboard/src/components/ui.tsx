@@ -720,6 +720,84 @@ export interface ConfirmMetric {
 }
 
 /**
+ * Shared modal mechanics. Dialog contents choose their own width and anatomy;
+ * this shell owns the behavior every modal must have: a body-level portal,
+ * initial focus, a complete focus trap, Escape, and scrim dismissal.
+ */
+export function DialogShell({
+  children,
+  onClose,
+  busy = false,
+  labelledBy,
+  describedBy,
+  label,
+  className = "max-w-md",
+}: {
+  children: ReactNode;
+  onClose: () => void;
+  busy?: boolean;
+  labelledBy?: string;
+  describedBy?: string;
+  label?: string;
+  className?: string;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialogRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-5"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        aria-describedby={describedBy}
+        aria-label={labelledBy ? undefined : label}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !busy) {
+            event.stopPropagation();
+            onClose();
+            return;
+          }
+          if (event.key !== "Tab") return;
+          const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          )];
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+        className={`scroll-well max-h-[calc(100dvh-1rem)] w-full overflow-y-auto rounded-[14px] border border-edge-2 bg-surface p-4 shadow-panel outline-none sm:max-h-[calc(100dvh-2rem)] sm:p-5 ${className}`}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
  * The app's confirmation for a destructive action, with the same anatomy as
  * DeleteActivityDialog: what is about to happen, how much of it there is, and
  * one button that commits.
@@ -742,6 +820,7 @@ export function ConfirmDialog({
   confirmLabel,
   busyLabel,
   busy = false,
+  confirmDisabled = false,
   variant = "danger",
   requireTyped,
   extraAction,
@@ -757,6 +836,8 @@ export function ConfirmDialog({
   confirmLabel: string;
   busyLabel?: string;
   busy?: boolean;
+  /** Prevent committing while prerequisite data or a valid selection is absent. */
+  confirmDisabled?: boolean;
   /** "danger" commits a deletion; "default" for a reset that destroys no data. */
   variant?: "danger" | "default";
   /** Word the reader must type before the commit button enables. */
@@ -767,52 +848,11 @@ export function ConfirmDialog({
   onClose: () => void;
 }) {
   const id = useId();
-  const dialogRef = useRef<HTMLDivElement>(null);
   const [typed, setTyped] = useState("");
   const satisfied = requireTyped === undefined || typed.trim() === requireTyped;
 
-  // Focus moves into the dialog rather than staying on the button that opened
-  // it, so the next Tab walks the dialog and Escape has somewhere to return from.
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-2 sm:p-5"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) onClose();
-      }}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={`${id}-title`}
-        tabIndex={-1}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && !busy) {
-            event.stopPropagation();
-            onClose();
-            return;
-          }
-          if (event.key !== "Tab") return;
-          const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>(
-            'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-          )];
-          if (focusable.length === 0) return;
-          const first = focusable[0];
-          const last = focusable[focusable.length - 1];
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
-        }}
-        className="scroll-well max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-[14px] border border-edge-2 bg-surface p-4 shadow-panel outline-none sm:max-h-[calc(100dvh-2rem)] sm:p-5"
-      >
+  return (
+    <DialogShell onClose={onClose} busy={busy} labelledBy={`${id}-title`}>
         <h2 id={`${id}-title`} className="text-sm font-semibold">{title}</h2>
         <div className="mt-3 text-xs leading-snug text-ink-2">{body}</div>
         {metrics && metrics.length > 0 && (
@@ -844,15 +884,13 @@ export function ConfirmDialog({
           {extraAction}
           <Button
             variant={variant === "danger" ? "danger" : "primary"}
-            disabled={busy || !satisfied}
+            disabled={busy || confirmDisabled || !satisfied}
             onClick={onConfirm}
           >
             {busy ? (busyLabel ?? confirmLabel) : confirmLabel}
           </Button>
         </div>
-      </div>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 

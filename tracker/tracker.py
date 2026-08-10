@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tracker import config, db, media_playback, power_events, tray, win32_probe
 from tracker.domains import parse_domain
-from tracker.session_manager import SessionManager
+from tracker.session_manager import LOCK_PROCESS, SessionManager, is_idle
 from tracker.tracking_schedule import schedule_state
 
 _ERROR_ALREADY_EXISTS = 183
@@ -115,11 +115,7 @@ def log_database_state(raw_settings: dict[str, str]) -> None:
 
 def stamp_tracker_health(conn, now: float) -> None:
     """Publish process health without exposing or depending on recorded activity."""
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?)"
-        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (HEALTH_HEARTBEAT_KEY, str(int(now))),
-    )
+    db.set_setting(conn, HEALTH_HEARTBEAT_KEY, str(int(now)))
 
 
 def _sync_tray(
@@ -179,11 +175,7 @@ def run() -> None:
     conn = db.open_db(config.DB_PATH)
     # Stamp the running tracker version so the dashboard can show both halves'
     # versions; a mismatched install is otherwise invisible in the field.
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES ('tracker_version', ?)"
-        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (config.TRACKER_VERSION,),
-    )
+    db.set_setting(conn, "tracker_version", config.TRACKER_VERSION)
     raw_settings = db.read_settings_raw(conn)
     log_database_state(raw_settings)
     if os.environ.get("TIME_MIGRATE_ONLY") == "1":
@@ -277,8 +269,8 @@ def run() -> None:
             snap = win32_probe.snapshot(now)
             if (
                 media_monitor is not None
-                and snap.process != "lockapp.exe"
-                and snap.idle_seconds >= manager.settings.idle_threshold_seconds
+                and snap.process != LOCK_PROCESS
+                and is_idle(snap, manager.settings)
             ):
                 is_browser = (
                     snap.process is not None

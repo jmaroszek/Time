@@ -13,6 +13,7 @@ use windows::Win32::Graphics::Dwm::{
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 mod database;
+mod restore;
 mod window_state;
 
 fn saved_window_state_flags() -> StateFlags {
@@ -24,7 +25,6 @@ use database::{
     DatabaseBackup, ExecuteResult, RestoreNotice, SessionClassificationRequest,
     SessionClassificationResult, SessionColumns, SessionCorrection, SessionCorrectionRequest,
     TimeDatabase, TrackingExclusion, TrackingExclusionPreview, TrackingExclusionResult,
-    SCHEMA_VERSION,
 };
 
 #[cfg(windows)]
@@ -505,88 +505,6 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, String> {
-    let pending = tauri::async_runtime::block_on(TimeDatabase::begin_pending_restore(&path));
-    let swap = match pending {
-        Ok(Some(swap)) => swap,
-        Ok(None) => return tauri::async_runtime::block_on(TimeDatabase::open(path)),
-        Err(error) => {
-            // A swap that failed partway leaves no database here. Discarding the
-            // marker would remove the one thing that lets the next launch put the
-            // rollback copy back, and opening would create an empty database over
-            // the top of it — history intact on disk, and invisible. Refuse to
-            // start instead: the next launch recovers, and a loud failure beats a
-            // Time that looks like it forgot everything.
-            if !path.exists() {
-                return Err(format!(
-                    "Restore could not be completed and the previous database is not back in \
-                     place: {error}"
-                ));
-            }
-            let message = format!(
-                "Restore was canceled and your existing data was left unchanged. \
-                 You can try the restore again: {error}"
-            );
-            TimeDatabase::discard_pending_restore(&path, message)?;
-            return tauri::async_runtime::block_on(TimeDatabase::open(path));
-        }
-    };
-    let restored = swap.pending.clone();
-    let opened = (|| {
-        if restored.schema_version < SCHEMA_VERSION {
-            system_run_tracker_migration()?;
-        }
-        tauri::async_runtime::block_on(TimeDatabase::open(path.clone()))
-    })();
-    let database = match opened {
-        Ok(database) => database,
-        Err(error) => {
-            if let Err(rollback) = swap.rollback() {
-                return Err(format!(
-                    "Restore failed ({error}), and Time could not put the previous database back: {rollback}"
-                ));
-            }
-            let message =
-                format!("Restore failed and the previous database was put back unchanged: {error}");
-            TimeDatabase::write_restore_notice(&path, RestoreNotice { ok: false, message })?;
-            return tauri::async_runtime::block_on(TimeDatabase::open(path));
-        }
-    };
-
-    let mut warnings = Vec::new();
-    if let Err(error) =
-        system_set_launch_at_login(restored.recording_consent && restored.launch_at_login)
-    {
-        warnings.push(format!("Windows startup could not be updated: {error}"));
-    }
-    if restored.recording_consent {
-        if let Err(error) = system_start_tracker() {
-            warnings.push(format!("the tracker could not be restarted: {error}"));
-        }
-    }
-    if let Err(error) = swap.commit() {
-        warnings.push(format!(
-            "the temporary rollback file could not be removed: {error}"
-        ));
-    }
-    let suffix = if warnings.is_empty() {
-        String::new()
-    } else {
-        format!(" Restore completed, but {}.", warnings.join("; "))
-    };
-    TimeDatabase::write_restore_notice(
-        &path,
-        RestoreNotice {
-            ok: true,
-            message: format!(
-                "Restored {}. Safety backup: {}.{}",
-                restored.source_name, restored.safety_backup_path, suffix
-            ),
-        },
-    )?;
-    Ok(database)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -637,7 +555,7 @@ pub fn run() {
             let path = database_path(&base);
             fs::create_dir_all(path.parent().expect("database path parent"))?;
             let database =
-                open_database_with_pending_restore(path).map_err(std::io::Error::other)?;
+                restore::open_database_with_pending_restore(path).map_err(std::io::Error::other)?;
             app.manage(database);
             Ok(())
         })

@@ -24,6 +24,7 @@ import {
 } from "./metrics";
 import {
   hourlyActivitySummaries,
+  addProductivitySeconds,
   monthlyActivitySummaries,
   overviewGranularity,
   overviewHistoryStart,
@@ -160,9 +161,7 @@ function addDaySeconds(
   if (!category) day.uncategorizedSeconds += seconds;
   else {
     const kind = categoryKind(category);
-    if (kind === "productive") day.productiveSeconds += seconds;
-    else if (kind === "neutral") day.neutralSeconds += seconds;
-    else day.unproductiveSeconds += seconds;
+    addProductivitySeconds(day, kind, seconds);
   }
   const categoryName = category?.name ?? UNCATEGORIZED_LABEL;
   day.categorySeconds.set(

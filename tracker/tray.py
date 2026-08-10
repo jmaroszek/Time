@@ -20,7 +20,7 @@ import threading
 import time as _time
 from pathlib import Path
 
-from tracker.db import is_paused, pause_until
+from tracker.db import is_paused, pause_until, set_settings
 from tracker.tracking_schedule import ScheduleState, schedule_state
 
 _DEV_ICON_PATH = Path(__file__).resolve().parent.parent / "dashboard/src-tauri/icons/icon.ico"
@@ -59,10 +59,12 @@ def _write_pause(db_path: str | Path, paused: str, until: float) -> None:
     """Set both pause keys in one short-lived connection (tray-thread only)."""
     conn = sqlite3.connect(db_path, timeout=30, isolation_level=None)
     try:
-        conn.executemany(
-            "INSERT INTO settings (key, value) VALUES (?,?)"
-            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            [("tracking_paused", paused), ("tracking_paused_until", str(int(until)))],
+        set_settings(
+            conn,
+            {
+                "tracking_paused": paused,
+                "tracking_paused_until": str(int(until)),
+            },
         )
     finally:
         conn.close()

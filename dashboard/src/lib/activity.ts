@@ -5,8 +5,10 @@ import {
   type Rule,
 } from "./classify";
 import { cleanDomainName, cleanProcessName } from "./format";
+import { entityId as makeEntityId, entityIdentity } from "./entityIdentity";
 import type { Session } from "./metrics";
 import { classifyNoise, type NoisePolicy, type NoiseReason } from "./noise";
+import { dayKey } from "./time";
 import { normalizeWindowTitle } from "./titleRules";
 
 export type ActivityEntityKind = "app" | "website";
@@ -285,7 +287,7 @@ function titleGroupKey(session: Pick<ActivitySessionRow, "entityId" | "title">):
 
 function groupSessionsByTitle(sessions: ActivitySessionRow[]): ActivityTitleGroup[] {
   const groups = new Map<string, ActivityTitleGroup>();
-  const daysByGroup = new Map<string, Set<number>>();
+  const daysByGroup = new Map<string, Set<string>>();
   for (const session of sessions) {
     // Entity as well as title: "Inbox" in a browser and "Inbox" in a mail
     // client are different activities that happen to share a word.
@@ -520,7 +522,7 @@ interface MutableEntity {
   sourceProcesses: Set<string>;
   seconds: number;
   sessionCount: number;
-  days: Set<number>;
+  days: Set<string>;
   firstSeen: number;
   lastSeen: number;
   uncategorizedSeconds: number;
@@ -534,13 +536,8 @@ interface MutableEntity {
  * Stepping with setDate keeps the walk correct across DST, where a day is not
  * 86400 seconds long.
  */
-function addDayKeys(target: Set<number>, startSec: number, endSec: number): void {
+function addDayKeys(target: Set<string>, startSec: number, endSec: number): void {
   forEachLocalDay(startSec, endSec, (day) => target.add(day.key));
-}
-
-/** The local calendar day a date falls on, as a comparable integer. */
-function dayKeyOf(date: Date): number {
-  return date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
 }
 
 /**
@@ -552,7 +549,7 @@ function dayKeyOf(date: Date): number {
 function forEachLocalDay(
   startSec: number,
   endSec: number,
-  visit: (day: { key: number; startSec: number; seconds: number }) => void,
+  visit: (day: { key: string; startSec: number; seconds: number }) => void,
 ): void {
   const cursor = new Date(startSec * 1000);
   cursor.setHours(0, 0, 0, 0);
@@ -560,7 +557,7 @@ function forEachLocalDay(
   // day for no time at all.
   while (cursor.getTime() / 1000 < endSec) {
     const dayStartSec = cursor.getTime() / 1000;
-    const key = dayKeyOf(cursor);
+    const key = dayKey(cursor);
     cursor.setDate(cursor.getDate() + 1);
     const dayEndSec = cursor.getTime() / 1000;
     const from = Math.max(startSec, dayStartSec);
@@ -585,11 +582,11 @@ export function bucketDailyUsage(
 ): ActivityDayBucket[] {
   if (rangeEndSec <= rangeStartSec || columns < 1) return [];
   const dayStarts: number[] = [];
-  const columnByDay = new Map<number, number>();
+  const columnByDay = new Map<string, number>();
   const cursor = new Date(rangeStartSec * 1000);
   cursor.setHours(0, 0, 0, 0);
   while (cursor.getTime() / 1000 < rangeEndSec) {
-    columnByDay.set(dayKeyOf(cursor), dayStarts.length);
+    columnByDay.set(dayKey(cursor), dayStarts.length);
     dayStarts.push(cursor.getTime() / 1000);
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -613,18 +610,6 @@ export function bucketDailyUsage(
     });
   }
   return buckets;
-}
-
-function entityIdentity(
-  session: Session,
-  browserProcesses: Set<string>,
-): { id: string; kind: ActivityEntityKind; key: string } {
-  const process = session.process.toLowerCase();
-  if (browserProcesses.has(process) && session.domain) {
-    const key = session.domain.toLowerCase();
-    return { id: `website:${key}`, kind: "website", key };
-  }
-  return { id: `app:${process}`, kind: "app", key: process };
 }
 
 function activityDisplayName(
@@ -680,9 +665,9 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
   const exactRuleByEntity = new Map<string, number>();
   for (const rule of source.rules) {
     const entityId = rule.matchType === "process"
-      ? `app:${rule.pattern.toLowerCase()}`
+      ? makeEntityId("app", rule.pattern)
       : rule.matchType === "domain"
-        ? `website:${rule.pattern.toLowerCase()}`
+        ? makeEntityId("website", rule.pattern)
         : null;
     if (entityId !== null && !exactRuleByEntity.has(entityId)) exactRuleByEntity.set(entityId, rule.id);
   }
@@ -729,7 +714,7 @@ function aggregateEntities(index: ActivityIndex, startSec: number, endSec: numbe
         sourceProcesses: new Set<string>(),
         seconds: 0,
         sessionCount: 0,
-        days: new Set<number>(),
+        days: new Set<string>(),
         firstSeen: start,
         lastSeen: end,
         uncategorizedSeconds: 0,

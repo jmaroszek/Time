@@ -10,6 +10,11 @@ export const ACTIVITY_COMPACT_TABLE_MAX = 767;
 export const MIN_SUPPORTED_WIDTH = 500;
 export const MIN_SUPPORTED_HEIGHT = 480;
 
+const ACTIVITY_PANEL_MIN_WIDTH = 300;
+const ACTIVITY_PANEL_MAX_WIDTH = 620;
+const ACTIVITY_PANEL_GAP = 16;
+const ACTIVITY_PANEL_EDGE = 24;
+
 export type LayoutClass = "compact" | "medium" | "large" | "wide-detail";
 export type ActivityDetailMode = "drill-in" | "outboard";
 
@@ -22,6 +27,20 @@ export function layoutClass(width: number): LayoutClass {
 
 export function activityDetailMode(width: number): ActivityDetailMode {
   return width >= WIDE_DETAIL_MIN ? "outboard" : "drill-in";
+}
+
+/** Position and width for Activity's outboard inspector. The fixed-width page
+ *  keeps its layout while the inspector consumes only the real right margin. */
+export function detailPanelBox(viewportWidth: number, cardRight: number): {
+  left: number;
+  width: number;
+} {
+  const margin = viewportWidth - (cardRight + ACTIVITY_PANEL_GAP) - ACTIVITY_PANEL_EDGE;
+  const width = Math.min(
+    ACTIVITY_PANEL_MAX_WIDTH,
+    Math.max(ACTIVITY_PANEL_MIN_WIDTH, margin),
+  );
+  return { left: cardRight + ACTIVITY_PANEL_GAP, width };
 }
 
 export type ActivitySummaryColumn = "name" | "comparison" | "time" | "days" | "lastSeen";

@@ -1,4 +1,6 @@
 import type { ActivitySource } from "./activity";
+import { entityIdentity } from "./entityIdentity";
+import { dayKeyFromSeconds } from "./time";
 import {
   buildClassifier,
   DEFAULT_RULE_PRIORITY,
@@ -51,22 +53,6 @@ interface TitleAggregate {
 
 interface DraftCandidate extends TitleRuleSpec {
   position: number;
-}
-
-function dayKey(seconds: number): string {
-  const date = new Date(seconds * 1000);
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-}
-
-function entityKey(
-  process: string,
-  domain: string | null,
-  browserProcesses: Set<string>,
-): string {
-  const normalizedProcess = process.toLowerCase();
-  return browserProcesses.has(normalizedProcess) && domain
-    ? `website:${domain.toLowerCase()}`
-    : `app:${normalizedProcess}`;
 }
 
 function candidateId(candidate: TitleRuleSpec): string {
@@ -157,8 +143,8 @@ export function suggestTitleRuleCandidates(
     }
     aggregate.sessions += 1;
     aggregate.seconds += session.end - session.start;
-    aggregate.days.add(dayKey(session.start));
-    aggregate.entities.add(entityKey(session.process, session.domain, browserProcesses));
+    aggregate.days.add(dayKeyFromSeconds(session.start));
+    aggregate.entities.add(entityIdentity(session, browserProcesses).id);
   }
   if (titles.size === 0) return [];
 
@@ -343,11 +329,11 @@ export function previewRule(
     if (after(session)?.id !== -1) continue;
     sessions += 1;
     seconds += session.end - session.start;
-    days.add(dayKey(session.start));
+    days.add(dayKeyFromSeconds(session.start));
     // App and Website rules claim untitled sessions too, so the title count is
     // a property of what matched rather than of every counted session.
     if (session.title) titles.add(normalizeWindowTitle(session.title));
-    entities.add(entityKey(session.process, session.domain, browsers));
+    entities.add(entityIdentity(session, browsers).id);
     if (before(session) !== null) reclassified += 1;
   }
   return {
