@@ -60,13 +60,12 @@ describe("listingForProgId", () => {
     expect(listingForProgId("chromehtml")?.store).toBe("Chrome Web Store");
   });
 
-  it("resolves a listing that has no store URL yet", () => {
-    // Firefox is unpublished at the time of writing. Resolution must still
-    // succeed so the caller can say "coming soon" rather than silently
-    // offering a Firefox reader the Chrome package.
-    const firefox = listingForProgId("FirefoxURL");
-    expect(firefox).not.toBeNull();
-    expect(TIME_EXTENSION_LISTINGS).toContain(firefox);
+  it("sends a Firefox reader to the AMO listing, not to Chrome's package", () => {
+    // The failure this guards is silent: a Firefox reader handed the Chrome
+    // package sees a store page that cannot install anything for their browser.
+    expect(listingForProgId("FirefoxURL")?.storeUrl).toMatch(
+      /^https:\/\/addons\.mozilla\.org\//,
+    );
   });
 
   it("returns null when the ProgId is absent or unrecognized", () => {

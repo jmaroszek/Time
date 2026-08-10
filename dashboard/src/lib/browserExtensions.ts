@@ -41,7 +41,9 @@ export const TIME_EXTENSION_LISTINGS: readonly TimeExtensionListing[] = [
     browsers: "Firefox",
     processes: ["firefox.exe"],
     store: "Firefox Add-ons",
-    storeUrl: null,
+    // Locale-less path on purpose: AMO redirects it to the reader's own locale,
+    // where the "en-US" listing URL would pin every reader to English.
+    storeUrl: "https://addons.mozilla.org/firefox/addon/time-web-extension/",
   },
 ];
 

@@ -28,8 +28,10 @@ how that is changing over time.
   immediately, and sleep records no timeline block. Awake away rows retain the
   foreground app/site identity for inspection, but replace the window title
   with the away reason; locked rows retain no foreground identity.
-- **Optional site-level browser time.** The first-party Time Website
-  Integration extension adds the current origin and path to the browser title
+- **Optional site-level browser time.** The first-party Time Web Extension
+  ([Chrome Web Store](https://chromewebstore.google.com/detail/time-web-extension/gnlfnddpjedjehaeofdbpfmmjghieoke),
+  [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/time-web-extension/))
+  adds the current origin and path to the browser title
   while excluding queries and fragments. Time derives only the normalized
   domain and immediately discards the raw origin/path; credentials are never
   exposed by the extension. No extension is required for app-level browser
