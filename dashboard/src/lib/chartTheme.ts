@@ -27,6 +27,19 @@ export const CHART_FONT_FAMILY = '"Segoe UI", system-ui, sans-serif';
  *  type scale rather than a size of their own. Mirrors --text-meta. */
 export const CHART_LABEL_SIZE = 11.5;
 
+/**
+ * The label type as a CSS `font` shorthand, for code that measures chart text on
+ * a canvas to predict what ECharts will lay out.
+ *
+ * Derived rather than written out: a measurement font that disagrees with the
+ * rendered one is silently wrong in whichever direction it differs, and a
+ * measurement in a *smaller* face under-counts every entry — which is how a
+ * legend wraps into a row nobody reserved for it and rides up into the x-axis.
+ * This was a live defect: the measurement said 11px while the legend rendered at
+ * CHART_LABEL_SIZE, under-counting every label by 4.5%.
+ */
+export const CHART_LABEL_FONT = `${CHART_LABEL_SIZE}px ${CHART_FONT_FAMILY}`;
+
 export interface ChartChrome {
   /** --color-ink-2 */
   axisLabel: string;
@@ -62,6 +75,41 @@ const CHROME_BY_THEME: Record<ThemeName, ChartChrome> = {
 /** Chrome shared by every chart: axis labels, gridlines, tooltip surface. */
 export function chartChrome(theme: ThemeName): ChartChrome {
   return CHROME_BY_THEME[theme];
+}
+
+/**
+ * Item geometry of the horizontal legend the stacked-bar charts draw.
+ *
+ * ProductiveHoursChart measures this legend to reserve the top margin a wrapped
+ * row needs, so the numbers below are read twice: once by the `legend` option
+ * ECharts lays out, and once by that estimate. They have to agree — under-count
+ * the width and an unpredicted row lands on top of the x-axis labels — so they
+ * are one constant rather than two sites and a comment asking for them to match.
+ */
+export const STACKED_BAR_LEGEND_GEOMETRY = {
+  itemWidth: 14,
+  itemHeight: 8,
+  itemGap: 14,
+} as const;
+
+/**
+ * The `legend` option for a stacked-bar chart, given its series names. An entry
+ * may be an object rather than a bare name when it needs its own icon — the
+ * productive-average line is drawn dashed, so its swatch has to say so.
+ */
+export function stackedBarLegend(
+  chrome: ChartChrome,
+  data: ReadonlyArray<string | { name: string; icon: string }>,
+) {
+  return {
+    show: true,
+    bottom: 4,
+    left: "center",
+    width: "92%",
+    data,
+    textStyle: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
+    ...STACKED_BAR_LEGEND_GEOMETRY,
+  } as const;
 }
 
 /** Tooltip surface and border, mirroring --color-surface-2 / --color-edge. */

@@ -1,0 +1,12 @@
+# Single source of truth for the Rust toolchain, pinned so that `cargo fmt
+# --check` is reproducible. An unpinned `stable` silently rolls forward every
+# six weeks, and rustfmt's output changes between releases, so a contributor on
+# an older stable could format a file locally and still fail the CI check
+# through no fault of their own.
+#
+# rustup honours this file for every cargo invocation under the repository, so
+# it pins local development as well as CI. Keep the version here in step with
+# dtolnay/rust-toolchain in .github/workflows/ci.yml.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt"]

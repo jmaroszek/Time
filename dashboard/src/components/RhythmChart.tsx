@@ -8,7 +8,13 @@
 
 import { useMemo } from "react";
 
-import { fmtDuration } from "../lib/format";
+import {
+  DAY_NAMES,
+  FULL_DAY_NAMES,
+  fmtCompactHour,
+  fmtDuration,
+  fmtHourRange,
+} from "../lib/format";
 import {
   metricSeconds,
   metricTrackedShare,
@@ -22,9 +28,6 @@ import { metricRamps } from "../lib/palettes";
 import { CHART_FONT_FAMILY, CHART_LABEL_SIZE, chartChrome, tooltipStyle } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 import { rhythmHourInterval, useViewportWidth } from "../lib/responsive";
-
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function RhythmChart({
   summary,
@@ -73,7 +76,7 @@ export default function RhythmChart({
       xAxis: {
         type: "category",
         data: visibleHours.map((hour) =>
-          (hour - dayStartHour) % hourInterval === 0 ? compactHour(hour) : ""
+          (hour - dayStartHour) % hourInterval === 0 ? fmtCompactHour(hour) : ""
         ),
         axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         axisTick: { show: false },
@@ -120,18 +123,13 @@ export function formatRhythmTooltip(
   const share = metricTrackedShare(cell, metric);
   const word = ACTIVITY_METRIC_WORDS[metric];
   return [
-    `<b>${FULL_DAY_NAMES[cell.weekday]} · ${compactHour(cell.hour)}–${compactHour(cell.hour + 1)}</b>`,
+    `<b>${FULL_DAY_NAMES[cell.weekday]} · ${fmtHourRange(cell.hour)}</b>`,
     `<div>Avg ${word}: ${avg(metricSeconds(cell, metric))}</div>`,
     share === null
       ? ""
       : `<div class="chart-tip-muted">${share}% of tracked time</div>`,
     topApp,
   ].join("");
-}
-
-function compactHour(hour: number): string {
-  const normalized = hour % 24;
-  return `${normalized % 12 || 12}${normalized < 12 ? "am" : "pm"}`;
 }
 
 function escapeHtml(value: string): string {

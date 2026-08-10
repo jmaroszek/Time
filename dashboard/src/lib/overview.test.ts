@@ -426,6 +426,73 @@ describe("visibleAverageHours", () => {
   });
 });
 
+// The local-hour walk finds the next hour boundary by component construction
+// rather than by adding 3600, so that a session crossing a DST transition lands
+// in the cells a clock on the wall would show. These cases moved here from a
+// since-deleted metrics.ts helper that shared the walk; `weekdayRhythmSummaries`
+// is the production path with the same weekday x hour shape, and it is the only
+// DST coverage the walk has. CI runs this suite under two timezones, so each
+// case declares the zone it means.
+const TEST_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+describe("weekdayRhythmSummaries across DST transitions", () => {
+  /** Tracked seconds in the given local weekday/hour cell, over a full-day window. */
+  const secondsAt = (startIso: string, endIso: string, weekday: number, hour: number) => {
+    const start = new Date(startIso).getTime() / 1000;
+    const end = new Date(endIso).getTime() / 1000;
+    const day = new Date(start * 1000);
+    const range = rangeFrom(new Date(day.getFullYear(), day.getMonth(), day.getDate()), 2);
+    const { cells } = weekdayRhythmSummaries(
+      [session(start, end, "code.exe")],
+      range,
+      classify,
+      0,
+      24,
+    );
+    return cells.find((cell) => cell.weekday === weekday && cell.hour === hour)?.trackedSeconds;
+  };
+
+  it.runIf(TEST_TIMEZONE === "America/New_York")(
+    "handles the skipped US eastern spring hour",
+    () => {
+      const span = ["2026-03-08T01:30:00-05:00", "2026-03-08T03:30:00-04:00"] as const;
+      expect(secondsAt(...span, 0, 1)).toBe(1800);
+      expect(secondsAt(...span, 0, 2)).toBe(0);
+      expect(secondsAt(...span, 0, 3)).toBe(1800);
+    },
+  );
+
+  it.runIf(TEST_TIMEZONE === "America/New_York")(
+    "puts both US eastern fall hours in the repeated cell",
+    () => {
+      const span = ["2026-11-01T00:30:00-04:00", "2026-11-01T02:30:00-05:00"] as const;
+      expect(secondsAt(...span, 0, 0)).toBe(1800);
+      expect(secondsAt(...span, 0, 1)).toBe(7200);
+      expect(secondsAt(...span, 0, 2)).toBe(1800);
+    },
+  );
+
+  it.runIf(TEST_TIMEZONE === "Australia/Adelaide")(
+    "handles Adelaide's skipped spring hour in a half-hour-offset zone",
+    () => {
+      const span = ["2026-10-04T01:30:00+09:30", "2026-10-04T03:30:00+10:30"] as const;
+      expect(secondsAt(...span, 0, 1)).toBe(1800);
+      expect(secondsAt(...span, 0, 2)).toBe(0);
+      expect(secondsAt(...span, 0, 3)).toBe(1800);
+    },
+  );
+
+  it.runIf(TEST_TIMEZONE === "Australia/Adelaide")(
+    "puts both Adelaide fall hours in the repeated cell",
+    () => {
+      const span = ["2026-04-05T01:30:00+10:30", "2026-04-05T03:30:00+09:30"] as const;
+      expect(secondsAt(...span, 0, 1)).toBe(1800);
+      expect(secondsAt(...span, 0, 2)).toBe(7200);
+      expect(secondsAt(...span, 0, 3)).toBe(1800);
+    },
+  );
+});
+
 describe("weekdayRhythmSummaries", () => {
   // Mon Jun 8 – Mon Jun 22, 2026 (15 days): three Mondays, two of everything else.
   const range = rangeFrom(new Date(2026, 5, 8), 15);

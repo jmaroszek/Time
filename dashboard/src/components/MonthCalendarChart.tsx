@@ -6,7 +6,7 @@
 
 import { useMemo } from "react";
 
-import { fmtDuration } from "../lib/format";
+import { MONTH_NAMES_LONG, MONTH_NAMES_SHORT, fmtDuration } from "../lib/format";
 import {
   ACTIVITY_METRIC_WORDS,
   metricSeconds,
@@ -18,12 +18,6 @@ import { useMeta } from "../state/meta";
 import { metricRamps } from "../lib/palettes";
 import { CHART_FONT_FAMILY, CHART_LABEL_SIZE, chartChrome, tooltipStyle } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
-
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const FULL_MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
 
 const CELL_HEIGHT = 26;
 const CELL_WIDTH = 48;
@@ -86,7 +80,7 @@ export default function MonthCalendarChart({
       xAxis: {
         type: "category",
         position: "top",
-        data: MONTH_NAMES,
+        data: MONTH_NAMES_SHORT,
         axisLabel: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
         axisTick: { show: false },
         axisLine: { show: false },
@@ -141,7 +135,7 @@ export function formatMonthCalendarTooltip(
     ? `<div class="chart-tip-muted">Top app: ${escapeHtml(month.topApp.name)} · ${fmtDuration(month.topApp.seconds)}</div>`
     : "";
   return [
-    `<b>${FULL_MONTH_NAMES[month.month]} ${month.year}</b>`,
+    `<b>${MONTH_NAMES_LONG[month.month]} ${month.year}</b>`,
     `<div>${label}: ${fmtDuration(metricSeconds(month, metric))}</div>`,
     share === null
       ? ""

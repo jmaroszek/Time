@@ -18,15 +18,18 @@ import {
 } from "../lib/overview";
 import { addDays, type Range } from "../lib/time";
 import type { WeekStart } from "../lib/time";
-import { fmtShortDate } from "../lib/format";
+import { DAY_NAMES, FULL_DAY_NAMES, MONTH_NAMES_SHORT, fmtShortDate } from "../lib/format";
 import EChart, { type EChartsOption } from "./EChart";
 import type { ThemeName } from "../lib/theme";
 import { useMeta } from "../state/meta";
 import {
   annotation,
   CHART_FONT_FAMILY,
+  CHART_LABEL_FONT,
   CHART_LABEL_SIZE,
   chartChrome,
+  STACKED_BAR_LEGEND_GEOMETRY,
+  stackedBarLegend,
   tooltipStyle,
   uncategorizedMark,
   uncategorizedBar,
@@ -79,9 +82,6 @@ export function categorySeries(
     .map(({ name, color, hours }) => ({ name, color, hours }));
 }
 
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const PRODUCTIVE_AVERAGES = {
   daily: "7-day productive avg",
   weekly: "4-week productive avg",
@@ -102,16 +102,24 @@ export function visibleAverageHours(value: number | null | undefined): number | 
   return rounded > 0 ? rounded : null;
 }
 
-// Legend geometry, mirrored from the `legend` option below so the row estimate
-// matches what ECharts actually lays out. The font FAMILY has to match too, not
-// just the size: measure in a narrower face than the chart renders and every
-// entry is under-counted, which is how a legend ends up wrapping into a row
-// nobody reserved for it. Both sides read CHART_FONT_FAMILY, so a missing-font
-// fallback resolves identically for the measurement and the render.
-const LEGEND_FONT = `11px ${CHART_FONT_FAMILY}`;
-const LEGEND_ITEM_WIDTH = 14; // legend.itemWidth
-const LEGEND_ICON_GAP = 5; // fixed icon-to-text spacing ECharts inserts
-const LEGEND_ITEM_GAP = 14; // legend.itemGap between entries
+// Legend geometry, derived from the `legend` option the chart actually sets so
+// the row estimate cannot disagree with what ECharts lays out. Everything here
+// reads from STACKED_BAR_LEGEND_GEOMETRY or CHART_LABEL_FONT rather than
+// restating a number: both sides then resolve identically, including a
+// missing-font fallback.
+const LEGEND_ITEM_WIDTH = STACKED_BAR_LEGEND_GEOMETRY.itemWidth;
+const LEGEND_ICON_GAP = 5; // fixed icon-to-text spacing ECharts inserts, not an option
+const LEGEND_ITEM_GAP = STACKED_BAR_LEGEND_GEOMETRY.itemGap;
+/**
+ * ECharts' per-row pitch for a wrapped horizontal legend: the text box, whose
+ * height is the font size, plus the `itemGap` it reuses as the row gap.
+ *
+ * Measured against a real render to confirm the rule rather than assume it — at
+ * `fontSize: 11` the pitch is exactly 25, at `11.5` exactly 25.5. Reserve too
+ * little and a wrapped legend creeps upward into the x-axis labels, and the
+ * shortfall compounds with each row.
+ */
+const LEGEND_ROW_H = CHART_LABEL_SIZE + LEGEND_ITEM_GAP;
 // Trim a little off the usable width so we round toward wrapping: an
 // unpredicted extra row collides with the x-axis, while a spare predicted row
 // only pads the (invisible) top margin.
@@ -143,7 +151,7 @@ function measureTextWidth(text: string, font: string): number {
 export function estimateLegendRows(
   labels: string[],
   availableWidth: number,
-  measure: (text: string) => number = (text) => measureTextWidth(text, LEGEND_FONT),
+  measure: (text: string) => number = (text) => measureTextWidth(text, CHART_LABEL_FONT),
 ): number {
   if (labels.length === 0) return 1;
   if (availableWidth <= 0) {
@@ -251,7 +259,7 @@ export default function ProductiveHoursChart({
       labels = buckets.map((bucket) => {
         if (granularity === "weekly") return fmtShortDate(bucket.periodStart);
         if (granularity === "yearly") return String(bucket.periodStart.getFullYear());
-        return `${MONTH_NAMES[bucket.periodStart.getMonth()]} '${String(bucket.periodStart.getFullYear()).slice(-2)}`;
+        return `${MONTH_NAMES_SHORT[bucket.periodStart.getMonth()]} '${String(bucket.periodStart.getFullYear()).slice(-2)}`;
       });
       tooltipHeaders = buckets.map((bucket) => {
         const period = granularity === "weekly" ? "week" : granularity === "yearly" ? "year" : "month";
@@ -314,13 +322,6 @@ export default function ProductiveHoursChart({
     // row next to a one-row legend), reserve exactly what THIS view needs at the
     // bottom and park the leftover worst-case slack on top. Same grid height,
     // but the freed space goes where it doesn't show.
-    // ECharts' real per-row pitch for an 11px legend: an 11px text box plus the
-    // `itemGap` it reuses as the row gap. This must match what it actually
-    // draws: reserve too little and a wrapped legend creeps upward into the
-    // x-axis labels, and the shortfall compounds with each row (a two-row
-    // legend overshoots by 2×). Matching it keeps the gap above the top row
-    // constant whether the legend is one row or two.
-    const LEGEND_ROW_H = 25;
     const AXIS_BAND = 40; // x-axis labels + baseline gap below the plot
     const GRID_TOP = 12;
     const legendData = showProductiveAverage ? [...stackNames, averageLegend] : stackNames;
@@ -347,17 +348,7 @@ export default function ProductiveHoursChart({
       textStyle: { fontFamily: CHART_FONT_FAMILY },
       grid: { left: 36, right: 12, top: topPad, bottom: bottomPad },
       tooltip,
-      legend: {
-        show: true,
-        bottom: 4,
-        left: "center",
-        width: "92%",
-        data: legendData,
-        textStyle: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
-        itemWidth: 14,
-        itemHeight: 8,
-        itemGap: 14,
-      },
+      legend: stackedBarLegend(chrome, legendData),
       xAxis: {
         type: "category",
         data: labels,
@@ -417,7 +408,7 @@ export function formatHoursBucketRange(bucket: HoursBucket): string {
 }
 
 function formatPeriodDate(date: Date): string {
-  return `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+  return `${MONTH_NAMES_SHORT[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
 }
 
 /** Uncategorized is supporting context, not a primary series. Suppress it

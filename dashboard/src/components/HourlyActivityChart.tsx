@@ -1,11 +1,12 @@
 import { useMemo } from "react";
 
-import { fmtDuration } from "../lib/format";
+import { fmtCompactHour, fmtDuration, fmtHourRange } from "../lib/format";
 import type { HourlyActivitySummary } from "../lib/overview";
 import {
   CHART_FONT_FAMILY,
   CHART_LABEL_SIZE,
   chartChrome,
+  stackedBarLegend,
   tooltipStyle,
   uncategorizedBar,
 } from "../lib/chartTheme";
@@ -51,23 +52,13 @@ export default function HourlyActivityChart({
           const rows = params
             .filter((param) => stackNames.includes(param.seriesName))
             .map((param) => `${param.marker}${param.seriesName}: <b>${fmtDuration(Number(param.value) * 60)}</b>`);
-          return [`<b>${formatHourRange(hour)}</b>`, ...rows].join("<br/>");
+          return [`<b>${fmtHourRange(hour)}</b>`, ...rows].join("<br/>");
         },
       },
-      legend: {
-        show: true,
-        bottom: 4,
-        left: "center",
-        width: "92%",
-        data: stackNames,
-        textStyle: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
-        itemWidth: 14,
-        itemHeight: 8,
-        itemGap: 14,
-      },
+      legend: stackedBarLegend(chrome, stackNames),
       xAxis: {
         type: "category",
-        data: hours.map((hour) => compactHour(hour.hour)),
+        data: hours.map((hour) => fmtCompactHour(hour.hour)),
         axisLabel: {
           color: chrome.axisLabel,
           fontSize: CHART_LABEL_SIZE,
@@ -127,13 +118,4 @@ export default function HourlyActivityChart({
   }, [hours, palette]);
 
   return <EChart option={option} height={254} />;
-}
-
-function compactHour(hour: number): string {
-  const normalized = hour % 24;
-  return `${normalized % 12 || 12}${normalized < 12 ? "am" : "pm"}`;
-}
-
-function formatHourRange(hour: number): string {
-  return `${compactHour(hour)}–${compactHour(hour + 1)}`;
 }

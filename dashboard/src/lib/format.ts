@@ -7,10 +7,6 @@ export function fmtDuration(seconds: number): string {
   return `${s}s`;
 }
 
-export function fmtHours(seconds: number, decimals = 1): string {
-  return (seconds / 3600).toFixed(decimals);
-}
-
 export function fmtPct(fraction: number): string {
   return `${Math.round(fraction * 100)}%`;
 }
@@ -40,10 +36,44 @@ function clockParts(unixSeconds: number): { time: string; meridiem: "am" | "pm" 
   };
 }
 
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Charts render dates from these tables rather than `toLocaleDateString`, whose
+// output varies with the host locale and would desync a chart's axis labels
+// from its tooltip. The month tables carry the form in their names because the
+// two used to be spelled `MONTH_NAMES` in different files with different
+// contents, which reads as correct in review and renders "Jan 5" as "January 5"
+// in one view only.
+export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+export const FULL_DAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+export const MONTH_NAMES_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+export const MONTH_NAMES_LONG = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 export function fmtDayLabel(d: Date): string {
   return `${DAY_NAMES[d.getDay()]} ${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/** An hour of the day as a bare clock label: `9am`, `12pm`, `11pm`. */
+export function fmtCompactHour(hour: number): string {
+  const normalized = hour % 24;
+  return `${normalized % 12 || 12}${normalized < 12 ? "am" : "pm"}`;
+}
+
+/** The one-hour bucket starting at `hour`, as `9am–10am`. */
+export function fmtHourRange(hour: number): string {
+  return `${fmtCompactHour(hour)}–${fmtCompactHour(hour + 1)}`;
 }
 
 export function fmtShortDate(d: Date): string {

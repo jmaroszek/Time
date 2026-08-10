@@ -8,23 +8,17 @@ export function Card({
   right,
   children,
   className = "",
-  titleAlign = "left",
 }: {
   title?: ReactNode;
   right?: ReactNode;
   children: ReactNode;
   className?: string;
-  titleAlign?: "left" | "center";
 }) {
   return (
     <div className={`min-w-0 rounded-[14px] border border-edge bg-surface p-4 sm:p-5 ${className}`}>
       {(title || right) && (
         <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
-          <h2
-            className={`min-w-0 text-sm font-semibold text-ink ${titleAlign === "center" ? "w-full text-center" : ""}`}
-          >
-            {title}
-          </h2>
+          <h2 className="min-w-0 text-sm font-semibold text-ink">{title}</h2>
           {right}
         </div>
       )}
@@ -865,11 +859,5 @@ export function ConfirmDialog({
 export function Spinner({ label = "Loading..." }: { label?: string }) {
   return (
     <div className="flex h-40 items-center justify-center text-sm text-ink-2">{label}</div>
-  );
-}
-
-export function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="flex h-40 items-center justify-center text-sm text-ink-3">{message}</div>
   );
 }

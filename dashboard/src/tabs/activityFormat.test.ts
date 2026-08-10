@@ -484,11 +484,10 @@ describe("detail panel docking", () => {
   it("fills the margin without touching the table on a large desktop", () => {
     // A wide desktop remains a regression target, but is no longer the only
     // geometry the interaction was designed around.
-    expect(box(2208)).toEqual({ left: 1672, width: 512, overlap: 0 });
+    expect(box(2208)).toEqual({ left: 1672, width: 512 });
   });
 
   it("still clears the table on an unscaled 1080p screen", () => {
-    expect(box(1920).overlap).toBe(0);
     expect(box(1920).width).toBe(368);
   });
 
@@ -508,9 +507,8 @@ describe("detail panel docking", () => {
 
   it("never overlaps the table when it is eligible to dock", () => {
     for (const viewport of [1832, 1864, 1920, 2208, 3840]) {
-      const { left, width, overlap } = detailPanelBox(viewport, cardRight(viewport));
+      const { left, width } = detailPanelBox(viewport, cardRight(viewport));
       expect(left).toBe(cardRight(viewport) + 16);
-      expect(overlap).toBe(0);
       expect(width).toBeGreaterThanOrEqual(300);
     }
   });

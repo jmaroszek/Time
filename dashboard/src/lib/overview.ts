@@ -3,7 +3,8 @@ import {
   addTopAppSeconds,
   forEachClippedSession,
   forEachDayChunk,
-  isFocusChainBreaker,
+  focusChain,
+  type FocusChain,
   topAppOf,
   type Session,
 } from "./metrics";
@@ -316,10 +317,8 @@ export function dailyActivitySummaries(
         uncategorizedSeconds: 0,
         categorySeconds: new Map<string, number>(),
         topApp: null,
-        longestFocusSeconds: 0,
         appSeconds: newTopAppSeconds(),
-        focusRunSeconds: 0,
-        focusChainEnd: null as number | null,
+        chain: focusChain(focusChainMaxGapSeconds),
       },
     ]),
   );
@@ -335,8 +334,7 @@ export function dailyActivitySummaries(
       if (!day) return;
       const seconds = chunk.endSec - chunk.startSec;
       if (session.isAfk) {
-        day.focusRunSeconds = 0;
-        day.focusChainEnd = null;
+        day.chain.breakChain();
         return;
       }
       day.trackedSeconds += seconds;
@@ -349,29 +347,13 @@ export function dailyActivitySummaries(
       }
       addCategorySeconds(day.categorySeconds, category?.name, seconds);
       addTopAppSeconds(day.appSeconds, session.process, aliases, seconds);
-      if (category?.isProductive) {
-        day.focusRunSeconds =
-          day.focusChainEnd !== null && chunk.startSec - day.focusChainEnd <= focusChainMaxGapSeconds
-            ? day.focusRunSeconds + seconds
-            : seconds;
-        day.focusChainEnd = chunk.endSec;
-        day.longestFocusSeconds = Math.max(day.longestFocusSeconds, day.focusRunSeconds);
-      } else if (isFocusChainBreaker(category)) {
-        day.focusRunSeconds = 0;
-        day.focusChainEnd = null;
-      } else if (day.focusChainEnd !== null) {
-        if (chunk.startSec - day.focusChainEnd <= focusChainMaxGapSeconds) {
-          day.focusChainEnd = Math.max(day.focusChainEnd, chunk.endSec);
-        } else {
-          day.focusRunSeconds = 0;
-          day.focusChainEnd = null;
-        }
-      }
+      day.chain.add(chunk.startSec, chunk.endSec, seconds, category);
     });
   });
 
-  return [...byKey.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...day }) => ({
+  return [...byKey.values()].map(({ appSeconds, chain, ...day }) => ({
     ...day,
+    longestFocusSeconds: chain.longestSeconds,
     topApp: topAppOf(appSeconds),
   }));
 }
@@ -409,10 +391,9 @@ export function monthlyActivitySummaries(
 ): MonthlyActivitySummary[] {
   const byKey = new Map<
     string,
-    MonthlyActivitySummary & {
+    Omit<MonthlyActivitySummary, "longestFocusSeconds"> & {
       appSeconds: TopAppSeconds;
-      focusRunSeconds: number;
-      focusChainEnd: number | null;
+      chain: FocusChain;
     }
   >();
   const first = new Date(range.start.getFullYear(), range.start.getMonth(), 1);
@@ -429,10 +410,8 @@ export function monthlyActivitySummaries(
       uncategorizedSeconds: 0,
       categorySeconds: new Map<string, number>(),
       topApp: null,
-      longestFocusSeconds: 0,
       appSeconds: newTopAppSeconds(),
-      focusRunSeconds: 0,
-      focusChainEnd: null,
+      chain: focusChain(focusChainMaxGapSeconds),
     });
   }
 
@@ -446,8 +425,7 @@ export function monthlyActivitySummaries(
       if (!month) return;
       const seconds = chunk.endSec - chunk.startSec;
       if (session.isAfk) {
-        month.focusRunSeconds = 0;
-        month.focusChainEnd = null;
+        month.chain.breakChain();
         return;
       }
       month.trackedSeconds += seconds;
@@ -460,29 +438,13 @@ export function monthlyActivitySummaries(
       }
       addCategorySeconds(month.categorySeconds, category?.name, seconds);
       addTopAppSeconds(month.appSeconds, session.process, aliases, seconds);
-      if (category?.isProductive) {
-        month.focusRunSeconds =
-          month.focusChainEnd !== null && chunk.startSec - month.focusChainEnd <= focusChainMaxGapSeconds
-            ? month.focusRunSeconds + seconds
-            : seconds;
-        month.focusChainEnd = chunk.endSec;
-        month.longestFocusSeconds = Math.max(month.longestFocusSeconds, month.focusRunSeconds);
-      } else if (isFocusChainBreaker(category)) {
-        month.focusRunSeconds = 0;
-        month.focusChainEnd = null;
-      } else if (month.focusChainEnd !== null) {
-        if (chunk.startSec - month.focusChainEnd <= focusChainMaxGapSeconds) {
-          month.focusChainEnd = Math.max(month.focusChainEnd, chunk.endSec);
-        } else {
-          month.focusRunSeconds = 0;
-          month.focusChainEnd = null;
-        }
-      }
+      month.chain.add(chunk.startSec, chunk.endSec, seconds, category);
     });
   });
 
-  return [...byKey.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...month }) => ({
+  return [...byKey.values()].map(({ appSeconds, chain, ...month }) => ({
     ...month,
+    longestFocusSeconds: chain.longestSeconds,
     topApp: topAppOf(appSeconds),
   }));
 }

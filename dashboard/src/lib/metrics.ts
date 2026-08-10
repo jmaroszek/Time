@@ -32,6 +32,66 @@ export function isFocusChainBreaker(category: Category | null): boolean {
   return category !== null && !category.isProductive && !category.isNeutral;
 }
 
+/** Running focus-chain state: see `focusChain`. */
+export interface FocusChain {
+  /**
+   * Fold one non-AFK span into the chain. `startSec`/`endSec` bound the span in
+   * wall-clock terms and `seconds` is what it contributes — the two differ once
+   * a session has been clipped to a range or split at a day boundary, and it is
+   * the wall-clock pair that decides whether the gap since the last productive
+   * span is small enough to keep the chain alive.
+   */
+  add(startSec: number, endSec: number, seconds: number, category: Category | null): void;
+  /** End the chain outright. AFK has no category to test, so it says so here. */
+  breakChain(): void;
+  /** Longest productive run seen so far, in seconds. */
+  readonly longestSeconds: number;
+}
+
+/**
+ * The focus-chain rule, in one place: productive time extends a chain and is
+ * counted; neutral and uncategorized activity carry a chain across without
+ * adding to it; unproductive activity and AFK end it; and a gap of untracked
+ * time longer than `maxGapSec` ends it too.
+ *
+ * Every view that reports focus — the KPI row, the day and month calendars, the
+ * Insights history — has to answer this the same way, or two surfaces disagree
+ * about the same day. They did each hold their own copy of the ladder.
+ */
+export function focusChain(maxGapSec: number = DEFAULT_FOCUS_CHAIN_MAX_GAP): FocusChain {
+  let run = 0;
+  let chainEnd: number | null = null;
+  let longest = 0;
+  return {
+    add(startSec, endSec, seconds, category) {
+      if (category?.isProductive) {
+        run = chainEnd !== null && startSec - chainEnd <= maxGapSec ? run + seconds : seconds;
+        chainEnd = endSec;
+        longest = Math.max(longest, run);
+      } else if (isFocusChainBreaker(category)) {
+        run = 0;
+        chainEnd = null;
+      } else if (chainEnd !== null) {
+        // Neutral or uncategorized: bridge the chain if it is still close
+        // enough, otherwise the gap has ended it.
+        if (startSec - chainEnd <= maxGapSec) {
+          chainEnd = Math.max(chainEnd, endSec);
+        } else {
+          run = 0;
+          chainEnd = null;
+        }
+      }
+    },
+    breakChain() {
+      run = 0;
+      chainEnd = null;
+    },
+    get longestSeconds() {
+      return longest;
+    },
+  };
+}
+
 export function duration(s: Session): number {
   return Math.max(0, s.end - s.start);
 }
@@ -105,46 +165,25 @@ export function computeKpis(
 ): Kpis {
   let total = 0;
   let prod = 0;
-  let longest = 0;
-  let run = 0;
-  let chainEnd: number | null = null;
+  const chain = focusChain(focusChainMaxGapSec);
 
   const sorted = [...sessions].sort((a, b) => a.start - b.start);
   for (const s of sorted) {
     if (s.isAfk) {
-      run = 0;
-      chainEnd = null;
+      chain.breakChain();
       continue;
     }
     const dur = duration(s);
     total += dur;
     const cat = classify(s);
-    if (cat?.isProductive) {
-      prod += dur;
-      if (chainEnd !== null && s.start - chainEnd <= focusChainMaxGapSec) {
-        run += dur;
-      } else {
-        run = dur;
-      }
-      chainEnd = s.end;
-      longest = Math.max(longest, run);
-    } else if (isFocusChainBreaker(cat)) {
-      run = 0;
-      chainEnd = null;
-    } else if (chainEnd !== null) {
-      if (s.start - chainEnd <= focusChainMaxGapSec) {
-        chainEnd = Math.max(chainEnd, s.end);
-      } else {
-        run = 0;
-        chainEnd = null;
-      }
-    }
+    if (cat?.isProductive) prod += dur;
+    chain.add(s.start, s.end, dur, cat);
   }
   return {
     totalSec: total,
     prodSec: prod,
     prodFraction: total > 0 ? prod / total : 0,
-    longestFocusSec: longest,
+    longestFocusSec: chain.longestSeconds,
   };
 }
 
@@ -480,23 +519,6 @@ export function withDeltas(
 
 // ---------------- daily series ----------------
 
-/** Seconds per day key, for sessions passing `include`; days are zero-filled. */
-export function dailySeconds(
-  sessions: Session[],
-  include: (s: Session) => boolean,
-  range: Range,
-): Map<string, number> {
-  const out = new Map<string, number>(listDays(range).map((d) => [dayKey(d), 0]));
-  for (const s of sessions) {
-    if (s.isAfk || !include(s)) continue;
-    for (const chunk of splitAtMidnights(s.start, s.end)) {
-      const key = dayKey(chunk.dayStart);
-      if (out.has(key)) out.set(key, out.get(key)! + (chunk.endSec - chunk.startSec));
-    }
-  }
-  return out;
-}
-
 /** Trailing mean over up to `window` values ending at each index. */
 export function rollingMean(values: number[], window: number): number[] {
   return values.map((_v, i) => {
@@ -504,32 +526,4 @@ export function rollingMean(values: number[], window: number): number[] {
     const slice = values.slice(from, i + 1);
     return slice.reduce((a, b) => a + b, 0) / slice.length;
   });
-}
-
-// ---------------- hour-of-day matrix ----------------
-
-/** [dayOfWeek 0=Sun][hour 0-23] -> seconds for sessions passing `include`. */
-export function hourMatrix(sessions: Session[], include: (s: Session) => boolean): number[][] {
-  const matrix: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
-  for (const s of sessions) {
-    if (s.isAfk || !include(s)) continue;
-    let cur = s.start;
-    while (cur < s.end) {
-      const d = new Date(cur * 1000);
-      // Component construction finds the next *local* hour boundary. UTC-hour
-      // chunks smear :30/:45 zones and the repeated/skipped hour on DST days.
-      const nextHour = new Date(
-        d.getFullYear(),
-        d.getMonth(),
-        d.getDate(),
-        d.getHours() + 1,
-      ).getTime() / 1000;
-      // The fallback only protects against exotic runtime timezone behavior;
-      // supported zones always produce a boundary strictly after `cur`.
-      const chunkEnd = Math.min(s.end, nextHour > cur ? nextHour : cur + 3600);
-      matrix[d.getDay()][d.getHours()] += chunkEnd - cur;
-      cur = chunkEnd;
-    }
-  }
-  return matrix;
 }

@@ -1,0 +1,5 @@
+# Shell scripts and git hooks are executed by Linux CI runners and by git's
+# own hook runner. A CRLF line ending makes the shebang line unparseable there,
+# so keep them LF regardless of a contributor's core.autocrlf setting.
+*.sh text eol=lf
+.githooks/* text eol=lf

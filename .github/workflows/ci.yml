@@ -132,7 +132,11 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: tracker/requirements-build.txt
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned rather than `stable` so the formatting check is reproducible:
+      # rustfmt's output changes between releases, so a floating stable makes
+      # CI reject code that was correctly formatted against an older toolchain.
+      # Keep in step with rust-toolchain.toml at the repository root.
+      - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -161,14 +165,20 @@ jobs:
           name: packaged-tracker-smoke
           path: ${{ runner.temp }}/time-packaged-smoke-${{ github.run_id }}-${{ github.run_attempt }}/results
           if-no-files-found: error
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
       # The only job that links the whole application. cargo test compiles the
       # crate but never produces the binary the installer ships.
       - name: Build debug application
         run: npm run build:debug-app
+      # Last, and unconditional. This ran first once, and a formatting nit
+      # aborted the job before a single test executed, so a run that should
+      # have reported "one misplaced line break" reported nothing at all.
+      # Formatting is independent of the tests, so it has no business
+      # standing in front of them.
+      - name: Check Rust formatting
+        if: always()
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
   protocol-parity:
     name: Shared protocol parity
@@ -206,6 +216,31 @@ jobs:
           TIME_PARITY_REQUIRED: "1"
         run: python -m pytest tracker/tests/test_protocol_parity.py -q
 
+  commit-formatting:
+    name: Formatting (every pushed commit)
+    # The Windows job proves the tip is formatted. This proves which commit
+    # stopped being formatted, which is the part a multi-commit push loses.
+    # Cheap enough to run every time: no build, no sidecar, no npm, no Python.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Every commit in the range has to be reachable, and the default
+          # single-commit checkout cannot see the parents being walked.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: rustfmt
+      - name: Check formatting of each pushed commit
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: bash scripts/check_commit_formatting.sh
+
   quality-gate:
     name: Required quality gate
     if: always()
@@ -215,6 +250,7 @@ jobs:
       - renderer-compatibility
       - windows-backend
       - protocol-parity
+      - commit-formatting
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -225,11 +261,13 @@ jobs:
           RENDERER_RESULT: ${{ needs.renderer-compatibility.result }}
           WINDOWS_RESULT: ${{ needs.windows-backend.result }}
           PARITY_RESULT: ${{ needs.protocol-parity.result }}
+          COMMIT_FORMATTING_RESULT: ${{ needs.commit-formatting.result }}
         run: |
           test "$TRACKER_RESULT" = success
           test "$DASHBOARD_RESULT" = success
           test "$RENDERER_RESULT" = success
           test "$WINDOWS_RESULT" = success
+          test "$COMMIT_FORMATTING_RESULT" = success
           # "skipped" while EXTENSION_REPOSITORY is unset; must pass once it is.
           case "$PARITY_RESULT" in
             success|skipped) ;;

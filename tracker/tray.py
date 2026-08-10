@@ -20,6 +20,7 @@ import threading
 import time as _time
 from pathlib import Path
 
+from tracker.db import is_paused, pause_until
 from tracker.tracking_schedule import ScheduleState, schedule_state
 
 _DEV_ICON_PATH = Path(__file__).resolve().parent.parent / "dashboard/src-tauri/icons/icon.ico"
@@ -85,12 +86,12 @@ def _read_tracker_state(db_path: str | Path) -> tuple[bool, float, ScheduleState
         )
     finally:
         conn.close()
-    try:
-        until = float(rows.get("tracking_paused_until", "0"))
-    except ValueError:
-        until = 0.0
-    paused = rows.get("tracking_paused") == "1" or _time.time() < until
-    return paused, until, schedule_state(rows)
+    # db.py owns how a settings row is read, the same way schedule_state below
+    # owns the schedule. Parsing these two keys here instead drifted once
+    # already: this end caught only ValueError, so a NULL value — settings.value
+    # is nullable — raised TypeError out of the tray thread rather than reading
+    # as "not paused".
+    return is_paused(rows), pause_until(rows), schedule_state(rows)
 
 
 class _TrayActions:

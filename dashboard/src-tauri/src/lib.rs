@@ -310,33 +310,6 @@ fn tracker_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "Time executable has no parent directory".into())
 }
 
-trait RuntimeControl {
-    fn start_tracker(&self) -> Result<(), String>;
-    fn stop_tracker(&self) -> Result<(), String>;
-    fn set_launch_at_login(&self, enabled: bool) -> Result<(), String>;
-    fn run_tracker_migration(&self) -> Result<(), String>;
-}
-
-struct SystemRuntimeControl;
-
-impl RuntimeControl for SystemRuntimeControl {
-    fn start_tracker(&self) -> Result<(), String> {
-        system_start_tracker()
-    }
-
-    fn stop_tracker(&self) -> Result<(), String> {
-        system_stop_tracker()
-    }
-
-    fn set_launch_at_login(&self, enabled: bool) -> Result<(), String> {
-        system_set_launch_at_login(enabled)
-    }
-
-    fn run_tracker_migration(&self) -> Result<(), String> {
-        system_run_tracker_migration()
-    }
-}
-
 fn system_start_tracker() -> Result<(), String> {
     let path = tracker_path()?;
     if !path.is_file() {
@@ -427,17 +400,17 @@ fn system_run_tracker_migration() -> Result<(), String> {
 
 #[tauri::command]
 fn start_tracker() -> Result<(), String> {
-    SystemRuntimeControl.start_tracker()
+    system_start_tracker()
 }
 
 #[tauri::command]
 fn stop_tracker() -> Result<(), String> {
-    SystemRuntimeControl.stop_tracker()
+    system_stop_tracker()
 }
 
 #[tauri::command]
 fn set_launch_at_login(enabled: bool) -> Result<(), String> {
-    SystemRuntimeControl.set_launch_at_login(enabled)
+    system_set_launch_at_login(enabled)
 }
 
 /// The ProgId Windows records as the handler for https — "ChromeHTML",
@@ -532,10 +505,7 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn open_database_with_pending_restore_using(
-    path: PathBuf,
-    runtime: &dyn RuntimeControl,
-) -> Result<TimeDatabase, String> {
+fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, String> {
     let pending = tauri::async_runtime::block_on(TimeDatabase::begin_pending_restore(&path));
     let swap = match pending {
         Ok(Some(swap)) => swap,
@@ -564,7 +534,7 @@ fn open_database_with_pending_restore_using(
     let restored = swap.pending.clone();
     let opened = (|| {
         if restored.schema_version < SCHEMA_VERSION {
-            runtime.run_tracker_migration()?;
+            system_run_tracker_migration()?;
         }
         tauri::async_runtime::block_on(TimeDatabase::open(path.clone()))
     })();
@@ -585,12 +555,12 @@ fn open_database_with_pending_restore_using(
 
     let mut warnings = Vec::new();
     if let Err(error) =
-        runtime.set_launch_at_login(restored.recording_consent && restored.launch_at_login)
+        system_set_launch_at_login(restored.recording_consent && restored.launch_at_login)
     {
         warnings.push(format!("Windows startup could not be updated: {error}"));
     }
     if restored.recording_consent {
-        if let Err(error) = runtime.start_tracker() {
+        if let Err(error) = system_start_tracker() {
             warnings.push(format!("the tracker could not be restarted: {error}"));
         }
     }
@@ -615,10 +585,6 @@ fn open_database_with_pending_restore_using(
         },
     )?;
     Ok(database)
-}
-
-fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDatabase, String> {
-    open_database_with_pending_restore_using(path, &SystemRuntimeControl)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

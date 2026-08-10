@@ -244,8 +244,3 @@ def browser_privacy_fields(title: str) -> BrowserPrivacyFields:
 def parse_domain(title: str) -> str | None:
     """Return the V1 or legacy normalized domain for compatibility callers."""
     return browser_privacy_fields(title).domain
-
-
-def sanitize_browser_title(title: str) -> str:
-    """Return the title paired with ``parse_domain`` by the same parse pass."""
-    return browser_privacy_fields(title).title

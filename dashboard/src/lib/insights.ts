@@ -12,7 +12,8 @@ import {
   addTopAppSeconds,
   forEachDayChunk,
   goalPace,
-  isFocusChainBreaker,
+  focusChain,
+  type FocusChain,
   rankAppUsage,
   topAppOf,
   withDeltas,
@@ -44,10 +45,9 @@ import {
   type WeekStart,
 } from "./time";
 
-interface MutableDay extends DailyActivitySummary {
+interface MutableDay extends Omit<DailyActivitySummary, "longestFocusSeconds"> {
   appSeconds: Map<string, { name: string; seconds: number }>;
-  focusRunSeconds: number;
-  focusChainEnd: number | null;
+  chain: FocusChain;
 }
 
 interface InsightsAggregation {
@@ -124,7 +124,7 @@ function clipped(session: Session, startSec: number, endSec: number): Session | 
     : { ...session, start, end };
 }
 
-function makeDays(range: Range): Map<string, MutableDay> {
+function makeDays(range: Range, focusChainMaxGapSeconds: number): Map<string, MutableDay> {
   return new Map(
     listDays(range).map((date) => {
       const key = dayKey(date);
@@ -140,10 +140,8 @@ function makeDays(range: Range): Map<string, MutableDay> {
           uncategorizedSeconds: 0,
           categorySeconds: new Map<string, number>(),
           topApp: null,
-          longestFocusSeconds: 0,
           appSeconds: new Map<string, { name: string; seconds: number }>(),
-          focusRunSeconds: 0,
-          focusChainEnd: null,
+          chain: focusChain(focusChainMaxGapSeconds),
         },
       ];
     }),
@@ -175,8 +173,9 @@ function addDaySeconds(
 }
 
 function finalizeDays(days: Map<string, MutableDay>): DailyActivitySummary[] {
-  return [...days.values()].map(({ appSeconds, focusRunSeconds: _run, focusChainEnd: _end, ...day }) => ({
+  return [...days.values()].map(({ appSeconds, chain, ...day }) => ({
     ...day,
+    longestFocusSeconds: chain.longestSeconds,
     topApp: topAppOf(appSeconds),
   }));
 }
@@ -214,7 +213,7 @@ export function aggregateInsightsSessions(
   const previousStart = previous.start.getTime() / 1000;
   const previousEnd = previous.end.getTime() / 1000;
   const historyStart = historyRange.start.getTime() / 1000;
-  const historyDays = makeDays(historyRange);
+  const historyDays = makeDays(historyRange, focusChainMaxGapSeconds);
   const currentDayIndex = new Map(listDays(range).map((date, index) => [dayKey(date), index]));
   const previousDayIndex = new Map(
     listDays(previous).map((date, index) => [dayKey(date), index]),
@@ -227,9 +226,7 @@ export function aggregateInsightsSessions(
   const current: Session[] = [];
   let totalSec = 0;
   let prodSec = 0;
-  let longestFocusSec = 0;
-  let focusRunSec = 0;
-  let focusChainEnd: number | null = null;
+  const rangeChain = focusChain(focusChainMaxGapSeconds);
 
   // Keyed by app row, not by process: `withDeltas` looks these series up by the
   // row's key, and a miss would read as a quiet "no time last period".
@@ -253,31 +250,13 @@ export function aggregateInsightsSessions(
     if (inCurrent) {
       current.push(inCurrent);
       if (inCurrent.isAfk) {
-        focusRunSec = 0;
-        focusChainEnd = null;
+        rangeChain.breakChain();
       } else {
         const seconds = inCurrent.end - inCurrent.start;
         totalSec += seconds;
         addAppSeconds(currentApps, inCurrent.process, aliases, category, seconds);
-        if (category?.isProductive) {
-          prodSec += seconds;
-          focusRunSec =
-            focusChainEnd !== null && inCurrent.start - focusChainEnd <= focusChainMaxGapSeconds
-              ? focusRunSec + seconds
-              : seconds;
-          focusChainEnd = inCurrent.end;
-          longestFocusSec = Math.max(longestFocusSec, focusRunSec);
-        } else if (isFocusChainBreaker(category)) {
-          focusRunSec = 0;
-          focusChainEnd = null;
-        } else if (focusChainEnd !== null) {
-          if (inCurrent.start - focusChainEnd <= focusChainMaxGapSeconds) {
-            focusChainEnd = Math.max(focusChainEnd, inCurrent.end);
-          } else {
-            focusRunSec = 0;
-            focusChainEnd = null;
-          }
-        }
+        if (category?.isProductive) prodSec += seconds;
+        rangeChain.add(inCurrent.start, inCurrent.end, seconds, category);
       }
     }
 
@@ -299,34 +278,12 @@ export function aggregateInsightsSessions(
         const key = dayKey(chunk.dayStart);
         const day = historyDays.get(key);
         if (inHistory.isAfk) {
-          if (day) {
-            day.focusRunSeconds = 0;
-            day.focusChainEnd = null;
-          }
+          day?.chain.breakChain();
           return;
         }
         const seconds = chunk.endSec - chunk.startSec;
         addDaySeconds(day, inHistory, category, seconds, aliases);
-        if (day) {
-          if (category?.isProductive) {
-            day.focusRunSeconds =
-              day.focusChainEnd !== null && chunk.startSec - day.focusChainEnd <= focusChainMaxGapSeconds
-                ? day.focusRunSeconds + seconds
-                : seconds;
-            day.focusChainEnd = chunk.endSec;
-            day.longestFocusSeconds = Math.max(day.longestFocusSeconds, day.focusRunSeconds);
-          } else if (isFocusChainBreaker(category)) {
-            day.focusRunSeconds = 0;
-            day.focusChainEnd = null;
-          } else if (day.focusChainEnd !== null) {
-            if (chunk.startSec - day.focusChainEnd <= focusChainMaxGapSeconds) {
-              day.focusChainEnd = Math.max(day.focusChainEnd, chunk.endSec);
-            } else {
-              day.focusRunSeconds = 0;
-              day.focusChainEnd = null;
-            }
-          }
-        }
+        day?.chain.add(chunk.startSec, chunk.endSec, seconds, category);
         if (inCurrent && currentValues) {
           const overlapStart = Math.max(chunk.startSec, inCurrent.start);
           const overlapEnd = Math.min(chunk.endSec, inCurrent.end);
@@ -349,7 +306,7 @@ export function aggregateInsightsSessions(
       totalSec,
       prodSec,
       prodFraction: totalSec > 0 ? prodSec / totalSec : 0,
-      longestFocusSec,
+      longestFocusSec: rangeChain.longestSeconds,
     },
     currentRanked: rankAppUsage(currentApps),
     previousRanked: rankAppUsage(previousApps),

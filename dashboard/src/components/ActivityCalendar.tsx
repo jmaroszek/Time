@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 
-import { fmtDuration } from "../lib/format";
+import { DAY_NAMES, FULL_DAY_NAMES, MONTH_NAMES_LONG, fmtDuration } from "../lib/format";
 import {
   metricSeconds,
   metricTrackedShare,
@@ -28,23 +28,6 @@ const NARROW_WEEK_COLUMNS = 30;
 /** A short calendar reads more naturally with weekdays across the top. Past
  *  this point, weeks running left-to-right use the card's width better. */
 const VERTICAL_MAX_WEEKS = 8;
-
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
 
 export default function ActivityCalendar({
   summaries,
@@ -181,7 +164,7 @@ export function formatActivityCalendarTooltip(
   day: DailyActivitySummary,
   metric: ActivityMetric = "tracked",
 ): string {
-  const date = `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}`;
+  const date = `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES_LONG[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}`;
   const topApp = metric === "tracked" && day.topApp
     ? `<div class="chart-tip-muted">Top app: ${escapeHtml(day.topApp.name)} · ${fmtDuration(day.topApp.seconds)}</div>`
     : "";

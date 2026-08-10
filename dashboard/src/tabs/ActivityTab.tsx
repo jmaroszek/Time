@@ -481,12 +481,11 @@ const PANEL_EDGE = 24;
 export function detailPanelBox(viewportWidth: number, cardRight: number): {
   left: number;
   width: number;
-  overlap: number;
 } {
   const margin = viewportWidth - (cardRight + PANEL_GAP) - PANEL_EDGE;
   const width = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, margin));
   const left = cardRight + PANEL_GAP;
-  return { left, width, overlap: 0 };
+  return { left, width };
 }
 
 function formatDateTime(seconds: number): string {
@@ -1268,7 +1267,6 @@ export default function ActivityTab({
   const detailPanel = currentWindow ? (
     <WindowPanel
       dock={detailMode === "outboard" ? panelStyle : null}
-      overlapping={false}
       group={currentWindow}
       usage={result?.selectedWindowUsage ?? []}
       rangeDays={calendarDays(range)}
@@ -1288,7 +1286,6 @@ export default function ActivityTab({
   ) : result?.selectedEntity ? (
     <EntityPanel
       dock={detailMode === "outboard" ? panelStyle : null}
-      overlapping={false}
       entity={result.selectedEntity}
       groups={result.detailGroups}
       usage={result.selectedEntityUsage}
@@ -3220,7 +3217,6 @@ function LoadMore({ shown, total, onClick }: { shown: number; total: number; onC
 function DetailPanel({
   label,
   dock,
-  overlapping,
   eyebrow,
   heading,
   subtitle,
@@ -3237,9 +3233,6 @@ function DetailPanel({
   /** Measured position in the page's right margin. Null on a window too narrow
    *  to dock into, where the panel falls back to stacking under the table. */
   dock: CSSProperties | null;
-  /** True when the margin could not hold the panel and it is floating over the
-   *  table's right-hand columns. Only then does it need to cast a shadow. */
-  overlapping: boolean;
   eyebrow: ReactNode;
   heading: ReactNode;
   subtitle?: ReactNode;
@@ -3255,7 +3248,7 @@ function DetailPanel({
       style={dock ?? undefined}
       className={`panel-in flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-edge bg-surface ${
         dock
-          ? `z-30 ${overlapping ? "shadow-panel" : ""}`
+          ? "z-30"
           : "h-full w-full flex-1"
       }`}
     >
@@ -3467,7 +3460,6 @@ function PanelWindowRow({
 
 function WindowPanel({
   dock,
-  overlapping,
   group,
   usage,
   rangeDays,
@@ -3485,7 +3477,6 @@ function WindowPanel({
   onClose,
 }: {
   dock: CSSProperties | null;
-  overlapping: boolean;
   group: ActivityTitleGroup;
   usage: ActivityDayBucket[];
   /** Calendar days the range spans, so "days seen" has a denominator. */
@@ -3509,7 +3500,6 @@ function WindowPanel({
   return (
     <DetailPanel
       dock={dock}
-      overlapping={overlapping}
       label={`Window details: ${group.title || "no title recorded"}`}
       eyebrow={
         <>
@@ -3818,7 +3808,6 @@ const WINDOW_ORDERS: { value: string; label: string; sort: ActivityWindowSort; d
 
 function EntityPanel({
   dock,
-  overlapping,
   entity,
   groups,
   usage,
@@ -3848,7 +3837,6 @@ function EntityPanel({
   onRemoveExactRule,
 }: {
   dock: CSSProperties | null;
-  overlapping: boolean;
   entity: ActivityEntitySummary;
   groups: ActivityTitleGroupPage;
   usage: ActivityDayBucket[];
@@ -3948,7 +3936,6 @@ function EntityPanel({
   return (
     <DetailPanel
       dock={dock}
-      overlapping={overlapping}
       label={`Activity details: ${entity.displayName}`}
       eyebrow={
         <>

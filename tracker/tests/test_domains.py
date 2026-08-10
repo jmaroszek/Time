@@ -11,7 +11,6 @@ from tracker.domains import (
     browser_privacy_fields,
     parse_browser_title,
     parse_domain,
-    sanitize_browser_title,
 )
 
 
@@ -55,21 +54,21 @@ def test_empty_title():
 
 
 def test_browser_title_strips_url_and_browser_suffix():
-    assert sanitize_browser_title(
+    assert browser_privacy_fields(
         "Account - https://user:secret@example.com/private?q=token - Google Chrome"
-    ) == "Account"
+    ).title == "Account"
 
 
 def test_browser_title_strips_non_http_url_schemes():
-    assert sanitize_browser_title("Local file - file:///C:/Users/person/private.txt") == "Local file"
+    assert browser_privacy_fields("Local file - file:///C:/Users/person/private.txt").title == "Local file"
 
 
 def test_browser_title_strips_trailing_domain():
-    assert sanitize_browser_title("Front page - reddit.com - Mozilla Firefox") == "Front page"
+    assert browser_privacy_fields("Front page - reddit.com - Mozilla Firefox").title == "Front page"
 
 
 def test_browser_title_preserves_non_url_page_name():
-    assert sanitize_browser_title("Project notes - Google Chrome") == "Project notes"
+    assert browser_privacy_fields("Project notes - Google Chrome").title == "Project notes"
 
 
 def test_www_prefix_stripped():

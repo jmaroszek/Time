@@ -1345,11 +1345,7 @@ impl TimeDatabase {
                 return Err("The selected category no longer exists".into());
             }
         }
-        let mut unique = request
-            .session_ids
-            .iter()
-            .copied()
-            .collect::<HashSet<_>>();
+        let mut unique = request.session_ids.iter().copied().collect::<HashSet<_>>();
         unique.retain(|id| *id > 0);
         let ids = unique.into_iter().collect::<Vec<_>>();
         let protected = self.protected_live_session_id().await?;
@@ -1385,8 +1381,9 @@ impl TimeDatabase {
                     skipped_count += 1;
                     continue;
                 }
-                let category_id: Option<i64> =
-                    row.try_get("category_id").map_err(|error| error.to_string())?;
+                let category_id: Option<i64> = row
+                    .try_get("category_id")
+                    .map_err(|error| error.to_string())?;
                 if category_id == request.category_id {
                     continue;
                 }
@@ -1464,9 +1461,8 @@ impl TimeDatabase {
                 let placeholders = std::iter::repeat_n("?", chunk.len())
                     .collect::<Vec<_>>()
                     .join(",");
-                let sql = format!(
-                    "DELETE FROM session_corrections WHERE session_id IN ({placeholders})"
-                );
+                let sql =
+                    format!("DELETE FROM session_corrections WHERE session_id IN ({placeholders})");
                 let mut query = sqlx::query(&sql);
                 for (id, _) in chunk {
                     query = query.bind(id);
@@ -2143,7 +2139,7 @@ pub fn database_path(base: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::{
         schedule_allows_local, ActivityDeleteRequest, SessionClassificationRequest,
         SessionCorrectionRequest, TimeDatabase, BOOTSTRAP_SQL, SCHEMA_VERSION,
@@ -2158,7 +2154,7 @@ pub(crate) mod tests {
     /// Windows a handle that has not finished closing turns that into a sharing
     /// violation — or leaves the directory in a delete-pending state where a
     /// file written afterwards silently disappears. Both were live flakes here.
-    pub(crate) fn scratch_root(name: &str) -> PathBuf {
+    fn scratch_root(name: &str) -> PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let unique = NEXT.fetch_add(1, Ordering::Relaxed);
         let stamp = SystemTime::now()
@@ -2173,7 +2169,7 @@ pub(crate) mod tests {
         root
     }
 
-    pub(crate) fn scratch_database(name: &str) -> PathBuf {
+    fn scratch_database(name: &str) -> PathBuf {
         scratch_root(name).join("time_log.db")
     }
 
@@ -2436,7 +2432,13 @@ pub(crate) mod tests {
             // and reporting the session as corrected forever.
             assert_eq!((restored.start, restored.end), (now - 290, now - 260));
             assert!(restored.is_corrected);
-            assert!(!database.fetch_session_correction(2).await.unwrap().is_corrected);
+            assert!(
+                !database
+                    .fetch_session_correction(2)
+                    .await
+                    .unwrap()
+                    .is_corrected
+            );
             assert_eq!(
                 sqlx::query_scalar::<_, i64>(
                     "SELECT COUNT(*) FROM session_corrections WHERE session_id=2"
