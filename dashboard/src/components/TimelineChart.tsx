@@ -11,6 +11,7 @@ import { aggregateBlocks } from "../lib/blocks";
 import { clipSessions, splitAtMidnights, type Session } from "../lib/metrics";
 import { dayKey, listDays, type Range } from "../lib/time";
 import { fmtClockRange, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
+import { escapeHtml } from "../lib/chartTooltip";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
 import {
@@ -232,8 +233,4 @@ export function formatTooltip(
       ? `<div class="chart-tip-muted" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(seg.title)}</div>`
       : "";
   return `${head}${titleLine}<div>${window} · ${fmtDuration(seg.endSec - seg.startSec)}</div>`;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

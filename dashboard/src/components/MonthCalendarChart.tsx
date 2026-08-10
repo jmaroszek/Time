@@ -6,11 +6,10 @@
 
 import { useMemo } from "react";
 
-import { MONTH_NAMES_LONG, MONTH_NAMES_SHORT, fmtDuration } from "../lib/format";
+import { MONTH_NAMES_LONG, MONTH_NAMES_SHORT } from "../lib/format";
+import { metricLabel, metricTooltipBody } from "../lib/chartTooltip";
 import {
-  ACTIVITY_METRIC_WORDS,
   metricSeconds,
-  metricTrackedShare,
   type ActivityMetric,
   type MonthlyActivitySummary,
 } from "../lib/overview";
@@ -128,25 +127,9 @@ export function formatMonthCalendarTooltip(
   month: MonthlyActivitySummary,
   metric: ActivityMetric = "tracked",
 ): string {
-  const share = metricTrackedShare(month, metric);
-  const word = ACTIVITY_METRIC_WORDS[metric];
-  const label = word.replace(/^./, (c) => c.toUpperCase());
-  const topApp = metric === "tracked" && month.topApp
-    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(month.topApp.name)} · ${fmtDuration(month.topApp.seconds)}</div>`
-    : "";
-  return [
-    `<b>${MONTH_NAMES_LONG[month.month]} ${month.year}</b>`,
-    `<div>${label}: ${fmtDuration(metricSeconds(month, metric))}</div>`,
-    share === null
-      ? ""
-      : `<div class="chart-tip-muted">${share}% of tracked time</div>`,
-    metric === "productive"
-      ? `<div class="chart-tip-muted">Longest focus: ${fmtDuration(month.longestFocusSeconds)}</div>`
-      : "",
-    topApp,
-  ].join("");
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return metricTooltipBody(month, metric, {
+    headline: `${MONTH_NAMES_LONG[month.month]} ${month.year}`,
+    valueLabel: metricLabel(metric),
+    longestFocusSeconds: month.longestFocusSeconds,
+  });
 }

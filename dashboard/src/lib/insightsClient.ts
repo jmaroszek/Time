@@ -4,22 +4,15 @@ import {
   type InsightsModel,
   type InsightsRequest,
   type InsightsWorkerRequest,
-  type InsightsWorkerResponse,
 } from "./insights";
 import { calendarDays } from "./time";
+import { createWorkerClient, objectId } from "./workerClient";
 
 const MAX_MODELS = 8;
 
-let nextObjectId = 1;
-const objectIds = new WeakMap<object, number>();
-function objectId(value: object): number {
-  let id = objectIds.get(value);
-  if (id === undefined) {
-    id = nextObjectId++;
-    objectIds.set(value, id);
-  }
-  return id;
-}
+/** Ranges longer than this are packed into transferable chunks rather than
+ *  structured-cloned whole, which blocks the main thread at this size. */
+const CHUNKED_PACK_MIN_DAYS = 14;
 
 export function insightsRequestKey(request: InsightsRequest): string {
   return [
@@ -40,50 +33,6 @@ export function insightsRequestKey(request: InsightsRequest): string {
   ].join(":");
 }
 
-const modelCache = new Map<string, InsightsModel>();
-const pendingByKey = new Map<string, Promise<InsightsModel>>();
-let worker: Worker | null = null;
-let workerUnavailable = false;
-let nextRequestId = 1;
-const pendingById = new Map<
-  number,
-  {
-    key: string;
-    request: InsightsRequest;
-    resolve: (model: InsightsModel) => void;
-    reject: (error: Error) => void;
-  }
->();
-
-function cacheModel(key: string, model: InsightsModel): InsightsModel {
-  modelCache.delete(key);
-  modelCache.set(key, model);
-  while (modelCache.size > MAX_MODELS) {
-    const oldest = modelCache.keys().next().value as string | undefined;
-    if (oldest === undefined) break;
-    modelCache.delete(oldest);
-  }
-  return model;
-}
-
-export function peekInsightsModel(key: string): InsightsModel | null {
-  return modelCache.get(key) ?? null;
-}
-
-function buildOnMainThread(key: string, request: InsightsRequest): Promise<InsightsModel> {
-  // A worker load/CSP failure must not make Insights unusable. Yield first so
-  // the retained prior view and its loading affordance can paint.
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      try {
-        resolve(cacheModel(key, buildInsightsModel(request)));
-      } catch (error) {
-        reject(error instanceof Error ? error : new Error(String(error)));
-      }
-    }, 0);
-  });
-}
-
 function yieldToBrowser(): Promise<void> {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
@@ -96,85 +45,42 @@ function yieldToBrowser(): Promise<void> {
   });
 }
 
-function disableWorkerAndFallback(): void {
-  workerUnavailable = true;
-  worker?.terminate();
-  worker = null;
-  const waiting = [...pendingById.values()];
-  pendingById.clear();
-  for (const pending of waiting) {
-    void buildOnMainThread(pending.key, pending.request).then(pending.resolve, pending.reject);
-  }
-}
-
-function getWorker(): Worker | null {
-  if (workerUnavailable) return null;
-  if (worker) return worker;
-  try {
-    worker = new Worker(new URL("../workers/insights.worker.ts", import.meta.url), {
+const client = createWorkerClient<InsightsRequest, InsightsModel>({
+  maxCached: MAX_MODELS,
+  createWorker: () =>
+    new Worker(new URL("../workers/insights.worker.ts", import.meta.url), {
       type: "module",
       name: "time-insights-analysis",
-    });
-    worker.onmessage = (event: MessageEvent<InsightsWorkerResponse>) => {
-      const pending = pendingById.get(event.data.id);
-      if (!pending) return;
-      pendingById.delete(event.data.id);
-      if ("error" in event.data) pending.reject(new Error(event.data.error));
-      else pending.resolve(cacheModel(pending.key, event.data.model));
-    };
-    worker.onerror = () => disableWorkerAndFallback();
-    worker.onmessageerror = () => disableWorkerAndFallback();
-    return worker;
-  } catch {
-    workerUnavailable = true;
-    return null;
-  }
+    }),
+  readResult: (data) => (data as typeof data & { model: InsightsModel }).model,
+  computeLocally: buildInsightsModel,
+  clearedMessage: "Insights data was refreshed",
+  // Deliberately not an `async` function: a short range posts synchronously,
+  // and only the chunked path returns a promise. Marking the whole thing async
+  // would push every request onto a microtask for no reason.
+  buildMessage: (id, request) => {
+    if (calendarDays(request.range) > CHUNKED_PACK_MIN_DAYS) {
+      return packInsightsRequestInChunks(request, yieldToBrowser).then((packed) => ({
+        message: { id, packed } satisfies InsightsWorkerRequest,
+        transfer: [
+          packed.starts.buffer,
+          packed.ends.buffer,
+          packed.processIndices.buffer,
+          packed.categoryIndices.buffer,
+          packed.isAfk.buffer,
+        ],
+      }));
+    }
+    return { message: { id, request } satisfies InsightsWorkerRequest };
+  },
+});
+
+export function peekInsightsModel(key: string): InsightsModel | null {
+  return client.peek(key);
 }
 
 export function analyzeInsights(request: InsightsRequest): Promise<InsightsModel> {
-  const key = insightsRequestKey(request);
-  const cached = modelCache.get(key);
-  if (cached) return Promise.resolve(cached);
-  const active = pendingByKey.get(key);
-  if (active) return active;
-
-  const analysisWorker = getWorker();
-  const promise = analysisWorker
-    ? new Promise<InsightsModel>((resolve, reject) => {
-        const submit = async () => {
-          const id = nextRequestId++;
-          if (calendarDays(request.range) > 14) {
-            const packed = await packInsightsRequestInChunks(request, yieldToBrowser);
-            const activeWorker = getWorker();
-            if (!activeWorker) {
-              void buildOnMainThread(key, request).then(resolve, reject);
-              return;
-            }
-            pendingById.set(id, { key, request, resolve, reject });
-            const message: InsightsWorkerRequest = { id, packed };
-            activeWorker.postMessage(message, [
-              packed.starts.buffer,
-              packed.ends.buffer,
-              packed.processIndices.buffer,
-              packed.categoryIndices.buffer,
-              packed.isAfk.buffer,
-            ]);
-          } else {
-            pendingById.set(id, { key, request, resolve, reject });
-            const message: InsightsWorkerRequest = { id, request };
-            analysisWorker.postMessage(message);
-          }
-        };
-        void submit().catch((error) =>
-          reject(error instanceof Error ? error : new Error(String(error))),
-        );
-      })
-    : buildOnMainThread(key, request);
-  const tracked = promise.finally(() => {
-    if (pendingByKey.get(key) === tracked) pendingByKey.delete(key);
-  });
-  pendingByKey.set(key, tracked);
-  return tracked;
+  return client.analyze(insightsRequestKey(request), request);
 }
 
 export async function warmInsightsModel(request: InsightsRequest): Promise<void> {
@@ -182,11 +88,5 @@ export async function warmInsightsModel(request: InsightsRequest): Promise<void>
 }
 
 export function clearInsightsModels(): void {
-  const error = new Error("Insights data was refreshed");
-  for (const pending of pendingById.values()) pending.reject(error);
-  modelCache.clear();
-  pendingByKey.clear();
-  pendingById.clear();
-  worker?.terminate();
-  worker = null;
+  client.clear();
 }

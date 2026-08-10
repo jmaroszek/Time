@@ -413,6 +413,35 @@ struct DeletionCandidate {
     end: i64,
 }
 
+/// Ids bound per statement. SQLite's default SQLITE_MAX_VARIABLE_NUMBER is the
+/// ceiling being kept under; the exact figure matters less than that every
+/// chunked statement uses the same one.
+const ID_CHUNK: usize = 500;
+
+/// `?,?,?` for a chunk of `count` values, or `count` copies of a wider `unit`
+/// such as `(?,NULL,NULL,?,?)` for a multi-column insert.
+fn placeholders(count: usize, unit: &str) -> String {
+    std::iter::repeat_n(unit, count)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The span a session is treated as occupying: its correction when one exists,
+/// otherwise what was recorded. Every surface that reports, previews or deletes
+/// time has to answer this the same way, so it is written once rather than
+/// retyped per query.
+const EFFECTIVE_SPAN: &str = "COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
+     COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end";
+
+/// Sessions with their correction attached when there is one.
+const CORRECTED_JOIN: &str = "FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id";
+
+/// Overlaps a half-open window. Binds in order: window start, then window end.
+/// Touching endpoints do not overlap, which is what makes a correction that
+/// begins exactly where its neighbour ends legal.
+const OVERLAPS_WINDOW: &str = "COALESCE(c.corrected_end_ts,s.end_ts)>? \
+     AND COALESCE(c.corrected_start_ts,s.start_ts)<?";
+
 impl TimeDatabase {
     /// Tests hand the closed file straight to a restore path, which validates it
     /// through a read-only connection. A read-only connection cannot build the
@@ -442,21 +471,21 @@ impl TimeDatabase {
             .max_connections(4)
             .connect_with(options)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
         let schema_version = if preexisting {
             let settings_exists: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='settings'",
             )
             .fetch_one(&pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
             if settings_exists == 0 {
                 let user_tables: i64 = sqlx::query_scalar(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
                 )
                 .fetch_one(&pool)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|error| error.to_string())?;
                 if user_tables == 0 {
                     SCHEMA_VERSION
                 } else {
@@ -471,7 +500,7 @@ impl TimeDatabase {
                 )
                 .fetch_optional(&pool)
                 .await
-                .map_err(|e| e.to_string())?
+                .map_err(|error| error.to_string())?
                 .ok_or_else(|| {
                     "Unversioned pre-release database; migrate it before running this release"
                         .to_owned()
@@ -506,7 +535,7 @@ impl TimeDatabase {
         sqlx::raw_sql(BOOTSTRAP_SQL)
             .execute(&pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
         Ok(Self {
             pool,
             path,
@@ -563,12 +592,12 @@ impl TimeDatabase {
         let rows = query
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
         rows.into_iter()
             .map(|row| {
                 let mut out = Map::new();
                 for (index, column) in row.columns().iter().enumerate() {
-                    let raw = row.try_get_raw(index).map_err(|e| e.to_string())?;
+                    let raw = row.try_get_raw(index).map_err(|error| error.to_string())?;
                     out.insert(column.name().to_owned(), sqlite_value_to_json(raw)?);
                 }
                 Ok(out)
@@ -681,7 +710,10 @@ impl TimeDatabase {
         for value in values {
             query = bind_value(query, value)?;
         }
-        let result = query.execute(&self.pool).await.map_err(|e| e.to_string())?;
+        let result = query
+            .execute(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
         Ok(ExecuteResult {
             rows_affected: result.rows_affected(),
             last_insert_id: result.last_insert_rowid(),
@@ -704,19 +736,20 @@ impl TimeDatabase {
             .filter(|word| !word.is_empty())
             .map(str::to_ascii_uppercase)
             .collect::<Vec<_>>();
-        let target = match words.as_slice() {
-            [verb, into, table, ..] if verb == "INSERT" && into == "INTO" => table.as_str(),
-            [verb, table, ..] if verb == "UPDATE" => table.as_str(),
-            [verb, from, table, ..] if verb == "DELETE" && from == "FROM" => table.as_str(),
+        // Statement shape and the tables it may touch, together: settings
+        // accepts INSERT but not UPDATE or DELETE, and that asymmetry is only
+        // readable if the verb and its table list sit on the same arm.
+        let (target, allowed_tables): (&str, &[&str]) = match words.as_slice() {
+            [verb, into, table, ..] if verb == "INSERT" && into == "INTO" => {
+                (table.as_str(), &["SETTINGS", "RULES", "CATEGORIES"])
+            }
+            [verb, table, ..] if verb == "UPDATE" => (table.as_str(), &["RULES", "CATEGORIES"]),
+            [verb, from, table, ..] if verb == "DELETE" && from == "FROM" => {
+                (table.as_str(), &["RULES", "CATEGORIES"])
+            }
             _ => return Err("Unsupported SQL mutation shape".into()),
         };
-        let allowed = match words.first().map(String::as_str) {
-            Some("INSERT") => ["SETTINGS", "RULES", "CATEGORIES"].contains(&target),
-            Some("UPDATE") => ["RULES", "CATEGORIES"].contains(&target),
-            Some("DELETE") => ["RULES", "CATEGORIES"].contains(&target),
-            _ => false,
-        };
-        if !allowed {
+        if !allowed_tables.contains(&target) {
             return Err(format!(
                 "Webview mutations of table {target:?} are not allowed"
             ));
@@ -739,14 +772,10 @@ impl TimeDatabase {
             unique.retain(|id| *id > 0);
             let ids = unique.into_iter().collect::<Vec<_>>();
             let mut candidates = Vec::new();
-            for chunk in ids.chunks(500) {
-                let placeholders = std::iter::repeat_n("?", chunk.len())
-                    .collect::<Vec<_>>()
-                    .join(",");
+            for chunk in ids.chunks(ID_CHUNK) {
+                let placeholders = placeholders(chunk.len(), "?");
                 let sql = format!(
-                    "SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
-                     COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end FROM sessions s \
-                     LEFT JOIN session_corrections c ON c.session_id=s.id \
+                    "SELECT s.id,{EFFECTIVE_SPAN} {CORRECTED_JOIN} \
                      WHERE s.id IN ({placeholders})"
                 );
                 let mut query = sqlx::query(&sql);
@@ -796,35 +825,22 @@ impl TimeDatabase {
             .iter()
             .map(|process| process.to_ascii_lowercase())
             .collect::<HashSet<_>>();
-        let rows = match entity_kind {
-            "app" => sqlx::query(
-                "SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
-                 COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end,s.process,s.domain \
-                 FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
-                 WHERE lower(s.process)=? AND COALESCE(c.corrected_end_ts,s.end_ts)>? \
-                 AND COALESCE(c.corrected_start_ts,s.start_ts)<?",
-            )
-            .bind(&entity_key)
-            .bind(start_sec)
-            .bind(end_sec)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| error.to_string())?,
-            "website" => sqlx::query(
-                "SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
-                 COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end,s.process,s.domain \
-                 FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
-                 WHERE lower(IFNULL(s.domain,''))=? AND COALESCE(c.corrected_end_ts,s.end_ts)>? \
-                 AND COALESCE(c.corrected_start_ts,s.start_ts)<?",
-            )
-            .bind(&entity_key)
-            .bind(start_sec)
-            .bind(end_sec)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| error.to_string())?,
+        let predicate = match entity_kind {
+            "app" => "lower(s.process)=?",
+            "website" => "lower(IFNULL(s.domain,''))=?",
             _ => return Err("Unsupported Activity entity kind".into()),
         };
+        let sql = format!(
+            "SELECT s.id,{EFFECTIVE_SPAN},s.process,s.domain {CORRECTED_JOIN} \
+             WHERE {predicate} AND {OVERLAPS_WINDOW}"
+        );
+        let rows = sqlx::query(&sql)
+            .bind(&entity_key)
+            .bind(start_sec)
+            .bind(end_sec)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
         let mut candidates = Vec::new();
         for row in rows {
             let process = row
@@ -1000,10 +1016,8 @@ impl TimeDatabase {
         }
         let mut transaction = self.pool.begin().await.map_err(|error| error.to_string())?;
         let mut deleted_count = 0_u64;
-        for chunk in ids.chunks(500) {
-            let placeholders = std::iter::repeat_n("?", chunk.len())
-                .collect::<Vec<_>>()
-                .join(",");
+        for chunk in ids.chunks(ID_CHUNK) {
+            let placeholders = placeholders(chunk.len(), "?");
             let sql = format!("DELETE FROM sessions WHERE id IN ({placeholders})");
             let mut query = sqlx::query(&sql);
             for id in chunk {
@@ -1060,7 +1074,7 @@ impl TimeDatabase {
         let sql = format!(
             "SELECT COUNT(*) AS n,COALESCE(SUM(MAX(0,COALESCE(c.corrected_end_ts,s.end_ts)- \
              COALESCE(c.corrected_start_ts,s.start_ts))),0) AS seconds \
-             FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id WHERE {predicate}"
+             {CORRECTED_JOIN} WHERE {predicate}"
         );
         let row = sqlx::query(&sql)
             .bind(&normalized)
@@ -1144,18 +1158,18 @@ impl TimeDatabase {
         &self,
         session_id: i64,
     ) -> Result<SessionCorrection, String> {
-        let row = sqlx::query(
+        let sql = format!(
             "SELECT s.id,s.start_ts,s.end_ts,s.process,s.title,s.domain,s.is_afk, \
-             COALESCE(c.corrected_start_ts,s.start_ts) AS effective_start, \
-             COALESCE(c.corrected_end_ts,s.end_ts) AS effective_end,c.category_id, \
+             {EFFECTIVE_SPAN},c.category_id, \
              c.session_id IS NOT NULL AS is_corrected \
-             FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id WHERE s.id=?",
-        )
-        .bind(session_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or("Session no longer exists")?;
+             {CORRECTED_JOIN} WHERE s.id=?"
+        );
+        let row = sqlx::query(&sql)
+            .bind(session_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or("Session no longer exists")?;
         let protected = self.protected_live_session_id().await?;
         let effective_start: i64 = row
             .try_get("effective_start")
@@ -1167,20 +1181,21 @@ impl TimeDatabase {
         // not exclude AFK rows: a neighbour is anything occupying the clock.
         // Touching endpoints are legal, so these are the exact bounds rather
         // than one second inside them.
-        let bounds = sqlx::query(
+        let sql = format!(
             "SELECT (SELECT MAX(COALESCE(c.corrected_end_ts,s.end_ts)) \
-               FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
+               {CORRECTED_JOIN} \
                WHERE s.id<>?1 AND COALESCE(c.corrected_end_ts,s.end_ts)<=?2) AS earliest_start, \
              (SELECT MIN(COALESCE(c.corrected_start_ts,s.start_ts)) \
-               FROM sessions s LEFT JOIN session_corrections c ON c.session_id=s.id \
-               WHERE s.id<>?1 AND COALESCE(c.corrected_start_ts,s.start_ts)>=?3) AS latest_end",
-        )
-        .bind(session_id)
-        .bind(effective_start)
-        .bind(effective_end)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|error| error.to_string())?;
+               {CORRECTED_JOIN} \
+               WHERE s.id<>?1 AND COALESCE(c.corrected_start_ts,s.start_ts)>=?3) AS latest_end"
+        );
+        let bounds = sqlx::query(&sql)
+            .bind(session_id)
+            .bind(effective_start)
+            .bind(effective_end)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
         Ok(SessionCorrection {
             session_id,
             original_start: row.try_get("start_ts").map_err(|error| error.to_string())?,
@@ -1256,18 +1271,14 @@ impl TimeDatabase {
                 return Err("The selected category no longer exists".into());
             }
         }
-        let overlaps: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sessions s \
-             LEFT JOIN session_corrections c ON c.session_id=s.id \
-             WHERE s.id<>? AND COALESCE(c.corrected_end_ts,s.end_ts)>? \
-             AND COALESCE(c.corrected_start_ts,s.start_ts)<?",
-        )
-        .bind(request.session_id)
-        .bind(start)
-        .bind(end)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|error| error.to_string())?;
+        let sql = format!("SELECT COUNT(*) {CORRECTED_JOIN} WHERE s.id<>? AND {OVERLAPS_WINDOW}");
+        let overlaps: i64 = sqlx::query_scalar(&sql)
+            .bind(request.session_id)
+            .bind(start)
+            .bind(end)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
         if overlaps > 0 {
             return Err("Corrected times overlap another recorded session".into());
         }
@@ -1357,13 +1368,10 @@ impl TimeDatabase {
         let mut skipped_count = 0_u64;
         let mut previous = Vec::new();
         let mut writable = Vec::new();
-        for chunk in ids.chunks(500) {
-            let placeholders = std::iter::repeat_n("?", chunk.len())
-                .collect::<Vec<_>>()
-                .join(",");
+        for chunk in ids.chunks(ID_CHUNK) {
+            let placeholders = placeholders(chunk.len(), "?");
             let sql = format!(
-                "SELECT s.id,s.is_afk,c.category_id,c.corrected_start_ts FROM sessions s \
-                 LEFT JOIN session_corrections c ON c.session_id=s.id \
+                "SELECT s.id,s.is_afk,c.category_id,c.corrected_start_ts {CORRECTED_JOIN} \
                  WHERE s.id IN ({placeholders})"
             );
             let mut query = sqlx::query(&sql);
@@ -1409,10 +1417,8 @@ impl TimeDatabase {
         let mut transaction = self.pool.begin().await.map_err(|error| error.to_string())?;
         let mut changed_count = 0_u64;
         if let Some(category_id) = request.category_id {
-            for chunk in writable.chunks(500) {
-                let values = std::iter::repeat_n("(?,NULL,NULL,?,?)", chunk.len())
-                    .collect::<Vec<_>>()
-                    .join(",");
+            for chunk in writable.chunks(ID_CHUNK) {
+                let values = placeholders(chunk.len(), "(?,NULL,NULL,?,?)");
                 // Only the two columns this call owns. `excluded` would carry
                 // the NULL times above into an existing row and silently drop a
                 // correction someone made to the clock.
@@ -1439,10 +1445,8 @@ impl TimeDatabase {
             // would report a session as corrected forever after.
             let (timed, bare): (Vec<_>, Vec<_>) =
                 writable.iter().partition(|(_, has_times)| *has_times);
-            for chunk in timed.chunks(500) {
-                let placeholders = std::iter::repeat_n("?", chunk.len())
-                    .collect::<Vec<_>>()
-                    .join(",");
+            for chunk in timed.chunks(ID_CHUNK) {
+                let placeholders = placeholders(chunk.len(), "?");
                 let sql = format!(
                     "UPDATE session_corrections SET category_id=NULL,updated_ts=? \
                      WHERE session_id IN ({placeholders})"
@@ -1457,10 +1461,8 @@ impl TimeDatabase {
                     .map_err(|error| error.to_string())?
                     .rows_affected();
             }
-            for chunk in bare.chunks(500) {
-                let placeholders = std::iter::repeat_n("?", chunk.len())
-                    .collect::<Vec<_>>()
-                    .join(",");
+            for chunk in bare.chunks(ID_CHUNK) {
+                let placeholders = placeholders(chunk.len(), "?");
                 let sql =
                     format!("DELETE FROM session_corrections WHERE session_id IN ({placeholders})");
                 let mut query = sqlx::query(&sql);
@@ -1490,15 +1492,15 @@ impl TimeDatabase {
         if !cutoff_sec.is_finite() {
             return Err("Invalid history cutoff".into());
         }
-        let result = sqlx::query(
-            "DELETE FROM sessions WHERE id IN (SELECT s.id FROM sessions s \
-             LEFT JOIN session_corrections c ON c.session_id=s.id \
-             WHERE COALESCE(c.corrected_end_ts,s.end_ts) < ?)",
-        )
-        .bind(cutoff_sec.floor() as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(|error| error.to_string())?;
+        let sql = format!(
+            "DELETE FROM sessions WHERE id IN (SELECT s.id {CORRECTED_JOIN} \
+             WHERE COALESCE(c.corrected_end_ts,s.end_ts) < ?)"
+        );
+        let result = sqlx::query(&sql)
+            .bind(cutoff_sec.floor() as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
         if result.rows_affected() > 0 {
             self.compact().await?;
         }
@@ -1515,14 +1517,14 @@ impl TimeDatabase {
     async fn backup_named(&self, prefix: &str) -> Result<String, String> {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
+            .map_err(|error| error.to_string())?
             .as_millis();
         let target = self.backups_dir()?.join(format!("{prefix}_{stamp}.db"));
         let escaped = target.to_string_lossy().replace("'", "''");
         sqlx::query(&format!("VACUUM INTO '{escaped}'"))
             .execute(&self.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -1703,32 +1705,37 @@ impl TimeDatabase {
         Ok(backups)
     }
 
-    fn pending_database_path(database_path: &Path) -> Result<PathBuf, String> {
+    /// A file beside the database. The restore set all lives here, and the
+    /// failure mode this guards — a database path with no parent — is the same
+    /// for every one of them.
+    fn sibling(database_path: &Path, name: &str) -> Result<PathBuf, String> {
         Ok(database_path
             .parent()
             .ok_or("database path has no parent")?
-            .join("restore_pending.db"))
+            .join(name))
+    }
+
+    fn pending_database_path(database_path: &Path) -> Result<PathBuf, String> {
+        Self::sibling(database_path, "restore_pending.db")
     }
 
     fn pending_marker_path(database_path: &Path) -> Result<PathBuf, String> {
-        Ok(database_path
-            .parent()
-            .ok_or("database path has no parent")?
-            .join("restore_pending.json"))
+        Self::sibling(database_path, "restore_pending.json")
     }
 
     fn restore_notice_path(database_path: &Path) -> Result<PathBuf, String> {
-        Ok(database_path
-            .parent()
-            .ok_or("database path has no parent")?
-            .join("restore_notice.json"))
+        Self::sibling(database_path, "restore_notice.json")
     }
 
     fn rollback_path(database_path: &Path) -> Result<PathBuf, String> {
-        Ok(database_path
-            .parent()
-            .ok_or("database path has no parent")?
-            .join("restore_previous.db"))
+        Self::sibling(database_path, "restore_previous.db")
+    }
+
+    /// Where a failed restore parks the database it could not replace. Named
+    /// alongside the rest of the restore set rather than inlined at its one
+    /// call site, so the whole set reads as a list.
+    fn failed_restore_path(database_path: &Path) -> Result<PathBuf, String> {
+        Self::sibling(database_path, "restore_failed.db")
     }
 
     fn remove_if_exists(path: &Path) -> Result<(), String> {
@@ -1963,7 +1970,7 @@ impl TimeDatabase {
         let result = sqlx::query("DELETE FROM sessions")
             .execute(&self.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
         // secure_delete overwrites deleted cells; checkpoint and compact so old
         // title text is not left recoverable in the WAL or free database pages.
         self.compact().await?;
@@ -1975,11 +1982,11 @@ impl TimeDatabase {
         sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
             .execute(&self.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
         sqlx::query("VACUUM")
             .execute(&self.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -2004,11 +2011,7 @@ impl RestoreSwap {
 
     pub fn rollback(self) -> Result<(), String> {
         TimeDatabase::remove_database_sidecars(&self.database_path)?;
-        let failed_path = self
-            .database_path
-            .parent()
-            .ok_or("database path has no parent")?
-            .join("restore_failed.db");
+        let failed_path = TimeDatabase::failed_restore_path(&self.database_path)?;
         TimeDatabase::remove_if_exists(&failed_path)?;
         fs::rename(&self.database_path, &failed_path).map_err(|error| error.to_string())?;
         if let Err(error) = fs::rename(&self.rollback_path, &self.database_path) {
@@ -2110,22 +2113,22 @@ fn sqlite_value_to_json(raw: sqlx::sqlite::SqliteValueRef<'_>) -> Result<JsonVal
             .to_owned()
             .try_decode::<String>()
             .map(JsonValue::String)
-            .map_err(|e| e.to_string()),
+            .map_err(|error| error.to_string()),
         "REAL" => raw
             .to_owned()
             .try_decode::<f64>()
             .map(JsonValue::from)
-            .map_err(|e| e.to_string()),
+            .map_err(|error| error.to_string()),
         "INTEGER" | "NUMERIC" | "BOOLEAN" => raw
             .to_owned()
             .try_decode::<i64>()
             .map(JsonValue::from)
-            .map_err(|e| e.to_string()),
+            .map_err(|error| error.to_string()),
         "BLOB" => raw
             .to_owned()
             .try_decode::<Vec<u8>>()
             .map(|bytes| JsonValue::Array(bytes.into_iter().map(JsonValue::from).collect()))
-            .map_err(|e| e.to_string()),
+            .map_err(|error| error.to_string()),
         other => Err(format!("Unsupported SQLite result type: {other}")),
     }
 }
@@ -2620,8 +2623,7 @@ mod tests {
             .unwrap();
             let pending = database.prepare_restore(backup_path).await.unwrap();
             assert_eq!(pending.schema_version, SCHEMA_VERSION);
-            database.pool.close().await;
-            drop(database);
+            database.close().await;
 
             let swap = TimeDatabase::begin_pending_restore(&path)
                 .await
@@ -2634,8 +2636,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(count, 1);
-            restored.pool.close().await;
-            drop(restored);
+            restored.close().await;
             swap.commit().unwrap();
             assert!(!root.join("restore_previous.db").exists());
             assert!(!root.join("restore_pending.json").exists());
@@ -2721,8 +2722,7 @@ mod tests {
                     ("Ignored", 0, 0, 1),
                 ]
             );
-            database.pool.close().await;
-            drop(database);
+            database.close().await;
         });
     }
 
@@ -2745,8 +2745,7 @@ mod tests {
             .execute(&database.pool)
             .await
             .unwrap();
-            database.pool.close().await;
-            drop(database);
+            database.close().await;
 
             let reopened = TimeDatabase::open(path.clone()).await.unwrap();
             let names: Vec<String> =
@@ -2762,8 +2761,7 @@ mod tests {
             .unwrap();
             assert_eq!(names, vec!["Personal"]);
             assert_eq!(marker, None);
-            reopened.pool.close().await;
-            drop(reopened);
+            reopened.close().await;
         });
     }
 
@@ -2917,8 +2915,7 @@ mod tests {
                 .execute(&database.pool)
                 .await
                 .unwrap();
-            database.pool.close().await;
-            drop(database);
+            database.close().await;
 
             let newer = TimeDatabase::open(path).await.unwrap();
             let request = ActivityDeleteRequest {

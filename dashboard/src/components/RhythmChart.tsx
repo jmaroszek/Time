@@ -15,10 +15,10 @@ import {
   fmtDuration,
   fmtHourRange,
 } from "../lib/format";
+import { metricTooltipBody } from "../lib/chartTooltip";
 import {
-  metricSeconds,
-  metricTrackedShare,
   ACTIVITY_METRIC_WORDS,
+  metricSeconds,
   type ActivityMetric,
   type RhythmCell,
   type WeekdayRhythmSummary,
@@ -116,22 +116,12 @@ export function formatRhythmTooltip(
   weekdayCount: number,
   metric: ActivityMetric = "tracked",
 ): string {
-  const avg = (seconds: number) => fmtDuration(weekdayCount > 0 ? seconds / weekdayCount : 0);
-  const topApp = metric === "tracked" && cell.topApp
-    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(cell.topApp.name)} · ${fmtDuration(cell.topApp.seconds)} total</div>`
-    : "";
-  const share = metricTrackedShare(cell, metric);
-  const word = ACTIVITY_METRIC_WORDS[metric];
-  return [
-    `<b>${FULL_DAY_NAMES[cell.weekday]} · ${fmtHourRange(cell.hour)}</b>`,
-    `<div>Avg ${word}: ${avg(metricSeconds(cell, metric))}</div>`,
-    share === null
-      ? ""
-      : `<div class="chart-tip-muted">${share}% of tracked time</div>`,
-    topApp,
-  ].join("");
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return metricTooltipBody(cell, metric, {
+    headline: `${FULL_DAY_NAMES[cell.weekday]} · ${fmtHourRange(cell.hour)}`,
+    valueLabel: `Avg ${ACTIVITY_METRIC_WORDS[metric]}`,
+    // A cell is one hour of one weekday across the whole range, so its figure is
+    // an average over however many of that weekday the range held.
+    formatValue: (seconds) => fmtDuration(weekdayCount > 0 ? seconds / weekdayCount : 0),
+    topAppSuffix: " total",
+  });
 }

@@ -1,10 +1,9 @@
 import { useMemo, useRef } from "react";
 
-import { DAY_NAMES, FULL_DAY_NAMES, MONTH_NAMES_LONG, fmtDuration } from "../lib/format";
+import { DAY_NAMES, FULL_DAY_NAMES, MONTH_NAMES_LONG } from "../lib/format";
+import { metricLabel, metricTooltipBody } from "../lib/chartTooltip";
 import {
   metricSeconds,
-  metricTrackedShare,
-  ACTIVITY_METRIC_WORDS,
   type ActivityMetric,
   type DailyActivitySummary,
 } from "../lib/overview";
@@ -164,26 +163,9 @@ export function formatActivityCalendarTooltip(
   day: DailyActivitySummary,
   metric: ActivityMetric = "tracked",
 ): string {
-  const date = `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES_LONG[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}`;
-  const topApp = metric === "tracked" && day.topApp
-    ? `<div class="chart-tip-muted">Top app: ${escapeHtml(day.topApp.name)} · ${fmtDuration(day.topApp.seconds)}</div>`
-    : "";
-  const share = metricTrackedShare(day, metric);
-  const word = ACTIVITY_METRIC_WORDS[metric];
-  const label = word.replace(/^./, (c) => c.toUpperCase());
-  return [
-    `<b>${date}</b>`,
-    `<div>${label}: ${fmtDuration(metricSeconds(day, metric))}</div>`,
-    share === null
-      ? ""
-      : `<div class="chart-tip-muted">${share}% of tracked time</div>`,
-    metric === "productive"
-      ? `<div class="chart-tip-muted">Longest focus: ${fmtDuration(day.longestFocusSeconds)}</div>`
-      : "",
-    topApp,
-  ].join("");
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return metricTooltipBody(day, metric, {
+    headline: `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES_LONG[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}`,
+    valueLabel: metricLabel(metric),
+    longestFocusSeconds: day.longestFocusSeconds,
+  });
 }
