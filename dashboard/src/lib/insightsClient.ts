@@ -66,6 +66,7 @@ const client = createWorkerClient<InsightsRequest, InsightsModel>({
           packed.starts.buffer,
           packed.ends.buffer,
           packed.processIndices.buffer,
+          packed.domainIndices.buffer,
           packed.categoryIndices.buffer,
           packed.isAfk.buffer,
         ],

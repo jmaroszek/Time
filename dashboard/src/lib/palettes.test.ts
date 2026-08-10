@@ -89,7 +89,7 @@ function minAllPairs(colors: string[]): number {
 }
 
 // WCAG contrast, for the hue swatches. These are never drawn as text —
-// stateColors feeds CategoryDot, TopAppsList and TimelineChart fill blocks,
+// stateColors feeds CategoryDot, TopUsageList and TimelineChart fill blocks,
 // chartTheme fills series — so the applicable floor is the 3:1 graphical-object
 // one, not the 4.5:1 text floor. Light is held on the card; dark is held on the
 // lighter raised surface where a swatch has its lowest contrast. The row surface
@@ -176,7 +176,7 @@ describe("palettes", () => {
           for (const neutral of neutrals) expect(chroma(neutral)).toBeLessThanOrEqual(0.09);
         });
 
-        // Light only: swatches are graphics (CategoryDot, TopAppsList,
+        // Light only: swatches are graphics (CategoryDot, TopUsageList,
         // TimelineChart, chartTheme series), never text, so the applicable WCAG
         // floor is 3:1, not 4.5:1. The band's upper bound is what a one-sided
         // minimum could never catch — a swatch that is too heavy is a failure

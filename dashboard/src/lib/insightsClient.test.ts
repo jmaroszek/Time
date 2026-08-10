@@ -61,9 +61,11 @@ function packed(): PackedInsightsRequest {
     starts: new Float64Array(1),
     ends: new Float64Array(1),
     processIndices: new Uint32Array(1),
+    domainIndices: new Uint32Array(1),
     categoryIndices: new Int32Array(1),
     isAfk: new Uint8Array(1),
     processes: ["app.exe"],
+    domains: [],
   };
 }
 
@@ -185,6 +187,7 @@ describe("long-range packed transfer", () => {
       columns.starts.buffer,
       columns.ends.buffer,
       columns.processIndices.buffer,
+      columns.domainIndices.buffer,
       columns.categoryIndices.buffer,
       columns.isAfk.buffer,
     ]);

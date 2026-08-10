@@ -5,7 +5,7 @@ import HourlyActivityChart from "../components/HourlyActivityChart";
 import MonthCalendarChart from "../components/MonthCalendarChart";
 import RhythmChart from "../components/RhythmChart";
 import TimelineChart from "../components/TimelineChart";
-import TopAppsList from "../components/TopAppsList";
+import TopUsageList from "../components/TopUsageList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
 import { Card, MenuSelect, MetricCard, Spinner } from "../components/ui";
 import { fmtDuration, fmtPct } from "../lib/format";
@@ -23,7 +23,11 @@ import type { PresetOrCustom } from "../components/DateRangePicker";
 import { useMeta } from "../state/meta";
 import { useInsightsModel } from "../state/useInsightsModel";
 import { insightsFetchWindow, useInsightsWarmup } from "../state/useInsightsWarmup";
-import { TOP_APPS_OPTIONS, type InsightsViewState } from "../state/useInsightsView";
+import {
+  TOP_ITEMS_OPTIONS,
+  type InsightsViewState,
+  type RankedEntityKind,
+} from "../state/useInsightsView";
 import { useSessions } from "../state/useSessions";
 
 const HOURS_CARD_TITLES = {
@@ -88,12 +92,25 @@ export default function OverviewTab({
   onOpenSettings: () => void;
 }) {
   const meta = useMeta();
-  // The view controls (top-app count, timeline resolution, aggregate view,
+  // The view controls (ranked identity/count, timeline resolution, aggregate view,
   // calendar metric, hours stacking) live in App so an in-session change to any
   // of them survives switching to another tab and back — this component unmounts
   // on a tab switch, App does not. `aggregateView` starts null so its default is
   // pinned the first time a long-enough range appears (see the effect below).
-  const { topN, setTopN, blockMinutes, setBlockMinutes, aggregateView, setAggregateView, metric, setMetric, stackBy, setStackBy } = view;
+  const {
+    topN,
+    setTopN,
+    rankedEntityKind,
+    setRankedEntityKind,
+    blockMinutes,
+    setBlockMinutes,
+    aggregateView,
+    setAggregateView,
+    metric,
+    setMetric,
+    stackBy,
+    setStackBy,
+  } = view;
 
   const { startSec: fetchStart, endSec: fetchEnd } = insightsFetchWindow(range);
   const sessionData = useSessions(fetchStart, fetchEnd, historyRevision, liveTick);
@@ -153,7 +170,7 @@ export default function OverviewTab({
     (day) => day.date >= displayRange.start && day.date < displayRange.end,
   );
 
-  const apps = model.apps.slice(0, topN);
+  const rankedItems = (rankedEntityKind === "apps" ? model.apps : model.websites).slice(0, topN);
   const updateError = sessionData.error ?? analyzed.error;
   const refreshing =
     !updateError &&
@@ -318,24 +335,38 @@ export default function OverviewTab({
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Card
-          title="Top Apps"
+          title={rankedEntityKind === "apps" ? "Top Apps" : "Top Websites"}
           className="h-[345px]"
           right={
-            <MenuSelect
-              variant="quiet"
-              label="How many apps to list"
-              value={String(topN)}
-              onChange={(v) => setTopN(Number(v))}
-              options={TOP_APPS_OPTIONS.map((x) => ({ value: String(x), label: `Top ${x}` }))}
-            />
+            <span className="flex items-center gap-2">
+              <MenuSelect
+                variant="quiet"
+                label={`How many ${rankedEntityKind} to list`}
+                value={String(topN)}
+                onChange={(v) => setTopN(Number(v))}
+                options={TOP_ITEMS_OPTIONS.map((x) => ({ value: String(x), label: `Top ${x}` }))}
+              />
+              <MenuSelect
+                variant="quiet"
+                label="Ranked activity type"
+                value={rankedEntityKind}
+                onChange={(v) => setRankedEntityKind(v as RankedEntityKind)}
+                options={[
+                  { value: "apps", label: "Apps" },
+                  { value: "websites", label: "Websites" },
+                ]}
+              />
+            </span>
           }
         >
           <div className="pt-2">
-            <TopAppsList
-              apps={apps}
+            <TopUsageList
+              items={rankedItems}
+              kind={rankedEntityKind}
               comparisonDays={calendarDays(prev)}
               comparisonAvailable={preset !== "alltime"}
-              hiddenAppCount={apps.length < topN ? hiddenAppCount : 0}
+              hiddenAppCount={rankedEntityKind === "apps" && rankedItems.length < topN ? hiddenAppCount : 0}
+              websiteCoverage={model.websiteCoverage}
             />
           </div>
         </Card>

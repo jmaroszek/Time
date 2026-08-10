@@ -41,13 +41,13 @@ how that is changing over time.
   custom categories and simple rules, all edited in the dashboard. New installs
   contain no personal categories or classification rules. Changes apply to all history, and the tracker
   picks them up within seconds — no config files, no restarts.
-- **Friendly app names.** Cryptic executable names can be
-  renamed in Insights' Top Apps or Activity's Apps & Websites, and the friendly name
-  shows everywhere with the recorded executable still available in Activity.
-- **Tells you what actually changed.** Week-over-week shifts in app usage are
-  highlighted only when they're statistically real (a Welch's t-test on daily
-  usage), and color depends on direction: more time in a productive app is
-  green, more in a distracting one is red.
+- **Friendly activity names.** Cryptic app and website names can be renamed in
+  Activity's Apps & Websites, and the friendly name carries into Insights while
+  the recorded identity remains available in Activity.
+- **Tells you what actually changed.** Previous-period shifts in app or website
+  usage are highlighted only when the relative and absolute change is meaningful
+  and not driven by one unusual day. Color depends on direction: more time in a
+  productive destination is green, more in a distracting one is red.
 - **Never loses meaningful data.** The tracker runs all day and survives
   crashes, restarts, and double launches — at worst the last 15 seconds are
   lost, because the open session is flushed to disk on that heartbeat. The
@@ -57,7 +57,7 @@ how that is changing over time.
 
 | Tab | What it shows |
 | --- | --- |
-| **[Insights](docs/overview.md)** | KPI cards (total, productive %, longest focus chain, goal pace); an adaptive main view that shifts with the range — a per-day timeline, a weekday×hour rhythm heatmap, or a day/month calendar (shadeable by total, productive, unproductive, or neutral time); top apps with category-aware deltas; and activity hours stacked by state or category. Ranges run from a single day to all time. |
+| **[Insights](docs/overview.md)** | KPI cards (total, productive %, longest focus chain, goal pace); an adaptive main view that shifts with the range — a per-day timeline, a weekday×hour rhythm heatmap, or a day/month calendar (shadeable by total, productive, unproductive, or neutral time); top apps or websites with category-aware deltas; and activity hours stacked by state or category. Ranges run from a single day to all time. |
 | **[Activity](docs/apps.md)** | Search and correct the apps, websites, windows, and sessions in the shared range; classify them with categories and rules; or delete exact recorded activity. |
 | **[Settings](docs/settings.md)** | Goals, AFK threshold, heartbeat, week start, browser processes, history retention, live tracker status, and one-click backup. |
 

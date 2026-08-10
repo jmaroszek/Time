@@ -9,19 +9,26 @@ import {
 import { appGroupKey } from "./format";
 import {
   addAppSeconds,
+  addWebsiteSeconds,
   addTopAppSeconds,
   forEachDayChunk,
   goalPace,
   focusChain,
   type FocusChain,
   rankAppUsage,
+  rankWebsiteUsage,
   topAppOf,
   withDeltas,
   type AppUsage,
   type AppUsageAccumulator,
+  type AppDelta,
   type Kpis,
   type Session,
+  type WebsiteDelta,
+  type WebsiteUsage,
+  type WebsiteUsageAccumulator,
 } from "./metrics";
+import type { BrowserDomainCoverage } from "./domainCoverage";
 import {
   hourlyActivitySummaries,
   addProductivitySeconds,
@@ -58,6 +65,11 @@ interface InsightsAggregation {
   previousRanked: AppUsage[];
   currentDaily: Map<string, number[]>;
   previousDaily: Map<string, number[]>;
+  currentWebsiteRanked: WebsiteUsage[];
+  previousWebsiteRanked: WebsiteUsage[];
+  currentWebsiteDaily: Map<string, number[]>;
+  previousWebsiteDaily: Map<string, number[]>;
+  websiteCoverage: BrowserDomainCoverage;
   historyDays: DailyActivitySummary[];
   /** Days in range that recorded any non-AFK activity. */
   activeDays: number;
@@ -89,7 +101,9 @@ export interface InsightsModel {
   labelMode: "weekday" | "date";
   kpis: Kpis;
   pace: ReturnType<typeof goalPace>;
-  apps: ReturnType<typeof withDeltas>;
+  apps: AppDelta[];
+  websites: WebsiteDelta[];
+  websiteCoverage: BrowserDomainCoverage;
   hiddenAppCount: number;
   historyDays: DailyActivitySummary[];
   timelineSessions: Session[] | null;
@@ -103,9 +117,12 @@ export interface PackedInsightsRequest {
   starts: Float64Array;
   ends: Float64Array;
   processIndices: Uint32Array;
+  /** Zero means no detected website; every dictionary index is offset by one. */
+  domainIndices: Uint32Array;
   categoryIndices: Int32Array;
   isAfk: Uint8Array;
   processes: string[];
+  domains: string[];
 }
 
 export type InsightsWorkerRequest =
@@ -190,8 +207,8 @@ function orderedSessions(sessions: Session[]): Session[] {
 
 /**
  * Build every shared Insights input in one ordered pass. The old path filtered,
- * clipped, classified, and split the same rows independently for KPIs, apps,
- * daily deltas, the calendar, and the hours chart.
+ * clipped, classified, and split the same rows independently for KPIs, ranked
+ * identities, daily deltas, the calendar, and the hours chart.
  */
 export function aggregateInsightsSessions(
   sessions: Session[],
@@ -200,6 +217,7 @@ export function aggregateInsightsSessions(
   focusChainMaxGapSeconds: number,
   weekStart: WeekStart,
   aliases?: Record<string, string>,
+  browserProcesses: ReadonlySet<string> = new Set(),
 ): InsightsAggregation {
   const previous = previousRange(range);
   const granularity = overviewGranularity(range);
@@ -221,16 +239,21 @@ export function aggregateInsightsSessions(
   const previousDaily = new Map<string, number[]>();
   const currentApps = new Map<string, AppUsageAccumulator>();
   const previousApps = new Map<string, AppUsageAccumulator>();
+  const currentWebsites = new Map<string, WebsiteUsageAccumulator>();
+  const previousWebsites = new Map<string, WebsiteUsageAccumulator>();
+  const currentWebsiteDaily = new Map<string, number[]>();
+  const previousWebsiteDaily = new Map<string, number[]>();
   const activeDayKeys = new Set<string>();
   const current: Session[] = [];
   let totalSec = 0;
   let prodSec = 0;
+  let browserSeconds = 0;
+  let missingDomainSeconds = 0;
   const rangeChain = focusChain(focusChainMaxGapSeconds);
 
-  // Keyed by app row, not by process: `withDeltas` looks these series up by the
-  // row's key, and a miss would read as a quiet "no time last period".
-  const dailyArray = (into: Map<string, number[]>, process: string, length: number) => {
-    const key = appGroupKey(process, aliases);
+  // Keyed by ranked row, not by raw session: `withDeltas` looks these series up
+  // by the row's key, and a miss would read as a quiet "no time last period".
+  const usageDailyArray = (into: Map<string, number[]>, key: string, length: number) => {
     let values = into.get(key);
     if (!values) {
       values = Array(length).fill(0);
@@ -238,6 +261,8 @@ export function aggregateInsightsSessions(
     }
     return values;
   };
+  const appDailyArray = (into: Map<string, number[]>, process: string, length: number) =>
+    usageDailyArray(into, appGroupKey(process, aliases), length);
 
   for (const source of orderedSessions(sessions)) {
     const category = classifier(source);
@@ -254,6 +279,14 @@ export function aggregateInsightsSessions(
         const seconds = inCurrent.end - inCurrent.start;
         totalSec += seconds;
         addAppSeconds(currentApps, inCurrent.process, aliases, category, seconds);
+        if (browserProcesses.has(inCurrent.process.toLowerCase())) {
+          browserSeconds += seconds;
+          if (inCurrent.domain) {
+            addWebsiteSeconds(currentWebsites, inCurrent.domain, aliases, category, seconds);
+          } else {
+            missingDomainSeconds += seconds;
+          }
+        }
         if (category?.isProductive) prodSec += seconds;
         rangeChain.add(inCurrent.start, inCurrent.end, seconds, category);
       }
@@ -262,16 +295,37 @@ export function aggregateInsightsSessions(
     if (inPrevious && !inPrevious.isAfk) {
       const seconds = inPrevious.end - inPrevious.start;
       addAppSeconds(previousApps, inPrevious.process, aliases, category, seconds);
-      const values = dailyArray(previousDaily, inPrevious.process, previousDayIndex.size);
+      const values = appDailyArray(previousDaily, inPrevious.process, previousDayIndex.size);
+      const previousWebsiteKey = browserProcesses.has(inPrevious.process.toLowerCase())
+        ? inPrevious.domain?.toLowerCase() ?? null
+        : null;
+      if (previousWebsiteKey) {
+        addWebsiteSeconds(previousWebsites, previousWebsiteKey, aliases, category, seconds);
+      }
+      const websiteValues = previousWebsiteKey
+        ? usageDailyArray(previousWebsiteDaily, previousWebsiteKey, previousDayIndex.size)
+        : null;
       forEachDayChunk(inPrevious.start, inPrevious.end, (chunk) => {
         const index = previousDayIndex.get(dayKey(chunk.dayStart));
-        if (index !== undefined) values[index] += chunk.endSec - chunk.startSec;
+        if (index !== undefined) {
+          const seconds = chunk.endSec - chunk.startSec;
+          values[index] += seconds;
+          if (websiteValues) websiteValues[index] += seconds;
+        }
       });
     }
 
     if (inHistory) {
       const currentValues = inCurrent && !inHistory.isAfk
-        ? dailyArray(currentDaily, inCurrent.process, currentDayIndex.size)
+        ? appDailyArray(currentDaily, inCurrent.process, currentDayIndex.size)
+        : null;
+      const currentWebsiteKey = inCurrent
+        && !inHistory.isAfk
+        && browserProcesses.has(inCurrent.process.toLowerCase())
+        ? inCurrent.domain?.toLowerCase() ?? null
+        : null;
+      const currentWebsiteValues = currentWebsiteKey
+        ? usageDailyArray(currentWebsiteDaily, currentWebsiteKey, currentDayIndex.size)
         : null;
       forEachDayChunk(inHistory.start, inHistory.end, (chunk) => {
         const key = dayKey(chunk.dayStart);
@@ -291,6 +345,7 @@ export function aggregateInsightsSessions(
             const index = currentDayIndex.get(key);
             if (index !== undefined) {
               currentValues[index] += seconds;
+              if (currentWebsiteValues) currentWebsiteValues[index] += seconds;
               activeDayKeys.add(key);
             }
           }
@@ -311,6 +366,15 @@ export function aggregateInsightsSessions(
     previousRanked: rankAppUsage(previousApps),
     currentDaily,
     previousDaily,
+    currentWebsiteRanked: rankWebsiteUsage(currentWebsites),
+    previousWebsiteRanked: rankWebsiteUsage(previousWebsites),
+    currentWebsiteDaily,
+    previousWebsiteDaily,
+    websiteCoverage: {
+      totalSeconds: browserSeconds,
+      missingSeconds: missingDomainSeconds,
+      missingFraction: browserSeconds === 0 ? 0 : missingDomainSeconds / browserSeconds,
+    },
     historyDays: finalizeDays(historyDays),
     activeDays: activeDayKeys.size,
   };
@@ -330,6 +394,7 @@ function buildInsightsModelWithClassifier(
     request.focusChainMaxGapSeconds,
     request.weekStart,
     request.aliases,
+    new Set(request.browserProcesses),
   );
   // The filter is a rate, not a total: a flat "hide under 2 minutes" bar is
   // most of a day's use of a rare app on Today and invisible on Year, so the
@@ -345,6 +410,17 @@ function buildInsightsModelWithClassifier(
     currentDaily: aggregation.currentDaily,
     previousDaily: aggregation.previousDaily,
   });
+  // The minimum-app preference stays app-specific. Website traffic is naturally
+  // more fragmented, and applying the same bar silently would erase short but
+  // still top-ranked destinations from the first website analysis in Insights.
+  const websites = withDeltas(
+    aggregation.currentWebsiteRanked.slice(0, 20),
+    aggregation.previousWebsiteRanked,
+    {
+      currentDaily: aggregation.currentWebsiteDaily,
+      previousDaily: aggregation.previousWebsiteDaily,
+    },
+  );
   const timelineSessions = rangeDays <= 14 ? aggregation.current : null;
   const rhythm =
     rangeDays > 14
@@ -387,6 +463,8 @@ function buildInsightsModelWithClassifier(
     kpis: aggregation.kpis,
     pace: goalPace(aggregation.kpis.prodSec, request.range, request.weeklyGoalHours),
     apps,
+    websites,
+    websiteCoverage: aggregation.websiteCoverage,
     hiddenAppCount: aggregation.currentRanked.length - eligibleApps.length,
     historyDays: aggregation.historyDays,
     timelineSessions,
@@ -403,20 +481,23 @@ export function buildInsightsModel(request: InsightsRequest): InsightsModel {
   return buildInsightsModelWithClassifier(request, classifier);
 }
 
-/** Classify once on the renderer, then transfer only numeric columns and a
- * process dictionary. Long-range charts never need raw titles/domains after
- * classification; avoiding their structured clone cuts the hand-off sharply. */
+/** Classify once on the renderer, then transfer numeric columns plus compact
+ * process/domain dictionaries. Raw titles remain unnecessary, and repeating a
+ * domain index per row is far cheaper than structured-cloning every string. */
 interface InsightsPackingState {
   request: InsightsRequest;
   classifier: Classifier;
   categoryIndex: Map<number, number>;
   processIndex: Map<string, number>;
+  domainIndex: Map<string, number>;
   starts: Float64Array;
   ends: Float64Array;
   processIndices: Uint32Array;
+  domainIndices: Uint32Array;
   categoryIndices: Int32Array;
   isAfk: Uint8Array;
   processes: string[];
+  domains: string[];
 }
 
 function createPackingState(request: InsightsRequest): InsightsPackingState {
@@ -430,12 +511,15 @@ function createPackingState(request: InsightsRequest): InsightsPackingState {
     ),
     categoryIndex: new Map(request.categories.map((category, index) => [category.id, index])),
     processIndex: new Map(),
+    domainIndex: new Map(),
     starts: new Float64Array(count),
     ends: new Float64Array(count),
     processIndices: new Uint32Array(count),
+    domainIndices: new Uint32Array(count),
     categoryIndices: new Int32Array(count),
     isAfk: new Uint8Array(count),
     processes: [],
+    domains: [],
   };
 }
 
@@ -456,6 +540,15 @@ function packRows(state: InsightsPackingState, start: number, end: number): void
       state.processIndex.set(session.process, process);
     }
     state.processIndices[index] = process;
+    if (session.domain) {
+      let domain = state.domainIndex.get(session.domain);
+      if (domain === undefined) {
+        domain = state.domains.length;
+        state.domains.push(session.domain);
+        state.domainIndex.set(session.domain, domain);
+      }
+      state.domainIndices[index] = domain + 1;
+    }
   }
 }
 
@@ -466,9 +559,11 @@ function finishPacking(state: InsightsPackingState): PackedInsightsRequest {
     starts: state.starts,
     ends: state.ends,
     processIndices: state.processIndices,
+    domainIndices: state.domainIndices,
     categoryIndices: state.categoryIndices,
     isAfk: state.isAfk,
     processes: state.processes,
+    domains: state.domains,
   };
 }
 
@@ -496,20 +591,24 @@ export function buildInsightsModelFromPacked(packed: PackedInsightsRequest): Ins
   if (
     packed.ends.length !== count ||
     packed.processIndices.length !== count ||
+    packed.domainIndices.length !== count ||
     packed.categoryIndices.length !== count ||
     packed.isAfk.length !== count
   ) {
     throw new Error("Packed Insights columns have mismatched lengths");
   }
-  const sessions: Session[] = Array.from({ length: count }, (_, index) => ({
-    id: index,
-    start: packed.starts[index],
-    end: packed.ends[index],
-    process: packed.processes[packed.processIndices[index]] ?? "",
-    title: "",
-    domain: null,
-    isAfk: packed.isAfk[index] !== 0,
-  }));
+  const sessions: Session[] = Array.from({ length: count }, (_, index) => {
+    const domainIndex = packed.domainIndices[index];
+    return {
+      id: index,
+      start: packed.starts[index],
+      end: packed.ends[index],
+      process: packed.processes[packed.processIndices[index]] ?? "",
+      title: "",
+      domain: domainIndex === 0 ? null : packed.domains[domainIndex - 1] ?? null,
+      isAfk: packed.isAfk[index] !== 0,
+    };
+  });
   const classifier: Classifier = (value) => {
     const index = (value as Session).id;
     const categoryIndex = packed.categoryIndices[index];

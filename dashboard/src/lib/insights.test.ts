@@ -40,7 +40,8 @@ const make = (
   end: number,
   process: string,
   isAfk = false,
-): Session => ({ id, start, end, process, title: "", domain: null, isAfk });
+  domain: string | null = null,
+): Session => ({ id, start, end, process, title: "", domain, isAfk });
 const sessions: Session[] = [
   make(1, at(5, 9), at(5, 10), "code.exe"),
   make(2, at(6, 9), at(6, 10), "video.exe"),
@@ -211,8 +212,64 @@ describe("minimum app time", () => {
   });
 });
 
+describe("ranked websites", () => {
+  const websiteRules: Rule[] = [
+    ...rules,
+    { id: 10, matchType: "domain", pattern: "google.com", categoryId: 1, priority: 1 },
+    { id: 11, matchType: "domain", pattern: "mail.google.com", categoryId: 2, priority: 1 },
+  ];
+  const websiteSessions: Session[] = [
+    make(30, at(5, 9), at(5, 9) + 600, "chrome.exe", false, "docs.google.com"),
+    make(31, at(5, 10), at(5, 10) + 120, "chrome.exe", false, "mail.google.com"),
+    make(32, at(8, 9), at(8, 9) + 1_200, "chrome.exe", false, "docs.google.com"),
+    make(33, at(8, 10), at(8, 10) + 300, "chrome.exe", false, "mail.google.com"),
+    make(34, at(8, 11), at(8, 11) + 1_800, "chrome.exe"),
+    // A stored domain is a Website only while its process is configured as a browser.
+    make(35, at(8, 12), at(8, 12) + 600, "firefox.exe", false, "example.com"),
+  ];
+
+  const model = buildInsightsModel({
+    sessions: websiteSessions,
+    range,
+    categories,
+    rules: websiteRules,
+    browserProcesses: ["chrome.exe"],
+    weekStart: "Sunday",
+    weeklyGoalHours: 0,
+    // Deliberately too high for any app: it must not silently erase websites.
+    minAppSecondsPerDay: 3_600,
+    aliases: { "docs.google.com": "Google Docs" },
+    focusChainMaxGapSeconds: 120,
+    dayStartHour: 0,
+    dayEndHour: 24,
+    labelMode: "date",
+  });
+
+  it("ranks exact normalized hosts instead of folding them into a parent", () => {
+    expect(model.websites.map((website) => website.key)).toEqual([
+      "docs.google.com",
+      "mail.google.com",
+    ]);
+    expect(model.websites.map((website) => website.name)).toEqual([
+      "Google Docs",
+      "mail.google.com",
+    ]);
+    expect(model.websites.map((website) => website.category?.name)).toEqual(["Focus", "Media"]);
+    expect(model.websites.map((website) => website.previousSeconds)).toEqual([600, 120]);
+    expect(model.apps).toEqual([]);
+  });
+
+  it("reports browser time that could not be assigned to a website", () => {
+    expect(model.websiteCoverage).toEqual({
+      totalSeconds: 3_300,
+      missingSeconds: 1_800,
+      missingFraction: 1_800 / 3_300,
+    });
+  });
+});
+
 describe("packed Insights transport", () => {
-  it("preserves long-range model output without transferring titles or domains", () => {
+  it("preserves long-range model output without transferring titles", () => {
     const longRange: Range = {
       start: new Date(2026, 4, 25),
       end: new Date(2026, 5, 11),
@@ -235,6 +292,36 @@ describe("packed Insights transport", () => {
     expect(buildInsightsModelFromPacked(packInsightsRequest(request))).toEqual(
       buildInsightsModel(request),
     );
+  });
+
+  it("deduplicates domains into a compact column without changing website output", () => {
+    const request = {
+      sessions: [
+        make(0, at(8, 9), at(8, 10), "chrome.exe", false, "docs.google.com"),
+        make(1, at(8, 10), at(8, 11), "chrome.exe", false, "docs.google.com"),
+        make(2, at(8, 11), at(8, 12), "chrome.exe"),
+      ],
+      range,
+      categories,
+      rules: [
+        ...rules,
+        { id: 12, matchType: "domain", pattern: "docs.google.com", categoryId: 1, priority: 1 },
+      ] as Rule[],
+      browserProcesses: ["chrome.exe"],
+      weekStart: "Sunday" as const,
+      weeklyGoalHours: 0,
+      minAppSecondsPerDay: 0,
+      aliases: {},
+      focusChainMaxGapSeconds: 120,
+      dayStartHour: 0,
+      dayEndHour: 24,
+      labelMode: "date" as const,
+    };
+    const packed = packInsightsRequest(request);
+
+    expect(packed.domains).toEqual(["docs.google.com"]);
+    expect([...packed.domainIndices]).toEqual([1, 1, 0]);
+    expect(buildInsightsModelFromPacked(packed)).toEqual(buildInsightsModel(request));
   });
 
   it("can pack in yielding chunks without changing the payload", async () => {

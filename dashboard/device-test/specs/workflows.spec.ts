@@ -378,6 +378,28 @@ test("@workflow Top Apps totals processes that share a display name as one row",
   await expect(rows.getByRole("textbox")).toHaveCount(0);
 });
 
+test("@workflow Insights switches from ranked apps to exact-host websites", async ({ page }) => {
+  await page.goto("/");
+  const topCount = page.getByRole("combobox", { name: "How many apps to list" });
+  const kind = page.getByRole("combobox", { name: "Ranked activity type" });
+  await expect(topCount).toContainText("Top 10");
+  await expect(kind).toContainText("Apps");
+
+  const [countBox, kindBox] = await Promise.all([topCount.boundingBox(), kind.boundingBox()]);
+  expect(countBox).not.toBeNull();
+  expect(kindBox).not.toBeNull();
+  expect(countBox!.x).toBeLessThan(kindBox!.x);
+
+  await kind.click();
+  await page.getByRole("option", { name: "Websites", exact: true }).click();
+
+  await expect(page.getByText("Top Websites", { exact: true })).toBeVisible();
+  await expect(page.getByTitle("docs.example.com")).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "How many websites to list" })).toContainText(
+    "Top 10",
+  );
+});
+
 // The update control is the whole update feature as far as a user is concerned:
 // if it does not appear, nobody updates, and if it moves the header when it
 // appears or expands, it breaks the one rule this header has — the date-range

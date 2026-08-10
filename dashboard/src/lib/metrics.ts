@@ -2,7 +2,7 @@
 // Sessions use unix SECONDS (DB native); Dates appear only at day/hour splits.
 
 import type { Category, Classifier } from "./classify";
-import { appGroupKey, cleanProcessName } from "./format";
+import { appGroupKey, cleanDomainName, cleanProcessName } from "./format";
 import { addDays, calendarDays, dayKey, listDays, type Range } from "./time";
 
 export interface Session {
@@ -222,9 +222,16 @@ export function goalPace(prodSec: number, range: Range, weeklyGoalHours: number)
   };
 }
 
-// ---------------- top apps ----------------
+// ---------------- ranked apps and websites ----------------
 
-export interface AppUsage {
+export interface RankedUsage {
+  key: string;
+  name: string;
+  seconds: number;
+  category: Category | null;
+}
+
+export interface AppUsage extends RankedUsage {
   /** Row identity — see `appGroupKey`. Processes sharing an alias share a row. */
   key: string;
   /** What the row is labeled, in the alias's own casing. */
@@ -234,8 +241,6 @@ export interface AppUsage {
    *  real process — a rule to write, a browser to test for — must consult all
    *  of them rather than assuming a single member. */
   processes: string[];
-  seconds: number;
-  category: Category | null;
 }
 
 /** An app row mid-build. `categorySeconds` exists only to settle the row's
@@ -321,6 +326,62 @@ export function rankAppUsage(rows: Map<string, AppUsageAccumulator>): AppUsage[]
     .sort((a, b) => b.seconds - a.seconds || a.key.localeCompare(b.key));
 }
 
+export interface WebsiteUsage extends RankedUsage {
+  /** Exact normalized hostname. Unlike app aliases, friendly website names do
+   *  not merge identities: two subdomains remain two analytical destinations. */
+  domain: string;
+}
+
+export interface WebsiteUsageAccumulator {
+  key: string;
+  name: string;
+  domain: string;
+  seconds: number;
+  categorySeconds: Map<number | null, { category: Category | null; seconds: number }>;
+}
+
+/** Fold detected browser time into one exact-host website row. `www.` has
+ * already been removed by the tracker; every remaining subdomain is retained. */
+export function addWebsiteSeconds(
+  into: Map<string, WebsiteUsageAccumulator>,
+  domain: string,
+  aliases: Record<string, string> | undefined,
+  category: Category | null,
+  seconds: number,
+): void {
+  const key = domain.toLowerCase();
+  let row = into.get(key);
+  if (!row) {
+    row = {
+      key,
+      name: cleanDomainName(domain, aliases),
+      domain,
+      seconds: 0,
+      categorySeconds: new Map(),
+    };
+    into.set(key, row);
+  }
+  row.seconds += seconds;
+  const id = category?.id ?? null;
+  const bucket = row.categorySeconds.get(id);
+  if (bucket) bucket.seconds += seconds;
+  else row.categorySeconds.set(id, { category, seconds });
+}
+
+export function rankWebsiteUsage(
+  rows: Map<string, WebsiteUsageAccumulator>,
+): WebsiteUsage[] {
+  return [...rows.values()]
+    .map((row) => ({
+      key: row.key,
+      name: row.name,
+      domain: row.domain,
+      seconds: row.seconds,
+      category: dominantCategory(row.categorySeconds),
+    }))
+    .sort((a, b) => b.seconds - a.seconds || a.key.localeCompare(b.key));
+}
+
 export function topApps(
   sessions: Session[],
   classify: Classifier,
@@ -365,7 +426,7 @@ export function topAppOf(
 
 export type DeltaDirection = "good" | "bad" | "neutral";
 
-export interface AppDelta extends AppUsage {
+export interface UsageDelta {
   /** Fractional change vs previous period; null when no previous data. */
   deltaFraction: number | null;
   /** Seconds in the previous period, for phrasing the change. */
@@ -382,6 +443,9 @@ export interface AppDelta extends AppUsage {
   robustFraction: number | null;
   direction: DeltaDirection;
 }
+
+export type AppDelta = AppUsage & UsageDelta;
+export type WebsiteDelta = WebsiteUsage & UsageDelta;
 
 /** Seconds per day per app row over the range's days (zero-filled arrays),
  *  keyed by `appGroupKey` to match the rows these series are looked up by. */
@@ -482,11 +546,11 @@ export function robustDeltaFraction(
  * A delta is colored only when the change is large in relative terms, large
  * enough in absolute terms to matter, and not the artifact of a single day.
  */
-export function withDeltas(
-  current: AppUsage[],
-  previous: AppUsage[],
+export function withDeltas<T extends RankedUsage>(
+  current: T[],
+  previous: Array<Pick<RankedUsage, "key" | "seconds">>,
   opts: DeltaOptions = {},
-): AppDelta[] {
+): Array<T & UsageDelta> {
   const prevByKey = new Map(previous.map((a) => [a.key, a.seconds]));
   return current.map((app) => {
     const prev = prevByKey.get(app.key) ?? 0;

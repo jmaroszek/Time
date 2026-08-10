@@ -2,25 +2,29 @@ import { useState } from "react";
 
 import type { ActivityMetric, ActivityStack } from "../lib/overview";
 
-export const TOP_APPS_OPTIONS = [5, 10, 15, 20];
+export const TOP_ITEMS_OPTIONS = [5, 10, 15, 20];
+export type RankedEntityKind = "apps" | "websites";
 
 /** Launch defaults for the Insights view controls. These are the values every
  *  fresh app session starts on; a change made in the UI overrides them until the
  *  next reload. The state lives in App (not OverviewTab) so it survives switching
  *  away to another tab and back — OverviewTab unmounts on a tab switch, App does
  *  not. */
-const DEFAULT_TOP_APPS = TOP_APPS_OPTIONS[1]; // Top 10
+const DEFAULT_TOP_ITEMS = TOP_ITEMS_OPTIONS[1]; // Top 10
 const DEFAULT_BLOCK_MINUTES = 15;
 const DEFAULT_METRIC: ActivityMetric = "productive";
 const DEFAULT_STACK_BY: ActivityStack = "state"; // "Productivity"
 
-/** Selected timeline resolution, aggregate view, top-app count, calendar metric,
- *  and hours-chart stacking — everything the Insights tab lets you change and
- *  should remember for the rest of the session. `aggregateView` starts null so
- *  OverviewTab can pin its default the first time a long-enough range appears. */
+/** Selected timeline resolution, aggregate view, ranked-identity view/count,
+ *  calendar metric, and hours-chart stacking — everything the Insights tab lets
+ *  you change and should remember for the rest of the session. `aggregateView`
+ *  starts null so OverviewTab can pin its default the first time a long-enough
+ *  range appears. */
 export interface InsightsViewState {
   topN: number;
   setTopN: (n: number) => void;
+  rankedEntityKind: RankedEntityKind;
+  setRankedEntityKind: (kind: RankedEntityKind) => void;
   blockMinutes: number;
   setBlockMinutes: (n: number) => void;
   aggregateView: "rhythm" | "calendar" | null;
@@ -38,7 +42,8 @@ export interface InsightsViewState {
 }
 
 export function useInsightsView(): InsightsViewState {
-  const [topN, setTopN] = useState(DEFAULT_TOP_APPS);
+  const [topN, setTopN] = useState(DEFAULT_TOP_ITEMS);
+  const [rankedEntityKind, setRankedEntityKind] = useState<RankedEntityKind>("apps");
   const [blockMinutes, setBlockMinutes] = useState(DEFAULT_BLOCK_MINUTES);
   const [aggregateView, setAggregateView] = useState<"rhythm" | "calendar" | null>(null);
   const [metric, setMetric] = useState<ActivityMetric>(DEFAULT_METRIC);
@@ -47,6 +52,8 @@ export function useInsightsView(): InsightsViewState {
   return {
     topN,
     setTopN,
+    rankedEntityKind,
+    setRankedEntityKind,
     blockMinutes,
     setBlockMinutes,
     aggregateView,

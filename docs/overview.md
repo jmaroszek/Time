@@ -20,19 +20,22 @@ selectable resolution (5/10/15/30-minute blocks, or exact session segments).
 Dim gray blocks are AFK. The shape of a day is instantly readable — morning
 browse, two work blocks around lunch, the evening tail.
 
-## Top Apps
+## Top Apps and Websites
 
-Apps ranked by time in range, with a delta against the previous period of the
-same length. Deltas are colored only when the change is big enough to mean
-something — a large enough shift, enough minutes behind it, and not the result
-of one unusual day — and the color is category-aware: *more* time in a
-productive app is green, more time in a non-productive one is red, and vice
-versa for declines.
+The two menus read together as **Top 10 Apps** or **Top 10 Websites**. Both rank
+time in the range and compare it with the previous period of the same length.
+Deltas are colored only when the change is big enough to mean something — a
+large enough shift, enough minutes behind it, and not the result of one unusual
+day — and the color is category-aware: *more* time in a productive app or site
+is green, more time in a non-productive one is red, and vice versa for declines.
 
-Double-click an app name to give it a friendly name; Enter or focus-out saves,
-Escape cancels, and a blank name restores the recorded default. The minimum-app
-setting applies to this list only. Search, session review, and exact deletion
-live in [Activity](apps.md), while Insights stays focused on analysis.
+Websites use exact normalized hostnames: `www.` is already removed, while a
+meaningful subdomain such as `docs.google.com` remains distinct from
+`mail.google.com`. Only detected website time appears, so the card explains when
+browser activity lacks that signal and offers the first-party Time Web Extension
+when none can be identified. The minimum-app setting applies only to the Apps
+view. Friendly names, search, session review, and exact deletion live in
+[Activity](apps.md), while Insights stays focused on analysis.
 
 ## Daily Hours
 
