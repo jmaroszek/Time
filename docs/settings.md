@@ -5,22 +5,19 @@ Every knob lives in the database and is edited here. You do not need to edit con
 ![Settings tab](images/settings.png)
 
 Settings is a single column, read top to bottom: tracker status, what may be
-recorded, then the knobs, then the data itself. Adding a setting makes the
-column longer and never rearranges it.
+recorded, when it runs, what the recording means, what is shown, and finally the
+data itself. On a wide window an index beside the column jumps to any section.
 
-## Recording & startup
+## Privacy & recording
+
+What Time is allowed to capture, and the one request that leaves your machine.
 
 | Setting | What it controls |
 | --- | --- |
 | **Record activity** | Allows the tracker to record app names and times. |
 | **Store window titles** | Stores window titles in the database. This enables window-based classification rules, but stored data may contain sensitive information. |
-| **Start at Windows sign-in** | Start the tracker when you sign into this Windows account. |
-| **Show tray icon** | Show tracker icon, status, and controls in the Windows system tray. |
+| **Website detection** | Links to the Time Web Extension for Chrome and Firefox, which is what lets browser activity be recorded as individual websites rather than one browser. Nothing is installed from here — the links open the stores. |
 | **Check for updates** | Check for updates once per day. Time will not install a new version without your consent. |
-
-**Show tray icon** controls the notification-area icon and nothing else. Hiding
-it does not stop recording and does not change whether Time starts with Windows
-— those two are separate switches above, and they stay exactly as you set them.
 
 **Check for updates** is the only time Time uses the network, so it is worth
 being precise about. The request fetches one small file and sends nothing with
@@ -39,19 +36,41 @@ exclusions and at three hundred. **View and manage** opens the list itself in
 the [Activity tab](apps.md), under the **Excluded from tracking** filter, next
 to the other per-item curation.
 
-## Goals, window, and behavior
+## Startup & schedule
+
+When the tracker runs. Separate from what it records, above.
 
 | Setting | What it controls |
 | --- | --- |
-| **Weekly productivity goal** | The target the Insights goal-pace card measures against. Set to 0 hours to leave your goal unset. |
-| **Day starts/ends at** | The hour window drawn on the Timeline and Hour-of-Day plots. Activity outside the window still counts in all totals. |
-| **Week starts on** | Affects weekly presets, bucketing, and goal pacing. |
+| **Start at Windows sign-in** | Start the tracker when you sign into this Windows account. |
+| **Only record on a schedule** | Keep the tracker running, but record only during the days and local hours you pick. A start later than the end runs overnight into the next day. |
+| **Show tray icon** | Show tracker icon, status, and controls in the Windows system tray. |
+
+Scheduling holds **Start at Windows sign-in** on, because a schedule the tracker
+is not running to observe would silently record nothing. The sign-in row says so
+while scheduling is enabled, which is why the two sit in one section.
+
+**Show tray icon** controls the notification-area icon and nothing else. Hiding
+it does not stop recording and does not change whether Time starts with Windows
+— those two are separate switches above, and they stay exactly as you set them.
+
+## Focus & idle, goals, and hidden items
+
+Listed in the order Settings presents them: the two numbers that decide what a
+recording *means* come first, then what the numbers are measured against, then
+what gets drawn and listed.
+
+| Setting | What it controls |
+| --- | --- |
 | **AFK idle threshold** | No input for this long marks you Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use. |
 | **Focus chain max gap** | Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration, while unproductive or AFK time ends it immediately. |
+| **Weekly productivity goal** | The target the Insights goal-pace card measures against. Set to 0 hours to leave your goal unset. |
+| **Week starts on** | Affects weekly presets, bucketing, and goal pacing. |
+| **Day starts/ends at** | The hour window drawn on the Timeline and Hour-of-Day plots. Activity outside the window still counts in all totals. |
+| **Minimum app time** | A rate: apps averaging less than this per tracked day are hidden only from Insights' Top Apps. Because it scales with the days that recorded activity, the same apps clear the bar on Today and on Year. Activity always shows the complete catalog. |
 | **Hide system utilities** | Hides uncategorized installers, drivers, and temporary files. |
 | **Hide rare items** | Hides uncategorized items only when their all-history time and session count are both below the configured limits. Grouped in Settings with the two limits that define "rare", since neither reads correctly alone. |
 | **Rare-item time limit** / **Rare-item session limit** | An item counts as rare only when its all-history time is under the time limit *and* its all-history session count is at or under the session limit. The result does not change with the visible date range. |
-| **Minimum app time** | A rate: apps averaging less than this per tracked day are hidden only from Insights' Top Apps. Because it scales with the days that recorded activity, the same apps clear the bar on Today and on Year. Activity always shows the complete catalog. |
 | **Heartbeat interval** | How often data is saved to the database. |
 | **Browser processes** | Which apps can be split into Websites and use Website or Window rules. Each process appears as a removable chip; type or paste a name or installation path and press Enter to add another. Several comma-separated or line-separated names can be pasted at once. Common browsers ship without `.exe` suffixes, while matching keeps canonical executable names internally. |
 

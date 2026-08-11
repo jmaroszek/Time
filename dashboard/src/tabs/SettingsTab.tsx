@@ -605,7 +605,12 @@ export default function SettingsTab({
         </div>
       </SettingsSection>
 
-      <Section title="Recording & startup">
+      {/* Consent, what gets kept, and the one request that leaves this machine.
+          Those are the questions a tracker owes a straight answer to, so they
+          lead and they sit together — including the update check, which is not
+          an "advanced" detail but the only time Time touches the network.
+          When the tracker runs is a separate question, and moved below. */}
+      <Section title="Privacy & recording">
         <Row
           label="Record activity"
           help="Allows the tracker to record app names and times."
@@ -622,6 +627,48 @@ export default function SettingsTab({
             />
           }
         />
+        {/* The extension is how websites get recorded at all, so it belongs
+            with the other decisions about what is captured. It sat in Advanced,
+            which is the heading that tells people not to touch what is under
+            it — the wrong place for the one thing here they may need to go
+            install. The process list it depends on is genuinely advanced and
+            stays there; its help names this row. */}
+        <Row
+          stacked
+          compact
+          label="Website detection"
+          help="Time Web Extension allows you to track activity in web browsers. Download in the Chrome or Firefox web store."
+          control={<ExtensionLinks />}
+        />
+        {/* The only network request Time makes. Installing stays a separate,
+            manual act: the control for it appears beside the tabs when a
+            version is waiting. */}
+        <Row
+          label="Check for updates"
+          help="Check for updates once per day. Time will not install a new version without your consent."
+          control={
+            <PrivacyToggle
+              label="Check for updates"
+              enabled={
+                (drafts.check_updates_automatically
+                  ?? meta.settings.check_updates_automatically
+                  ?? "1") !== "0"
+              }
+              disabled={savingKeys.has("check_updates_automatically")}
+              onChange={(enabled) =>
+                selectSetting("check_updates_automatically", enabled ? "1" : "0")
+              }
+            />
+          }
+        />
+        <ExclusionSummary onManage={onManageExclusions} />
+      </Section>
+
+      {/* Sign-in and the schedule share a section because they are one
+          decision wearing two switches: scheduling holds launch-at-login on,
+          and the row says so. Separating them would put a dependency and the
+          hint that explains it in different cards. */}
+      <Section title="Startup & schedule">
         <Row
           label="Start at Windows sign-in"
           help="Start the tracker when you sign into this Windows account."
@@ -728,52 +775,97 @@ export default function SettingsTab({
             />
           }
         />
-        {/* The only network request Time makes. Installing stays a separate,
-            manual act: the control for it appears beside the tabs when a
-            version is waiting. */}
-        <Row
-          label="Check for updates"
-          help="Check for updates once per day. Time will not install a new version without your consent."
-          control={
-            <PrivacyToggle
-              label="Check for updates"
-              enabled={
-                (drafts.check_updates_automatically
-                  ?? meta.settings.check_updates_automatically
-                  ?? "1") !== "0"
-              }
-              disabled={savingKeys.has("check_updates_automatically")}
-              onChange={(enabled) =>
-                selectSetting("check_updates_automatically", enabled ? "1" : "0")
-              }
-            />
-          }
-        />
-        <ExclusionSummary onManage={onManageExclusions} />
       </Section>
 
-      <Section title="Insights">
+      {/* Directly under what gets recorded, because these two numbers
+          decide what the recording *means*: the idle threshold draws the line
+          between computer use and time away from it, and the chain gap decides
+          where one stretch of focus ends. Every section below reads or draws
+          the totals they define. */}
+      <Section title="Focus & idle">
+        <Row label="AFK idle threshold" help="No input for this long marks you Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use." control={numberControl(SPECS.idle, "AFK idle threshold", "min")} />
+        <Row label="Focus chain max gap" help="Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration, while unproductive or AFK time ends it immediately." control={numberControl(SPECS.focus, "Focus chain max gap", "min")} />
+      </Section>
+
+      {/* One section, not the two this was — "Insights" and "Timeline window"
+          were named for the tabs they touch rather than the question they
+          answer, which is how "Week starts on" ended up filed under a window it
+          has nothing to do with while pacing the goal two sections above it.
+          Read together they are the frame the numbers are measured in: the
+          target, the week it is paced against, and the hours drawn. */}
+      <Section title="Goals & time">
         <Row label="Weekly productivity goal" help="Set to 0 hours to leave your goal unset." control={numberControl(SPECS.goal, "Weekly productivity goal", "h")} />
-        <Row
-          label="Minimum app time"
-          help="Hides apps averaging less than this per tracked day from Insights' Top Apps."
-          control={numberControl(SPECS.minimum, "Minimum app time", "min/day")}
-        />
-      </Section>
-
-      <Section title="Timeline window">
-        <Row label="Day starts at" help="First hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.start, "Day starts at", undefined, true)} />
-        <Row label="Day ends at" help="Last hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.end, "Day ends at", undefined, true)} />
         <Row
           label="Week starts on"
           help="Affects weekly presets, bucketing, and goal pacing."
           control={<Segmented label="Week starts on" options={["Sunday", "Monday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
         />
+        <Row label="Day starts at" help="First hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.start, "Day starts at", undefined, true)} />
+        <Row label="Day ends at" help="Last hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.end, "Day ends at", undefined, true)} />
       </Section>
 
-      <Section title="Focus & idle">
-        <Row label="AFK idle threshold" help="No input for this long marks you Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use." control={numberControl(SPECS.idle, "AFK idle threshold", "min")} />
-        <Row label="Focus chain max gap" help="Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration, while unproductive or AFK time ends it immediately." control={numberControl(SPECS.focus, "Focus chain max gap", "min")} />
+      {/* Every way to hide something, in one place. The minimum-app-time rate
+          used to sit under "Insights" and these two switches under "Activity
+          list", which filed one question — stop showing me noise — under two
+          headings by which tab it happened to affect. Which rows appear is
+          still a question about the data, so this sits above Appearance, the
+          one section that changes nothing but how the app looks. */}
+      <Section
+        title="Hidden items"
+        intro="Keep low-signal items out of the lists you read. Nothing here changes a total — the time is still recorded and still counted — and categorized items always remain visible."
+      >
+        <Row
+          label="Minimum app time"
+          help="Hides apps averaging less than this per tracked day from Insights' Top Apps."
+          control={numberControl(SPECS.minimum, "Minimum app time", "min/day")}
+        />
+        {/* Utilities are recognized by name alone, so this switch stands on its
+            own and leads. The rare-item switch cannot be read without the two
+            limits that define "rare", so those three travel together below. */}
+        <Row
+          label="Hide system utilities"
+          help="Hides uncategorized installers, drivers, and temporary files."
+          control={
+            <PrivacyToggle
+              label="Hide system utilities"
+              enabled={hideUtilities}
+              onChange={(enabled) => setNoiseVisibility(hideRare, enabled)}
+            />
+          }
+        />
+        <SettingGroup
+          dependents={hideRare && (
+            <>
+              <Row
+                bare
+                compact
+                label="Time limit"
+                help="Less than this much recorded time, across all history."
+                control={numberControl(SPECS.noiseTime, "Rare-item time limit", "min")}
+              />
+              <Row
+                bare
+                compact
+                label="Session limit"
+                help="…and no more than this many sessions."
+                control={numberControl(SPECS.noiseSessions, "Rare-item session limit", "sessions")}
+              />
+            </>
+          )}
+        >
+          <Row
+            bare
+            label="Hide rare items"
+            help="Hides uncategorized items that fall under both of the limits below."
+            control={
+              <PrivacyToggle
+                label="Hide rare items"
+                enabled={hideRare}
+                onChange={(enabled) => setNoiseVisibility(enabled, hideUtilities)}
+              />
+            }
+          />
+        </SettingGroup>
       </Section>
 
       <Section
@@ -882,59 +974,6 @@ export default function SettingsTab({
         </div>
       </Section>
 
-      <Section
-        title="Activity list"
-        intro="Hide obscure system utilities and rarely seen items from the Activity list. This never changes totals or Insights, and categorized items always remain visible."
-      >
-        {/* Utilities are recognized by name alone, so this switch stands on its
-            own and leads. The rare-item switch cannot be read without the two
-            limits that define "rare", so those three travel together below. */}
-        <Row
-          label="Hide system utilities"
-          help="Hides uncategorized installers, drivers, and temporary files."
-          control={
-            <PrivacyToggle
-              label="Hide system utilities"
-              enabled={hideUtilities}
-              onChange={(enabled) => setNoiseVisibility(hideRare, enabled)}
-            />
-          }
-        />
-        <SettingGroup
-          dependents={hideRare && (
-            <>
-              <Row
-                bare
-                compact
-                label="Time limit"
-                help="Less than this much recorded time, across all history."
-                control={numberControl(SPECS.noiseTime, "Rare-item time limit", "min")}
-              />
-              <Row
-                bare
-                compact
-                label="Session limit"
-                help="…and no more than this many sessions."
-                control={numberControl(SPECS.noiseSessions, "Rare-item session limit", "sessions")}
-              />
-            </>
-          )}
-        >
-          <Row
-            bare
-            label="Hide rare items"
-            help="Hides uncategorized items that fall under both of the limits below."
-            control={
-              <PrivacyToggle
-                label="Hide rare items"
-                enabled={hideRare}
-                onChange={(enabled) => setNoiseVisibility(enabled, hideUtilities)}
-              />
-            }
-          />
-        </SettingGroup>
-      </Section>
-
       <Section title="Advanced">
         <Row label="Heartbeat interval" help="How often data is saved to the database." control={numberControl(SPECS.heartbeat, "Heartbeat interval", "s")} />
         <Row
@@ -948,23 +987,20 @@ export default function SettingsTab({
             />
           }
         />
-        <Row
-          stacked
-          compact
-          label="Website detection"
-          help="Time Web Extension allows you to track activity in web browsers. Download in the Chrome or Firefox web store."
-          control={<ExtensionLinks />}
-        />
         <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-3">
           Dashboard {appVersion ?? "—"} · Tracker {meta.settings.tracker_version ?? "not stamped yet"}
         </p>
       </Section>
 
+      {/* Restoring defaults and erasing history are the same kind of act, so
+          they end the page together rather than with support wedged between
+          them. Data goes last: it is the only section that can destroy
+          something no setting can put back. */}
+      <HelpAndFeedbackSection appVersion={appVersion} trackerVersion={meta.settings.tracker_version} />
       <RestoreDefaultsSection
         disabled={savingKeys.size > 0}
         onRestored={() => setPause({ paused: false, until: 0 })}
       />
-      <HelpAndFeedbackSection appVersion={appVersion} trackerVersion={meta.settings.tracker_version} />
       <DataSection settingsBusy={savingKeys.size > 0} />
       </div>
       <SectionRail />
@@ -1016,7 +1052,7 @@ function ExclusionSummary({ onManage }: { onManage: () => void }) {
 
 /** The app versions that make a report actionable travel with the email
  *  itself rather than sitting in this section — the one place they're worth
- *  reading on their own is beside the update control in Recording & startup,
+ *  reading on their own is beside the update control in Privacy & recording,
  *  which already reports what's installed. */
 function HelpAndFeedbackSection({
   appVersion,

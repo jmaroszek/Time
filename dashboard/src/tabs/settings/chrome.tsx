@@ -29,15 +29,15 @@ export function Section({ title, intro, children }: { title: string; intro?: str
  *  pointing at nothing — the failure a hand-written list of links invites. */
 const SETTINGS_SECTIONS = [
   "Tracker status",
-  "Recording & startup",
-  "Insights",
-  "Timeline window",
+  "Privacy & recording",
+  "Startup & schedule",
   "Focus & idle",
+  "Goals & time",
+  "Hidden items",
   "Appearance",
-  "Activity list",
   "Advanced",
-  "Defaults",
   "Help & feedback",
+  "Defaults",
   "Data management",
 ] as const;
 

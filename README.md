@@ -94,7 +94,7 @@ unconditional fetch of a static file — it carries no identifier, no version, a
 nothing about your activity, so the only thing the server can log is that some
 computer asked, which is what any web server records for any visitor. Nothing is
 ever installed without you clicking Update, and the whole check can be turned off
-under Settings → Recording & startup.
+under Settings → Privacy & recording.
 
 The dashboard uses a restrictive content-security policy and a fixed-path,
 least-authority database bridge. See [SECURITY.md](SECURITY.md) for the threat

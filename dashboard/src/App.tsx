@@ -319,7 +319,7 @@ function Shell() {
             historyRevision={historyRevision}
             liveTick={liveTick}
             onOpenSettings={() => {
-              setHighlightSection("Goals");
+              setHighlightSection("Goals & time");
               setTab("settings");
             }}
           />
