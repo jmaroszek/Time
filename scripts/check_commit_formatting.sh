@@ -22,6 +22,21 @@
 #     Intermediate commits in a series are not always self-contained, and
 #     compilation is already gated on the tip by the Windows job. This job
 #     stays about formatting alone so it cannot invent failures of its own.
+#
+# Two commits in a range are deliberately not checked, because blaming either
+# is always wrong and doing so is how this job first went red:
+#
+#   * one that predates the current toolchain pin. rustfmt's output changes
+#     between releases, so a commit formatted against an older rustfmt can
+#     disagree with today's through nobody's fault. The commit that moves the
+#     pin carries whatever reformatting the bump required, so the walk starts
+#     there.
+#   * one that does not touch the crate at all. A README edit cannot change how
+#     Rust formats, but it can be the oldest commit in a push, and the oldest
+#     commit is what an unscoped walk reports.
+#
+# Neither exemption leaves anything ungated: the Windows job runs `cargo fmt
+# --check` against the tip regardless of what this walk skipped.
 
 set -euo pipefail
 
@@ -31,6 +46,7 @@ readonly MAX_COMMITS=50
 # files, so the ignored target/ directory cannot leak in.
 readonly SOURCE_PATH='dashboard/src-tauri'
 readonly MANIFEST_PATH='dashboard/src-tauri/Cargo.toml'
+readonly TOOLCHAIN_PATH='rust-toolchain.toml'
 readonly DEFAULT_EDITION='2021'
 readonly EMPTY_SHA='0000000000000000000000000000000000000000'
 
@@ -72,14 +88,37 @@ fi
 
 failed=()
 unparsed=()
+checked=0
+
+# Empty when the pin has never been committed, which disables the floor rather
+# than skipping everything: an unpinned repository has no reproducible rustfmt
+# to be fair about in the first place.
+pin_commit="$(git log -1 --format='%H' -- "$TOOLCHAIN_PATH" 2>/dev/null || true)"
 
 for commit in "${commits[@]}"; do
   short="$(git rev-parse --short "$commit")"
   subject="$(git log -1 --format='%s' "$commit")"
   label="${short}  ${subject}"
 
+  # `--is-ancestor` counts a commit as its own ancestor, so the pin commit is
+  # compared out explicitly: it must be checked, not skipped.
+  if [[ -n "$pin_commit" && "$commit" != "$pin_commit" ]] &&
+    git merge-base --is-ancestor "$commit" "$pin_commit" 2>/dev/null; then
+    echo "skip  ${label}  (predates the toolchain pin)"
+    continue
+  fi
+
   if ! git rev-parse --verify --quiet "${commit}:${SOURCE_PATH}" >/dev/null; then
     echo "skip  ${label}  (no ${SOURCE_PATH})"
+    continue
+  fi
+
+  # A merge has no single parent to compare against and a root commit has none
+  # at all, so both are checked rather than guessed at.
+  parent_count=$(($(git rev-list --parents -n 1 "$commit" | wc -w) - 1))
+  if ((parent_count == 1)) &&
+    git diff --quiet "${commit}^" "$commit" -- "$SOURCE_PATH"; then
+    echo "skip  ${label}  (does not touch ${SOURCE_PATH})"
     continue
   fi
 
@@ -120,6 +159,7 @@ for commit in "${commits[@]}"; do
     head -1)"
   edition="${edition:-$DEFAULT_EDITION}"
 
+  checked=$((checked + 1))
   if output="$(rustfmt --check --edition "$edition" "${roots[@]}" 2>&1)"; then
     echo "ok    ${label}"
   elif grep -q '^Diff in ' <<<"$output"; then
@@ -148,7 +188,10 @@ if ((${#unparsed[@]} > 0)); then
 fi
 
 if ((${#failed[@]} == 0)); then
-  echo "Formatting verified for ${#commits[@]} commit(s)."
+  # The two counts differ whenever something was skipped, and a bare "verified
+  # 6 commits" over a walk that checked 3 is the kind of quiet overstatement
+  # that makes a green gate worth less than no gate.
+  echo "Formatting verified for ${checked} of ${#commits[@]} commit(s) in range."
   exit 0
 fi
 
