@@ -1738,12 +1738,86 @@ impl TimeDatabase {
         Self::sibling(database_path, "restore_failed.db")
     }
 
+    /// Retry a file operation that a transient Windows lock can fail.
+    ///
+    /// Windows releases a database file a moment *after* the close future that
+    /// owned it resolves, so there is nothing the restore can await before
+    /// renaming or deleting it. `RUST_TEST_THREADS` narrowed that window enough
+    /// to make the suite usually pass; it cannot close it, and a real machine
+    /// has antivirus and search indexers opening files behind Time's back
+    /// besides. Retrying briefly is the only thing that makes these operations
+    /// deterministic.
+    ///
+    /// The sleep blocks rather than yields. Every caller reaches this through
+    /// `block_on` during startup, before there is anything else to run, and a
+    /// blocking sleep keeps the helper usable from `RestoreSwap`'s synchronous
+    /// commit and rollback paths too.
+    fn retry_while_locked<T>(
+        mut operation: impl FnMut() -> std::io::Result<T>,
+    ) -> std::io::Result<T> {
+        // ERROR_SHARING_VIOLATION, plus ERROR_ACCESS_DENIED for the
+        // delete-pending state a handle that is still closing leaves behind.
+        // Rust maps neither to a distinct `ErrorKind`, so match the raw codes.
+        const TRANSIENT: [i32; 2] = [32, 5];
+        // Half a second, and deliberately not more. sqlx finishes
+        // `sqlite3_close` on a background thread after `pool.close()` has
+        // already resolved, so what this waits on needs a thread to make
+        // progress — and the sleep below blocks rather than yields. Raising the
+        // budget to two seconds made a heavily oversubscribed run fail *more*
+        // often (4 in 60, against 1 in 100 at this setting): the longer wait
+        // starves the close it is waiting for. Half a second clears the lag
+        // without holding a runtime thread long enough to cause one.
+        const ATTEMPTS: u32 = 25;
+        const BACKOFF: Duration = Duration::from_millis(20);
+
+        let mut attempts = 0;
+        loop {
+            let error = match operation() {
+                Ok(value) => return Ok(value),
+                Err(error) => error,
+            };
+            attempts += 1;
+            let transient = error
+                .raw_os_error()
+                .is_some_and(|code| TRANSIENT.contains(&code));
+            if !transient || attempts >= ATTEMPTS {
+                return Err(error);
+            }
+            std::thread::sleep(BACKOFF);
+        }
+    }
+
+    /// Every failure here names the file. The error a sharing violation carries
+    /// says only that "another process" holds "the file", and a restore touches
+    /// six of them, so without the path a CI failure cannot be diagnosed at all.
     fn remove_if_exists(path: &Path) -> Result<(), String> {
-        match fs::remove_file(path) {
+        match Self::retry_while_locked(|| fs::remove_file(path)) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.to_string()),
+            Err(error) => Err(format!("could not remove {}: {error}", path.display())),
         }
+    }
+
+    fn rename_with_retry(from: &Path, to: &Path) -> Result<(), String> {
+        Self::retry_while_locked(|| fs::rename(from, to)).map_err(|error| {
+            format!(
+                "could not rename {} to {}: {error}",
+                from.display(),
+                to.display()
+            )
+        })
+    }
+
+    fn copy_with_retry(from: &Path, to: &Path) -> Result<(), String> {
+        Self::retry_while_locked(|| fs::copy(from, to))
+            .map(|_| ())
+            .map_err(|error| {
+                format!(
+                    "could not copy {} to {}: {error}",
+                    from.display(),
+                    to.display()
+                )
+            })
     }
 
     fn remove_database_sidecars(path: &Path) -> Result<(), String> {
@@ -1766,11 +1840,13 @@ impl TimeDatabase {
     async fn stage_consolidated_copy(source: &Path, destination: &Path) -> Result<(), String> {
         Self::remove_if_exists(destination)?;
         Self::remove_database_sidecars(destination)?;
-        fs::copy(source, destination).map_err(|error| error.to_string())?;
+        // The copies take the same treatment as the deletes and renames: the
+        // destination is a file this process may itself have closed moments
+        // ago, and opening it for writing is as lockable as removing it.
+        Self::copy_with_retry(source, destination)?;
         let source_log = source.with_extension("db-wal");
         if source_log.is_file() {
-            fs::copy(&source_log, destination.with_extension("db-wal"))
-                .map_err(|error| error.to_string())?;
+            Self::copy_with_retry(&source_log, &destination.with_extension("db-wal"))?;
         }
 
         let options = SqliteConnectOptions::new()
@@ -1796,7 +1872,7 @@ impl TimeDatabase {
         let bytes = serde_json::to_vec(value).map_err(|error| error.to_string())?;
         fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
         Self::remove_if_exists(path)?;
-        fs::rename(&temporary, path).map_err(|error| error.to_string())
+        Self::rename_with_retry(&temporary, path)
     }
 
     pub async fn prepare_restore(&self, source: PathBuf) -> Result<PendingRestore, String> {
@@ -1899,7 +1975,7 @@ impl TimeDatabase {
         // A process exit between the two renames leaves the old database in the
         // rollback slot. Put it back before retrying the staged swap.
         if rollback_path.exists() && !database_path.exists() && pending_path.exists() {
-            fs::rename(&rollback_path, database_path).map_err(|error| error.to_string())?;
+            Self::rename_with_retry(&rollback_path, database_path)?;
         }
         if rollback_path.exists() && database_path.exists() && !pending_path.exists() {
             let restored = Self::read_restore_settings(database_path, true).await?;
@@ -1921,20 +1997,20 @@ impl TimeDatabase {
             return Err("Staged database does not match its pending marker".into());
         }
         Self::remove_database_sidecars(database_path)?;
-        fs::rename(database_path, &rollback_path).map_err(|error| error.to_string())?;
-        if let Err(error) = fs::rename(&pending_path, database_path) {
+        Self::rename_with_retry(database_path, &rollback_path)?;
+        if let Err(error) = Self::rename_with_retry(&pending_path, database_path) {
             // Putting the original back is the only thing between a failed swap
             // and an empty database opened over the user's history. Discarding
             // that failure left no database in place, and the caller could not
             // tell the difference, so say it plainly instead.
-            if let Err(rollback) = fs::rename(&rollback_path, database_path) {
+            if let Err(rollback) = Self::rename_with_retry(&rollback_path, database_path) {
                 return Err(format!(
                     "The restore could not be applied ({error}) and the previous database could \
                      not be put back ({rollback}). It is saved as {}",
                     rollback_path.display()
                 ));
             }
-            return Err(error.to_string());
+            return Err(error);
         }
         Ok(Some(RestoreSwap {
             pending,
@@ -2013,10 +2089,12 @@ impl RestoreSwap {
         TimeDatabase::remove_database_sidecars(&self.database_path)?;
         let failed_path = TimeDatabase::failed_restore_path(&self.database_path)?;
         TimeDatabase::remove_if_exists(&failed_path)?;
-        fs::rename(&self.database_path, &failed_path).map_err(|error| error.to_string())?;
-        if let Err(error) = fs::rename(&self.rollback_path, &self.database_path) {
-            let _ = fs::rename(&failed_path, &self.database_path);
-            return Err(error.to_string());
+        TimeDatabase::rename_with_retry(&self.database_path, &failed_path)?;
+        if let Err(error) =
+            TimeDatabase::rename_with_retry(&self.rollback_path, &self.database_path)
+        {
+            let _ = TimeDatabase::rename_with_retry(&failed_path, &self.database_path);
+            return Err(error);
         }
         TimeDatabase::remove_if_exists(&failed_path)?;
         TimeDatabase::remove_if_exists(&self.marker_path)?;
@@ -2641,6 +2719,51 @@ mod tests {
             assert!(!root.join("restore_previous.db").exists());
             assert!(!root.join("restore_pending.json").exists());
         });
+    }
+
+    /// The restore swap renames a database the process has just closed, and
+    /// Windows releases that handle a moment after the close resolves. Hold a
+    /// genuine exclusive handle rather than simulating one: a share mode that
+    /// still permits deletion would let the rename through and prove nothing.
+    #[test]
+    #[cfg(windows)]
+    fn a_briefly_locked_file_is_renamed_once_the_handle_closes() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = scratch_root("database-lock-retry-test");
+        let source = root.join("locked.db");
+        let destination = root.join("moved.db");
+        std::fs::write(&source, b"contents").unwrap();
+
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&source)
+            .unwrap();
+        assert!(
+            std::fs::rename(&source, &destination).is_err(),
+            "the handle must actually block a plain rename, or this proves nothing"
+        );
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            drop(handle);
+        });
+
+        TimeDatabase::rename_with_retry(&source, &destination).unwrap();
+        holder.join().unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"contents");
+        assert!(!source.exists());
+    }
+
+    /// A lock is worth waiting out; a missing file never becomes present, and
+    /// retrying one for half a second would just slow every failure down.
+    #[test]
+    fn a_failure_that_is_not_a_lock_is_reported_with_its_path() {
+        let root = scratch_root("database-lock-missing-test");
+        let error =
+            TimeDatabase::rename_with_retry(&root.join("absent.db"), &root.join("target.db"))
+                .unwrap_err();
+        assert!(error.contains("absent.db"), "{error}");
     }
 
     #[test]
