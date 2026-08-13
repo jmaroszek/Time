@@ -10,22 +10,25 @@ ROOT = Path(__file__).resolve().parent.parent
 def _data_dir() -> Path:
     """Per-user data directory shared with the dashboard.
 
-    Both halves independently resolve the same %LOCALAPPDATA%\\Time location so
-    the SQLite database is a stable contract regardless of where the code lives.
-    Override with TIME_DATA_DIR (tests, or pointing at an alternate DB). The
-    repo-relative fallback only applies off Windows / when LOCALAPPDATA is unset.
+    Both halves independently resolve the same %LOCALAPPDATA%\\Time\\Data
+    location so the SQLite database is a stable contract regardless of where the
+    code lives. Everything the user owns — database, write-ahead log, logs,
+    backups — lives under this one directory, which keeps it distinct from the
+    installation beside it. Override with TIME_DATA_DIR (tests, or pointing at
+    an alternate DB). The repo-relative fallback only applies off Windows / when
+    LOCALAPPDATA is unset.
     """
     override = None if getattr(sys, "frozen", False) else os.environ.get("TIME_DATA_DIR")
     if override:
         return Path(override)
     local = os.environ.get("LOCALAPPDATA")
     if local:
-        return Path(local) / "Time"
+        return Path(local) / "Time" / "Data"
     return ROOT / "Data"
 
 
 DATA_DIR = _data_dir()
-DB_PATH = DATA_DIR / "time_log.db"
+DB_PATH = DATA_DIR / "database.db"
 LOG_PATH = DATA_DIR / "Logs" / "tracker.log"
 
 # Written to the settings table at startup so the dashboard can report it; bump

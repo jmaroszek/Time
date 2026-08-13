@@ -19,7 +19,7 @@ from tracker.db import SCHEMA_VERSION  # noqa: E402
 def verify_smoke_database(database: Path, local_app_data: Path) -> dict[str, object]:
     database = database.resolve()
     local_app_data = local_app_data.resolve()
-    expected = (local_app_data / "Time" / "time_log.db").resolve()
+    expected = (local_app_data / "Time" / "Data" / "database.db").resolve()
     if database != expected:
         raise ValueError(f"database resolved outside scratch LOCALAPPDATA: {database}")
     if not database.is_file():

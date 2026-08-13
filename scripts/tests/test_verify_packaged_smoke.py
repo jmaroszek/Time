@@ -10,7 +10,7 @@ from tracker import db
 
 def test_packaged_smoke_accepts_fresh_no_consent_database(tmp_path):
     local_app_data = tmp_path / "LOCALAPPDATA"
-    path = local_app_data / "Time" / "time_log.db"
+    path = local_app_data / "Time" / "Data" / "database.db"
     connection = db.open_db(path)
     connection.close()
 
@@ -22,7 +22,7 @@ def test_packaged_smoke_accepts_fresh_no_consent_database(tmp_path):
 
 
 def test_packaged_smoke_refuses_database_outside_declared_scratch_root(tmp_path):
-    outside = tmp_path / "elsewhere" / "time_log.db"
+    outside = tmp_path / "elsewhere" / "database.db"
     connection = db.open_db(outside)
     connection.close()
 
@@ -32,7 +32,7 @@ def test_packaged_smoke_refuses_database_outside_declared_scratch_root(tmp_path)
 
 def test_packaged_smoke_refuses_sessions_without_consent(tmp_path):
     local_app_data = tmp_path / "LOCALAPPDATA"
-    path = local_app_data / "Time" / "time_log.db"
+    path = local_app_data / "Time" / "Data" / "database.db"
     connection = db.open_db(path)
     connection.execute(
         "INSERT INTO sessions (start_ts,end_ts,process) VALUES (1,2,'code.exe')"
@@ -53,7 +53,7 @@ def test_packaged_smoke_refuses_sessions_without_consent(tmp_path):
 )
 def test_packaged_smoke_refuses_unsafe_settings(tmp_path, key, value, message):
     local_app_data = tmp_path / "LOCALAPPDATA"
-    path = local_app_data / "Time" / "time_log.db"
+    path = local_app_data / "Time" / "Data" / "database.db"
     connection = db.open_db(path)
     connection.execute("UPDATE settings SET value=? WHERE key=?", (value, key))
     connection.close()
@@ -67,7 +67,7 @@ def test_packaged_smoke_refuses_missing_database(tmp_path):
 
     with pytest.raises(ValueError, match="did not create"):
         verify_smoke_database(
-            local_app_data / "Time" / "time_log.db",
+            local_app_data / "Time" / "Data" / "database.db",
             local_app_data,
         )
 
@@ -76,7 +76,7 @@ def test_packaged_smoke_cli_emits_machine_readable_result(
     tmp_path, monkeypatch, capsys
 ):
     local_app_data = tmp_path / "LOCALAPPDATA"
-    path = local_app_data / "Time" / "time_log.db"
+    path = local_app_data / "Time" / "Data" / "database.db"
     connection = db.open_db(path)
     connection.close()
     monkeypatch.setattr(
@@ -102,7 +102,7 @@ def test_packaged_smoke_cli_labels_validation_failure(tmp_path, monkeypatch):
         "argv",
         [
             "verify_packaged_smoke.py",
-            str(local_app_data / "Time" / "time_log.db"),
+            str(local_app_data / "Time" / "Data" / "database.db"),
             "--local-app-data",
             str(local_app_data),
         ],

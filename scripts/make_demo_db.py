@@ -244,8 +244,10 @@ def main() -> int:
     args = ap.parse_args()
 
     out = Path(args.out).resolve()
-    if out.name == "time_log.db":
-        print("refusing to write the real tracker database (time_log.db)")
+    # Both names: "database.db" is the live tracker database, and "time_log.db"
+    # is what it was called before, so archived history keeps its guard too.
+    if out.name in {"database.db", "time_log.db"}:
+        print(f"refusing to write a real tracker database ({out.name})")
         return 1
     if out.exists() and not args.force:
         try:

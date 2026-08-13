@@ -2226,7 +2226,7 @@ pub fn database_path(base: &Path) -> PathBuf {
     if let Some(path) = std::env::var_os("TIME_DB_PATH") {
         return PathBuf::from(path);
     }
-    base.join("Time").join("time_log.db")
+    base.join("Time").join("Data").join("database.db")
 }
 
 #[cfg(test)]
@@ -2261,7 +2261,7 @@ mod tests {
     }
 
     fn scratch_database(name: &str) -> PathBuf {
-        scratch_root(name).join("time_log.db")
+        scratch_root(name).join("database.db")
     }
 
     #[test]
@@ -2636,7 +2636,7 @@ mod tests {
     #[test]
     fn a_backup_carrying_a_write_ahead_log_restores_everything_it_holds() {
         let root = scratch_root("database-restore-wal-test");
-        let live = root.join("time_log.db");
+        let live = root.join("database.db");
         let backup = root.join("copied-while-running.db");
 
         let origin = root.join("still-running.db");
@@ -2689,7 +2689,7 @@ mod tests {
     #[test]
     fn backup_folder_and_staged_restore_preserve_a_rollback_until_reopen() {
         let root = scratch_root("database-restore-test");
-        let path = root.join("time_log.db");
+        let path = root.join("database.db");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path.clone()).await.unwrap();
             sqlx::query(

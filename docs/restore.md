@@ -3,7 +3,7 @@
 All of your data lives in one SQLite file:
 
 ```
-%LOCALAPPDATA%\Time\time_log.db
+%LOCALAPPDATA%\Time\Data\database.db
 ```
 
 (The exact path is shown — with a copy button — in **Settings → Database**.)
@@ -14,7 +14,7 @@ Click **Back up now** in Settings. This writes a complete, self-contained
 snapshot named `backup_manual_<timestamp>.db` into:
 
 ```
-%LOCALAPPDATA%\Time\Backups\
+%LOCALAPPDATA%\Time\Data\Backups\
 ```
 
 The full path is shown when it finishes. It is safe to do this while the tracker
@@ -48,5 +48,5 @@ Time puts the previous database back and reports the failure after restart.
 - Restoring replaces *everything*: sessions, categories, rules, and settings
   revert to the moment the backup was taken. Activity recorded after that
   backup is lost.
-- Legacy `backup_*.db` files beside `time_log.db` remain discoverable; Time does
+- Legacy `backup_*.db` files beside `database.db` remain discoverable; Time does
   not silently move them.

@@ -62,7 +62,7 @@ if (Test-Path -LiteralPath $output) {
 }
 
 $localAppData = Join-Path $output "LOCALAPPDATA"
-$database = Join-Path $localAppData "Time\time_log.db"
+$database = Join-Path $localAppData "Time\Data\database.db"
 $results = Join-Path $output "results"
 New-Item -ItemType Directory -Path $localAppData, $results | Out-Null
 

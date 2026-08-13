@@ -300,7 +300,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
   let result: unknown;
   switch (command) {
     case "db_path":
-      result = "C:\\DeviceFixture\\time_log.db";
+      result = "C:\\DeviceFixture\\Data\\database.db";
       break;
     case "db_select":
       result = selectFixture(args);

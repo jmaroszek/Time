@@ -70,7 +70,7 @@ dashboard/    Tauri 2 + React + ECharts, launched on demand: reads sessions,
 ```
 
 The two halves share a SQLite database (WAL) at
-`%LOCALAPPDATA%\Time\time_log.db`. Both resolve that fixed per-user path
+`%LOCALAPPDATA%\Time\Data\database.db`. Both resolve that fixed per-user path
 independently. Settings written by the dashboard are re-read by the tracker
 every heartbeat. Both executables verify `schema_version` and refuse unsafe
 writes; new schemas are bootstrapped directly at the current public contract.

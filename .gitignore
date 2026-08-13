@@ -9,8 +9,12 @@ dashboard/src-tauri/binaries/
 /Images/
 /Logs/
 features_to_add.txt
-time_log.db
+database.db
 time_tracker.log*
+database.db-shm
+database.db-wal
+# The pre-rename name, so an archived history can never be committed either.
+time_log.db
 time_log.db-shm
 time_log.db-wal
 /.coverage

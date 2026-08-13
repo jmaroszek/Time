@@ -22,7 +22,7 @@ Its normal runtime data flow is:
 ## Local storage and threat model
 
 The live database and user-created backups are ordinary SQLite files under
-`%LOCALAPPDATA%\Time`. Windows user-profile permissions protect them from other
+`%LOCALAPPDATA%\Time\Data`. Windows user-profile permissions protect them from other
 standard user accounts. They are not encrypted by Time. Malware running as the
 same user, an administrator, someone with the unlocked Windows session, or a
 party with offline access to an unencrypted disk may read them. Use Windows

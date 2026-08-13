@@ -61,7 +61,7 @@ fn style_windows_frame<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     }
 }
 
-/// Resolve the shared SQLite path (%LOCALAPPDATA%\Time\time_log.db) and ensure
+/// Resolve the shared SQLite path (%LOCALAPPDATA%\Time\Data\database.db) and ensure
 /// the directory exists. The tracker derives the same location in
 /// tracker/config.py, so the two halves share one database.
 #[tauri::command]

@@ -16,7 +16,9 @@
   Exec '"$INSTDIR\${TIME_TRACKER_EXE}"'
 !macroend
 
-; Leave %LOCALAPPDATA%\Time intact: it contains the user's SQLite history.
+; Leave %LOCALAPPDATA%\Time\Data intact: it holds the user's SQLite history.
+; The uninstaller's closing RMDir on $INSTDIR is not recursive, so a Data
+; directory with a database in it survives by refusing to be removed.
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro CheckIfAppIsRunning "${TIME_TRACKER_EXE}" "Time tracker"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" \

@@ -1,8 +1,8 @@
 """Read-only SQLite health and invariant checks for a Time database.
 
 Usage:
-    python scripts/check_db_anomalies.py path\to\time_log.db
-    python scripts/check_db_anomalies.py path\to\time_log.db --json
+    python scripts/check_db_anomalies.py path\to\database.db
+    python scripts/check_db_anomalies.py path\to\database.db --json
 
 The checker opens SQLite with ``mode=ro`` and ``query_only=ON``. It never runs
 migrations, checkpoints the WAL, or modifies the database.

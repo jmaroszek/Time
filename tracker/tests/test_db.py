@@ -525,4 +525,4 @@ def test_packaged_tracker_ignores_data_directory_override(monkeypatch, tmp_path)
 
     monkeypatch.setenv("TIME_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(config.sys, "frozen", True, raising=False)
-    assert config._data_dir() == Path(config.os.environ["LOCALAPPDATA"]) / "Time"
+    assert config._data_dir() == Path(config.os.environ["LOCALAPPDATA"]) / "Time" / "Data"

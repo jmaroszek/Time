@@ -47,7 +47,7 @@ def test_a_packaged_build_still_refuses_to_be_relocated_by_the_environment(
         monkeypatch.setenv("TIME_DATA_DIR", str(tmp_path / "elsewhere"))
         monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "scratch"))
         reloaded = importlib.reload(config)
-        assert reloaded.DATA_DIR == tmp_path / "scratch" / "Time"
+        assert reloaded.DATA_DIR == tmp_path / "scratch" / "Time" / "Data"
     finally:
         monkeypatch.undo()
         importlib.reload(config)

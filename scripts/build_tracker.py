@@ -69,7 +69,7 @@ def _verify_sidecar_starts(executable: Path) -> None:
             text=True,
             timeout=120,
         )
-        database = Path(scratch) / "Time" / "time_log.db"
+        database = Path(scratch) / "Time" / "Data" / "database.db"
         if completed.returncode != 0 or not database.is_file():
             details = (completed.stderr or completed.stdout or "").strip()
             raise SystemExit(

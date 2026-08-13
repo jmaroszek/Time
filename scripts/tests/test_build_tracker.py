@@ -115,7 +115,7 @@ def _fake_run(monkeypatch, *, returncode, write_database):
     def run(command, *, cwd, env, capture_output, text, timeout):
         captured["env"] = env
         if write_database:
-            database = Path(env["LOCALAPPDATA"]) / "Time" / "time_log.db"
+            database = Path(env["LOCALAPPDATA"]) / "Time" / "Data" / "database.db"
             database.parent.mkdir(parents=True, exist_ok=True)
             database.write_text("", encoding="utf-8")
         return subprocess.CompletedProcess(command, returncode, "", "boom")
