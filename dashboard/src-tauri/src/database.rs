@@ -2245,6 +2245,13 @@ mod tests {
     /// Windows a handle that has not finished closing turns that into a sharing
     /// violation — or leaves the directory in a delete-pending state where a
     /// file written afterwards silently disappears. Both were live flakes here.
+    ///
+    /// Nothing deletes these afterwards, for the same reason: a run that tidied
+    /// up would be racing the handles it just closed. They therefore accumulate,
+    /// one per filesystem-touching test per invocation, and collecting them
+    /// under a single parent is what keeps `target/` navigable — 11k loose
+    /// directories once buried the release bundle. Delete `target/test-scratch`
+    /// whenever it gets large; nothing reads it between runs.
     fn scratch_root(name: &str) -> PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let unique = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -2255,6 +2262,7 @@ mod tests {
         let root = std::env::current_dir()
             .unwrap()
             .join("target")
+            .join("test-scratch")
             .join(format!("{name}-{stamp}-{unique}"));
         std::fs::create_dir_all(&root).unwrap();
         root
