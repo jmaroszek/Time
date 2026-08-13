@@ -484,16 +484,8 @@ export default function ActivityTab({
    * browser is classified (otherwise the misconception has not formed), and no
    * website rule exists yet (one proves they have evidently found the idea).
    */
-  // Confirmation of the signal precedes advice about what to do with it, and
-  // never shares the screen with it: two stacked notices about the same subject
-  // read as one long one nobody finishes.
-  const showWebsiteSignal =
-    domainCoverage !== null
-    && websiteSignalConfirmed(domainCoverage)
-    && meta.settings.website_signal_seen !== "1";
-
-  const showWebsiteRuleHint = useMemo(() => {
-    if (domainCoverage === null || showWebsiteSignal) return false;
+  const needsWebsiteRuleGuidance = useMemo(() => {
+    if (domainCoverage === null) return false;
     return shouldShowWebsiteRuleHint(
       domainCoverage,
       meta.rules.some(
@@ -501,25 +493,58 @@ export default function ActivityTab({
       ),
       meta.rules.some((rule) => rule.matchType === "domain"),
     );
-  }, [domainCoverage, showWebsiteSignal, meta.rules, meta.browserSet]);
+  }, [domainCoverage, meta.rules, meta.browserSet]);
+
+  const showWebsiteSignal =
+    domainCoverage !== null
+    && websiteSignalConfirmed(domainCoverage)
+    && meta.settings.website_signal_seen !== "1";
+
+  // When success and guidance coincide, the confirmation carries the next
+  // action. Otherwise dismissing one notice immediately replaces it with an
+  // almost identical one. A later browser classification still receives the
+  // lighter inline prompt below the filters.
+  const showWebsiteRuleHint =
+    needsWebsiteRuleGuidance
+    && !showWebsiteSignal
+    && meta.settings.website_rule_guidance_seen !== "1";
 
   const refreshMeta = async () => {
     await meta.refresh();
   };
 
-  // Persisted rather than component-local: the notice reports a one-time
-  // transition, and one that reappeared on the next launch would stop reading
-  // as news. Deliberately outside DEFAULT_USER_SETTINGS, so restoring default
-  // settings does not re-announce something the reader already saw.
+  // Persisted rather than component-local: successful tracking is a one-time
+  // transition, and a confirmation that reappeared on the next launch would
+  // stop reading as news. These are onboarding metadata, deliberately outside
+  // DEFAULT_USER_SETTINGS, so restoring settings does not restart onboarding.
   const [dismissingSignal, setDismissingSignal] = useState(false);
-  const dismissWebsiteSignal = async () => {
+  const [dismissingWebsiteRuleHint, setDismissingWebsiteRuleHint] = useState(false);
+  const acknowledgeWebsiteSignal = async (showWebsites: boolean) => {
     setDismissingSignal(true);
     try {
       await updateSetting("website_signal_seen", "1");
+      // The combined notice has already taught website-level classification.
+      // Mark that guidance seen too, so it cannot turn into a second banner as
+      // soon as this one closes.
+      if (showWebsites) await updateSetting("website_rule_guidance_seen", "1");
+      if (showWebsites) {
+        setTypeFilter("website");
+        setClassificationFilter("all");
+      }
       await meta.refresh();
     } catch (cause) {
-      banner.report(cause, "dismissing the website notice");
+      banner.report(cause, "acknowledging the website notice");
       setDismissingSignal(false);
+    }
+  };
+  const dismissWebsiteRuleHint = async () => {
+    setDismissingWebsiteRuleHint(true);
+    try {
+      await updateSetting("website_rule_guidance_seen", "1");
+      await meta.refresh();
+    } catch (cause) {
+      banner.report(cause, "dismissing the website classification hint");
+      setDismissingWebsiteRuleHint(false);
     }
   };
   const { applySuggestions, assignEntity, assignFromTriage, removeExactRules } =
@@ -842,27 +867,23 @@ export default function ActivityTab({
       {view === "library" && showWebsiteSignal && (
         <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2">
           <p>
-            <span className="font-medium text-ink">Website tracking is working.</span> Time is
-            splitting your browser time by site. Websites now appear here alongside your apps, and
-            can be classified the same way.
+            <span className="font-medium text-ink">Website tracking is working.</span>{" "}
+            {needsWebsiteRuleGuidance ? (
+              <>
+                Time is now separating your browser time by site. Websites can have their own
+                categories—select one below, then choose a category under Classification.
+              </>
+            ) : (
+              <>Time is splitting your browser time by site. Websites now appear here alongside your apps.</>
+            )}
           </p>
           <div className="mt-2.5">
-            <Button disabled={dismissingSignal} onClick={() => void dismissWebsiteSignal()}>
-              {dismissingSignal ? "Saving…" : "Got it"}
+            <Button
+              disabled={dismissingSignal}
+              onClick={() => void acknowledgeWebsiteSignal(needsWebsiteRuleGuidance)}
+            >
+              {dismissingSignal ? "Saving…" : needsWebsiteRuleGuidance ? "Show websites" : "Got it"}
             </Button>
-          </div>
-        </section>
-      )}
-
-      {view === "library" && showWebsiteRuleHint && (
-        <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2">
-          <p>
-            Your browser has a category, but the websites you visit inside it can have their own.
-            Show websites, click a row, then choose Classification to give that site its own
-            category.
-          </p>
-          <div className="mt-2.5">
-            <Button onClick={() => setTypeFilter("website")}>Show websites</Button>
           </div>
         </section>
       )}
@@ -972,6 +993,38 @@ export default function ActivityTab({
               includeNoise={includeNoise}
               onIncludeNoise={() => setIncludeNoise((shown) => !shown)}
             />
+            {showWebsiteRuleHint && (
+              <div className="-mt-1 mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
+                <p>
+                  Websites can have their own categories.{" "}
+                  {typeFilter === "website" && classificationFilter !== "excluded" ? (
+                    <>Select one, then choose a category under Classification.</>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTypeFilter("website");
+                          setClassificationFilter("all");
+                        }}
+                        className="text-ink-2 underline-offset-2 hover:text-ink hover:underline"
+                      >
+                        Show websites
+                      </button>{" "}
+                      to select one, then choose a category under Classification.
+                    </>
+                  )}
+                </p>
+                <button
+                  type="button"
+                  disabled={dismissingWebsiteRuleHint}
+                  onClick={() => void dismissWebsiteRuleHint()}
+                  className="shrink-0 text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline disabled:cursor-wait disabled:no-underline"
+                >
+                  {dismissingWebsiteRuleHint ? "Saving…" : "Dismiss"}
+                </button>
+              </div>
+            )}
             {showingExclusions ? (
               <ExcludedPanel />
             ) : (
