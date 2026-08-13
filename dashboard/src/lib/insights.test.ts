@@ -165,6 +165,7 @@ describe("minimum app time", () => {
       minAppSecondsPerDay: 60,
       aliases: {},
       focusChainMaxGapSeconds: 120,
+      hideUtilityApps: false,
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date",
@@ -203,6 +204,7 @@ describe("minimum app time", () => {
       minAppSecondsPerDay: 75,
       aliases: { "time.exe": "Time", "time-tracker.exe": "Time" },
       focusChainMaxGapSeconds: 120,
+      hideUtilityApps: false,
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date",
@@ -240,6 +242,7 @@ describe("ranked websites", () => {
     minAppSecondsPerDay: 3_600,
     aliases: { "docs.google.com": "Google Docs" },
     focusChainMaxGapSeconds: 120,
+    hideUtilityApps: false,
     dayStartHour: 0,
     dayEndHour: 24,
     labelMode: "date",
@@ -285,6 +288,7 @@ describe("packed Insights transport", () => {
       minAppSecondsPerDay: 0,
       aliases,
       focusChainMaxGapSeconds: 120,
+      hideUtilityApps: false,
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date" as const,
@@ -313,6 +317,7 @@ describe("packed Insights transport", () => {
       minAppSecondsPerDay: 0,
       aliases: {},
       focusChainMaxGapSeconds: 120,
+      hideUtilityApps: false,
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date" as const,
@@ -336,6 +341,7 @@ describe("packed Insights transport", () => {
       minAppSecondsPerDay: 0,
       aliases,
       focusChainMaxGapSeconds: 120,
+      hideUtilityApps: false,
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date" as const,
@@ -350,5 +356,86 @@ describe("packed Insights transport", () => {
     );
     expect(chunked).toEqual(packInsightsRequest(request));
     expect(yields).toBe(2);
+  });
+});
+
+describe("utility rows in the Insights rankings", () => {
+  const utilityRange: Range = { start: new Date(2026, 5, 8), end: new Date(2026, 5, 9) };
+  const utilitySessions: Session[] = [
+    make(60, at(8, 9), at(8, 10), "code.exe"),
+    // The plumbing a fresh install wakes up, and an installer that ran longer
+    // than the real work did — duration alone would rank it first.
+    make(61, at(8, 10), at(8, 10, 1), "shellexperiencehost.exe"),
+    make(62, at(8, 11), at(8, 13), "some_app_setup.exe"),
+    make(63, at(8, 14), at(8, 15), "explorer.exe"),
+  ];
+  const build = (hideUtilityApps: boolean) =>
+    buildInsightsModel({
+      sessions: utilitySessions,
+      range: utilityRange,
+      categories,
+      rules,
+      browserProcesses: [],
+      weekStart: "Sunday",
+      weeklyGoalHours: 0,
+      minAppSecondsPerDay: 0,
+      aliases: {},
+      focusChainMaxGapSeconds: 120,
+      hideUtilityApps,
+      dayStartHour: 0,
+      dayEndHour: 24,
+      labelMode: "date",
+    });
+
+  it("drops unclassified plumbing and installers from Top Apps", () => {
+    expect(build(true).apps.map((app) => app.key)).toEqual(["code", "explorer"]);
+  });
+
+  it("keeps them when the utilities switch is off", () => {
+    // Ranked by duration, so the installer that ran for two minutes leads the
+    // list a new user sees — the exact first impression this filter exists for.
+    expect(build(false).apps.map((app) => app.key)).toEqual([
+      "some_app_setup",
+      "code",
+      "explorer",
+      "shellexperiencehost",
+    ]);
+  });
+
+  it("leaves every total untouched", () => {
+    const hidden = build(true);
+    const shown = build(false);
+    expect(hidden.kpis).toEqual(shown.kpis);
+    expect(hidden.hourly).toEqual(shown.hourly);
+    expect(hidden.historyDays).toEqual(shown.historyDays);
+  });
+
+  it("keeps a utility the reader has classified", () => {
+    const classified = buildInsightsModel({
+      sessions: utilitySessions,
+      range: utilityRange,
+      categories,
+      rules: [
+        ...rules,
+        { id: 5, matchType: "process", pattern: "shellexperiencehost.exe", categoryId: 4, priority: 3 },
+      ],
+      browserProcesses: [],
+      weekStart: "Sunday",
+      weeklyGoalHours: 0,
+      minAppSecondsPerDay: 0,
+      aliases: {},
+      focusChainMaxGapSeconds: 120,
+      hideUtilityApps: true,
+      dayStartHour: 0,
+      dayEndHour: 24,
+      labelMode: "date",
+    });
+    // Putting an entity in a category says it matters, and that outranks the
+    // name heuristic — the same precedence the Activity Library gives.
+    expect(classified.apps.map((app) => app.key)).toContain("shellexperiencehost");
+  });
+
+  it("does not inflate the count that explains the duration filter", () => {
+    expect(build(true).hiddenAppCount).toBe(0);
   });
 });

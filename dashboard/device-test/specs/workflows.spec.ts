@@ -400,6 +400,37 @@ test("@workflow Insights switches from ranked apps to exact-host websites", asyn
   );
 });
 
+test("@workflow website tracking confirmation appears only for newly arriving data", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByText("Website tracking is working.")).toHaveCount(0);
+
+  await page.goto("/?browser=signal");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByText("Website tracking is working.")).toBeVisible();
+  await page.getByRole("button", { name: "Got it", exact: true }).click();
+  await expect.poll(async () => (await fixtureSettings(page)).website_signal_seen).toBe("1");
+});
+
+test("@workflow website-rule hint leads through the row Classification control", async ({
+  page,
+}) => {
+  await page.goto("/?browser=classified");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(
+    page.getByText(/Show websites, click a row, then choose Classification/),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Show websites", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Activity type" })).toContainText("Websites");
+  await page.locator("tbody button").first().click();
+  await expect(
+    page.getByRole("complementary").getByText("Classification", { exact: true }),
+  ).toBeVisible();
+});
+
 // The update control is the whole update feature as far as a user is concerned:
 // if it does not appear, nobody updates, and if it moves the header when it
 // appears or expands, it breaks the one rule this header has — the date-range

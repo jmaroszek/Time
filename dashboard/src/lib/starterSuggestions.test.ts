@@ -110,17 +110,16 @@ describe("resolving roles to categories", () => {
     expect(resolved.get("plumbing")).toBe(6);
   });
 
-  // Renaming is the first thing a reader engaging with the taxonomy does.
-  it("follows a rename to an equivalent name", () => {
+  it("does not follow a starter category after it is renamed", () => {
     const resolved = resolveRoleCategories([
       category(1, "Deep Work", { isProductive: true, isNeutral: false }),
       category(2, "Comms"),
     ]);
-    expect(resolved.get("development")).toBe(1);
-    expect(resolved.get("messaging")).toBe(2);
+    expect(resolved.get("development")).toBeUndefined();
+    expect(resolved.get("messaging")).toBeUndefined();
   });
 
-  it("prefers the earlier alias when several categories match one role", () => {
+  it("uses the exact starter category when a synonymous custom category also exists", () => {
     const resolved = resolveRoleCategories([
       category(1, "Focus", { isProductive: true, isNeutral: false }),
       category(2, "Work", { isProductive: true, isNeutral: false }),
@@ -129,9 +128,21 @@ describe("resolving roles to categories", () => {
   });
 
   // A taxonomy Time does not recognize is one the user has made their own.
-  it("resolves nothing for names outside the aliases", () => {
+  it("resolves nothing for names outside the starter taxonomy", () => {
     const resolved = resolveRoleCategories([category(1, "Client billable")]);
     expect(resolved.size).toBe(0);
+  });
+
+  it("treats renaming a starter category as declining its suggestions", () => {
+    const renamedSystem = SEEDED.map((candidate) =>
+      candidate.name === "System" ? { ...candidate, name: "Utilities" } : candidate,
+    );
+    expect(suggestForTriage(
+      [app("explorer.exe")],
+      renamedSystem,
+      new Set(),
+      BROWSERS,
+    )).toEqual([]);
   });
 
   // Hiding time is a stronger act than filing it.
@@ -206,6 +217,16 @@ describe("suggesting", () => {
     expect(suggest([app("slack.exe")], withoutComms)).toEqual([]);
     // …while roles that still resolve keep working.
     expect(suggest([app("code.exe")], withoutComms)[0]?.categoryId).toBe(1);
+  });
+
+  it("suggests nothing when System was deleted or renamed", () => {
+    const withoutSystem = SEEDED.filter((c) => c.name !== "System");
+    expect(suggest([app("explorer.exe")], withoutSystem)).toEqual([]);
+
+    const renamedSystem = SEEDED.map((candidate) =>
+      candidate.name === "System" ? { ...candidate, name: "Utilities" } : candidate,
+    );
+    expect(suggest([app("explorer.exe")], renamedSystem)).toEqual([]);
   });
 
   it("suggests nothing at all when the user declined the starter categories", () => {

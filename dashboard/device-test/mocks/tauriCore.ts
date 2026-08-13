@@ -126,7 +126,7 @@ let sessions = firstRun
 const categoryRows = [
   { id: 1, name: "Focus", color: "#6ba0da", is_productive: 1, is_neutral: 0, is_ignored: 0, sort_order: 1 },
   { id: 2, name: "Communication", color: "#a78bfa", is_productive: 0, is_neutral: 1, is_ignored: 0, sort_order: 2 },
-  { id: 3, name: "Utilities", color: "#94a3b8", is_productive: 0, is_neutral: 1, is_ignored: 0, sort_order: 3 },
+  { id: 3, name: "System", color: "#94a3b8", is_productive: 0, is_neutral: 1, is_ignored: 0, sort_order: 3 },
   { id: 4, name: "Ignored", color: "#5b616b", is_productive: 0, is_neutral: 0, is_ignored: 1, sort_order: 4 },
 ];
 
@@ -180,6 +180,28 @@ const ruleRows = [
   })),
 ];
 
+// "?browser=classified" models the reader the website-rule hint is written for:
+// websites are being recorded, the browser itself has a category, and no
+// website rule has ever been written. Dropping the seeded domain rules is the
+// point rather than a convenience — a reader who has written one already knows
+// websites classify separately, which is exactly when the hint should retire.
+if (fixtureParams.get("browser") === "classified") {
+  for (let index = ruleRows.length - 1; index >= 0; index--) {
+    if (ruleRows[index].match_type === "domain") ruleRows.splice(index, 1);
+  }
+  ruleRows.push({
+    id: ruleRows.length + 1,
+    match_type: "process",
+    pattern: "chrome.exe",
+    category_id: 3,
+    priority: 30,
+    scope_kind: "",
+    scope_value: "",
+    title_match_mode: "",
+    title_anchor: "",
+  });
+}
+
 /** Ids for rules written during a session, past the seeded three. */
 let nextRuleId = ruleRows.length + 1;
 
@@ -208,6 +230,12 @@ const settings: Record<string, string> = {
   activity_noise_filter: "none",
   activity_noise_max_seconds: "120",
   activity_noise_max_sessions: "1",
+  // The default fixture is a long-lived database whose website rows predate
+  // this run, so its one-time confirmation has already been seen. The signal
+  // fixture alone models domains arriving for the first time. The classified
+  // fixture also stays past the confirmation so it opens directly on the next
+  // piece of guidance: how to classify those website rows.
+  website_signal_seen: fixtureParams.get("browser") === "signal" ? "0" : "1",
   color_palette: "slate",
   productivity_style: "vivid",
   focus_chain_max_gap_seconds: "300",
@@ -554,15 +582,20 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
       result = undefined;
       break;
     // Chrome by default so the onboarding extension row renders its published
-    // state. "?browser=firefox" exercises the not-yet-published branch, and
-    // "?browser=unknown" the fallback for a ProgId Time does not recognize.
+    // state. "?browser=firefox" exercises the not-yet-published branch,
+    // "?browser=unknown" the fallback for a ProgId Time does not recognize, and
+    // "?browser=edge" the store-gate branch — the only browsers that carry a
+    // gate are Edge and Opera, so without one of them the extension row's last
+    // sentence cannot be seen at all.
     case "default_browser_prog_id":
       result =
         fixtureParams.get("browser") === "firefox"
           ? "FirefoxURL-308046B0AF4A39CB"
           : fixtureParams.get("browser") === "unknown"
             ? "SomeOtherBrowserURL"
-            : "ChromeHTML";
+            : fixtureParams.get("browser") === "edge"
+              ? "MSEdgeHTM"
+              : "ChromeHTML";
       break;
     // Null is the ordinary answer and also the answer a failed check gives, so
     // the header control is absent in every fixture but the one that asks for

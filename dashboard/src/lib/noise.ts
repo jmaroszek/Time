@@ -12,8 +12,15 @@
 //               Installers can run for twenty minutes, so duration cannot
 //               catch these and a name pattern has to.
 //
-// Filtering is a view treatment over the catalog list. It never changes totals,
-// Insights, or anything an entity contributes to a category.
+// Filtering is a view treatment over a list. It never changes totals, KPIs, or
+// anything an entity contributes to a category.
+//
+// Both tests apply to the Activity Library. Insights' Top Apps and Top Websites
+// take the utility test only: those are rankings of what mattered, and Windows
+// plumbing is not an answer at any point in a database's life — least of all on
+// day one, when a fresh install's whole list is the plumbing its own installer
+// woke up. The rare-item test stays out, because a short-lived entry is exactly
+// what a one-day range is supposed to show.
 
 import type { ActivityEntityKind, ActivityStatus } from "./activity";
 
@@ -83,14 +90,18 @@ const UTILITY_APP_PATTERNS: RegExp[] = [
 const LOCAL_FILE_PATTERN =
   /\.(pdf|docx?|xlsx?|pptx?|txt|rtf|csv|log|tmp|zip|rar|7z|exe|msi|png|jpe?g|gif|webp|bmp|svg|epub|mobi)$/;
 
-function normalizedNames(candidate: NoiseCandidate): string[] {
+function normalizedNames(candidate: UtilityNameCandidate): string[] {
   const names = [candidate.key, ...candidate.sourceProcesses];
   return names.map((name) => name.toLowerCase().replace(/\.exe$/, ""));
 }
 
+/** The fields the utility-name test alone needs. Insights ranks rows that have
+ *  no session count or catalog status, and only this test applies to them. */
+export type UtilityNameCandidate = Pick<NoiseCandidate, "kind" | "key" | "sourceProcesses">;
+
 /** True when the entity's name marks it as an installer, driver, or other
  *  system chore. Exported for tests and for the Settings preview copy. */
-export function isUtilityName(candidate: NoiseCandidate): boolean {
+export function isUtilityName(candidate: UtilityNameCandidate): boolean {
   if (candidate.kind === "website") return LOCAL_FILE_PATTERN.test(candidate.key.toLowerCase());
   return normalizedNames(candidate).some((name) =>
     UTILITY_APP_PATTERNS.some((pattern) => pattern.test(name)),

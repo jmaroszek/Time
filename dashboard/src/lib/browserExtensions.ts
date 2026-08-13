@@ -75,7 +75,9 @@ const PROG_ID_ROUTES: readonly ProgIdRoute[] = [
   {
     prefix: "MSEdgeHTM",
     store: "Chrome Web Store",
-    gate: "Edge asks you to allow extensions from other stores the first time. Its banner appears at the top of the page.",
+    // Phrased without "if you use Edge": a gate is only ever rendered to the
+    // browser it belongs to, so the condition is already established.
+    gate: "You may need to enable extensions from other stores in Edge first.",
   },
   { prefix: "BraveHTML", store: "Chrome Web Store" },
   {

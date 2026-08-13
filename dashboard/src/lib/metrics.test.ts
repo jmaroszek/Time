@@ -82,6 +82,21 @@ describe("computeKpis", () => {
     expect(k.totalSec).toBe(3600);
   });
 
+  it("separates time no rule claimed from time that is merely unproductive", () => {
+    // The distinction the Insights tiles rest on. apex.exe is classified and
+    // simply not productive; nothing.exe matches no rule at all. Both leave
+    // prodSec at zero, and only one of them means "there is nothing to show
+    // yet" rather than "you were not productive".
+    const unproductive = computeKpis([sess(0, 3600, "apex.exe")], classify);
+    expect(unproductive.prodSec).toBe(0);
+    expect(unproductive.uncategorizedSec).toBe(0);
+
+    const unclassified = computeKpis([sess(0, 3600, "nothing.exe")], classify);
+    expect(unclassified.prodSec).toBe(0);
+    expect(unclassified.uncategorizedSec).toBe(3600);
+    expect(unclassified.uncategorizedSec).toBe(unclassified.totalSec);
+  });
+
   it("focus chain spans contiguous productive sessions", () => {
     // code -> obsidian back-to-back: one 2h chain
     const k = computeKpis([sess(0, 3600, "code.exe"), sess(3600, 7200, "obsidian.exe")], classify);

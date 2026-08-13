@@ -78,14 +78,15 @@ describe("listingForProgId", () => {
 
 describe("storeGateForProgId", () => {
   it("warns Edge readers about the other-stores prompt", () => {
-    const gate = storeGateForProgId("MSEdgeHTM");
-    expect(gate).toContain("other stores");
+    expect(storeGateForProgId("MSEdgeHTM")).toContain("other stores");
   });
 
   it("warns Opera readers that its own add-on comes first", () => {
     expect(storeGateForProgId("OperaStable")).toContain("Install Chrome Extensions");
   });
 
+  // The point of the gate being per-browser: a Chrome reader is never shown a
+  // caveat about a browser they are not installing into.
   it("stays silent for browsers that install from the store directly", () => {
     for (const progId of ["ChromeHTML", "BraveHTML", "VivaldiHTM", "FirefoxURL"]) {
       expect(storeGateForProgId(progId)).toBeNull();

@@ -27,6 +27,7 @@ export function insightsRequestKey(request: InsightsRequest): string {
     request.minAppSecondsPerDay,
     objectId(request.aliases),
     request.focusChainMaxGapSeconds,
+    request.hideUtilityApps,
     request.dayStartHour,
     request.dayEndHour,
     request.labelMode,

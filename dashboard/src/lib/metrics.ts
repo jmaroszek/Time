@@ -156,6 +156,10 @@ export interface Kpis {
   prodSec: number;
   prodFraction: number;
   longestFocusSec: number;
+  /** Tracked seconds no rule claimed. Equal to totalSec means nothing in the
+   *  range is classified at all, which is a different statement from "none of
+   *  it was productive" and the two read identically as a bare zero. */
+  uncategorizedSec: number;
 }
 
 export function computeKpis(
@@ -165,6 +169,7 @@ export function computeKpis(
 ): Kpis {
   let total = 0;
   let prod = 0;
+  let uncategorized = 0;
   const chain = focusChain(focusChainMaxGapSec);
 
   const sorted = [...sessions].sort((a, b) => a.start - b.start);
@@ -177,6 +182,7 @@ export function computeKpis(
     total += dur;
     const cat = classify(s);
     if (cat?.isProductive) prod += dur;
+    if (!cat) uncategorized += dur;
     chain.add(s.start, s.end, dur, cat);
   }
   return {
@@ -184,6 +190,7 @@ export function computeKpis(
     prodSec: prod,
     prodFraction: total > 0 ? prod / total : 0,
     longestFocusSec: chain.longestSeconds,
+    uncategorizedSec: uncategorized,
   };
 }
 

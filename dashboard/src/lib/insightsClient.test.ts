@@ -83,6 +83,7 @@ function request(overrides: Partial<InsightsRequest> = {}): InsightsRequest {
     minAppSecondsPerDay: 60,
     aliases: {},
     focusChainMaxGapSeconds: 300,
+    hideUtilityApps: false,
     dayStartHour: 0,
     dayEndHour: 24,
     labelMode: "date",

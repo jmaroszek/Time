@@ -51,27 +51,28 @@ export type StarterRole =
   | "media";
 
 /**
- * Category names that satisfy each role, best first.
+ * Starter category that satisfies each role.
  *
- * Resolved by name rather than by ids captured at onboarding, which keeps the
- * seed a plain list and makes the feature work three ways at once: for the
- * starter taxonomy, for a user who renamed a category to something equivalent,
- * and for an existing install that never saw an onboarding screen.
+ * Resolved by current name rather than by ids captured at onboarding, which
+ * keeps the seed a plain list and works for existing installs that never saw an
+ * onboarding screen. Exact starter names are intentional: deleting or renaming
+ * one is the reader declining that piece of Time's taxonomy, so suggestions
+ * aimed at it must disappear rather than following the category under a name
+ * Time happens to consider synonymous.
  *
- * A name outside these lists resolves to nothing and that role simply makes no
- * suggestions. That is the right outcome, not a gap — a category named something
- * the catalog does not recognize is one the user has made their own.
+ * A missing starter name resolves to nothing and that role simply makes no
+ * suggestions. That is the right outcome, not a gap — the user's taxonomy wins.
  */
-const ROLE_ALIASES: Record<StarterRole, readonly string[]> = {
-  system: ["system", "utilities", "utility"],
-  plumbing: ["ignored"],
-  messaging: ["communication", "comms", "messaging", "chat", "email", "mail"],
-  development: ["work", "development", "dev", "coding", "focus", "projects", "deep work"],
-  writing: ["work", "notes", "writing", "documents", "focus", "projects", "deep work"],
-  creative: ["work", "creative", "design", "focus", "projects", "deep work"],
-  study: ["work", "learning", "study", "research", "focus", "projects", "deep work"],
-  gaming: ["entertainment", "gaming", "games"],
-  media: ["entertainment", "media", "music", "video"],
+const ROLE_CATEGORY: Record<StarterRole, string> = {
+  system: "system",
+  plumbing: "ignored",
+  messaging: "communication",
+  development: "work",
+  writing: "work",
+  creative: "work",
+  study: "work",
+  gaming: "entertainment",
+  media: "entertainment",
 };
 
 /** One sentence per role rather than per app. A hundred hand-written rationales
@@ -320,17 +321,14 @@ export function resolveRoleCategories(
   categories: readonly Category[],
 ): Map<StarterRole, number> {
   const resolved = new Map<StarterRole, number>();
-  for (const [role, aliases] of Object.entries(ROLE_ALIASES) as [StarterRole, readonly string[]][]) {
-    for (const alias of aliases) {
-      const match = categories.find(
-        (category) =>
-          category.name.trim().toLowerCase() === alias
-          && (role === "plumbing" ? category.isIgnored : !category.isIgnored),
-      );
-      if (match) {
-        resolved.set(role, match.id);
-        break;
-      }
+  for (const [role, name] of Object.entries(ROLE_CATEGORY) as [StarterRole, string][]) {
+    const match = categories.find(
+      (category) =>
+        category.name.trim().toLowerCase() === name
+        && (role === "plumbing" ? category.isIgnored : !category.isIgnored),
+    );
+    if (match) {
+      resolved.set(role, match.id);
     }
   }
   return resolved;

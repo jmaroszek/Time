@@ -7,6 +7,7 @@ import {
   FirstRunPanel,
   NewerDatabaseScreen,
   PrivacyOnboarding,
+  TrackerAlert,
   WaitingForTracker,
 } from "./components/AppStates";
 import { isMissingSchemaError } from "./lib/dbErrors";
@@ -22,6 +23,7 @@ import {
   type TrackerStatus,
 } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
+import { trackerNeedsAttention } from "./lib/trackerHealth";
 import {
   allTimeRange,
   clampRangeStart,
@@ -170,7 +172,12 @@ function Shell() {
     const id = setInterval(load, 30_000);
     return () => clearInterval(id);
   }, [ready, firstSessionSec, refreshFirstSession]);
-  const firstRun = status !== null && status.totalSessionCount === 0;
+  // The welcome panel outlives the empty database it used to be gated on. Its
+  // old gate was `totalSessionCount === 0`, so the panel announced that the
+  // first activity was about to arrive and was then destroyed by that arrival —
+  // usually inside a minute, before a new reader had finished it. Dismissal is
+  // now the only thing that ends it.
+  const welcomeVisible = status !== null && meta.settings.welcome_dismissed !== "1";
   // Depend on the answer, not on `status` itself. fetchTrackerStatus resolves a
   // new object every time, so keeping `status` in the dependency list tore this
   // effect down and rebuilt it on every poll — and because the body starts with
@@ -179,8 +186,11 @@ function Shell() {
   // unbounded loop: roughly twelve hundred queries a second, for as long as a
   // fresh install went without its first session.
   const awaitingFirstSession = status === null || status.totalSessionCount === 0;
+  // Keep polling while the welcome panel is up, even once sessions exist: the
+  // panel shows a live/stopped dot, and a dot that stopped refreshing when the
+  // first session landed would report a tracker state minutes out of date.
   useEffect(() => {
-    if (!ready || !awaitingFirstSession) return;
+    if (!ready || (!awaitingFirstSession && !welcomeVisible)) return;
     let cancelled = false;
     const load = () =>
       void fetchTrackerStatus()
@@ -209,7 +219,47 @@ function Shell() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [ready, awaitingFirstSession]);
+  }, [ready, awaitingFirstSession, welcomeVisible]);
+
+  // The health signal behind TrackerAlert. The poll above stops once the first
+  // session exists and the welcome panel is gone, which is exactly when a
+  // tracker is most likely to die unnoticed — after a reboot, weeks in. A minute
+  // is far below the two-minute staleness bar, so the warning appears within one
+  // tick of becoming true. `liveTick` re-checks on the way back to the app, for
+  // the reader who returns before the tick lands.
+  // Booleans and numbers in the dependency list only: fetchTrackerStatus
+  // resolves a fresh object each time, and depending on `status` would rebuild
+  // this effect on every response and re-fire its immediate load.
+  useEffect(() => {
+    if (!ready) return;
+    const load = () => void fetchTrackerStatus().then(setStatus).catch(() => {});
+    load();
+    const id = setInterval(load, 60_000);
+    return () => clearInterval(id);
+  }, [ready, liveTick]);
+
+  const heartbeatAgeSec = status?.lastHeartbeat == null || status.lastHeartbeat <= 0
+    ? null
+    : Date.now() / 1000 - status.lastHeartbeat;
+  // Never before the first status read: `status === null` is "not asked yet",
+  // and treating it as "never checked in" would flash the warning on every
+  // launch in the gap before the first answer arrives.
+  // Suppressed wherever the same news is already on screen, and nowhere else.
+  // That is Insights while the welcome panel is up — not wherever the panel is
+  // merely undismissed, which silenced this for every new reader who had not yet
+  // pressed "Got it" — and Settings, whose Tracker status panel says the same
+  // thing at the top of the page, with an animated dot and its own start button.
+  // Repeating it there stacks two warnings about one fact.
+  const trackerAlertVisible =
+    ready
+    && status !== null
+    && tab !== "settings"
+    && !(welcomeVisible && tab === "insights")
+    && trackerNeedsAttention({
+      heartbeatAgeSec,
+      settings: meta.settings,
+      nowSec: Date.now() / 1000,
+    });
 
   // The backlog behind the Activity tab's mark. It lives here rather than in
   // ActivityTab because the reader who most needs telling is the one who has
@@ -298,13 +348,25 @@ function Shell() {
         )}
       </header>
 
-      {firstRun && (
+      {/* Insights only. The panel used to appear on every tab, which cost
+          nothing while it was gated on an empty database — there were no rows
+          to push aside. Now that it persists until dismissed, that space is
+          contested: at the 500x480 minimum it drove the Activity table's first
+          row out of a region that scrolls internally, leaving it unreachable.
+          Insights is also where it belongs, since it is the landing tab and its
+          own advice is to go and look at Activity. */}
+      {welcomeVisible && tab === "insights" && (
         <FirstRunPanel
           status={status}
           onRefreshStatus={refreshTrackerStatus}
           onOpenSettings={() => setTab("settings")}
         />
       )}
+
+      {/* Every tab, unlike the welcome panel: a reader who is not looking at
+          Insights is no less affected by a tracker that stopped, and this is
+          short enough that the Activity table keeps its room. */}
+      {trackerAlertVisible && <TrackerAlert onOpenSettings={() => setTab("settings")} />}
 
       {/* A flex column so a tab can opt into filling the leftover viewport
           height — Activity does, to bound its own scroll wells. Tabs that do

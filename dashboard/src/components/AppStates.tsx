@@ -105,9 +105,8 @@ export function PrivacyOnboarding() {
           <div className="rounded-xl border border-edge bg-surface-dim p-4">
             <p className="font-medium">When tracking is enabled</p>
             <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
-              Time tracks which apps you use and for how long. With Time Web Extension, the
-              browser locally hands Time the current website address through its title. The
-              extension never reads the page path, so specific pages are never recorded.
+              Time tracks app use by default. Website tracking requires the optional Time Web
+              Extension.
             </p>
           </div>
           <ConsentCheck
@@ -130,7 +129,7 @@ export function PrivacyOnboarding() {
                 checked={installExtension}
                 onChange={setInstallExtension}
                 title={`Install ${TIME_EXTENSION_NAME}`}
-                detail={`Splits browser time by website instead of logging one long stretch of ${extensionListing.browsers}. Opens the ${extensionListing.store} in your browser after this screen; nothing is installed without your say-so there.${storeGate === null ? "" : ` ${storeGate}`}`}
+                detail={`Splits browser time by website instead of logging one long session in Chrome, Firefox, or another browser. If you accept, the app will open the web store listing for your browser after this screen.${storeGate === null ? "" : ` ${storeGate}`}`}
               />
             ) : (
               <div className="rounded-xl border border-edge bg-surface-dim p-4">
@@ -149,7 +148,7 @@ export function PrivacyOnboarding() {
             checked={windowTitles}
             onChange={setWindowTitles}
             title="Store window titles"
-            detail="Storing window titles lets you create rules that separate work from leisure within the same app. Titles may include document names, email subjects, or other sensitive text, so this setting is off by default."
+            detail="Storing window titles lets you create rules that classify activity differently within the same app. Titles may include document names, email subjects, or other sensitive text, so this setting is off by default. You can still create app and website rules without window titles."
           />
         </div>
 
@@ -227,6 +226,7 @@ export function FirstRunPanel({
   const [offerStartup, setOfferStartup] = useState(false);
   const [startAttempted, setStartAttempted] = useState(false);
   const [startUnconfirmed, setStartUnconfirmed] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const heartbeatAge = status.lastHeartbeat == null
     ? null
     : Date.now() / 1000 - status.lastHeartbeat;
@@ -259,6 +259,22 @@ export function FirstRunPanel({
     return () => clearTimeout(id);
   }, [startAttempted, trackerLive]);
 
+  // Dismissal is the only thing that retires this panel, so it has to persist.
+  // A component-local flag would bring the whole thing back on the next launch,
+  // which reads as the app having forgotten the reader rather than respecting
+  // them. Deliberately outside DEFAULT_USER_SETTINGS: restoring default
+  // settings should not resurrect a welcome the reader already read.
+  const dismiss = async () => {
+    setDismissing(true);
+    try {
+      await updateSetting("welcome_dismissed", "1");
+      await meta.refresh();
+    } catch (cause) {
+      banner.report(cause, "dismissing the welcome panel");
+      setDismissing(false);
+    }
+  };
+
   const enableStartup = async () => {
     setRegistering(true);
     try {
@@ -275,13 +291,39 @@ export function FirstRunPanel({
 
   return (
     <section className="rounded-[14px] border border-accent/25 bg-gradient-to-b from-accent/[.06] to-accent/[.02] px-5 py-4 text-xs leading-relaxed">
-      <p className="text-row font-semibold">Welcome to Time</p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-row font-semibold">Welcome to Time</p>
+        {/* Only once tracking is on. While it is stopped this panel is not a
+            welcome but the readiest way to start recording — and, after "Not
+            now" on the privacy screen, the only one outside Settings. */}
+        {trackerLive && (
+          <Button onClick={() => void dismiss()} disabled={dismissing}>
+            {dismissing ? "Saving…" : "Got it"}
+          </Button>
+        )}
+      </div>
       {trackerLive ? (
         <>
           <p className="mt-2 flex flex-wrap items-center gap-2 text-ink-2">
             <span className="h-2 w-2 rounded-full bg-good-data" />
-            Tracking is on. Your first activity will appear here within a minute.
+            Tracking is on.
           </p>
+          <div className="mt-3 space-y-2 text-ink-2">
+            <p>
+              <span className="font-medium text-ink">Keep using your computer normally.</span>{" "}
+              Time records in the background. There is nothing to start or stop.
+            </p>
+            <p>
+              <span className="font-medium text-ink">Check back tomorrow.</span> The Activity tab
+              will have a list of the apps and websites you have used, waiting to be sorted into
+              categories. That is what turns recorded time into the numbers on this page.
+            </p>
+            <p>
+              <span className="font-medium text-ink">Time updates on focus.</span> Switch to
+              another app and back to pull in the latest data. You can also do the same with tabs
+              within Time.
+            </p>
+          </div>
           {offerStartup && (
             <div className="mt-3 rounded-[10px] border border-edge bg-surface-2/60 px-3 py-2.5">
               <p className="text-ink-2">
@@ -323,6 +365,51 @@ export function FirstRunPanel({
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+/**
+ * Recording is on and the tracker is not answering.
+ *
+ * This is the one tracker state worth interrupting for, because it is the only
+ * one with no symptom. A paused or descheduled tracker was the reader's own
+ * decision; a dead one looks exactly like a quiet day — the numbers simply stop
+ * growing, and nothing distinguishes that from not having used the computer.
+ * Until now it was reported only in Settings, which is the last place someone
+ * goes when they have no reason to suspect a problem.
+ */
+export function TrackerAlert({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const banner = useBanner();
+  const [starting, setStarting] = useState(false);
+
+  const start = async () => {
+    setStarting(true);
+    try {
+      await invoke("start_tracker");
+    } catch (cause) {
+      banner.report(cause, "tracker startup");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return (
+    <section className="rounded-[14px] border border-bad/30 bg-bad/10 px-5 py-4 text-xs leading-relaxed">
+      <p className="flex flex-wrap items-center gap-2 text-row font-semibold">
+        <span className="h-2 w-2 rounded-full bg-bad" />
+        Time has stopped recording
+      </p>
+      <p className="mt-2 text-ink-2">
+        Tracking is switched on, but the tracker is not running. No activity is being recorded
+        until it starts again.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="primary" disabled={starting} onClick={() => void start()}>
+          {starting ? "Starting…" : "Start tracking"}
+        </Button>
+        <Button onClick={onOpenSettings}>Open settings</Button>
+      </div>
     </section>
   );
 }

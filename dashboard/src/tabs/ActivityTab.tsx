@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import {
+  Button,
   Card,
   Spinner,
 } from "../components/ui";
@@ -32,7 +33,12 @@ import {
   suggestForTriage,
   suggestionKey,
 } from "../lib/starterSuggestions";
-import { browserDomainCoverage, shouldShowDomainCoverageHint } from "../lib/domainCoverage";
+import {
+  browserDomainCoverage,
+  shouldShowDomainCoverageHint,
+  shouldShowWebsiteRuleHint,
+  websiteSignalConfirmed,
+} from "../lib/domainCoverage";
 import {
   countNoun,
   entityRowDomId,
@@ -451,18 +457,70 @@ export default function ActivityTab({
   }, [panelOpen, detailMode]);
   const panelStyle = dock;
 
-  const showDomainHint = useMemo(() => {
-    if (!sessionData.ready) return false;
+  const domainCoverage = useMemo(() => {
+    if (!sessionData.ready) return null;
     const clipped = clipSessions(
       sessionData.sessions,
       range.start.getTime() / 1000,
       range.end.getTime() / 1000,
     ).filter((session) => !session.isAfk);
-    return shouldShowDomainCoverageHint(browserDomainCoverage(clipped, meta.browserSet));
+    return browserDomainCoverage(clipped, meta.browserSet);
   }, [sessionData.ready, sessionData.sessions, range.start, range.end, meta.browserSet]);
+  const showDomainHint = domainCoverage !== null && shouldShowDomainCoverageHint(domainCoverage);
+
+  /**
+   * The other half of the browser problem. `showDomainHint` covers the reader
+   * whose browser time is not split at all; this covers the one whose *is*.
+   *
+   * Classifying chrome.exe as Browsing is the correct move and quietly the
+   * wrong conclusion: every site inside it inherits that category, so a reader
+   * who never learns websites classify separately reads their own YouTube and
+   * their own docs as one undifferentiated blob and assumes Time cannot tell
+   * them apart. Nothing on the screen says otherwise, because the app row they
+   * just classified now looks finished.
+   *
+   * Conditions, all necessary: websites are actually being recorded (otherwise
+   * this is advice they cannot take, and the extension hint is the right one), a
+   * browser is classified (otherwise the misconception has not formed), and no
+   * website rule exists yet (one proves they have evidently found the idea).
+   */
+  // Confirmation of the signal precedes advice about what to do with it, and
+  // never shares the screen with it: two stacked notices about the same subject
+  // read as one long one nobody finishes.
+  const showWebsiteSignal =
+    domainCoverage !== null
+    && websiteSignalConfirmed(domainCoverage)
+    && meta.settings.website_signal_seen !== "1";
+
+  const showWebsiteRuleHint = useMemo(() => {
+    if (domainCoverage === null || showWebsiteSignal) return false;
+    return shouldShowWebsiteRuleHint(
+      domainCoverage,
+      meta.rules.some(
+        (rule) => rule.matchType === "process" && meta.browserSet.has(rule.pattern.toLowerCase()),
+      ),
+      meta.rules.some((rule) => rule.matchType === "domain"),
+    );
+  }, [domainCoverage, showWebsiteSignal, meta.rules, meta.browserSet]);
 
   const refreshMeta = async () => {
     await meta.refresh();
+  };
+
+  // Persisted rather than component-local: the notice reports a one-time
+  // transition, and one that reappeared on the next launch would stop reading
+  // as news. Deliberately outside DEFAULT_USER_SETTINGS, so restoring default
+  // settings does not re-announce something the reader already saw.
+  const [dismissingSignal, setDismissingSignal] = useState(false);
+  const dismissWebsiteSignal = async () => {
+    setDismissingSignal(true);
+    try {
+      await updateSetting("website_signal_seen", "1");
+      await meta.refresh();
+    } catch (cause) {
+      banner.report(cause, "dismissing the website notice");
+      setDismissingSignal(false);
+    }
   };
   const { applySuggestions, assignEntity, assignFromTriage, removeExactRules } =
     useEntityRuleWrites(result?.triage.total ?? 0);
@@ -777,6 +835,34 @@ export default function ActivityTab({
           </p>
           <div className="mt-2.5">
             <ExtensionLinks />
+          </div>
+        </section>
+      )}
+
+      {view === "library" && showWebsiteSignal && (
+        <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2">
+          <p>
+            <span className="font-medium text-ink">Website tracking is working.</span> Time is
+            splitting your browser time by site. Websites now appear here alongside your apps, and
+            can be classified the same way.
+          </p>
+          <div className="mt-2.5">
+            <Button disabled={dismissingSignal} onClick={() => void dismissWebsiteSignal()}>
+              {dismissingSignal ? "Saving…" : "Got it"}
+            </Button>
+          </div>
+        </section>
+      )}
+
+      {view === "library" && showWebsiteRuleHint && (
+        <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2">
+          <p>
+            Your browser has a category, but the websites you visit inside it can have their own.
+            Show websites, click a row, then choose Classification to give that site its own
+            category.
+          </p>
+          <div className="mt-2.5">
+            <Button onClick={() => setTypeFilter("website")}>Show websites</Button>
           </div>
         </section>
       )}

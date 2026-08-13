@@ -29,6 +29,7 @@ import {
   type WebsiteUsageAccumulator,
 } from "./metrics";
 import type { BrowserDomainCoverage } from "./domainCoverage";
+import { isUtilityName } from "./noise";
 import {
   hourlyActivitySummaries,
   addProductivitySeconds,
@@ -88,6 +89,9 @@ export interface InsightsRequest {
    *  — `insightsRequestKey` has to include them or the change won't be seen. */
   aliases: Record<string, string>;
   focusChainMaxGapSeconds: number;
+  /** Hide utility-named rows from the app and website rankings. Mirrors
+   *  the Activity Library's utilities switch; totals are never affected. */
+  hideUtilityApps: boolean;
   dayStartHour: number;
   dayEndHour: number;
   labelMode: "weekday" | "date";
@@ -247,6 +251,7 @@ export function aggregateInsightsSessions(
   const current: Session[] = [];
   let totalSec = 0;
   let prodSec = 0;
+  let uncategorizedSec = 0;
   let browserSeconds = 0;
   let missingDomainSeconds = 0;
   const rangeChain = focusChain(focusChainMaxGapSeconds);
@@ -288,6 +293,7 @@ export function aggregateInsightsSessions(
           }
         }
         if (category?.isProductive) prodSec += seconds;
+        if (!category) uncategorizedSec += seconds;
         rangeChain.add(inCurrent.start, inCurrent.end, seconds, category);
       }
     }
@@ -361,6 +367,7 @@ export function aggregateInsightsSessions(
       prodSec,
       prodFraction: totalSec > 0 ? prodSec / totalSec : 0,
       longestFocusSec: rangeChain.longestSeconds,
+      uncategorizedSec,
     },
     currentRanked: rankAppUsage(currentApps),
     previousRanked: rankAppUsage(previousApps),
@@ -403,8 +410,25 @@ function buildInsightsModelWithClassifier(
   // stretches inside a long range from inflating the bar.
   const minAppThresholdSeconds =
     request.minAppSecondsPerDay * Math.max(aggregation.activeDays, 1);
-  const eligibleApps = aggregation.currentRanked.filter(
+  // Two independent reasons a row can leave the list, kept apart because only
+  // the first one is reported. The footer names a duration preference, so
+  // folding utilities into its count would have it explain a row's absence with
+  // a threshold that row never met.
+  const aboveThreshold = aggregation.currentRanked.filter(
     (app) => app.seconds >= minAppThresholdSeconds,
+  );
+  // Utility rows drop out of the ranking but not out of any total: the KPIs and
+  // the hourly chart above still count every second the plumbing spent in the
+  // foreground. A row the reader has classified stays, because putting an
+  // entity in a category is an explicit statement that it matters — the same
+  // precedence `classifyNoise` gives the catalog.
+  const eligibleApps = aboveThreshold.filter(
+    (app) =>
+      !(
+        request.hideUtilityApps
+        && app.category === null
+        && isUtilityName({ kind: "app", key: app.key, sourceProcesses: app.processes })
+      ),
   );
   const apps = withDeltas(eligibleApps.slice(0, 20), aggregation.previousRanked, {
     currentDaily: aggregation.currentDaily,
@@ -413,8 +437,18 @@ function buildInsightsModelWithClassifier(
   // The minimum-app preference stays app-specific. Website traffic is naturally
   // more fragmented, and applying the same bar silently would erase short but
   // still top-ranked destinations from the first website analysis in Insights.
+  // The utility test still applies: for a website it catches a local file the
+  // browser rendered, which is no more a destination than msiexec is an app.
+  const eligibleWebsites = aggregation.currentWebsiteRanked.filter(
+    (site) =>
+      !(
+        request.hideUtilityApps
+        && site.category === null
+        && isUtilityName({ kind: "website", key: site.key, sourceProcesses: [] })
+      ),
+  );
   const websites = withDeltas(
-    aggregation.currentWebsiteRanked.slice(0, 20),
+    eligibleWebsites.slice(0, 20),
     aggregation.previousWebsiteRanked,
     {
       currentDaily: aggregation.currentWebsiteDaily,
@@ -465,7 +499,7 @@ function buildInsightsModelWithClassifier(
     apps,
     websites,
     websiteCoverage: aggregation.websiteCoverage,
-    hiddenAppCount: aggregation.currentRanked.length - eligibleApps.length,
+    hiddenAppCount: aggregation.currentRanked.length - aboveThreshold.length,
     historyDays: aggregation.historyDays,
     timelineSessions,
     rhythm,

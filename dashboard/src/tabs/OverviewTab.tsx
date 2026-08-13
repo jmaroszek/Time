@@ -10,6 +10,7 @@ import ProductiveHoursChart from "../components/ProductiveHoursChart";
 import { Card, MenuSelect, MetricCard, Spinner } from "../components/ui";
 import { fmtDuration, fmtPct } from "../lib/format";
 import type { InsightsRequest } from "../lib/insights";
+import { hidesUtilities } from "../lib/noise";
 import { calendarDays, type Range } from "../lib/time";
 import {
   MONTH_CALENDAR_MIN_DAYS,
@@ -127,6 +128,7 @@ export default function OverviewTab({
       minAppSecondsPerDay: meta.minAppSecondsPerDay,
       aliases: meta.aliases,
       focusChainMaxGapSeconds: meta.focusChainMaxGapSeconds,
+      hideUtilityApps: hidesUtilities(meta.noisePolicy.mode),
       dayStartHour: meta.dayStartHour,
       dayEndHour: meta.dayEndHour,
       labelMode: preset === "last7" ? "weekday" : "date",
@@ -176,6 +178,17 @@ export default function OverviewTab({
     !updateError &&
     (sessionData.refreshing || sessionData.loading || analyzed.refreshing || !analyzed.current);
   const { kpis, pace, hiddenAppCount } = model;
+  // A bare "0s" is an assertion: it says the reader was productive for no time
+  // at all. On a fresh install that is not what happened — nothing has been
+  // measured yet, or nothing has been classified — and three confident zeros in
+  // a row is what a broken app looks like. An em dash reports the absence
+  // instead of measuring it. A genuine zero, where activity exists and is
+  // classified but none of it is productive, is a real measurement and keeps
+  // its number.
+  const nothingRecorded = kpis.totalSec === 0;
+  const nothingClassified = kpis.totalSec > 0 && kpis.uncategorizedSec === kpis.totalSec;
+  const emptyReason = nothingRecorded || nothingClassified ? "—" : null;
+  const emptyNote = nothingRecorded ? "Nothing recorded yet" : "Nothing classified yet";
 
   return (
     <div className="relative flex flex-col gap-4" aria-busy={refreshing}>
@@ -197,17 +210,20 @@ export default function OverviewTab({
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <MetricCard
           label="Daily productive time"
-          value={fmtDuration(kpis.prodSec / calendarDays(displayRange))}
+          value={emptyReason ?? fmtDuration(kpis.prodSec / calendarDays(displayRange))}
+          sub={emptyReason ? emptyNote : undefined}
           hint="Total productive time in this range divided by the number of days it spans."
         />
         <MetricCard
           label="Productive share"
-          value={fmtPct(kpis.prodFraction)}
+          value={emptyReason ?? fmtPct(kpis.prodFraction)}
+          sub={emptyReason ? emptyNote : undefined}
           hint="Share of tracked time spent in apps and sites you've marked productive."
         />
         <MetricCard
           label="Longest focus"
-          value={fmtDuration(kpis.longestFocusSec)}
+          value={emptyReason ?? fmtDuration(kpis.longestFocusSec)}
+          sub={emptyReason ? emptyNote : undefined}
           hint="Longest continuous run of productive time. Short gaps don't break the chain."
         />
         {/* The target is not part of the figure. "40h / 35h" reads as a
