@@ -1,8 +1,9 @@
 # Security and privacy
 
-Time is a local-first Windows application. It has no account system, remote
-service, analytics, telemetry, advertising SDK, or application network client.
-Its normal runtime data flow is:
+Time is a local-first Windows application. It has no account system, cloud service,
+analytics, telemetry, or advertising SDK. Its only network-enabled feature is the updater:
+an automatic daily static-manifest check, followed only on user request by a fresh check and
+installer download. Its activity-data flow remains entirely local:
 
 `Win32 foreground/idle APIs → local tracker → per-user SQLite database → local dashboard`
 

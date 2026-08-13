@@ -13,6 +13,7 @@ vi.mock("./historyInvalidation", () => ({ invalidateHistory }));
 
 import {
   DEFAULT_USER_SETTINGS,
+  backupDatabase,
   chooseDatabaseBackupFile,
   deleteActivity,
   deleteHistoryBefore,
@@ -121,6 +122,7 @@ describe("backup and restore commands", () => {
   });
 
   it("keeps backup discovery, inspection, restore, and restart notice native", async () => {
+    await backupDatabase("Before cleanup");
     await listDatabaseBackups();
     await inspectDatabaseBackup("C:\\Backups\\one.db");
     await chooseDatabaseBackupFile();
@@ -128,6 +130,7 @@ describe("backup and restore commands", () => {
     await takeRestoreNotice();
 
     expect(invoke.mock.calls).toEqual([
+      ["backup_database", { backupName: "Before cleanup" }],
       ["list_database_backups"],
       ["inspect_database_backup", { backupPath: "C:\\Backups\\one.db" }],
       ["choose_database_backup_file"],

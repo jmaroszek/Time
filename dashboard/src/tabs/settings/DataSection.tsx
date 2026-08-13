@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { Button, ConfirmDialog, DialogShell, TrashButton } from "../../components/ui";
+import { BackupNameDialog } from "../../components/BackupNameDialog";
 import { getDbPath } from "../../lib/db";
 import { explainDbError } from "../../lib/dbErrors";
 import {
-  backupDatabase,
   chooseDatabaseBackupFile,
   countSessionsOlderThan,
   deleteHistoryBefore,
@@ -29,8 +29,7 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
   const [olderDays, setOlderDays] = useState("365");
   const [message, setMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [backingUp, setBackingUp] = useState(false);
-  const [backupDetail, setBackupDetail] = useState<{ ok: boolean; text: string } | null>(null);
+  const [backupNameOpen, setBackupNameOpen] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
   // The retention delete carries its own counted scope, so it is held as a
   // pending request rather than a bare open flag.
@@ -57,19 +56,6 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
     setTimeout(() => setCopied(false), 1500);
   });
 
-  const backUpNow = async () => {
-    if (backingUp) return;
-    setBackingUp(true);
-    setBackupDetail(null);
-    try {
-      const target = await backupDatabase();
-      setBackupDetail({ ok: true, text: `Backup saved to ${target}` });
-    } catch (error) {
-      setBackupDetail({ ok: false, text: explainDbError(error, "backup") });
-    } finally {
-      setBackingUp(false);
-    }
-  };
   const closeRestore = () => {
     setRestoreOpen(false);
     requestAnimationFrame(() => restoreButtonRef.current?.focus());
@@ -151,19 +137,13 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
-              disabled={backingUp}
-              aria-busy={backingUp}
-              onClick={() => void backUpNow()}
-              className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-xs font-semibold text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15 disabled:cursor-wait disabled:opacity-60"
+              onClick={() => setBackupNameOpen(true)}
+              className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-xs font-semibold text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15"
             >
-              {backingUp ? (
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" aria-hidden="true" />
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 3v11" /><path d="M7 9l5 5 5-5" /><path d="M4 20h16" />
-                </svg>
-              )}
-              {backingUp ? "Backing up…" : "Back up now"}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3v11" /><path d="M7 9l5 5 5-5" /><path d="M4 20h16" />
+              </svg>
+              Back up now
             </button>
             <button
               ref={restoreButtonRef}
@@ -176,15 +156,6 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
               Restore backup…
             </button>
           </div>
-          {backupDetail && (
-            <p
-              className={`mt-2 break-all text-xs ${backupDetail.ok ? "text-ink-3" : "text-bad"}`}
-              role={backupDetail.ok ? "status" : "alert"}
-              aria-live={backupDetail.ok ? "polite" : "assertive"}
-            >
-              {backupDetail.text}
-            </p>
-          )}
           <p className="mt-3 text-xs leading-snug text-ink-3">
             Backups are stored in a Backups folder beside this database. Everything stays on your machine.
           </p>
@@ -223,6 +194,12 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
         {message && <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-2">{message}</p>}
       </div>
       {restoreOpen && <RestoreBackupDialog onClose={closeRestore} />}
+      {backupNameOpen && (
+        <BackupNameDialog
+          onClose={() => setBackupNameOpen(false)}
+          onSaved={(target) => banner.show(`Backup saved to ${target}`)}
+        />
+      )}
       {pendingOlder && (
         <ConfirmDialog
           title="Delete recorded activity?"
@@ -234,9 +211,7 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
           busy={busyAction === "older"}
           extraAction={
             <Button
-              onClick={() => void backupDatabase()
-                .then((target) => setBackupDetail({ ok: true, text: `Backup saved to ${target}` }))
-                .catch((error) => setBackupDetail({ ok: false, text: explainDbError(error, "backup") }))}
+              onClick={() => setBackupNameOpen(true)}
             >
               Back up first
             </Button>

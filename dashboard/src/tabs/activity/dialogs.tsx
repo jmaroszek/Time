@@ -36,7 +36,6 @@ import { fmtDuration } from "../../lib/format";
 import {
   addRule,
   addTrackingExclusion,
-  backupDatabase,
   correctSession,
   deleteActivity,
   fetchSessionCorrection,
@@ -48,6 +47,7 @@ import {
   type SessionCorrection,
   type TrackingExclusionKind,
 } from "../../lib/queries";
+import { BackupNameDialog } from "../../components/BackupNameDialog";
 import type { StarterSuggestion } from "../../lib/starterSuggestions";
 import {
   previewTitleRule,
@@ -827,7 +827,7 @@ export function DeleteActivityDialog({
   const [preview, setPreview] = useState<ActivityDeletePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
-  const [backupPath, setBackupPath] = useState<string | null>(null);
+  const [backupNameOpen, setBackupNameOpen] = useState(false);
   // Always opens on the narrower of the two. Widening is a decision someone
   // has to make on purpose, and it is one keystroke away either way.
   const [wide, setWide] = useState(false);
@@ -862,6 +862,7 @@ export function DeleteActivityDialog({
     }
   };
   return (
+    <>
     <ConfirmDialog
       title="Delete recorded activity?"
       body={(
@@ -900,9 +901,6 @@ export function DeleteActivityDialog({
               {preview.count === 0 && (
                 <p className="mt-3 text-ink-3">There are no deletable sessions in this scope.</p>
               )}
-              {backupPath && (
-                <p className="mt-3 break-all text-ink-3">Backup saved to {backupPath}</p>
-              )}
             </>
           )}
         </>
@@ -917,9 +915,7 @@ export function DeleteActivityDialog({
       extraAction={(
         <Button
           disabled={deleting}
-          onClick={() => void backupDatabase()
-            .then(setBackupPath)
-            .catch((error) => banner.report(error, "backup"))}
+          onClick={() => setBackupNameOpen(true)}
         >
           Back up first
         </Button>
@@ -931,6 +927,13 @@ export function DeleteActivityDialog({
       onConfirm={() => void confirm()}
       onClose={onClose}
     />
+    {backupNameOpen && (
+      <BackupNameDialog
+        onClose={() => setBackupNameOpen(false)}
+        onSaved={(target) => banner.show(`Backup saved to ${target}`)}
+      />
+    )}
+    </>
   );
 }
 

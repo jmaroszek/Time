@@ -104,8 +104,11 @@ async fn fetch_sessions(
 }
 
 #[tauri::command]
-async fn backup_database(database: tauri::State<'_, TimeDatabase>) -> Result<String, String> {
-    database.backup().await
+async fn backup_database(
+    database: tauri::State<'_, TimeDatabase>,
+    backup_name: String,
+) -> Result<String, String> {
+    database.backup_with_name(&backup_name).await
 }
 
 #[tauri::command]

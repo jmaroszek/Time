@@ -48,10 +48,9 @@ how that is changing over time.
   usage are highlighted only when the relative and absolute change is meaningful
   and not driven by one unusual day. Color depends on direction: more time in a
   productive destination is green, more in a distracting one is red.
-- **Never loses meaningful data.** The tracker runs all day and survives
-  crashes, restarts, and double launches — at worst the last 15 seconds are
-  lost, because the open session is flushed to disk on that heartbeat. The
-  tracker and dashboard share one SQLite file (WAL mode) safely.
+- **Limits loss when a process is interrupted.** The tracker rejects double launches and
+  flushes the open session to disk on its heartbeat, limiting an unexpected exit to roughly
+  the last 15 seconds. The tracker and dashboard share one SQLite file (WAL mode) safely.
 
 ## The dashboard
 
@@ -77,9 +76,9 @@ writes; new schemas are bootstrapped directly at the current public contract.
 
 ## Installing it
 
-Time is distributed as a signed installer for Windows from
-[trackwithtime.com](https://trackwithtime.com). It bootstraps the local database
-but records nothing and creates no startup entry until you opt in; uninstalling
+The beta will be distributed as an approved signed installer for Windows from
+[trackwithtime.com](https://trackwithtime.com). It will bootstrap the local database
+but record nothing and create no startup entry until you opt in; uninstalling
 removes the app and its autostart entry while keeping your database.
 
 ## Privacy and security
@@ -88,13 +87,11 @@ Tracking is disabled until an explicit first-run choice. Window titles are a
 separate opt-in and are off by default; browser URLs are sanitized before a
 session is written. Time has no account, cloud sync, analytics, or telemetry.
 
-Time makes exactly one network request: once a day, it asks
-`trackwithtime.com` whether a newer version exists. The request is an
-unconditional fetch of a static file — it carries no identifier, no version, and
-nothing about your activity, so the only thing the server can log is that some
-computer asked, which is what any web server records for any visitor. Nothing is
-ever installed without you clicking Update, and the whole check can be turned off
-under Settings → Privacy & recording.
+The updater is Time's only network-enabled feature. Its only automatic request is a daily
+fetch of a static manifest from `trackwithtime.com`; it carries no identifier, version, or
+activity data. If you choose to install an update, Time performs a fresh manifest check and
+downloads the installer. Nothing is installed without that click, and update checks can be
+turned off under Settings → Privacy & recording.
 
 The dashboard uses a restrictive content-security policy and a fixed-path,
 least-authority database bridge. See [SECURITY.md](SECURITY.md) for the threat

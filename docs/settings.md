@@ -19,12 +19,11 @@ What Time is allowed to capture, and the one request that leaves your machine.
 | **Website detection** | Links to the Time Web Extension for Chrome and Firefox, which is what lets browser activity be recorded as individual websites rather than one browser. Nothing is installed from here — the links open the stores. |
 | **Check for updates** | Check for updates once per day. Time will not install a new version without your consent. |
 
-**Check for updates** is the only time Time uses the network, so it is worth
-being precise about. The request fetches one small file and sends nothing with
-it — not an identifier, not your version, not a word about what you have been
-doing. When a newer version is found, a download icon appears next to the tabs
-at the top of the window; hovering it names the version, and clicking it
-installs. Nothing is downloaded or installed until you click.
+The updater is the only Time feature that uses the network, so it is worth being precise
+about. Its automatic daily request fetches one small static manifest and sends no identifier,
+version, or activity data. When a newer version is found, a download icon appears next to the
+tabs; hovering names the version. Clicking performs a fresh check, downloads the installer,
+and starts installation. No installer is downloaded or run until you click.
 
 Installing closes Time, replaces it, and starts it again. Recording resumes on
 its own if it was on, and your history is untouched — the database lives outside

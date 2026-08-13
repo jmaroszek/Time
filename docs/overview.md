@@ -1,6 +1,7 @@
 # Insights tab
 
-This tab focuses on your recent behavior. The date picker in the top-right corner offers Today, Last 7/14/28 days, and a custom range.
+This tab explains behavior over the selected range. The date picker in the top-right offers
+Today, Week, Month, Quarter, Year, All time, and a custom range.
 
 ![Insights tab](images/overview.png)
 

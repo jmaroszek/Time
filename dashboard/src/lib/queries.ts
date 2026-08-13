@@ -626,9 +626,9 @@ export async function fetchEarliestSessionStart(): Promise<number | null> {
   return rows[0]?.first_ts ?? null;
 }
 
-/** Snapshot the DB into its Backups folder and return the full path. */
-export async function backupDatabase(): Promise<string> {
-  return invoke<string>("backup_database");
+/** Snapshot the DB under a user-chosen name and return the full path. */
+export async function backupDatabase(backupName: string): Promise<string> {
+  return invoke<string>("backup_database", { backupName });
 }
 
 export interface DatabaseBackup {

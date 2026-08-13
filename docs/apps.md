@@ -430,8 +430,8 @@ scope is then a deliberate choice rather than what happens by not choosing. Both
 that dialog and the builder under Categories & Rules report the same counts
 before anything is saved.
 
-Window rules applied only to browsers before Time 0.2. On upgrade, existing ones
-become **Any app**, which can reclassify past activity whose titles happen to
+Window rules in older schemas applied only to browsers. On migration, existing ones become
+**Any app**, which can reclassify past activity whose titles happen to
 contain the same words; setting such a rule back to **Browsers** restores its
 former behaviour exactly, since rules are evaluated against history rather than
 written into session rows. The tracker backs the database up in its Backups folder before

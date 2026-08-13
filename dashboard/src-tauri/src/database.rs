@@ -1528,8 +1528,36 @@ impl TimeDatabase {
         Ok(target.to_string_lossy().into_owned())
     }
 
-    pub async fn backup(&self) -> Result<String, String> {
-        self.backup_named("backup_manual").await
+    pub async fn backup_with_name(&self, name: &str) -> Result<String, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Give the backup a name".into());
+        }
+        if name.starts_with("backup_")
+            || name.ends_with('.')
+            || name.ends_with(' ')
+            || name.chars().any(|character| {
+                matches!(
+                    character,
+                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+                ) || character.is_control()
+            })
+        {
+            return Err(
+                "Backup names cannot start with backup_, contain path characters, or end with a period or space".into(),
+            );
+        }
+
+        let target = self.backups_dir()?.join(format!("{name}.db"));
+        if target.exists() {
+            return Err("A backup with that name already exists. Choose a different name".into());
+        }
+        let escaped = target.to_string_lossy().replace("'", "''");
+        sqlx::query(&format!("VACUUM INTO '{escaped}'"))
+            .execute(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(target.to_string_lossy().into_owned())
     }
 
     async fn read_restore_settings(
@@ -1616,14 +1644,12 @@ impl TimeDatabase {
     }
 
     fn backup_kind(name: &str) -> String {
-        if name.starts_with("backup_manual_") {
-            "Manual".to_owned()
-        } else if name.starts_with("backup_schema") {
+        if name.starts_with("backup_schema") {
             "Before update".to_owned()
         } else if name.starts_with("backup_pre_restore_") {
             "Before restore".to_owned()
         } else {
-            "Backup".to_owned()
+            "Manual".to_owned()
         }
     }
 
@@ -1688,8 +1714,8 @@ impl TimeDatabase {
                 let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
                     continue;
                 };
-                if name.starts_with("backup_")
-                    && path.extension().and_then(|value| value.to_str()) == Some("db")
+                if path.extension().and_then(|value| value.to_str()) == Some("db")
+                    && (!legacy || name.starts_with("backup_"))
                 {
                     paths.push((path, legacy));
                 }
@@ -2706,11 +2732,29 @@ mod tests {
             .execute(&database.pool)
             .await
             .unwrap();
-            let backup_path = PathBuf::from(database.backup().await.unwrap());
+            let backup_path =
+                PathBuf::from(database.backup_with_name("before-restore").await.unwrap());
             assert_eq!(
                 backup_path.parent().unwrap().file_name().unwrap(),
                 "Backups"
             );
+            assert_eq!(backup_path.file_name().unwrap(), "before-restore.db");
+            assert!(database
+                .list_backups()
+                .await
+                .unwrap()
+                .iter()
+                .any(|backup| backup.name == "before-restore.db" && backup.kind == "Manual"));
+            assert!(database
+                .backup_with_name("before-restore")
+                .await
+                .unwrap_err()
+                .contains("already exists"));
+            assert!(database
+                .backup_with_name("not/a-backup")
+                .await
+                .unwrap_err()
+                .contains("contain path"));
             sqlx::query(
                 "INSERT INTO sessions (id,start_ts,end_ts,process) VALUES (2,20,30,'mail.exe')",
             )
