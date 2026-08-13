@@ -508,6 +508,39 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// How long the window may stay hidden while the frontend loads. Generous:
+/// this is a last resort, not a race with a cold start.
+const FRONTEND_SHOW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(12);
+
+/// Show the window even if the frontend never mounts.
+///
+/// The window is created hidden and `WindowTitleBar` shows it, which keeps
+/// visibility an application decision rather than a persisted window-state
+/// field. The cost is that a webview which never loads leaves a process with no
+/// window at all: alive, holding the database, holding the single-instance
+/// lock, and invisible. Restoring a backup is where that bites, because the
+/// restart puts a fresh startup between the user and their data — a failure
+/// there reads as a crash, and the restore notice waiting to be shown is never
+/// read.
+///
+/// Showing an unpainted window is not a good outcome. It is a far better one
+/// than a process the user can neither see nor replace, and the native frame
+/// goes back on so there is a close button when the frontend that draws Time's
+/// own titlebar is the thing that failed.
+fn show_window_if_the_frontend_never_does(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(FRONTEND_SHOW_DEADLINE);
+        let Some(window) = app.get_webview_window("main") else {
+            return;
+        };
+        if window.is_visible().unwrap_or(true) {
+            return;
+        }
+        let _ = window.set_decorations(true);
+        let _ = window.show();
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -552,6 +585,8 @@ pub fn run() {
                         let _ = app_handle.save_window_state(saved_window_state_flags());
                     }
                 });
+
+                show_window_if_the_frontend_never_does(app.handle().clone());
             }
 
             let base = app.path().local_data_dir()?;

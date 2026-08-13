@@ -1861,6 +1861,35 @@ impl TimeDatabase {
         Self::remove_if_exists(&path.with_extension("db-shm"))
     }
 
+    /// Fold a database's write-ahead log into its main file.
+    ///
+    /// Always call this before dropping a `-wal`. A log is not a cache: the
+    /// rows it holds are only in the database while the pair stays together,
+    /// and a restore has to break the pair — the file being replaced must never
+    /// be left beside a log belonging to the database that replaced it. The
+    /// tracker is force-stopped for a restore and its last minutes are still in
+    /// the log when it dies, so deleting the log instead of folding it in threw
+    /// away exactly the recording the safety copy exists to protect.
+    async fn checkpoint_wal(path: &Path) -> Result<(), String> {
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(false)
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_secs(10));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .map_err(|error| format!("Could not open the database: {error}"))?;
+        let checkpoint = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&pool)
+            .await;
+        pool.close().await;
+        checkpoint
+            .map(|_| ())
+            .map_err(|error| format!("Could not fold in the write-ahead log: {error}"))
+    }
+
     /// Copy a database and fold any write-ahead log into the copy.
     ///
     /// Every restore validates through a read-only connection, and a read-only
@@ -1885,21 +1914,9 @@ impl TimeDatabase {
             Self::copy_with_retry(&source_log, &destination.with_extension("db-wal"))?;
         }
 
-        let options = SqliteConnectOptions::new()
-            .filename(destination)
-            .create_if_missing(false)
-            .journal_mode(SqliteJournalMode::Wal)
-            .busy_timeout(Duration::from_secs(10));
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
+        Self::checkpoint_wal(destination)
             .await
-            .map_err(|error| format!("Could not open backup: {error}"))?;
-        let checkpoint = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-            .execute(&pool)
-            .await;
-        pool.close().await;
-        checkpoint.map_err(|error| error.to_string())?;
+            .map_err(|error| format!("Could not read backup: {error}"))?;
         Self::remove_database_sidecars(destination)
     }
 
@@ -1945,7 +1962,11 @@ impl TimeDatabase {
         }
         let safety_backup_path = self.backup_named("backup_pre_restore").await?;
         Self::remove_if_exists(&pending_path)?;
-        fs::rename(&temporary_path, &pending_path).map_err(|error| error.to_string())?;
+        Self::remove_database_sidecars(&pending_path)?;
+        // Both pools that read the staged copy have just closed, which is the
+        // case `rename_with_retry` exists for.
+        Self::rename_with_retry(&temporary_path, &pending_path)?;
+        let _ = Self::remove_database_sidecars(&temporary_path);
         let pending = PendingRestore {
             source_name: source
                 .file_name()
@@ -1991,7 +2012,9 @@ impl TimeDatabase {
     }
 
     pub fn cancel_pending_restore(&self) -> Result<(), String> {
-        Self::remove_if_exists(&Self::pending_database_path(&self.path)?)?;
+        let pending_path = Self::pending_database_path(&self.path)?;
+        Self::remove_if_exists(&pending_path)?;
+        Self::remove_database_sidecars(&pending_path)?;
         Self::remove_if_exists(&Self::pending_marker_path(&self.path)?)
     }
 
@@ -2032,6 +2055,11 @@ impl TimeDatabase {
         if staged.0 != pending.schema_version {
             return Err("Staged database does not match its pending marker".into());
         }
+        // Best effort, and deliberately so: a database too damaged to open is
+        // one of the reasons to restore in the first place, and refusing to
+        // proceed would strand the user with the file they are replacing. The
+        // safety copy taken before the tracker stopped still holds this data.
+        let _ = Self::checkpoint_wal(database_path).await;
         Self::remove_database_sidecars(database_path)?;
         Self::rename_with_retry(database_path, &rollback_path)?;
         if let Err(error) = Self::rename_with_retry(&pending_path, database_path) {
@@ -2048,6 +2076,10 @@ impl TimeDatabase {
             }
             return Err(error);
         }
+        // SQLite only cleans up a `-wal`/`-shm` pair for a database still where
+        // it left it, so every rename here orphans one under the old name.
+        // Never worth failing a completed swap over.
+        let _ = Self::remove_database_sidecars(&pending_path);
         Ok(Some(RestoreSwap {
             pending,
             rollback_path,
@@ -2057,7 +2089,9 @@ impl TimeDatabase {
     }
 
     pub fn discard_pending_restore(database_path: &Path, message: String) -> Result<(), String> {
-        Self::remove_if_exists(&Self::pending_database_path(database_path)?)?;
+        let pending_path = Self::pending_database_path(database_path)?;
+        Self::remove_if_exists(&pending_path)?;
+        Self::remove_database_sidecars(&pending_path)?;
         Self::remove_if_exists(&Self::pending_marker_path(database_path)?)?;
         Self::write_restore_notice(database_path, RestoreNotice { ok: false, message })
     }
@@ -2134,7 +2168,9 @@ impl RestoreSwap {
         }
         TimeDatabase::remove_if_exists(&failed_path)?;
         TimeDatabase::remove_if_exists(&self.marker_path)?;
-        TimeDatabase::remove_if_exists(&TimeDatabase::pending_database_path(&self.database_path)?)
+        let pending_path = TimeDatabase::pending_database_path(&self.database_path)?;
+        TimeDatabase::remove_if_exists(&pending_path)?;
+        TimeDatabase::remove_database_sidecars(&pending_path)
     }
 }
 
@@ -2662,6 +2698,96 @@ mod tests {
         );
     }
 
+    /// A restore force-stops the tracker, so the live database is left exactly
+    /// like this one: a main file plus a log nobody folded in. The swap has to
+    /// delete that log — pairing it with the database that replaces it would
+    /// corrupt both — and deleting it before folding it in silently reverted
+    /// the copy kept for rollback to its last checkpoint, which on a busy day
+    /// is hours of recording.
+    #[test]
+    fn a_rolled_back_restore_keeps_what_the_stopped_tracker_left_in_its_log() {
+        let root = scratch_root("database-restore-rollback-wal-test");
+        let live = root.join("database.db");
+        let origin = root.join("still-running.db");
+
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(live.clone()).await.unwrap();
+            let backup = database.backup_with_name("before").await.unwrap();
+            database
+                .prepare_restore(PathBuf::from(backup))
+                .await
+                .unwrap();
+            database.close().await;
+
+            // Stand in for the tracker's last minutes: written, acknowledged,
+            // and still only in the log when the process was killed.
+            let source = TimeDatabase::open(origin.clone()).await.unwrap();
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process) VALUES (3,30,40,'unsaved.exe')",
+            )
+            .execute(&source.pool)
+            .await
+            .unwrap();
+            std::fs::copy(&origin, &live).unwrap();
+            std::fs::copy(
+                origin.with_extension("db-wal"),
+                live.with_extension("db-wal"),
+            )
+            .unwrap();
+            source.close().await;
+
+            let swap = TimeDatabase::begin_pending_restore(&live)
+                .await
+                .unwrap()
+                .unwrap();
+            swap.rollback().unwrap();
+
+            let restored = TimeDatabase::open(live.clone()).await.unwrap();
+            let processes: Vec<String> =
+                sqlx::query_scalar("SELECT process FROM sessions ORDER BY id")
+                    .fetch_all(&restored.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(processes, ["unsaved.exe"]);
+            restored.close().await;
+        });
+    }
+
+    /// A renamed database leaves its `-wal`/`-shm` behind under the old name:
+    /// SQLite cleans those up only for a file still where it left it. Every
+    /// restore renames twice, and the strays accumulated in the folder Time
+    /// tells the user holds their data.
+    #[test]
+    fn a_completed_restore_leaves_no_stray_files_behind() {
+        let root = scratch_root("database-restore-litter-test");
+        let live = root.join("database.db");
+
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(live.clone()).await.unwrap();
+            let backup = database.backup_with_name("before").await.unwrap();
+            database
+                .prepare_restore(PathBuf::from(backup))
+                .await
+                .unwrap();
+            database.close().await;
+
+            let swap = TimeDatabase::begin_pending_restore(&live)
+                .await
+                .unwrap()
+                .unwrap();
+            swap.commit().unwrap();
+            let restored = TimeDatabase::open(live.clone()).await.unwrap();
+            restored.close().await;
+        });
+
+        let strays: Vec<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("restore_"))
+            .collect();
+        assert!(strays.is_empty(), "restore left {strays:?} behind");
+    }
+
     /// A backup copied out of a running Time keeps its write-ahead log, and the
     /// rows it holds are not in the main file yet. Restore validates through a
     /// read-only connection, which cannot replay a log, so such a backup was
@@ -2732,21 +2858,25 @@ mod tests {
             .execute(&database.pool)
             .await
             .unwrap();
-            let backup_path =
-                PathBuf::from(database.backup_with_name("before-restore").await.unwrap());
+            let backup_path = PathBuf::from(
+                database
+                    .backup_with_name("Backup 08-13-2026")
+                    .await
+                    .unwrap(),
+            );
             assert_eq!(
                 backup_path.parent().unwrap().file_name().unwrap(),
                 "Backups"
             );
-            assert_eq!(backup_path.file_name().unwrap(), "before-restore.db");
+            assert_eq!(backup_path.file_name().unwrap(), "Backup 08-13-2026.db");
             assert!(database
                 .list_backups()
                 .await
                 .unwrap()
                 .iter()
-                .any(|backup| backup.name == "before-restore.db" && backup.kind == "Manual"));
+                .any(|backup| backup.name == "Backup 08-13-2026.db" && backup.kind == "Manual"));
             assert!(database
-                .backup_with_name("before-restore")
+                .backup_with_name("Backup 08-13-2026")
                 .await
                 .unwrap_err()
                 .contains("already exists"));
