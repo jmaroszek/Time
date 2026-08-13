@@ -1752,6 +1752,16 @@ impl TimeDatabase {
     /// `block_on` during startup, before there is anything else to run, and a
     /// blocking sleep keeps the helper usable from `RestoreSwap`'s synchronous
     /// commit and rollback paths too.
+    ///
+    /// None of this is a licence to unserialize the test suite. At
+    /// `RUST_TEST_THREADS=16` the restore tests still fail about once in sixty,
+    /// because a blocked thread can starve the very `sqlite3_close` it waits on
+    /// — the retry narrows the window, `RUST_TEST_THREADS` in `/.cargo/config.toml`
+    /// is what closes it, and both are load-bearing. Making the wait yield
+    /// instead means an async retry, which turns `remove_if_exists` and
+    /// `write_json_atomic` async and ripples through `RestoreSwap`'s synchronous
+    /// commit and rollback paths; not worth it while the suite is serialized
+    /// everywhere it runs.
     fn retry_while_locked<T>(
         mut operation: impl FnMut() -> std::io::Result<T>,
     ) -> std::io::Result<T> {
