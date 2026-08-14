@@ -112,9 +112,34 @@ differences.
 ## Tracker status
 
 The tracker publishes a dedicated health signal every five seconds, independent
-of recorded sessions, exclusions, and the session-flush interval. Settings
-reports a missing tracker after the first missed signal plus a short scheduling
-allowance, with a distinct paused state when tracking is paused from the tray.
+of recorded sessions, exclusions, and the session-flush interval. That signal
+reports only whether the tracker process is alive — it keeps arriving while
+recording is paused, outside scheduled hours, or switched off, because in each
+of those cases the tracker is running and deliberately storing nothing.
+
+Settings reports a missing tracker after the first missed signal plus a short
+scheduling allowance. A reason you chose takes precedence over that check, so a
+pause you set is reported as a pause rather than as a fault.
+
+The status card offers whichever action the tracker actually needs: **Start
+tracker** when it is not running, **Resume now** while tracking is paused.
+These are different operations — starting the tracker does not end a pause, and
+a paused tracker that is also not running is resumed and started together.
+
+Outside Settings, Time shows at most one status message at a time:
+
+- **Time has stopped recording** — recording is on and the tracker is not
+  answering. This appears on every tab and cannot be dismissed, because it is
+  the only tracker state with no other symptom: the numbers simply stop growing,
+  which looks the same as not having used the computer.
+- **Tracking is paused** — appears on every tab while a pause is in effect, with
+  the same **Resume now** button as the Settings card. Dismissing it hides it for
+  that pause only; a later pause says so again.
+- **Recording is off**, **Outside your recording hours**, and the first-run
+  welcome appear on Insights and can be dismissed for good.
+
+Every message except the stopped-tracker warning describes a state you chose, so
+every one of them can be dismissed.
 
 ## Restore defaults
 

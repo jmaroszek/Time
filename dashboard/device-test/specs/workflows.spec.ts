@@ -64,7 +64,7 @@ test("@workflow onboarding rolls back consent when tracker startup fails", async
   expect(launchCalls).toEqual([{ enabled: true }, { enabled: false }]);
 });
 
-// The welcome panel is the only screen a user reaches by declining at the
+// The first-run panel is the only screen a user reaches by declining at the
 // consent step, and the only place tracking can be started without visiting
 // Settings. Both of its states are covered here because the quiet failure it
 // guards against — tracking that never starts, or starts and then stops for
@@ -97,11 +97,19 @@ test("@workflow first run starts tracking, then offers to register startup", asy
   await expect(page.getByRole("button", { name: "Start at sign-in" })).toHaveCount(0);
 });
 
-test("@workflow first run with a live tracker asks for nothing", async ({ page }) => {
+// A running process is not consent. The tracker stamps its health before any
+// recording gate is applied, so it beats on happily after "Not now" — and
+// reading that stamp as "tracking is on" told a reader Time was recording in
+// the background while it was storing nothing at all. Consent decides what this
+// panel says; liveness only decides whether starting is still needed.
+test("@workflow a live tracker without consent still offers to start recording", async ({
+  page,
+}) => {
   await page.goto("/?fixture=firstrun");
-  await expect(page.getByText("Tracking is on")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start tracking" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Start at sign-in" })).toHaveCount(0);
+  await expect(page.getByText("nothing is being recorded")).toBeVisible();
+  await expect(page.getByText("Tracking is on")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Start tracking" })).toBeVisible();
+  // Offering is not doing: nothing may start until the reader asks.
   expect(await invocationNames(page)).not.toContain("start_tracker");
 });
 
@@ -143,6 +151,63 @@ test("@workflow missing tracker can be started from its status card", async ({ p
   await expect(page.getByText("Tracker is live")).toBeVisible();
   await expect(page.getByRole("button", { name: "Start tracker" })).toHaveCount(0);
   await expect.poll(() => invocationNames(page)).toContain("start_tracker");
+});
+
+// Starting and resuming are different operations on different state, and the
+// status card offers whichever one the tracker actually needs. `start_tracker`
+// never touches the pause keys, so on a paused tracker it would spawn a process
+// that reads tracking_paused=1 and stores nothing — a button that visibly did
+// nothing. Before this control a tray pause could only be ended from the tray.
+test("@workflow a paused tracker is resumed, not started, from its status card", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  // Establish liveness before pausing. The fixture's health stamp is a fixed
+  // timestamp that ages in real time, so a test that assumed it was still fresh
+  // would start failing on a slow run rather than on a real defect.
+  await expect(page.getByText("Tracker is live")).toBeVisible();
+  await page.evaluate(() => {
+    const settings = window.__TIME_DEVICE_TEST__.settings;
+    settings.tracking_paused = "1";
+    settings.tracking_paused_until = "0";
+    settings.tracker_health_heartbeat = String(Math.floor(Date.now() / 1000));
+  });
+  // Pause is read on mount and then every 15s, because the tray writes it
+  // outside every path that refreshes the dashboard. Leave and return rather
+  // than waiting out that cycle.
+  await page.getByRole("button", { name: "Insights", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  await expect(page.getByText("Tracking paused")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start tracker" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Resume now" }).click();
+
+  // Both keys move together, or the pause is over and is not.
+  await expect.poll(async () => await fixtureSettings(page)).toMatchObject({
+    tracking_paused: "0",
+    tracking_paused_until: "0",
+  });
+  await expect(page.getByText("Tracker is live")).toBeVisible();
+  // The process was already answering, so resuming must not respawn it.
+  expect(await invocationNames(page)).not.toContain("start_tracker");
+});
+
+test("@workflow resuming a pause that outlived the tracker also starts it", async ({ page }) => {
+  await page.goto("/?tracker=missing");
+  await page.evaluate(() => {
+    window.__TIME_DEVICE_TEST__.settings.tracking_paused = "1";
+  });
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  // A pause the reader chose outranks liveness in the label.
+  await expect(page.getByText("Tracking paused")).toBeVisible();
+  await page.getByRole("button", { name: "Resume now" }).click();
+
+  // Resuming means "record again", not "clear a flag and leave a second broken
+  // state for the reader to find".
+  await expect.poll(() => invocationNames(page)).toContain("start_tracker");
+  await expect(page.getByText("Tracker is live")).toBeVisible();
 });
 
 test("@workflow tracker start failure stays actionable", async ({ page }) => {

@@ -148,6 +148,17 @@ export async function updateSetting(key: string, value: string): Promise<void> {
   );
 }
 
+/** End a pause by clearing both keys, exactly as the tray does.
+ *
+ *  The pair has to move together: `tracking_paused` is the indefinite flag and
+ *  `tracking_paused_until` is the timed one, and the tracker resumes only when
+ *  neither is set. Clearing one and leaving the other is a pause that looks over
+ *  and is not. The tracker picks this up on its next one-second settings read. */
+export async function clearTrackingPause(): Promise<void> {
+  await updateSetting("tracking_paused", "0");
+  await updateSetting("tracking_paused_until", "0");
+}
+
 // Mirrors fresh-install values in tracker/db.py DEFAULT_SETTINGS and the Rust
 // BOOTSTRAP_SQL. This intentionally selects only settings the global restore
 // action owns; runtime and onboarding metadata must survive it.

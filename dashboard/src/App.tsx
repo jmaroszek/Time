@@ -4,11 +4,15 @@ import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePick
 import { Spinner } from "./components/ui";
 import {
   DbErrorScreen,
-  FirstRunPanel,
   NewerDatabaseScreen,
+  OffScheduleNotice,
+  PauseNotice,
   PrivacyOnboarding,
+  RecordingOffPanel,
+  StartRecordingPanel,
   TrackerAlert,
   WaitingForTracker,
+  WelcomePanel,
 } from "./components/AppStates";
 import { isMissingSchemaError } from "./lib/dbErrors";
 import {
@@ -18,12 +22,19 @@ import {
 } from "./lib/historyInvalidation";
 import {
   fetchEarliestSessionStart,
+  fetchSettings,
   fetchTrackerStatus,
   takeRestoreNotice,
   type TrackerStatus,
 } from "./lib/queries";
 import { isNewerSchemaError } from "./lib/schema";
-import { trackerNeedsAttention } from "./lib/trackerHealth";
+import {
+  bannerFor,
+  bannerVisibleOnTab,
+  readerIsNew,
+  recordingState,
+  TRACKER_ALERT_STALE_SECONDS,
+} from "./lib/trackerHealth";
 import {
   allTimeRange,
   clampRangeStart,
@@ -172,12 +183,74 @@ function Shell() {
     const id = setInterval(load, 30_000);
     return () => clearInterval(id);
   }, [ready, firstSessionSec, refreshFirstSession]);
-  // The welcome panel outlives the empty database it used to be gated on. Its
-  // old gate was `totalSessionCount === 0`, so the panel announced that the
-  // first activity was about to arrive and was then destroyed by that arrival —
-  // usually inside a minute, before a new reader had finished it. Dismissal is
-  // now the only thing that ends it.
-  const welcomeVisible = status !== null && meta.settings.welcome_dismissed !== "1";
+  // Pause is written from the tray, outside every path that refreshes `meta`,
+  // which loads once and re-reads only after a write from this window. Overlay
+  // just those two keys from the status poll below: meta stays authoritative for
+  // everything the dashboard itself owns, including the dismiss flags, so a
+  // dismissal takes effect immediately rather than at the next poll.
+  const [trayPause, setTrayPause] = useState<Record<string, string>>({});
+  const trackerSettings = useMemo(
+    () => ({ ...meta.settings, ...trayPause }),
+    [meta.settings, trayPause],
+  );
+  // A start the reader just asked for, held here rather than inside the panel
+  // that asked for it: the panel is mounted by the very state this flag
+  // suppresses, so owning it there would unmount the timer mid-countdown.
+  const [startPending, setStartPending] = useState(false);
+  const [offerStartup, setOfferStartup] = useState(false);
+  const [pauseNoticeDismissed, setPauseNoticeDismissed] = useState(false);
+
+  const heartbeatAgeSec = status?.lastHeartbeat == null || status.lastHeartbeat <= 0
+    ? null
+    : Date.now() / 1000 - status.lastHeartbeat;
+  // Never before the first status read: `status === null` is "not asked yet",
+  // and treating it as "never checked in" would flash a warning on every launch
+  // in the gap before the first answer arrives.
+  const trackerState = status === null
+    ? null
+    : recordingState({
+      heartbeatAgeSec,
+      settings: trackerSettings,
+      nowSec: Date.now() / 1000,
+      totalSessionCount: status.totalSessionCount,
+      starting: startPending,
+    });
+  // At most one banner, resolved from one state. Two surfaces reporting the same
+  // fact used to be prevented by a suppression clause maintained by hand at each
+  // call site; it is now impossible by construction.
+  const bannerPlan = trackerState === null
+    ? null
+    : bannerFor(trackerState, {
+      readerIsNew: readerIsNew(firstSessionSec, Date.now() / 1000),
+      settings: trackerSettings,
+      pauseNoticeDismissed,
+    });
+  const trackerBannerVisible = ready && bannerVisibleOnTab(bannerPlan, tab);
+  // Both of these render a live tracker dot, so the status poll has to keep
+  // running while either is up even once the first session exists.
+  const panelWatchesTracker = bannerPlan?.id === "welcome"
+    || bannerPlan?.id === "start_recording";
+
+  // A start that never confirms must not sit as "starting" forever, or the one
+  // alarm worth interrupting for would be suppressed by the reader's own
+  // attempt to fix it. The panel says so at TRACKER_CONFIRM_MS; this is the
+  // outer bound after which the state falls through to `stopped`.
+  useEffect(() => {
+    if (!startPending) return;
+    if (trackerState?.kind === "recording") {
+      setStartPending(false);
+      return;
+    }
+    const id = setTimeout(() => setStartPending(false), TRACKER_ALERT_STALE_SECONDS * 1000);
+    return () => clearTimeout(id);
+  }, [startPending, trackerState?.kind]);
+
+  // A new pause is a new announcement, even if the last one was dismissed.
+  const pauseIdentity = trackerState?.kind === "paused" ? String(trackerState.until ?? "open") : "";
+  useEffect(() => {
+    setPauseNoticeDismissed(false);
+  }, [pauseIdentity]);
+
   // Depend on the answer, not on `status` itself. fetchTrackerStatus resolves a
   // new object every time, so keeping `status` in the dependency list tore this
   // effect down and rebuilt it on every poll — and because the body starts with
@@ -186,11 +259,11 @@ function Shell() {
   // unbounded loop: roughly twelve hundred queries a second, for as long as a
   // fresh install went without its first session.
   const awaitingFirstSession = status === null || status.totalSessionCount === 0;
-  // Keep polling while the welcome panel is up, even once sessions exist: the
-  // panel shows a live/stopped dot, and a dot that stopped refreshing when the
-  // first session landed would report a tracker state minutes out of date.
+  // Keep polling while a tracker-state panel is up, even once sessions exist:
+  // those panels show a live/stopped dot, and a dot that stopped refreshing when
+  // the first session landed would report a tracker state minutes out of date.
   useEffect(() => {
-    if (!ready || (!awaitingFirstSession && !welcomeVisible)) return;
+    if (!ready || (!awaitingFirstSession && !panelWatchesTracker)) return;
     let cancelled = false;
     const load = () =>
       void fetchTrackerStatus()
@@ -219,7 +292,7 @@ function Shell() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [ready, awaitingFirstSession, welcomeVisible]);
+  }, [ready, awaitingFirstSession, panelWatchesTracker]);
 
   // The health signal behind TrackerAlert. The poll above stops once the first
   // session exists and the welcome panel is gone, which is exactly when a
@@ -230,36 +303,25 @@ function Shell() {
   // Booleans and numbers in the dependency list only: fetchTrackerStatus
   // resolves a fresh object each time, and depending on `status` would rebuild
   // this effect on every response and re-fire its immediate load.
+  // The pause keys ride along with this poll rather than getting a timer of
+  // their own. A minute's lag is right for a notice — the tray flipped it, so
+  // the reader already knows — and `liveTick` re-reads on the way back to the
+  // app, which is when someone who paused elsewhere actually looks.
   useEffect(() => {
     if (!ready) return;
-    const load = () => void fetchTrackerStatus().then(setStatus).catch(() => {});
+    const load = () => {
+      void fetchTrackerStatus().then(setStatus).catch(() => {});
+      void fetchSettings()
+        .then((s) => setTrayPause({
+          tracking_paused: s.tracking_paused ?? "0",
+          tracking_paused_until: s.tracking_paused_until ?? "0",
+        }))
+        .catch(() => {});
+    };
     load();
     const id = setInterval(load, 60_000);
     return () => clearInterval(id);
   }, [ready, liveTick]);
-
-  const heartbeatAgeSec = status?.lastHeartbeat == null || status.lastHeartbeat <= 0
-    ? null
-    : Date.now() / 1000 - status.lastHeartbeat;
-  // Never before the first status read: `status === null` is "not asked yet",
-  // and treating it as "never checked in" would flash the warning on every
-  // launch in the gap before the first answer arrives.
-  // Suppressed wherever the same news is already on screen, and nowhere else.
-  // That is Insights while the welcome panel is up — not wherever the panel is
-  // merely undismissed, which silenced this for every new reader who had not yet
-  // pressed "Got it" — and Settings, whose Tracker status panel says the same
-  // thing at the top of the page, with an animated dot and its own start button.
-  // Repeating it there stacks two warnings about one fact.
-  const trackerAlertVisible =
-    ready
-    && status !== null
-    && tab !== "settings"
-    && !(welcomeVisible && tab === "insights")
-    && trackerNeedsAttention({
-      heartbeatAgeSec,
-      settings: meta.settings,
-      nowSec: Date.now() / 1000,
-    });
 
   // The backlog behind the Activity tab's mark. It lives here rather than in
   // ActivityTab because the reader who most needs telling is the one who has
@@ -298,6 +360,67 @@ function Shell() {
 
   const showRange =
     tab === "insights" || (tab === "activity" && activityView === "library");
+
+  const openSettings = () => setTab("settings");
+  const handleStarted = (needsStartup: boolean | null) => {
+    if (needsStartup === null) return;
+    setStartPending(true);
+    setOfferStartup(needsStartup);
+  };
+
+  // Switching on the state rather than the plan's id keeps the union narrowed,
+  // so a banner cannot be handed data belonging to a different state. Visibility
+  // is already settled by `trackerBannerVisible`.
+  const renderTrackerBanner = () => {
+    if (!trackerBannerVisible || trackerState === null) return null;
+    switch (trackerState.kind) {
+      case "recording":
+        return (
+          <WelcomePanel
+            offerStartup={offerStartup}
+            onDeclineStartup={() => setOfferStartup(false)}
+          />
+        );
+      case "never_started":
+      case "starting":
+        return (
+          <StartRecordingPanel
+            live={false}
+            onRefreshStatus={refreshTrackerStatus}
+            onOpenSettings={openSettings}
+            onStarted={handleStarted}
+          />
+        );
+      case "consent_withdrawn":
+        return (
+          <RecordingOffPanel
+            onRefreshStatus={refreshTrackerStatus}
+            onOpenSettings={openSettings}
+            onStarted={handleStarted}
+          />
+        );
+      case "paused":
+        return (
+          <PauseNotice
+            until={trackerState.until}
+            live={heartbeatAgeSec !== null && heartbeatAgeSec < TRACKER_ALERT_STALE_SECONDS}
+            onDismiss={() => setPauseNoticeDismissed(true)}
+            onResumed={() =>
+              setTrayPause({ tracking_paused: "0", tracking_paused_until: "0" })}
+          />
+        );
+      case "off_schedule":
+        return (
+          <OffScheduleNotice
+            nextStart={trackerState.nextStart}
+            valid={trackerState.valid}
+            onOpenSettings={openSettings}
+          />
+        );
+      case "stopped":
+        return <TrackerAlert onOpenSettings={openSettings} />;
+    }
+  };
 
   // Activity bounds its own scroll wells, and a percentage of an auto height
   // resolves to auto: without a definite height here, its "fill the leftover
@@ -348,25 +471,17 @@ function Shell() {
         )}
       </header>
 
-      {/* Insights only. The panel used to appear on every tab, which cost
-          nothing while it was gated on an empty database — there were no rows
-          to push aside. Now that it persists until dismissed, that space is
-          contested: at the 500x480 minimum it drove the Activity table's first
-          row out of a region that scrolls internally, leaving it unreachable.
-          Insights is also where it belongs, since it is the landing tab and its
-          own advice is to go and look at Activity. */}
-      {welcomeVisible && tab === "insights" && (
-        <FirstRunPanel
-          status={status}
-          onRefreshStatus={refreshTrackerStatus}
-          onOpenSettings={() => setTab("settings")}
-        />
-      )}
-
-      {/* Every tab, unlike the welcome panel: a reader who is not looking at
-          Insights is no less affected by a tracker that stopped, and this is
-          short enough that the Activity table keeps its room. */}
-      {trackerAlertVisible && <TrackerAlert onOpenSettings={() => setTab("settings")} />}
+      {/* At most one, and never on Settings, whose own status panel says the
+          same thing with an animated dot and its own start button.
+          Which tabs each one reaches is the plan's `scope`. The teaching panels
+          are Insights-only: they persist until dismissed, and at the 500x480
+          minimum a tall panel drove the Activity table's first row out of a
+          region that scrolls internally, leaving it unreachable. Insights is
+          also where they belong, since their own advice is to go look at
+          Activity. The short ones — a stopped tracker, a pause — reach every
+          tab, because a reader who is not on Insights is no less affected, and
+          they leave the table its room. */}
+      {renderTrackerBanner()}
 
       {/* A flex column so a tab can opt into filling the leftover viewport
           height — Activity does, to bound its own scroll wells. Tabs that do

@@ -35,7 +35,9 @@ import {
   scheduleMinuteToInput,
   trackingScheduleState,
 } from "../lib/trackingSchedule";
+import { recordingState, TRACKER_LIVE_STALE_SECONDS } from "../lib/trackerHealth";
 import {
+  clearTrackingPause,
   fetchSettings,
   fetchTrackerStatus,
   listTrackingExclusions,
@@ -94,7 +96,6 @@ const SPECS_BY_KEY = new Map(
   Object.values(SPECS).map((spec) => [spec.key, spec]),
 );
 
-const TRACKER_HEALTH_STALE_SECONDS = 8;
 const TRACKER_STATUS_POLL_MS = 2_000;
 const TRACKER_START_TIMEOUT_MS = 10_000;
 const TRACKING_SCHEDULE_DAYS = [
@@ -112,7 +113,7 @@ const TRACKING_SCHEDULE_DAYS = [
 function trackerHeartbeatIsLive(status: TrackerStatus): boolean {
   return status.lastHeartbeat !== null
     && status.lastHeartbeat > 0
-    && Date.now() / 1000 - status.lastHeartbeat < TRACKER_HEALTH_STALE_SECONDS;
+    && Date.now() / 1000 - status.lastHeartbeat < TRACKER_LIVE_STALE_SECONDS;
 }
 
 function wait(ms: number): Promise<void> {
@@ -177,6 +178,7 @@ export default function SettingsTab({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [startingTracker, setStartingTracker] = useState(false);
+  const [resumingTracker, setResumingTracker] = useState(false);
   const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
   const [flashedSection, setFlashedSection] = useState<string | null>(null);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -392,7 +394,7 @@ export default function SettingsTab({
   const heartbeatAge = status?.lastHeartbeat == null || status.lastHeartbeat <= 0
     ? null
     : Date.now() / 1000 - status.lastHeartbeat;
-  const trackerLive = heartbeatAge !== null && heartbeatAge < TRACKER_HEALTH_STALE_SECONDS;
+  const trackerLive = heartbeatAge !== null && heartbeatAge < TRACKER_LIVE_STALE_SECONDS;
   const trackingEnabled = meta.settings.recording_consent === "1";
   const scheduleSettings = { ...meta.settings, ...drafts };
   const schedule = trackingScheduleState(scheduleSettings);
@@ -400,33 +402,59 @@ export default function SettingsTab({
     scheduleSettings.tracking_schedule_days ?? DEFAULT_TRACKING_SCHEDULE_DAYS,
   );
   const scheduleEnabled = schedule.enabled;
-  const scheduleOutside = scheduleEnabled && !schedule.recordingAllowed;
-  const trackerLabel = !trackingEnabled
+  // The same state the banners read, so this panel and they cannot disagree —
+  // at this tab's tighter liveness threshold, because the reader is watching the
+  // dot. Pause comes from the poll above rather than meta, since the tray writes
+  // it; drafts stay in so the schedule preview follows the reader's edits.
+  const trackerRecording = recordingState({
+    heartbeatAgeSec: heartbeatAge,
+    settings: {
+      ...scheduleSettings,
+      tracking_paused: pause.paused ? "1" : "0",
+      tracking_paused_until: String(pause.until),
+    },
+    nowSec: Date.now() / 1000,
+    totalSessionCount: status?.totalSessionCount ?? 0,
+  }, TRACKER_LIVE_STALE_SECONDS);
+  const trackerOff = trackerRecording.kind === "never_started"
+    || trackerRecording.kind === "consent_withdrawn";
+  // Precedence follows recordingState: a silence the reader chose outranks the
+  // liveness of a process they had already told to stop recording. The Start
+  // button below stays keyed on liveness, so a tracker that died during a pause
+  // still offers recovery under the label naming the pause.
+  const trackerLabel = trackerOff
     ? "Tracking disabled"
-    : !trackerLive
-      ? "Tracker not detected"
-      : pause.paused
-        ? "Tracking paused"
-        : scheduleOutside
-          ? "Outside scheduled hours"
-        : "Tracker is live";
-  const trackerDetail = !trackingEnabled
+    : trackerRecording.kind === "paused"
+      ? "Tracking paused"
+      : trackerRecording.kind === "off_schedule"
+        ? "Outside scheduled hours"
+        : trackerRecording.kind === "recording"
+          ? "Tracker is live"
+          : "Tracker not detected";
+  const trackerDetail = trackerOff
     ? "No new activity is being recorded"
-    : !trackerLive
-      ? heartbeatAge === null
-        ? "Waiting for a tracker health signal"
-        : `No tracker heartbeat for ${fmtDuration(Math.max(heartbeatAge, 0))}`
-      : pause.paused
-        ? pause.until > Date.now() / 1000
-          ? `Resumes at ${new Date(pause.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — or sooner from the tray icon`
-          : "Resume from the tray icon"
-        : scheduleOutside
-          ? !schedule.valid
-            ? "Choose at least one day and different start and end times"
-            : schedule.nextStart
-              ? `Scheduled to resume ${formatScheduleResume(schedule.nextStart)}`
-              : "No recording days are selected"
-        : "Collecting activity in real time";
+    : trackerRecording.kind === "paused"
+      ? trackerRecording.until !== null
+        ? `Resumes at ${new Date(trackerRecording.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}, or now from here or the tray`
+        : "Nothing is being recorded until you resume"
+      : trackerRecording.kind === "off_schedule"
+        ? !trackerRecording.valid
+          ? "Choose at least one day and different start and end times"
+          : trackerRecording.nextStart
+            ? `Scheduled to resume ${formatScheduleResume(trackerRecording.nextStart)}`
+            : "No recording days are selected"
+        : trackerRecording.kind === "recording"
+          ? "Collecting activity in real time"
+          : heartbeatAge === null
+            ? "Waiting for a tracker health signal"
+            : `No tracker heartbeat for ${fmtDuration(Math.max(heartbeatAge, 0))}`;
+  const trackerDot = trackerOff
+    ? "bg-ink-3"
+    : trackerRecording.kind === "paused" || trackerRecording.kind === "off_schedule"
+      ? "bg-warn"
+      : trackerRecording.kind === "recording"
+        ? "live-pulse bg-good-data"
+        : "alert-pulse bg-bad";
   const noiseMode = resolvedNoiseMode(drafts.activity_noise_filter);
   const hideRare = hidesRareItems(noiseMode);
   const hideUtilities = hidesUtilities(noiseMode);
@@ -445,6 +473,12 @@ export default function SettingsTab({
       } else {
         await updateSetting("launch_at_login", "0");
         await invoke("set_launch_at_login", { enabled: false });
+        // Stop the process too. Leaving it running with consent withdrawn means
+        // a live health stamp reporting a tracker that records nothing, which
+        // every status surface then has to explain away — and after the next
+        // reboot it would not come back anyway, startup having just been turned
+        // off. Secure erase already stops it for the same reason.
+        await invoke("stop_tracker");
       }
     }, "tracking preference");
   };
@@ -492,6 +526,29 @@ export default function SettingsTab({
   const setScheduleTime = (key: string, value: string) => {
     const minute = scheduleInputToMinute(value);
     if (minute !== null) selectSetting(key, String(minute));
+  };
+
+  // Starting is not resuming. `start_tracker` spawns the process and never
+  // touches the pause keys, so on a paused tracker it would launch something
+  // that reads tracking_paused=1 and records nothing — a button that visibly
+  // did nothing. Until this existed, a pause set from the tray could only be
+  // ended from the tray.
+  const resumeTracking = async () => {
+    if (resumingTracker) return;
+    setResumingTracker(true);
+    try {
+      await clearTrackingPause();
+      if (!trackerLive) await invoke("start_tracker");
+      // The pause poll runs on its own 15s cycle; without this the panel would
+      // keep reporting the pause the reader has just ended.
+      setPause({ paused: false, until: 0 });
+      await meta.refresh();
+      banner.show("Tracking resumed");
+    } catch (error) {
+      banner.report(error, "resuming tracking");
+    } finally {
+      setResumingTracker(false);
+    }
   };
 
   const startTracker = async () => {
@@ -576,7 +633,7 @@ export default function SettingsTab({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-4 py-4 sm:px-[18px]">
-          <span className={`h-[9px] w-[9px] rounded-full ${!trackingEnabled ? "bg-ink-3" : !trackerLive ? "alert-pulse bg-bad" : pause.paused || scheduleOutside ? "bg-warn" : "live-pulse bg-good-data"}`} />
+          <span className={`h-[9px] w-[9px] rounded-full ${trackerDot}`} />
           <div className="min-w-0">
             <p className="text-row font-semibold text-ink">
               {trackerLabel}
@@ -585,7 +642,17 @@ export default function SettingsTab({
               {trackerDetail}
             </p>
           </div>
-          {!trackingEnabled || trackerLive ? (
+          {trackerRecording.kind === "paused" ? (
+            <div className="basis-full sm:ml-auto sm:basis-auto">
+              <Button
+                variant="primary"
+                disabled={resumingTracker}
+                onClick={() => void resumeTracking()}
+              >
+                {resumingTracker ? "Resuming…" : "Resume now"}
+              </Button>
+            </div>
+          ) : !trackingEnabled || trackerLive ? (
             heartbeatAge !== null && (
               <span className="basis-full text-xs tabular-nums text-ink-3 sm:ml-auto sm:basis-auto">
                 last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago

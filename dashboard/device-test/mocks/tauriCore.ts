@@ -100,8 +100,9 @@ const consolidationSessions = consolidationDomains.flatMap((domain, domainIndex)
   }),
 );
 
-/** The welcome panel exists only while the database holds no sessions at all,
- *  so seeing it at all requires a fixture that has none. Pair with
+/** The welcome panel is shown only to a reader whose history is still new (see
+ *  WELCOME_MAX_HISTORY_DAYS), so seeing it at all requires a fixture with no
+ *  sessions — the default fixture's are far too old. Pair with
  *  `tracker=missing` for the variant that offers to start tracking. */
 const firstRun = fixtureParams.get("fixture") === "firstrun";
 
@@ -212,7 +213,8 @@ const settings: Record<string, string> = {
   starter_categories_pending: fixtureParams.get("fixture") === "onboarding" ? "1" : "0",
   // The first-run fixture models the state "Not now" leaves behind: onboarding
   // is complete, but nothing was consented to and no startup entry was written.
-  // That is the only state in which the welcome panel offers to start tracking.
+  // Consent, not the health stamp, is what makes the panel offer to start:
+  // this fixture's tracker is live and still records nothing.
   recording_consent: firstRun ? "0" : "1",
   record_window_titles: "1",
   launch_at_login: firstRun ? "0" : "1",

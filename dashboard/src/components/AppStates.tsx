@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import {
@@ -12,10 +12,16 @@ import {
 } from "../lib/browserExtensions";
 import { getDbPath } from "../lib/db";
 import {
+  clearTrackingPause,
   deleteCategory,
   updateSetting,
-  type TrackerStatus,
 } from "../lib/queries";
+import {
+  OFF_SCHEDULE_DISMISSED_KEY,
+  RECORDING_OFF_DISMISSED_KEY,
+  WELCOME_DISMISSED_KEY,
+} from "../lib/trackerHealth";
+import { formatScheduleResume } from "../lib/trackingSchedule";
 import { useBanner } from "../state/banner";
 import { useMeta } from "../state/meta";
 import { Button, Checkbox } from "./ui";
@@ -210,27 +216,16 @@ function ConsentCheck({
   );
 }
 
-export function FirstRunPanel({
-  status,
-  onRefreshStatus,
-  onOpenSettings,
-}: {
-  status: TrackerStatus;
-  onRefreshStatus: () => Promise<void>;
-  onOpenSettings: () => void;
-}) {
+/** Turning recording on, from wherever the reader happens to be.
+ *
+ *  Shared because "start recording" is one action with one failure mode, and it
+ *  is offered from two panels — the first-run prompt and the notice an
+ *  established reader gets after switching recording off. */
+function useStartTracking(onRefreshStatus: () => Promise<void>) {
   const meta = useMeta();
   const banner = useBanner();
   const [starting, setStarting] = useState(false);
-  const [registering, setRegistering] = useState(false);
-  const [offerStartup, setOfferStartup] = useState(false);
   const [startAttempted, setStartAttempted] = useState(false);
-  const [startUnconfirmed, setStartUnconfirmed] = useState(false);
-  const [dismissing, setDismissing] = useState(false);
-  const heartbeatAge = status.lastHeartbeat == null
-    ? null
-    : Date.now() / 1000 - status.lastHeartbeat;
-  const trackerLive = heartbeatAge !== null && heartbeatAge < 120;
 
   const startTracking = async () => {
     const needsStartup = meta.settings.launch_at_login !== "1";
@@ -240,40 +235,66 @@ export function FirstRunPanel({
       await invoke("start_tracker");
       await Promise.all([meta.refresh(), onRefreshStatus()]);
       setStartAttempted(true);
-      if (needsStartup) setOfferStartup(true);
+      return needsStartup;
     } catch (cause) {
       banner.report(cause, "tracker startup");
+      // Null, not false: a failed start must not be reported to the caller as a
+      // start that simply does not need startup registration.
+      return null;
     } finally {
       setStarting(false);
     }
   };
 
-  useEffect(() => {
-    if (!startAttempted) return;
-    if (trackerLive) {
-      setStartUnconfirmed(false);
-      setStartAttempted(false);
+  return { starting, startAttempted, setStartAttempted, startTracking };
+}
+
+/** Persisting a dismissal, with the button state that goes with it. */
+function useDismiss(key: string | null, context: string) {
+  const meta = useMeta();
+  const banner = useBanner();
+  const [dismissing, setDismissing] = useState(false);
+
+  const dismiss = async (fallback?: () => void) => {
+    // A pause notice has no key: it is dismissed for this episode only, so a
+    // later pause announces itself once more.
+    if (key === null) {
+      fallback?.();
       return;
     }
-    const id = setTimeout(() => setStartUnconfirmed(true), TRACKER_CONFIRM_MS);
-    return () => clearTimeout(id);
-  }, [startAttempted, trackerLive]);
-
-  // Dismissal is the only thing that retires this panel, so it has to persist.
-  // A component-local flag would bring the whole thing back on the next launch,
-  // which reads as the app having forgotten the reader rather than respecting
-  // them. Deliberately outside DEFAULT_USER_SETTINGS: restoring default
-  // settings should not resurrect a welcome the reader already read.
-  const dismiss = async () => {
     setDismissing(true);
     try {
-      await updateSetting("welcome_dismissed", "1");
+      await updateSetting(key, "1");
       await meta.refresh();
     } catch (cause) {
-      banner.report(cause, "dismissing the welcome panel");
+      banner.report(cause, context);
       setDismissing(false);
     }
   };
+
+  return { dismissing, dismiss };
+}
+
+/**
+ * The welcome, shown only to a reader who is actually new.
+ *
+ * Dismissal is the only thing that retires this panel, so it has to persist. A
+ * component-local flag would bring the whole thing back on the next launch,
+ * which reads as the app having forgotten the reader rather than respecting
+ * them. Deliberately outside DEFAULT_USER_SETTINGS: restoring default settings
+ * should not resurrect a welcome the reader already read.
+ */
+export function WelcomePanel({ offerStartup, onDeclineStartup }: {
+  offerStartup: boolean;
+  onDeclineStartup: () => void;
+}) {
+  const meta = useMeta();
+  const banner = useBanner();
+  const [registering, setRegistering] = useState(false);
+  const { dismissing, dismiss } = useDismiss(
+    WELCOME_DISMISSED_KEY,
+    "dismissing the welcome panel",
+  );
 
   const enableStartup = async () => {
     setRegistering(true);
@@ -281,7 +302,7 @@ export function FirstRunPanel({
       await updateSetting("launch_at_login", "1");
       await invoke("set_launch_at_login", { enabled: true });
       await meta.refresh();
-      setOfferStartup(false);
+      onDeclineStartup();
     } catch (cause) {
       banner.report(cause, "startup registration");
     } finally {
@@ -293,79 +314,294 @@ export function FirstRunPanel({
     <section className="rounded-[14px] border border-accent/25 bg-gradient-to-b from-accent/[.06] to-accent/[.02] px-5 py-4 text-xs leading-relaxed">
       <div className="flex items-start justify-between gap-3">
         <p className="text-row font-semibold">Welcome to Time</p>
-        {/* Only once tracking is on. While it is stopped this panel is not a
-            welcome but the readiest way to start recording — and, after "Not
-            now" on the privacy screen, the only one outside Settings. */}
-        {trackerLive && (
-          <Button onClick={() => void dismiss()} disabled={dismissing}>
-            {dismissing ? "Saving…" : "Got it"}
-          </Button>
-        )}
+        <Button onClick={() => void dismiss()} disabled={dismissing}>
+          {dismissing ? "Saving…" : "Got it"}
+        </Button>
       </div>
-      {trackerLive ? (
-        <>
-          <p className="mt-2 flex flex-wrap items-center gap-2 text-ink-2">
-            <span className="h-2 w-2 rounded-full bg-good-data" />
-            Tracking is on.
+      <p className="mt-2 flex flex-wrap items-center gap-2 text-ink-2">
+        <span className="h-2 w-2 rounded-full bg-good-data" />
+        Tracking is on.
+      </p>
+      <div className="mt-3 space-y-2 text-ink-2">
+        <p>
+          <span className="font-medium text-ink">Keep using your computer normally.</span>{" "}
+          Time records in the background. There is nothing to start or stop.
+        </p>
+        <p>
+          <span className="font-medium text-ink">Check back tomorrow.</span> The Activity tab
+          will have a list of the apps and websites you have used, waiting to be sorted into
+          categories. That is what turns recorded time into the numbers on this page.
+        </p>
+        <p>
+          <span className="font-medium text-ink">Time updates on focus.</span> Switch to
+          another app and back to pull in the latest data. You can also do the same with tabs
+          within Time.
+        </p>
+      </div>
+      {offerStartup && (
+        <div className="mt-3 rounded-[10px] border border-edge bg-surface-2/60 px-3 py-2.5">
+          <p className="text-ink-2">
+            Time won&rsquo;t come back on its own after you shut down. Start it automatically
+            when you sign in?
           </p>
-          <div className="mt-3 space-y-2 text-ink-2">
-            <p>
-              <span className="font-medium text-ink">Keep using your computer normally.</span>{" "}
-              Time records in the background. There is nothing to start or stop.
-            </p>
-            <p>
-              <span className="font-medium text-ink">Check back tomorrow.</span> The Activity tab
-              will have a list of the apps and websites you have used, waiting to be sorted into
-              categories. That is what turns recorded time into the numbers on this page.
-            </p>
-            <p>
-              <span className="font-medium text-ink">Time updates on focus.</span> Switch to
-              another app and back to pull in the latest data. You can also do the same with tabs
-              within Time.
-            </p>
-          </div>
-          {offerStartup && (
-            <div className="mt-3 rounded-[10px] border border-edge bg-surface-2/60 px-3 py-2.5">
-              <p className="text-ink-2">
-                Time won&rsquo;t come back on its own after you shut down. Start it automatically
-                when you sign in?
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Button
-                  variant="primary"
-                  disabled={registering}
-                  onClick={() => void enableStartup()}
-                >
-                  {registering ? "Saving…" : "Start at sign-in"}
-                </Button>
-                <Button onClick={() => setOfferStartup(false)}>Not now</Button>
-              </div>
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          <p className="mt-2 flex flex-wrap items-center gap-2 text-ink-2">
-            <span className="h-2 w-2 rounded-full bg-bad" />
-            The tracker isn&rsquo;t running, so nothing is being recorded.
-          </p>
-          <p className="mt-1 text-ink-2">
-            Start tracking when you&rsquo;re ready, or review your settings first.
-          </p>
-          {startUnconfirmed && (
-            <p className="mt-2 text-bad">
-              Time couldn&rsquo;t confirm the tracker started. Open Settings to check its status.
-            </p>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="primary" disabled={starting} onClick={() => void startTracking()}>
-              {starting ? "Starting…" : "Start tracking"}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              disabled={registering}
+              onClick={() => void enableStartup()}
+            >
+              {registering ? "Saving…" : "Start at sign-in"}
             </Button>
-            <Button onClick={onOpenSettings}>Open settings</Button>
+            <Button onClick={onDeclineStartup}>Not now</Button>
           </div>
-        </>
+        </div>
       )}
     </section>
+  );
+}
+
+/**
+ * The first-run prompt: consent has never been given and nothing was ever
+ * recorded.
+ *
+ * No dismiss control, deliberately. For a reader who chose "Not now" on the
+ * privacy screen this is not a welcome but the readiest way to start recording,
+ * and the only one outside Settings. That argument holds only while they have
+ * no history — an established reader who switches recording off gets
+ * RecordingOffPanel instead, which they can dismiss.
+ */
+export function StartRecordingPanel({
+  live,
+  onRefreshStatus,
+  onOpenSettings,
+  onStarted,
+}: {
+  live: boolean;
+  onRefreshStatus: () => Promise<void>;
+  onOpenSettings: () => void;
+  onStarted: (needsStartup: boolean | null) => void;
+}) {
+  const [startUnconfirmed, setStartUnconfirmed] = useState(false);
+  const { starting, startAttempted, setStartAttempted, startTracking } =
+    useStartTracking(onRefreshStatus);
+
+  useEffect(() => {
+    if (!startAttempted) return;
+    if (live) {
+      setStartUnconfirmed(false);
+      setStartAttempted(false);
+      return;
+    }
+    const id = setTimeout(() => setStartUnconfirmed(true), TRACKER_CONFIRM_MS);
+    return () => clearTimeout(id);
+  }, [startAttempted, live, setStartAttempted]);
+
+  return (
+    <section className="rounded-[14px] border border-accent/25 bg-gradient-to-b from-accent/[.06] to-accent/[.02] px-5 py-4 text-xs leading-relaxed">
+      <p className="text-row font-semibold">Welcome to Time</p>
+      <p className="mt-2 flex flex-wrap items-center gap-2 text-ink-2">
+        <span className="h-2 w-2 rounded-full bg-bad" />
+        The tracker isn&rsquo;t running, so nothing is being recorded.
+      </p>
+      <p className="mt-1 text-ink-2">
+        Start tracking when you&rsquo;re ready, or review your settings first.
+      </p>
+      {startUnconfirmed && (
+        <p className="mt-2 text-bad">
+          Time couldn&rsquo;t confirm the tracker started. Open Settings to check its status.
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button
+          variant="primary"
+          disabled={starting}
+          onClick={() => void startTracking().then(onStarted)}
+        >
+          {starting ? "Starting…" : "Start tracking"}
+        </Button>
+        <Button onClick={onOpenSettings}>Open settings</Button>
+      </div>
+    </section>
+  );
+}
+
+/** A quiet strip for the states the reader chose. Neutral by construction: each
+ *  of these is Time reporting its own configuration, not raising a problem. */
+function NoticeStrip({
+  tone,
+  title,
+  detail,
+  actions,
+  onDismiss,
+  dismissing = false,
+}: {
+  tone: "warn" | "muted";
+  title: string;
+  detail: string;
+  actions?: ReactNode;
+  onDismiss: () => void;
+  dismissing?: boolean;
+}) {
+  const frame = tone === "warn"
+    ? "border-warn/30 bg-warn/[.08]"
+    : "border-edge bg-surface-dim";
+  return (
+    <section className={`rounded-[14px] border px-5 py-3 text-xs leading-relaxed ${frame}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${tone === "warn" ? "bg-warn" : "bg-ink-3"}`} />
+        <div className="min-w-0 flex-1">
+          <p className="text-row font-semibold">{title}</p>
+          <p className="mt-[3px] text-ink-2">{detail}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {actions}
+          <Button onClick={onDismiss} disabled={dismissing}>
+            {dismissing ? "Saving…" : "Dismiss"}
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Recording is off because the reader turned it off, and they have history.
+ *
+ * Distinct from StartRecordingPanel in tone and in dismissibility: nothing is
+ * wrong, nothing is new, and the reader does not need to be greeted or nagged.
+ * They need the fact stated once and a way back.
+ */
+export function RecordingOffPanel({
+  onRefreshStatus,
+  onOpenSettings,
+  onStarted,
+}: {
+  onRefreshStatus: () => Promise<void>;
+  onOpenSettings: () => void;
+  onStarted: (needsStartup: boolean | null) => void;
+}) {
+  const { starting, startTracking } = useStartTracking(onRefreshStatus);
+  const { dismissing, dismiss } = useDismiss(
+    RECORDING_OFF_DISMISSED_KEY,
+    "dismissing the recording notice",
+  );
+
+  return (
+    <NoticeStrip
+      tone="muted"
+      title="Recording is off"
+      detail="Time isn't recording new activity. Everything already recorded is unchanged."
+      dismissing={dismissing}
+      onDismiss={() => void dismiss()}
+      actions={
+        <>
+          <Button
+            variant="primary"
+            disabled={starting}
+            onClick={() => void startTracking().then(onStarted)}
+          >
+            {starting ? "Starting…" : "Turn on recording"}
+          </Button>
+          <Button onClick={onOpenSettings}>Open settings</Button>
+        </>
+      }
+    />
+  );
+}
+
+/**
+ * Tracking is paused.
+ *
+ * Every tab, because a paused tracker misleads a reader looking at Activity
+ * exactly as much as one looking at Insights — and until now the dashboard had
+ * no way at all to report or end a pause, which could only be set from the tray.
+ * Dismissal lasts for this pause episode only, so a later pause says so once.
+ */
+export function PauseNotice({
+  until,
+  live,
+  onDismiss,
+  onResumed,
+}: {
+  until: number | null;
+  /** Whether the tracker process is answering. A pause outranks liveness, so a
+   *  paused tracker may also be gone. */
+  live: boolean;
+  onDismiss: () => void;
+  onResumed: () => void;
+}) {
+  const meta = useMeta();
+  const banner = useBanner();
+  const [resuming, setResuming] = useState(false);
+
+  const resume = async () => {
+    setResuming(true);
+    try {
+      await clearTrackingPause();
+      // Resuming has to mean "record again". Clearing the flags on a tracker
+      // that is not running would hand the reader a second broken state to
+      // notice and fix, having just told them the problem was the pause.
+      if (!live) await invoke("start_tracker");
+      await meta.refresh();
+      onResumed();
+    } catch (cause) {
+      banner.report(cause, "resuming tracking");
+    } finally {
+      setResuming(false);
+    }
+  };
+
+  const detail = until === null
+    ? "Nothing is being recorded until you resume."
+    : `Nothing is being recorded. Recording resumes at ${new Date(until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`;
+
+  return (
+    <NoticeStrip
+      tone="warn"
+      title="Tracking is paused"
+      detail={detail}
+      onDismiss={onDismiss}
+      actions={
+        <Button variant="primary" disabled={resuming} onClick={() => void resume()}>
+          {resuming ? "Resuming…" : "Resume now"}
+        </Button>
+      }
+    />
+  );
+}
+
+/** Outside the reader's configured recording hours. The most routine of these
+ *  states — it recurs every single day — so it is Insights-only and its
+ *  dismissal is permanent. */
+export function OffScheduleNotice({
+  nextStart,
+  valid,
+  onOpenSettings,
+}: {
+  nextStart: Date | null;
+  valid: boolean;
+  onOpenSettings: () => void;
+}) {
+  const { dismissing, dismiss } = useDismiss(
+    OFF_SCHEDULE_DISMISSED_KEY,
+    "dismissing the schedule notice",
+  );
+
+  const detail = !valid
+    ? "Your recording schedule has no usable window. Choose at least one day and different start and end times."
+    : nextStart === null
+      ? "No recording days are selected, so nothing will be recorded."
+      : `Nothing is being recorded until ${formatScheduleResume(nextStart)}.`;
+
+  return (
+    <NoticeStrip
+      tone="muted"
+      title="Outside your recording hours"
+      detail={detail}
+      dismissing={dismissing}
+      onDismiss={() => void dismiss()}
+      actions={<Button onClick={onOpenSettings}>Open settings</Button>}
+    />
   );
 }
 
