@@ -1,0 +1,42 @@
+name: Dependency audit
+
+on:
+  push:
+    paths:
+      - dashboard/package.json
+      - dashboard/package-lock.json
+      - .github/workflows/dependency-audit.yml
+  pull_request:
+    paths:
+      - dashboard/package.json
+      - dashboard/package-lock.json
+      - .github/workflows/dependency-audit.yml
+  schedule:
+    - cron: "23 11 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shipped-npm-dependencies:
+    name: Shipped npm dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      # Advisory databases change independently of this repository. Audit both
+      # dependency changes and a weekly schedule so shipped vulnerabilities stay
+      # visible without making an unrelated source commit appear broken.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev

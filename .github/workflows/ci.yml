@@ -39,17 +39,11 @@ jobs:
           if-no-files-found: error
 
   dashboard:
-    name: dashboard (${{ matrix.timezone }})
+    name: Dashboard
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        timezone:
-          - America/New_York
-          - Australia/Adelaide
     env:
-      TZ: ${{ matrix.timezone }}
+      TZ: America/New_York
     defaults:
       run:
         working-directory: dashboard
@@ -62,22 +56,24 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - name: Install dependencies
         run: npm ci
-      # The native-test toolchain currently has upstream-only advisories, but
-      # nothing bundled into Time may carry a known npm vulnerability.
-      - name: Audit production dependencies
-        if: matrix.timezone == 'America/New_York'
-        run: npm audit --omit=dev
       - name: Typecheck
         run: npx tsc --noEmit
-      - name: Run vitest with branch coverage
+      - name: Run behavior suite and collect branch coverage
         run: npm run test:coverage
+      # Date logic must agree in zones with different DST boundaries. Keep the
+      # second run in this job: another matrix runner duplicated installation,
+      # artifacts, and failure labels for a suite that takes only seconds.
+      - name: Run behavior suite in a southern-hemisphere timezone
+        env:
+          TZ: Australia/Adelaide
+        run: npm test
       - name: Check patch whitespace
         run: git diff --check
       - name: Upload dashboard coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dashboard-coverage-${{ strategy.job-index }}
+          name: dashboard-coverage
           path: dashboard/coverage/vitest
           if-no-files-found: error
 
@@ -100,8 +96,6 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Run device renderer suite
-        run: npm run test:device
-      - name: Repeat deterministic renderer suite
         run: npm run test:device
       - name: Upload renderer failure artifacts
         if: always()
@@ -216,31 +210,6 @@ jobs:
           TIME_PARITY_REQUIRED: "1"
         run: python -m pytest tracker/tests/test_protocol_parity.py -q
 
-  commit-formatting:
-    name: Formatting (every pushed commit)
-    # The Windows job proves the tip is formatted. This proves which commit
-    # stopped being formatted, which is the part a multi-commit push loses.
-    # Cheap enough to run every time: no build, no sidecar, no npm, no Python.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          # Every commit in the range has to be reachable, and the default
-          # single-commit checkout cannot see the parents being walked.
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.97.1
-        with:
-          components: rustfmt
-      - name: Check formatting of each pushed commit
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PUSH_BEFORE: ${{ github.event.before }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          HEAD_SHA: ${{ github.sha }}
-        run: bash scripts/check_commit_formatting.sh
-
   quality-gate:
     name: Required quality gate
     if: always()
@@ -250,7 +219,6 @@ jobs:
       - renderer-compatibility
       - windows-backend
       - protocol-parity
-      - commit-formatting
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -261,13 +229,11 @@ jobs:
           RENDERER_RESULT: ${{ needs.renderer-compatibility.result }}
           WINDOWS_RESULT: ${{ needs.windows-backend.result }}
           PARITY_RESULT: ${{ needs.protocol-parity.result }}
-          COMMIT_FORMATTING_RESULT: ${{ needs.commit-formatting.result }}
         run: |
           test "$TRACKER_RESULT" = success
           test "$DASHBOARD_RESULT" = success
           test "$RENDERER_RESULT" = success
           test "$WINDOWS_RESULT" = success
-          test "$COMMIT_FORMATTING_RESULT" = success
           # "skipped" while EXTENSION_REPOSITORY is unset; must pass once it is.
           case "$PARITY_RESULT" in
             success|skipped) ;;

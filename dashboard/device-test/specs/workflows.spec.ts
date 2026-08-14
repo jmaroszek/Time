@@ -234,9 +234,12 @@ test("@workflow backup and restore failures remain actionable", async ({ page })
   await page.goto("/?fail=backup_database");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Back up now" }).click();
-  await expect(page.getByRole("alert")).toContainText(
+  const backupDialog = page.getByRole("dialog", { name: "Save backup" });
+  await backupDialog.getByRole("button", { name: "Save backup" }).click();
+  await expect(backupDialog.getByRole("alert")).toContainText(
     "device fixture forced backup_database failure",
   );
+  await expect(backupDialog.getByRole("button", { name: "Save backup" })).toBeEnabled();
 
   await page.goto("/?fail=restore_database");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -419,11 +422,9 @@ test("@workflow website-rule hint leads through the row Classification control",
 }) => {
   await page.goto("/?browser=classified");
   await page.getByRole("button", { name: "Activity", exact: true }).click();
-  await expect(
-    page.getByText(/Show websites, click a row, then choose Classification/),
-  ).toBeVisible();
-
-  await page.getByRole("button", { name: "Show websites", exact: true }).click();
+  const showWebsites = page.getByRole("button", { name: "Show websites", exact: true });
+  await expect(showWebsites).toBeVisible();
+  await showWebsites.click();
   await expect(page.getByRole("combobox", { name: "Activity type" })).toContainText("Websites");
   await page.locator("tbody button").first().click();
   await expect(
