@@ -210,6 +210,16 @@ def generate(out: Path, weeks: int, end_day: datetime, now_ts: int | None) -> in
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('demo_dataset','1')")
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('recording_consent','1')")
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('record_window_titles','1')")
+        # Without these, App.tsx's privacy_onboarding_complete gate shows the
+        # consent screen on every fresh demo.db — and both of its buttons
+        # write to the real Windows registry (launch-at-login) regardless of
+        # which one is clicked, which has nothing to do with this demo file.
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('privacy_onboarding_complete','1')"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('starter_categories_pending','0')"
+        )
         # The persona's productive hours land around 35-40/wk; match the goal.
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('weekly_goal_hours','35')"
