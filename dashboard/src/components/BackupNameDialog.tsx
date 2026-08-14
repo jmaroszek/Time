@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { defaultBackupName } from "../lib/backupName";
 import { explainDbError } from "../lib/dbErrors";
 import { backupDatabase } from "../lib/queries";
 import { Button, DialogShell } from "./ui";
@@ -12,7 +13,7 @@ export function BackupNameDialog({
   onClose: () => void;
   onSaved: (target: string) => void;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(defaultBackupName);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const trimmedName = name.trim();
@@ -61,7 +62,6 @@ export function BackupNameDialog({
           }}
           aria-describedby={error ? "save-backup-error" : undefined}
           className="mt-1.5 w-full rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-accent/60"
-          placeholder="For example, before deleting history"
         />
       </label>
       {error && <p id="save-backup-error" role="alert" className="mt-2 text-xs text-bad">{error}</p>}
