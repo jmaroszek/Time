@@ -91,6 +91,10 @@ export interface ActivitySessionRow {
   winningRulePattern: string | null;
   classificationSource: "rule" | "session_override" | "none";
   isCorrected: boolean;
+  /** The title reduced to its matchable form, computed once while indexing.
+   *  Grouping and every window sort compare on it, and re-deriving it there
+   *  cost more than the rest of a query put together. */
+  normalizedTitle: string;
 }
 
 export type ActivityClassificationFilter =
@@ -237,6 +241,8 @@ export interface ActivityTitleGroup {
    *  Window rule is doing any work here. */
   winningRuleType: MatchType | null;
   winningRulePattern: string | null;
+  /** The form the group's key and every title comparison are built from. */
+  normalizedTitle: string;
 }
 
 export interface ActivityTitleGroupPage {
@@ -281,8 +287,10 @@ export const USAGE_STRIP_COLUMNS = 60;
  * newest-first, so the first original title becomes the representative label
  * and that order is preserved inside each group.
  */
-function titleGroupKey(session: Pick<ActivitySessionRow, "entityId" | "title">): string {
-  return `${session.entityId}${GROUP_KEY_SEP}${normalizeWindowTitle(session.title)}`;
+function titleGroupKey(
+  session: Pick<ActivitySessionRow, "entityId" | "normalizedTitle">,
+): string {
+  return `${session.entityId}${GROUP_KEY_SEP}${session.normalizedTitle}`;
 }
 
 function groupSessionsByTitle(sessions: ActivitySessionRow[]): ActivityTitleGroup[] {
@@ -301,6 +309,7 @@ function groupSessionsByTitle(sessions: ActivitySessionRow[]): ActivityTitleGrou
         entityKey: session.entityKey,
         displayName: session.displayName,
         title: session.title,
+        normalizedTitle: session.normalizedTitle,
         sessionCount: 0,
         seconds: 0,
         daysSeen: 0,
@@ -373,8 +382,11 @@ function compareTitleGroups(
 ): (left: ActivityTitleGroup, right: ActivityTitleGroup) => number {
   const sign = direction === "asc" ? 1 : -1;
   return (left, right) => {
-    const leftTitle = normalizeWindowTitle(left.title);
-    const rightTitle = normalizeWindowTitle(right.title);
+    // Read, not recomputed: normalizing inside a comparator runs it O(n log n)
+    // times per sort, and for every sort — including the ones that never look
+    // at the title.
+    const leftTitle = left.normalizedTitle;
+    const rightTitle = right.normalizedTitle;
     let comparison = 0;
     if (sort === "title") comparison = leftTitle.localeCompare(rightTitle);
     else if (sort === "seconds") comparison = left.seconds - right.seconds;
@@ -490,6 +502,108 @@ interface IndexedSession extends ActivitySessionRow {
   rawSeconds: number;
 }
 
+/**
+ * The last few results of one stage of `queryActivityIndex`, keyed by the
+ * inputs that decide it.
+ *
+ * Paging is deliberately not among those inputs. "Load more" moves only where a
+ * slice ends, but every limit sits in the query, so each press used to
+ * re-aggregate the whole database to rebuild the list being sliced — and so did
+ * every keystroke in the detail search, which does not change which sessions
+ * the selected identity has. The stages below are cut along that line: what the
+ * filters decide, and what the page then takes from it.
+ *
+ * Held on the index rather than beside it, so it is discarded exactly when its
+ * answers stop being true — the index is rebuilt whenever the sessions or the
+ * classification change, and nothing else can alter what these stages compute.
+ */
+class StageCache<T> {
+  private readonly entries = new Map<string, T>();
+
+  constructor(private readonly maxEntries: number) {}
+
+  read(key: string, compute: () => T): T {
+    const hit = this.entries.get(key);
+    if (hit !== undefined) {
+      // Reinsert, so the key evicted below is the least recently read one.
+      this.entries.delete(key);
+      this.entries.set(key, hit);
+      return hit;
+    }
+    const value = compute();
+    this.entries.set(key, value);
+    while (this.entries.size > this.maxEntries) {
+      const oldest = this.entries.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.entries.delete(oldest);
+    }
+    return value;
+  }
+}
+
+/** Entities aggregated over one range, with the lifetime facts overlaid. */
+interface RangeStage {
+  entities: ActivityEntitySummary[];
+  byId: Map<string, ActivityEntitySummary>;
+  totalSeconds: number;
+  /** False when the range reaches back to the very first session, where
+   *  nothing can be new. */
+  canBeNew: boolean;
+}
+
+/** The catalog as the filters and sort leave it, before it is paged. */
+interface CatalogStage {
+  matches: ActivityEntitySummary[];
+  noiseHidden: number;
+  maxSeconds: number;
+  apps: number;
+  websites: number;
+}
+
+/** Grouped title matches for a search, before they are paged. */
+interface WindowStage {
+  groups: ActivityTitleGroup[];
+  sessionTotal: number;
+  maxSeconds: number;
+}
+
+/** Every session belonging to the selected identity, and its usage strip.
+ *  Separate from the stage below because the detail search narrows which
+ *  windows are listed, not which sessions the identity has. */
+interface EntityScanStage {
+  rows: ActivitySessionRow[];
+  usage: ActivityDayBucket[];
+}
+
+/** The selected identity's windows as the detail search and sort leave them. */
+interface DetailStage {
+  rows: ActivitySessionRow[];
+  groups: ActivityTitleGroup[];
+}
+
+interface QueryStages {
+  range: StageCache<RangeStage>;
+  catalog: StageCache<CatalogStage>;
+  windows: StageCache<WindowStage>;
+  entityScan: StageCache<EntityScanStage>;
+  detail: StageCache<DetailStage>;
+  triage: StageCache<ActivityTriage>;
+}
+
+/** Two entries where a stage holds sessions, so the reader who steps back to
+ *  the previous range or filter still hits, and more where it holds only the
+ *  identity-level summaries a range aggregates to. */
+function createQueryStages(): QueryStages {
+  return {
+    range: new StageCache(3),
+    catalog: new StageCache(4),
+    windows: new StageCache(2),
+    entityScan: new StageCache(2),
+    detail: new StageCache(2),
+    triage: new StageCache(2),
+  };
+}
+
 export interface ActivityIndex {
   sessions: IndexedSession[];
   categories: Category[];
@@ -508,6 +622,9 @@ export interface ActivityIndex {
    *  question about the rule rather than about the dates on screen — a rule
    *  that classified a hundred hours in June is not unused in August. */
   ruleUsageSeconds: RuleUsageEntry[];
+  /** Memo of the last few queries run against this index. Never serialized:
+   *  the worker returns query results, and the index stays on its own side. */
+  stages: QueryStages;
 }
 
 /** One rule's id and the seconds it won, as a pair rather than a Map: this
@@ -659,6 +776,7 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
       winningRulePattern: explanation.winningRule?.pattern ?? null,
       classificationSource: explanation.source,
       isCorrected: session.isCorrected ?? false,
+      normalizedTitle: normalizeWindowTitle(session.title),
     });
   }
 
@@ -673,7 +791,7 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
   }
   const lifetimeWindowFirstSeen = new Map<string, number>();
   for (const session of indexed) {
-    if (!normalizeWindowTitle(session.title)) continue;
+    if (!session.normalizedTitle) continue;
     const key = titleGroupKey(session);
     lifetimeWindowFirstSeen.set(
       key,
@@ -689,6 +807,7 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
     lifetimeWindowFirstSeen,
     hasStoredTitles,
     ruleUsageSeconds: [...ruleSeconds],
+    stages: createQueryStages(),
   };
   index.lifetimeEntities = new Map(
     aggregateEntities(index, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY)
@@ -924,63 +1043,108 @@ function page<T>(rows: T[], offset: number, limit: number): T[] {
   return rows.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(1, limit));
 }
 
+/** The range a stage is scoped to. Stages that do not read the noise policy key
+ *  on this alone, since folding a row changes how it is presented rather than
+ *  which sessions belong to it. */
+function rangeKeyOf(query: ActivityQuery): string {
+  return `${query.startSec}:${query.endSec}`;
+}
+
 export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): ActivityQueryResult {
   const policy = query.noise;
-  const visibleEntities = aggregateEntities(index, query.startSec, query.endSec);
-  // "New" means new to your history, not new to what the range happens to show.
-  // A range reaching back to the very first session therefore has no new items
-  // at all, which is the honest answer rather than every row wearing the tag.
-  let earliestEver = Number.POSITIVE_INFINITY;
-  for (const lifetime of index.lifetimeEntities.values()) {
-    earliestEver = Math.min(earliestEver, lifetime.firstSeen);
-  }
-  const canBeNew = query.startSec > earliestEver;
-  const allEntities = visibleEntities.map((entity) => {
-    const lifetime = index.lifetimeEntities.get(entity.id) ?? entity;
+  const search = query.search.trim().toLowerCase();
+  const detailSearch = query.detailSearch?.trim().toLowerCase() ?? "";
+  const range = rangeKeyOf(query);
+  // Free-form text is quoted rather than joined raw, so a search containing the
+  // separator cannot spell out a different key's tail.
+  const scopedRange = `${range}:${JSON.stringify(policy ?? null)}`;
+
+  const {
+    entities: allEntities,
+    byId: entitiesById,
+    totalSeconds,
+    canBeNew,
+  } = index.stages.range.read(scopedRange, () => {
+    const visibleEntities = aggregateEntities(index, query.startSec, query.endSec);
+    // "New" means new to your history, not new to what the range happens to show.
+    // A range reaching back to the very first session therefore has no new items
+    // at all, which is the honest answer rather than every row wearing the tag.
+    let earliestEver = Number.POSITIVE_INFINITY;
+    for (const lifetime of index.lifetimeEntities.values()) {
+      earliestEver = Math.min(earliestEver, lifetime.firstSeen);
+    }
+    const newnessPossible = query.startSec > earliestEver;
+    const entities = visibleEntities.map((entity) => {
+      const lifetime = index.lifetimeEntities.get(entity.id) ?? entity;
+      return {
+        ...entity,
+        // Rarity is a property of the full history, not of whichever date
+        // range happens to be visible. The row's displayed totals stay scoped.
+        noise: policy ? classifyNoise(lifetime, policy) : null,
+        isNew: newnessPossible && lifetime.firstSeen >= query.startSec,
+      };
+    });
     return {
-      ...entity,
-      // Rarity is a property of the full history, not of whichever date
-      // range happens to be visible. The row's displayed totals stay scoped.
-      noise: policy ? classifyNoise(lifetime, policy) : null,
-      isNew: canBeNew && lifetime.firstSeen >= query.startSec,
+      entities,
+      byId: new Map(entities.map((entity) => [entity.id, entity])),
+      totalSeconds: entities.reduce((total, entity) => total + entity.seconds, 0),
+      canBeNew: newnessPossible,
     };
   });
-  const totalSeconds = allEntities.reduce((total, entity) => total + entity.seconds, 0);
-  const entitiesById = new Map(allEntities.map((entity) => [entity.id, entity]));
+
   const inType = (entity: ActivityEntitySummary) =>
     query.typeFilter === "all" || entity.kind === query.typeFilter;
-  const classificationFiltered = allEntities.filter((entity) =>
-    matchesClassification(entity, query.classificationFilter),
+
+  const listed = index.stages.catalog.read(
+    [
+      scopedRange,
+      query.typeFilter,
+      query.classificationFilter,
+      query.includeNoise ? 1 : 0,
+      query.sort,
+      query.direction,
+      JSON.stringify(search),
+    ].join("|"),
+    () => {
+      const classificationFiltered = allEntities.filter((entity) =>
+        matchesClassification(entity, query.classificationFilter),
+      );
+      const typeFiltered = classificationFiltered.filter(inType);
+      // Search deliberately reaches past the filter: someone typing "setup" is
+      // looking for exactly the thing the list hides, and finding nothing would
+      // read as missing data.
+      const hidden = search ? 0 : typeFiltered.filter((entity) => entity.noise !== null).length;
+      const unfolded = hidden > 0 && !query.includeNoise
+        ? typeFiltered.filter((entity) => entity.noise === null)
+        : typeFiltered;
+      const sorted = [...unfolded].sort(compareEntities(query.sort, query.direction));
+      const matches = search
+        ? sorted.filter((entity) =>
+            entity.displayName.toLowerCase().includes(search) ||
+            entity.key.toLowerCase().includes(search) ||
+            entity.sourceProcesses.some((process) => process.toLowerCase().includes(search)),
+          )
+        : sorted;
+      return {
+        matches,
+        noiseHidden: hidden,
+        // Measured over every row the filters admit, not the loaded page, so the
+        // bar scale is fixed the moment the filters are: pressing Load more must
+        // never rescale the rows already on screen. A title search extends the
+        // same scale with every matching Window below.
+        maxSeconds: matches.reduce((most, entity) => Math.max(most, entity.seconds), 0),
+        apps: matches.filter((entity) => entity.kind === "app").length,
+        websites: matches.filter((entity) => entity.kind === "website").length,
+      };
+    },
   );
-  const typeFiltered = classificationFiltered.filter(inType);
-  const search = query.search.trim().toLowerCase();
-  // Search deliberately reaches past the filter: someone typing "setup" is
-  // looking for exactly the thing the list hides, and finding nothing would
-  // read as missing data.
-  const noiseHidden = search ? 0 : typeFiltered.filter((entity) => entity.noise !== null).length;
-  const unfolded = noiseHidden > 0 && !query.includeNoise
-    ? typeFiltered.filter((entity) => entity.noise === null)
-    : typeFiltered;
-  const sorted = [...unfolded].sort(compareEntities(query.sort, query.direction));
-  const identityMatches = search
-    ? sorted.filter((entity) =>
-        entity.displayName.toLowerCase().includes(search) ||
-        entity.key.toLowerCase().includes(search) ||
-        entity.sourceProcesses.some((process) => process.toLowerCase().includes(search)),
-      )
-    : sorted;
 
-  // Measured over every row the filters admit, not the loaded page, so the bar
-  // scale is fixed the moment the filters are: pressing Load more must never
-  // rescale the rows already on screen. A title search extends the same scale
-  // with every matching Window below.
-  let maxSeconds = identityMatches.reduce((most, entity) => Math.max(most, entity.seconds), 0);
-
+  let maxSeconds = listed.maxSeconds;
   const catalog = {
-    rows: page(identityMatches, query.entityOffset, query.entityLimit),
-    total: identityMatches.length,
-    apps: identityMatches.filter((entity) => entity.kind === "app").length,
-    websites: identityMatches.filter((entity) => entity.kind === "website").length,
+    rows: page(listed.matches, query.entityOffset, query.entityLimit),
+    total: listed.matches.length,
+    apps: listed.apps,
+    websites: listed.websites,
   };
 
   // A title has no kind of its own, but every grouped Window has a parent
@@ -989,87 +1153,130 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
   // identity that may contain unrelated categories.
   let windowMatches: ActivityTitleGroupPage | null = null;
   if (search) {
-    const matching: ActivitySessionRow[] = [];
-    for (const session of index.sessions) {
-      if (!session.title.toLowerCase().includes(search)) continue;
-      const entity = entitiesById.get(session.entityId);
-      if (
-        !entity
-        || !inType(entity)
-      ) continue;
-      const clipped = clippedSession(session, query.startSec, query.endSec);
-      if (clipped) matching.push(clipped);
-    }
-    matching.sort((left, right) => right.start - left.start || right.id - left.id);
-    const grouped = groupSessionsByTitle(matching)
-      .filter((group) => matchesTitleGroupClassification(group, query.classificationFilter));
-    for (const group of grouped) {
-      const lifetimeFirstSeen = index.lifetimeWindowFirstSeen.get(group.key) ?? group.firstSeen;
-      group.isNew = canBeNew && lifetimeFirstSeen >= query.startSec;
-      maxSeconds = Math.max(maxSeconds, group.seconds);
-    }
-    grouped.sort(compareTitleGroups(query.windowSort, query.windowDirection));
+    const windows = index.stages.windows.read(
+      [
+        range,
+        query.typeFilter,
+        query.classificationFilter,
+        query.windowSort,
+        query.windowDirection,
+        JSON.stringify(search),
+      ].join("|"),
+      () => {
+        const matching: ActivitySessionRow[] = [];
+        for (const session of index.sessions) {
+          if (!session.title.toLowerCase().includes(search)) continue;
+          const entity = entitiesById.get(session.entityId);
+          if (
+            !entity
+            || !inType(entity)
+          ) continue;
+          const clipped = clippedSession(session, query.startSec, query.endSec);
+          if (clipped) matching.push(clipped);
+        }
+        matching.sort((left, right) => right.start - left.start || right.id - left.id);
+        const grouped = groupSessionsByTitle(matching)
+          .filter((group) => matchesTitleGroupClassification(group, query.classificationFilter));
+        for (const group of grouped) {
+          const lifetimeFirstSeen = index.lifetimeWindowFirstSeen.get(group.key) ?? group.firstSeen;
+          group.isNew = canBeNew && lifetimeFirstSeen >= query.startSec;
+        }
+        grouped.sort(compareTitleGroups(query.windowSort, query.windowDirection));
+        return {
+          groups: grouped,
+          sessionTotal: grouped.reduce((total, group) => total + group.sessionCount, 0),
+          maxSeconds: grouped.reduce((most, group) => Math.max(most, group.seconds), 0),
+        };
+      },
+    );
+    maxSeconds = Math.max(maxSeconds, windows.maxSeconds);
     // The page limit counts titles, not sessions: one busy window should cost
     // one row here, which is the entire point of grouping.
     windowMatches = {
-      rows: page(grouped, query.windowOffset, query.windowLimit),
-      total: grouped.length,
-      sessionTotal: grouped.reduce((total, group) => total + group.sessionCount, 0),
-      maxSeconds: grouped.reduce((most, group) => Math.max(most, group.seconds), 0),
+      rows: page(windows.groups, query.windowOffset, query.windowLimit),
+      total: windows.groups.length,
+      sessionTotal: windows.sessionTotal,
+      maxSeconds: windows.maxSeconds,
     };
   }
 
   const selectedEntity = query.selectedEntityId
     ? (entitiesById.get(query.selectedEntityId) ?? null)
     : null;
-  const detailSearch = query.detailSearch?.trim().toLowerCase() ?? "";
   // Collected before the filter is applied, so the usage strip below can
-  // describe the entity while the list beside it describes the filter.
-  const entityRows: ActivitySessionRow[] = [];
-  if (selectedEntity) {
-    for (const session of index.sessions) {
-      if (session.entityId !== selectedEntity.id) continue;
-      const clipped = clippedSession(session, query.startSec, query.endSec);
-      if (clipped) entityRows.push(clipped);
-    }
-    entityRows.sort((left, right) => right.start - left.start || right.id - left.id);
-  }
-  const selectedEntityUsage = selectedEntity
-    ? bucketDailyUsage(entityRows, query.startSec, query.endSec)
-    : [];
-  const detailRows = detailSearch
-    ? entityRows.filter((session) => session.title.toLowerCase().includes(detailSearch))
-    : entityRows;
+  // describe the entity while the list beside it describes the filter — and
+  // memoized apart from it, so typing in that filter does not send the scan
+  // back over every session in the database.
+  const entityScan = index.stages.entityScan.read(
+    `${range}|${query.selectedEntityId ?? ""}`,
+    () => {
+      const rows: ActivitySessionRow[] = [];
+      if (selectedEntity) {
+        for (const session of index.sessions) {
+          if (session.entityId !== selectedEntity.id) continue;
+          const clipped = clippedSession(session, query.startSec, query.endSec);
+          if (clipped) rows.push(clipped);
+        }
+        rows.sort((left, right) => right.start - left.start || right.id - left.id);
+      }
+      return {
+        rows,
+        usage: selectedEntity ? bucketDailyUsage(rows, query.startSec, query.endSec) : [],
+      };
+    },
+  );
+
   // Titles are no longer blanked until searched. That rule tied a privacy
   // decision to an unrelated control — one character in the detail search
   // revealed everything anyway — and it cannot coexist with grouping, which
   // has nothing to name its groups by if the titles are empty. The panel
   // offers an explicit toggle instead, and title capture is still opt-in and
   // off by default, which is where the real consent lives.
-  const detailGrouped = groupSessionsByTitle(detailRows);
-  for (const group of detailGrouped) {
-    const lifetimeFirstSeen = index.lifetimeWindowFirstSeen.get(group.key) ?? group.firstSeen;
-    group.isNew = canBeNew && lifetimeFirstSeen >= query.startSec;
-  }
-  detailGrouped.sort(compareTitleGroups(
-    query.detailSort ?? "seconds",
-    query.detailDirection ?? "desc",
-  ));
+  const detail = index.stages.detail.read(
+    [
+      range,
+      query.selectedEntityId ?? "",
+      query.detailSort ?? "seconds",
+      query.detailDirection ?? "desc",
+      JSON.stringify(detailSearch),
+    ].join("|"),
+    () => {
+      const rows = detailSearch
+        ? entityScan.rows.filter((session) => session.title.toLowerCase().includes(detailSearch))
+        : entityScan.rows;
+      const groups = groupSessionsByTitle(rows);
+      for (const group of groups) {
+        const lifetimeFirstSeen = index.lifetimeWindowFirstSeen.get(group.key) ?? group.firstSeen;
+        group.isNew = canBeNew && lifetimeFirstSeen >= query.startSec;
+      }
+      groups.sort(compareTitleGroups(
+        query.detailSort ?? "seconds",
+        query.detailDirection ?? "desc",
+      ));
+      return { rows, groups };
+    },
+  );
+
   // GROUP_SESSION_SAMPLE keeps the payload sane across hundreds of groups, but
   // it also decided that a visit older than the newest twenty-five could not be
   // ticked, corrected, or deleted on its own — only as part of "all visits".
   // One group at a time is cheap, so the one being inspected pages properly.
   let selectedWindowUsage: ActivityDayBucket[] = [];
+  let detailPage = page(detail.groups, query.detailOffset ?? 0, query.detailLimit ?? 50);
   if (query.selectedWindowKey) {
-    const inspected = detailGrouped.find((group) => group.key === query.selectedWindowKey);
+    const inspected = detail.groups.find((group) => group.key === query.selectedWindowKey);
     if (inspected) {
-      const visits = detailRows.filter(
+      const visits = detail.rows.filter(
         (session) => titleGroupKey(session) === query.selectedWindowKey,
       );
-      inspected.sessions = visits.slice(
-        0,
-        query.selectedWindowSessionLimit ?? GROUP_SESSION_SAMPLE,
-      );
+      // Substituted into the page rather than written onto the group: the
+      // grouped list is memoized above, and one query's visit limit must not
+      // follow it into the next.
+      const expanded = {
+        ...inspected,
+        sessions: visits.slice(0, query.selectedWindowSessionLimit ?? GROUP_SESSION_SAMPLE),
+      };
+      detailPage = detailPage.map((group) => (group.key === expanded.key ? expanded : group));
       // Every visit, not the page of them carried for the list: a strip drawn
       // from the first twenty-five would redraw itself on "load more".
       selectedWindowUsage = bucketDailyUsage(visits, query.startSec, query.endSec);
@@ -1078,7 +1285,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
 
   return {
     catalog,
-    noiseHidden,
+    noiseHidden: listed.noiseHidden,
     windowMatches,
     totalSeconds,
     maxSeconds,
@@ -1086,17 +1293,20 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     // that applies that filter, so reading it from an already-filtered set
     // would zero it the moment any other classification was chosen.
     uncategorized: uncategorizedSummary(allEntities.filter(inType)),
-    triage: triageSummary(index, policy),
+    triage: index.stages.triage.read(
+      JSON.stringify(policy ?? null),
+      () => triageSummary(index, policy),
+    ),
     selectedEntity,
     detailGroups: {
-      rows: page(detailGrouped, query.detailOffset ?? 0, query.detailLimit ?? 50),
-      total: detailGrouped.length,
-      sessionTotal: detailRows.length,
-      maxSeconds: detailGrouped.reduce((most, group) => Math.max(most, group.seconds), 0),
+      rows: detailPage,
+      total: detail.groups.length,
+      sessionTotal: detail.rows.length,
+      maxSeconds: detail.groups.reduce((most, group) => Math.max(most, group.seconds), 0),
     },
-    selectedEntityUsage,
+    selectedEntityUsage: entityScan.usage,
     selectedWindowUsage,
-    detailTotal: detailRows.length,
+    detailTotal: detail.rows.length,
     hasStoredTitles: index.hasStoredTitles,
     ruleUsageSeconds: index.ruleUsageSeconds,
   };

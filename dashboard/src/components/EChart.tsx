@@ -1,7 +1,52 @@
 import { useEffect, useRef } from "react";
-import * as echarts from "echarts";
+import {
+  init,
+  use,
+  type ECElementEvent,
+  type ECharts,
+  type EChartsCoreOption,
+} from "echarts/core";
+import { BarChart, CustomChart, HeatmapChart, LineChart } from "echarts/charts";
+import {
+  AxisPointerComponent,
+  CalendarComponent,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  VisualMapContinuousComponent,
+} from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
 
-export type EChartsOption = echarts.EChartsCoreOption;
+export type EChartsOption = EChartsCoreOption;
+
+/**
+ * Every series type and component this app's charts declare, and nothing else.
+ *
+ * The package's default entry registers all of them — pie, map, graph, radar,
+ * the toolbox, both data-zoom flavours — which left about 510 KB of minified
+ * JavaScript in the bundle for the WebView to parse on every cold start and
+ * never run. Registration is explicit instead, so the cost tracks what is
+ * actually drawn.
+ *
+ * A chart that renders blank after gaining a new option is the symptom of a
+ * type missing from this list.
+ */
+use([
+  BarChart,
+  CustomChart,
+  HeatmapChart,
+  LineChart,
+  // Drives tooltip.trigger "axis". TooltipComponent installs it anyway; naming
+  // it keeps the list a complete account of what the options rely on.
+  AxisPointerComponent,
+  CalendarComponent,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  // Continuous only: every visualMap here is a min/max ramp, none piecewise.
+  VisualMapContinuousComponent,
+  CanvasRenderer,
+]);
 
 export default function EChart({
   option,
@@ -10,14 +55,14 @@ export default function EChart({
 }: {
   option: EChartsOption;
   height: number;
-  onClick?: (params: echarts.ECElementEvent) => void;
+  onClick?: (params: ECElementEvent) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<ECharts | null>(null);
 
   useEffect(() => {
     const container = containerRef.current!;
-    const chart = echarts.init(container, undefined, { renderer: "canvas" });
+    const chart = init(container, undefined, { renderer: "canvas" });
     chartRef.current = chart;
     let resizeFrame = 0;
     const resize = () => {

@@ -4,11 +4,13 @@
 
 import {
   ANY_APP,
-  normalizeTitleRuleSpec,
   normalizeWindowTitle,
+  prepareTitleRule,
+  preparedTitleRuleMatches,
+  SessionTitle,
   titleMatchSpecificity,
-  titleRuleMatches,
   titleScopeSpecificity,
+  type PreparedTitleRule,
   type TitleRuleAnchor,
   type TitleRuleMatchMode,
   type TitleRuleScopeKind,
@@ -180,9 +182,13 @@ export function buildClassificationExplainer(
   const catById = new Map(categories.map((c) => [c.id, c]));
   type NormalizedRule = Rule & TitleRuleSpec;
   type Candidate = { rule: NormalizedRule; order: number };
+  /** A Window rule keeps the prepared form of itself: pattern normalization is
+   *  the bulk of matching, and doing it here rather than per session is what
+   *  keeps the cost of classifying a database flat in the number of rules. */
+  type TitleCandidate = Candidate & { prepared: PreparedTitleRule };
   const processRules = new Map<string, Candidate>();
   const domainRules = new Map<string, Candidate>();
-  const titleRules: Candidate[] = [];
+  const titleRules: TitleCandidate[] = [];
   const effectivePriority = (candidate: Candidate): number =>
     candidate.rule.matchType === "title" && candidate.rule.scopeKind === "domain"
       ? 0
@@ -190,13 +196,17 @@ export function buildClassificationExplainer(
   const prefer = (left: Candidate | undefined, right: Candidate): Candidate =>
     !left || effectivePriority(right) < effectivePriority(left) ? right : left;
   for (const [order, r] of rules.entries()) {
-    const titleSpec = normalizeTitleRuleSpec({
+    // The prepared rule is what the matcher reads. `rule` keeps only its spec
+    // half, because that one is reported as `winningRule` and a token list is
+    // no business of the caller's.
+    const prepared = prepareTitleRule({
       pattern: r.pattern,
       scopeKind: r.scopeKind ?? ANY_APP,
       scopeValue: r.scopeValue ?? "",
       titleMatchMode: r.titleMatchMode ?? "phrase",
       titleAnchor: r.titleAnchor ?? "any",
     });
+    const { patternTokens, ...titleSpec } = prepared;
     const candidate = {
       rule: {
         ...r,
@@ -212,7 +222,7 @@ export function buildClassificationExplainer(
     } else if (r.matchType === "domain") {
       domainRules.set(candidate.rule.pattern, prefer(domainRules.get(candidate.rule.pattern), candidate));
     } else {
-      titleRules.push(candidate);
+      titleRules.push({ ...candidate, prepared });
     }
   }
 
@@ -266,9 +276,13 @@ export function buildClassificationExplainer(
     // editor or note window says as much about what is being worked on as a
     // browser tab does. Each rule's own scope decides how far it reaches.
     if (titleRules.length > 0 && s.title) {
+      // One holder for the whole loop. Every rule below reads the same
+      // normalized title, and a scope-rejected rule never causes it to be
+      // computed at all.
+      const title = new SessionTitle(s.title);
       let titleBest: Candidate | undefined;
       for (const candidate of titleRules) {
-        if (!titleRuleMatches(candidate.rule, s, browserProcesses)) continue;
+        if (!preparedTitleRuleMatches(candidate.prepared, s, title, browserProcesses)) continue;
         const candidatePriority = effectivePriority(candidate);
         const bestPriority = titleBest ? effectivePriority(titleBest) : Number.POSITIVE_INFINITY;
         if (

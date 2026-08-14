@@ -701,6 +701,49 @@ describe("Activity index", () => {
   });
 });
 
+describe("Query stage reuse", () => {
+  // queryActivityIndex memoizes its expensive stages on the index, keyed on
+  // everything except the paging fields. These pin the two ways that can go
+  // wrong: a page change altering more than the slice, and a stage answering
+  // one query from another one's inputs.
+  const index = buildActivityIndex(source);
+
+  it("changes only the slice when a page grows", () => {
+    const firstPage = queryActivityIndex(index, { ...baseQuery, entityLimit: 1 });
+    const everything = queryActivityIndex(index, { ...baseQuery, entityLimit: 100 });
+    expect(firstPage.catalog.total).toBe(everything.catalog.total);
+    expect(firstPage.catalog.apps).toBe(everything.catalog.apps);
+    expect(firstPage.catalog.websites).toBe(everything.catalog.websites);
+    expect(firstPage.maxSeconds).toBe(everything.maxSeconds);
+    expect(firstPage.totalSeconds).toBe(everything.totalSeconds);
+    expect(firstPage.catalog.rows).toEqual(everything.catalog.rows.slice(0, 1));
+  });
+
+  it("answers a repeated query the same way after others have run", () => {
+    const before = queryActivityIndex(index, baseQuery);
+    // More distinct shapes than any one stage will hold, so the first query's
+    // entries are evicted rather than merely shadowed.
+    for (const other of [
+      { ...baseQuery, sort: "name" as const },
+      { ...baseQuery, typeFilter: "website" as const },
+      { ...baseQuery, classificationFilter: "uncategorized" as const },
+      { ...baseQuery, search: "e" },
+      { ...baseQuery, startSec: 0, endSec: 5 },
+      { ...baseQuery, startSec: 20, endSec: 90 },
+      { ...baseQuery, direction: "asc" as const },
+      { ...baseQuery, selectedEntityId: "website:example.com" },
+    ]) queryActivityIndex(index, other);
+    expect(queryActivityIndex(index, baseQuery)).toEqual(before);
+  });
+
+  it("keeps a noise policy out of an answer given without one", () => {
+    const policy = { mode: "one_off" as const, maxSeconds: 60, maxSessions: 1 };
+    const plain = queryActivityIndex(index, baseQuery);
+    queryActivityIndex(index, { ...baseQuery, noise: policy });
+    expect(queryActivityIndex(index, baseQuery)).toEqual(plain);
+  });
+});
+
 describe("Activity noise filtering", () => {
   const policy = { mode: "utilities", maxSeconds: 120, maxSessions: 3 } as const;
   const index = buildActivityIndex(source);
@@ -1129,6 +1172,20 @@ describe("visits carried for the inspected window", () => {
       selectedWindowSessionLimit: 500,
     }).detailGroups.rows[0];
     expect(group.sessions).toHaveLength(60);
+  });
+
+  it("leaves no expanded visit list behind for the next query", () => {
+    // The inspected group's visits are substituted into the returned page
+    // rather than written onto the grouped row, which the stage memo holds on
+    // to. Asking again without the request has to give the sample back.
+    queryActivityIndex(many, {
+      ...selected,
+      selectedWindowKey: windowKey(),
+      selectedWindowSessionLimit: 45,
+    });
+    expect(queryActivityIndex(many, selected).detailGroups.rows[0].sessions).toHaveLength(
+      GROUP_SESSION_SAMPLE,
+    );
   });
 
   it("leaves the other groups sampled when one is inspected", () => {

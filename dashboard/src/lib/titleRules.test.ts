@@ -36,6 +36,31 @@ describe("Windows title normalization", () => {
     expect(normalizeWindowTitle("*Untitled - Notepad")).toBe("untitled - notepad");
   });
 
+  it("gives one answer whichever stages the scan is able to skip", () => {
+    // normalizeWindowTitle skips any stage a scan proves cannot change the
+    // string, so each case here reaches a different one and has to agree with
+    // the unconditional pipeline it replaced.
+    expect(normalizeWindowTitle("Roadmap - Obsidian")).toBe("roadmap - obsidian");
+    // Above ASCII, so NFKC runs and nothing else does.
+    expect(normalizeWindowTitle("Seeds \u2014 Obsidian")).toBe("seeds \u2014 obsidian");
+    // Non-breaking spaces are whitespace the collapse has to reach.
+    expect(normalizeWindowTitle("Seeds\u00a0\u00a0\u2014 Obsidian")).toBe("seeds \u2014 obsidian");
+    // Fullwidth forms compose down to ASCII, the space among them.
+    expect(normalizeWindowTitle("\uff21pp\u3000Name")).toBe("app name");
+    // A tab is a control character, replaced before the collapse sees it.
+    expect(normalizeWindowTitle("Report\tdraft")).toBe("report draft");
+    // Decoration at the start, at the end, and at both.
+    expect(normalizeWindowTitle("(12) Inbox")).toBe("inbox");
+    expect(normalizeWindowTitle("Notes \u25cf")).toBe("notes");
+    expect(normalizeWindowTitle("admin: Notes *")).toBe("notes");
+    // A title merely beginning with "a" is not an administrator prefix.
+    expect(normalizeWindowTitle("Atlas - Visual Studio Code")).toBe(
+      "atlas - visual studio code",
+    );
+    expect(normalizeWindowTitle("")).toBe("");
+    expect(normalizeWindowTitle("   ")).toBe("");
+  });
+
   it("splits visible separators but not a hyphen inside a word", () => {
     expect(splitWindowTitle("roadmap.md - Skill Tree — Obsidian | notes")).toEqual([
       "roadmap.md",
