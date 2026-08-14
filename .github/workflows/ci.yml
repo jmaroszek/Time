@@ -32,7 +32,7 @@ jobs:
           python -m coverage report
       - name: Upload Python test and coverage results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-quality-results
           path: coverage/python
@@ -71,7 +71,7 @@ jobs:
         run: git diff --check
       - name: Upload dashboard coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dashboard-coverage
           path: dashboard/coverage/vitest
@@ -99,7 +99,7 @@ jobs:
         run: npm run test:device
       - name: Upload renderer failure artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: renderer-compatibility-artifacts
           path: |
@@ -154,7 +154,7 @@ jobs:
           ../scripts/smoke_packaged_tracker.ps1 -TrackerExecutable $tracker -OutputDirectory $output
       - name: Upload packaged tracker smoke results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packaged-tracker-smoke
           path: ${{ runner.temp }}/time-packaged-smoke-${{ github.run_id }}-${{ github.run_attempt }}/results
