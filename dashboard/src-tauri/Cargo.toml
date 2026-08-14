@@ -33,6 +33,13 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2.4.1"
 
+[profile.dev]
+# Full debug info is what makes a debug build enormous, and most of it is never
+# read: a panic needs a file and a line, which line tables carry. Stepping
+# through this crate in a native debugger — inspecting locals and types — is
+# what this gives up, so raise it back to `true` for a session that needs one.
+debug = "line-tables-only"
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }

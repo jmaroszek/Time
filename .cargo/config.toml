@@ -10,3 +10,17 @@
 # The whole lib suite runs in well under a second, so serializing it costs
 # nothing and is the only setting that makes it deterministic.
 RUST_TEST_THREADS = "1"
+
+[build]
+# Cargo never reclaims an incremental cache. Each one is about a gigabyte, and
+# a new one is minted for every compilation-unit hash — a dependency bump, a
+# feature or profile change, a toolchain change, or simply alternating between
+# `cargo test` and `build:debug-app`, which are separate units with separate
+# caches. The old directory is then dead and stays on disk forever: eighty-eight
+# of them had reached 15.9 GB, against two that were live.
+#
+# Measured on this crate: an edit-and-rebuild costs 5s with the cache and 10s
+# without. Five seconds on the rare day this crate is edited is the whole price,
+# and the crate is small enough that it stays five seconds — revisit this if it
+# grows, because the gap widens with the amount of code being recompiled.
+incremental = false

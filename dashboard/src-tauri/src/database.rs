@@ -2297,9 +2297,10 @@ mod tests {
         schedule_allows_local, ActivityDeleteRequest, SessionClassificationRequest,
         SessionCorrectionRequest, TimeDatabase, BOOTSTRAP_SQL, SCHEMA_VERSION,
     };
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::Once;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     /// A directory no previous run has touched.
     ///
@@ -2308,26 +2309,63 @@ mod tests {
     /// violation — or leaves the directory in a delete-pending state where a
     /// file written afterwards silently disappears. Both were live flakes here.
     ///
-    /// Nothing deletes these afterwards, for the same reason: a run that tidied
-    /// up would be racing the handles it just closed. They therefore accumulate,
-    /// one per filesystem-touching test per invocation, and collecting them
-    /// under a single parent is what keeps `target/` navigable — 11k loose
-    /// directories once buried the release bundle. Delete `target/test-scratch`
-    /// whenever it gets large; nothing reads it between runs.
+    /// Nothing deletes these during the run that made them, for the same
+    /// reason: a run that tidied up would be racing the handles it just closed.
+    /// They therefore accumulate, one per filesystem-touching test per
+    /// invocation, and collecting them under a single parent is what keeps
+    /// `target/` navigable — 11k loose directories once buried the release
+    /// bundle. `sweep_old_scratch` bounds the pile at a day's worth.
     fn scratch_root(name: &str) -> PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
+        static SWEPT: Once = Once::new();
         let unique = NEXT.fetch_add(1, Ordering::Relaxed);
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::current_dir()
+        let parent = std::env::current_dir()
             .unwrap()
             .join("target")
-            .join("test-scratch")
-            .join(format!("{name}-{stamp}-{unique}"));
+            .join("test-scratch");
+        // Once per test process: the sweep reads one directory, and doing it
+        // per scratch-using test would read it sixteen times for one result.
+        SWEPT.call_once(|| sweep_old_scratch(&parent));
+        let root = parent.join(format!("{name}-{stamp}-{unique}"));
         std::fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    /// Delete scratch directories left by earlier runs.
+    ///
+    /// Age is the discriminator rather than ownership, which is what makes this
+    /// safe to do at startup: a directory another run is still using is minutes
+    /// old at most, so a day-old one cannot belong to a run still in progress.
+    /// That keeps the guarantee `scratch_root` depends on — no run ever touches
+    /// a path a live handle might still own — while bounding a pile that
+    /// otherwise grows by every scratch-using test, forever.
+    ///
+    /// Every failure is ignored. A directory that will not delete is one
+    /// something else is holding, which is precisely the case to leave alone;
+    /// the next run finds it a day older and no more troublesome.
+    fn sweep_old_scratch(parent: &Path) {
+        const KEEP: Duration = Duration::from_secs(24 * 60 * 60);
+        let Ok(entries) = std::fs::read_dir(parent) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let stale = metadata.is_dir()
+                && metadata
+                    .modified()
+                    .ok()
+                    .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+                    .is_some_and(|age| age > KEEP);
+            if stale {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
     }
 
     fn scratch_database(name: &str) -> PathBuf {
