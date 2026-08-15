@@ -389,7 +389,7 @@ export default function OverviewTab({
         <Card
           title={isSingleDay ? "Hourly Activity" : HOURS_CARD_TITLES[granularity]}
           className="h-[345px]"
-          right={isSingleDay ? undefined : (
+          right={
             <MenuSelect
               variant="quiet"
               label="Stack bars by"
@@ -400,12 +400,14 @@ export default function OverviewTab({
                 { value: "category", label: "Categories" },
               ]}
             />
-          )}
+          }
         >
           <div className="pt-2">
             {isSingleDay ? (
               <HourlyActivityChart
                 hours={model.hourly!}
+                stackBy={stackBy}
+                categories={meta.categories}
               />
             ) : (
               <ProductiveHoursChart
