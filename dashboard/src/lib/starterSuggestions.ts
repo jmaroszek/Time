@@ -1,11 +1,11 @@
 // A short list of common Windows applications, used to *offer* a category for
 // an app the user has not classified yet.
 //
-// Nothing here classifies anything. A suggestion pre-fills a control and fills a
-// review sheet; a rule exists only once the user says yes, and what they accept
-// is an ordinary rule indistinguishable from one they typed. That is the
-// boundary the Window-rule redesign settled and this feature keeps: Time does
-// not silently infer categories.
+// Nothing here classifies anything. A suggestion marks an entry in a menu and
+// fills a review sheet; a rule exists only once the user says yes, and what
+// they accept is an ordinary rule indistinguishable from one they typed. That
+// is the boundary the Window-rule redesign settled and this feature keeps: Time
+// does not silently infer categories.
 //
 // Every gate below fails toward *not* suggesting, for the same reason
 // domainConsolidation.ts does: a missed suggestion costs nothing — the app sits
@@ -29,7 +29,13 @@
 //
 // This is not a source of display names. cleanProcessName in format.ts stays
 // mechanical ("production code never guesses app identities"); the catalog only
-// informs a suggestion and the sentence explaining it.
+// informs which category is offered.
+//
+// It does not explain itself either. Each role used to carry a sentence — "A
+// developer tool" — shown beside the suggestion, and the surfaces that printed
+// it are gone: the menu marks its entry with a word, and the review sheet lists
+// a duration. RECOGNIZED_NOT_SUGGESTED still carries prose because a refusal
+// genuinely needs one; an offer the reader can simply decline does not.
 
 import type { ActivityEntityKind } from "./activity";
 import { entityId } from "./entityIdentity";
@@ -73,20 +79,6 @@ const ROLE_CATEGORY: Record<StarterRole, string> = {
   study: "work",
   gaming: "entertainment",
   media: "entertainment",
-};
-
-/** One sentence per role rather than per app. A hundred hand-written rationales
- *  would rot; the role is the actual reason in every case. */
-const ROLE_REASON: Record<StarterRole, string> = {
-  system: "A Windows system tool",
-  plumbing: "Windows background plumbing, not something you use",
-  messaging: "A messaging or email app",
-  development: "A developer tool",
-  writing: "A documents or notes app",
-  creative: "A design or media-editing app",
-  study: "A study or reference app",
-  gaming: "A game or game launcher",
-  media: "A music or video app",
 };
 
 /**
@@ -272,17 +264,11 @@ export const RECOGNIZED_NOT_SUGGESTED: Readonly<Record<string, string>> = {
  * Installer and driver shapes are deliberately absent: noise.ts already folds
  * those out of the catalog, and they were worth a rounding error.
  */
-const NAME_SHAPES: readonly { pattern: RegExp; role: StarterRole; reason: string }[] = [
-  {
-    pattern: /-win(?:32|64)-shipping\.exe$/,
-    role: "gaming",
-    reason: "Named the way Unreal Engine packages a game",
-  },
-  {
-    pattern: /(?:_eac|_be)\.exe$|^start_protected_game\.exe$/,
-    role: "gaming",
-    reason: "Named like a game's anti-cheat launcher",
-  },
+const NAME_SHAPES: readonly { pattern: RegExp; role: StarterRole }[] = [
+  // How Unreal Engine names a shipping build.
+  { pattern: /-win(?:32|64)-shipping\.exe$/, role: "gaming" },
+  // A game's anti-cheat launcher, wearing a second executable name.
+  { pattern: /(?:_eac|_be)\.exe$|^start_protected_game\.exe$/, role: "gaming" },
 ];
 
 /** The fields a suggestion needs. Structural so a triage row and a test fixture
@@ -295,8 +281,6 @@ export interface SuggestibleEntity {
 export interface StarterSuggestion<T extends SuggestibleEntity> {
   entity: T;
   categoryId: number;
-  /** One line, shown beside the suggestion. Never a claim about the person. */
-  reason: string;
 }
 
 export interface RecognizedEntity<T extends SuggestibleEntity> {
@@ -345,13 +329,6 @@ export function roleForProcess(process: string): StarterRole | null {
   return null;
 }
 
-function reasonForProcess(process: string, role: StarterRole): string {
-  const name = process.trim().toLowerCase();
-  if (STARTER_APPS[name]) return ROLE_REASON[role];
-  const shape = NAME_SHAPES.find((candidate) => candidate.pattern.test(name));
-  return shape ? shape.reason : ROLE_REASON[role];
-}
-
 /**
  * Suggestions for a set of unclassified entities.
  *
@@ -378,7 +355,7 @@ export function suggestForTriage<T extends SuggestibleEntity>(
     if (!role) continue;
     const categoryId = roleCategories.get(role);
     if (categoryId === undefined) continue;
-    suggestions.push({ entity, categoryId, reason: reasonForProcess(name, role) });
+    suggestions.push({ entity, categoryId });
   }
   return suggestions;
 }

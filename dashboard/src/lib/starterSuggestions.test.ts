@@ -159,7 +159,7 @@ describe("resolving roles to categories", () => {
 describe("suggesting", () => {
   it("suggests a catalogued app", () => {
     expect(suggest([app("slack.exe")])).toEqual([
-      { entity: app("slack.exe"), categoryId: 2, reason: "A messaging or email app" },
+      { entity: app("slack.exe"), categoryId: 2 },
     ]);
   });
 
@@ -168,9 +168,7 @@ describe("suggesting", () => {
   });
 
   it("recognizes an Unreal Engine build nobody has catalogued", () => {
-    const [suggestion] = suggest([app("sandfall-win64-shipping.exe")]);
-    expect(suggestion?.categoryId).toBe(4);
-    expect(suggestion?.reason).toBe("Named the way Unreal Engine packages a game");
+    expect(suggest([app("sandfall-win64-shipping.exe")])[0]?.categoryId).toBe(4);
   });
 
   it("recognizes an anti-cheat launcher as the game it guards", () => {
