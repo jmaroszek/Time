@@ -129,12 +129,12 @@ export function StarterSuggestionDialog({
           Classify {suggestions.length} recognized app{suggestions.length === 1 ? "" : "s"}
         </h2>
         {/* Where this came from, in the one place it matters, before any of it
-            is applied. "Never leaves your machine" because a list of common apps
-            is exactly the kind of thing a reader might assume was fetched. */}
+            is applied. "Recognizes" rather than anything about a list shipping
+            with Time: the list is names Time can read, and a sentence about it
+            arriving with the app reads as though the apps themselves did. */}
         <p className="mt-2 text-xs leading-relaxed text-ink-3">
-          These come from a short list of common Windows apps that ships with Time. It never
-          leaves your machine and nothing changes until you apply it. Each one becomes an
-          ordinary rule you can edit or delete afterwards.
+          Time recognizes these common Windows apps. Each suggestion becomes an ordinary rule
+          you can edit or delete afterwards.
         </p>
 
         <div className="mt-4 space-y-1">
@@ -153,7 +153,7 @@ export function StarterSuggestionDialog({
                       {item.displayName}
                     </span>
                     <span className="text-micro text-ink-3">
-                      {suggestion.reason} · {fmtDuration(item.seconds)}
+                      {fmtDuration(item.seconds)}
                     </span>
                   </span>
                 </Checkbox>
@@ -203,31 +203,37 @@ export function StarterSuggestionDialog({
           </div>
         )}
 
-        {/* What is left, stated before the button rather than after it. The
-            starter list reaches work apps far better than it reaches games, so a
-            screen that implied this finished the job would leave the reader
-            with a productive share flattered by whatever it could not name. */}
-        {remaining > 0 && (
-          <p className="mt-4 text-xs text-ink-3">
-            {remaining} item{remaining === 1 ? "" : "s"} would still be unclassified afterwards —
-            games and less common apps mostly have to be classified by hand.
-          </p>
-        )}
+        {/* The rule is what separates the list from the buttons; the sentence
+            only has to be true. It names Unclassified because the count is
+            about the section behind this dialog, not about the rows just above
+            it — a bare "n items would still be unclassified" reads as a comment
+            on the list you are looking at, which is the one thing it is not.
 
-        <div className="mt-5 flex justify-end gap-2">
-          <Button disabled={applying} onClick={onClose}>Not now</Button>
-          <Button
-            variant="primary"
-            disabled={applying || accepted.length === 0}
-            onClick={() => {
-              setApplying(true);
-              onApply(accepted);
-            }}
-          >
-            {applying
-              ? "Classifying…"
-              : `Classify ${accepted.length} app${accepted.length === 1 ? "" : "s"}`}
-          </Button>
+            It is here at all because the starter list reaches work apps far
+            better than it reaches games, and a screen that implied this
+            finished the job would leave the reader with a productive share
+            flattered by whatever it could not name. */}
+        <div className="mt-4 border-t border-edge pt-3">
+          {remaining > 0 && (
+            <p className="mb-3 text-xs text-ink-3">
+              Unclassified will still have {remaining} item{remaining === 1 ? "" : "s"} after this.
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button disabled={applying} onClick={onClose}>Not now</Button>
+            <Button
+              variant="primary"
+              disabled={applying || accepted.length === 0}
+              onClick={() => {
+                setApplying(true);
+                onApply(accepted);
+              }}
+            >
+              {applying
+                ? "Classifying…"
+                : `Classify ${accepted.length} app${accepted.length === 1 ? "" : "s"}`}
+            </Button>
+          </div>
         </div>
     </DialogShell>
   );

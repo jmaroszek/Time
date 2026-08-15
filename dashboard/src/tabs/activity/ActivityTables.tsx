@@ -2,7 +2,6 @@ import { type ReactNode } from "react";
 
 import { MenuSelect, type MenuOption } from "../../components/ui";
 import {
-  BACKLOG_BADGE_SECONDS,
   type ActivityEntityPage,
   type ActivityEntitySummary,
   type ActivityQueryResult,
@@ -159,10 +158,15 @@ export function UnclassifiedSection({
 }) {
   if (triage.total === 0) return null;
   const listed = triage.items.length;
-  // The same floor the tab badge uses. Per-row suggestions need no gate — they
-  // cost nothing and teach the mechanism — but an invitation to sit down and
-  // review a list has to be worth the interruption first.
-  const offerReview = suggestionCount > 0 && triage.seconds >= BACKLOG_BADGE_SECONDS;
+  // No floor beyond having something to review. The hour this used to require
+  // was the tab badge's, borrowed, and the badge is the other kind of
+  // interruption: it reaches across the app to say a different tab wants you,
+  // while this sits on the surface the reader already opened, one line above
+  // the rows it is describing. A small backlog is also where the offer is worth
+  // most — plumbing accrues seconds, not hours, so a queue of it could never
+  // have cleared an hour, and hiding it is exactly what a reader would want
+  // done in one go.
+  const offerReview = suggestionCount > 0;
   return (
     <section
       aria-labelledby="unclassified-heading"
@@ -212,22 +216,26 @@ export function UnclassifiedSection({
         Time in these apps and sites is left out of every category total in Insights until you
         classify it.
       </p>
-      {/* An offer, phrased as one. It names the source in the same breath so the
-          reader knows a list shipped with Time is doing the recognizing, and
-          nothing has been decided for them yet. */}
+      {/* An offer, and nothing around it. The label carries the count and the
+          verb, which is everything the sentence that used to sit beside it was
+          saying; where the suggestions come from is explained by the sheet this
+          opens, at the moment it matters. With no sentence left there is
+          nothing to separate, so the rules came off too — ruled top and bottom
+          it read as another row, which is the one thing it is not.
+
+          Borderless for the same reason: a bordered control would be the
+          heaviest thing in a recessed card whose own rows carry a quiet trigger
+          each, and this is an offer rather than the work. The negative margin
+          pulls the padding back so the label starts on the text above it. */}
       {offerReview && (
-        <p className="mt-2 text-meta leading-snug text-ink-2">
-          {suggestionCount === 1
-            ? "One of these matches Time's starter list of common apps."
-            : `${suggestionCount} of these match Time's starter list of common apps.`}{" "}
-          <button
-            type="button"
-            onClick={onReview}
-            className="font-medium text-accent underline-offset-2 hover:underline"
-          >
-            Review
-          </button>
-        </p>
+        <button
+          type="button"
+          onClick={onReview}
+          className="-ml-1.5 mt-1.5 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-accent transition-colors hover:bg-accent/10"
+        >
+          Review {suggestionCount} suggestion{suggestionCount === 1 ? "" : "s"}
+          <span aria-hidden="true">→</span>
+        </button>
       )}
       <div className="mt-2">
         {triage.items.map((item) => (
@@ -273,40 +281,28 @@ function TriageRow({
         </span>
       </span>
       <span className="shrink-0 text-xs tabular-nums text-ink-2">{fmtDuration(item.seconds)}</span>
-      {/* Its own button rather than a pre-filled trigger below. The control
-          beside it shows no value on purpose — see its note — and a suggestion
-          rendered as the current selection would say this row is already
-          Communication when it is still uncategorized. A separate button is the
-          honest shape: one click accepts, and nothing claims to have happened
-          until it is pressed. */}
-      {suggested && (
-        <button
-          type="button"
-          title={`${suggestion?.reason}. Classifies ${item.displayName} in all history.`}
-          onClick={() => onAssign(item, suggested.id)}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-edge-2 px-2 py-1 text-xs text-ink-2 transition-colors hover:border-accent/40 hover:text-ink"
-        >
-          <span
-            aria-hidden="true"
-            className="h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ background: suggested.color }}
-          />
-          {suggested.name}
-          <span className="text-micro text-ink-3">suggested</span>
-        </button>
-      )}
       {/* A placeholder trigger, not a value: every row here is uncategorized, so
           showing that as the current selection would print the same word five
-          times and call it information. The verb is what the control does. */}
+          times and call it information. The verb is what the control does — and
+          it stays the same verb on a row Time has a guess for, since a trigger
+          naming a category it has not been given is the one shape that reads as
+          already classified. The guess is inside, marked where it sits. */}
       <MenuSelect
         size="compact"
         variant="resting"
         align="end"
+        // No width of its own. The placeholder above is the same word on every
+        // row and the trigger never carries a value, so intrinsic sizing is both
+        // an exact fit and identical down the list — which is what lets the
+        // durations beside it line up. Give this a value again and the two rules
+        // part company: a trigger whose text varies needs a fixed box, and one
+        // that doesn't needs none.
+        className="shrink-0"
         label={`Classify ${item.displayName}`}
-        placeholder={suggested ? "Other" : "Classify"}
+        placeholder="Classify"
         value=""
         onChange={(value) => onAssign(item, Number(value))}
-        options={triageCategoryOptions(categories)}
+        options={triageCategoryOptions(categories, suggested?.id)}
       />
     </div>
   );

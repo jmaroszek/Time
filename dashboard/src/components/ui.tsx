@@ -310,6 +310,10 @@ export interface MenuOption {
   divider?: boolean;
   /** Swatch shown before the label, and on the trigger once chosen. */
   dot?: string;
+  /** A word about this entry, dimmed and trailing the label — in the list only,
+   *  never on the trigger. For marking an entry in place: the alternative is
+   *  moving it, and a list whose order answers to state cannot be learned. */
+  hint?: string;
 }
 
 const MENU_VIEWPORT_MARGIN = 8;
@@ -616,6 +620,7 @@ export function MenuSelect({
                 <span className="flex min-w-0 items-center gap-2">
                   {option.dot && <CategoryDot color={option.dot} />}
                   <span className="truncate">{option.label}</span>
+                  {option.hint && <span className="shrink-0 text-micro text-ink-3">{option.hint}</span>}
                 </span>
                 {/* Held on every row, not just the chosen one: the menu sizes
                     itself to its content, so a check that came and went would
