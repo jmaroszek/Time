@@ -6,7 +6,9 @@ import {
   computeKpis,
   dailySecondsByApp,
   goalPace,
+  productivityDataState,
   rollingMean,
+  rollingMeanObserved,
   splitAtMidnights,
   topApps,
   robustDeltaFraction,
@@ -15,7 +17,7 @@ import {
   type Session,
 } from "./metrics";
 import { appGroupKey, cleanProcessName } from "./format";
-import { dayKey } from "./time";
+import { addDays, dayKey } from "./time";
 
 const CATS: Category[] = [
   { id: 1, name: "Dev", color: "#378ADD", isProductive: true, isNeutral: false, isIgnored: false, sortOrder: 1 },
@@ -204,6 +206,22 @@ describe("goalPace", () => {
     const p = goalPace(9 * 3600, week, 21); // 9h over 3 days = 3h/day == daily goal
     expect(p.avgPerDayHours).toBeCloseTo(3);
     expect(p.fraction).toBeGreaterThanOrEqual(1);
+    expect(p.met).toBe(true);
+  });
+
+  it("uses exact values for equality and exposes rounded ties below the goal", () => {
+    const exact = goalPace(9 * 3600, week, 21);
+    expect(exact.met).toBe(true);
+    expect(exact.roundedTieWhileBehind).toBe(false);
+
+    const roundedTie = goalPace(8.6 * 3600, week, 21);
+    expect(roundedTie.doneHours.toFixed(0)).toBe(roundedTie.targetHours.toFixed(0));
+    expect(roundedTie.met).toBe(false);
+    expect(roundedTie.roundedTieWhileBehind).toBe(true);
+
+    const subHourTarget = goalPace(0, { start: week.start, end: addDays(week.start, 1) }, 1);
+    expect(subHourTarget.targetHours).toBeLessThan(1);
+    expect(subHourTarget.roundedTieWhileBehind).toBe(true);
   });
 });
 
@@ -526,5 +544,29 @@ describe("rollingMean", () => {
   it("averages a trailing window", () => {
     expect(rollingMean([2, 4, 6], 7)).toEqual([2, 3, 4]);
     expect(rollingMean([1, 2, 3, 4], 2)).toEqual([1, 1.5, 2.5, 3.5]);
+  });
+
+  it("keeps measured zeroes while leaving unavailable periods out", () => {
+    expect(rollingMeanObserved([null, 0, 2, null, 4], 2)).toEqual([
+      null, 0, 1, null, 3,
+    ]);
+  });
+});
+
+describe("productivityDataState", () => {
+  const kpis = {
+    totalSec: 0,
+    prodSec: 0,
+    prodFraction: 0,
+    longestFocusSec: 0,
+    uncategorizedSec: 0,
+  };
+
+  it("distinguishes missing recording, missing classification, and a measured zero", () => {
+    expect(productivityDataState(kpis)).toBe("nothing-recorded");
+    expect(productivityDataState({ ...kpis, totalSec: 60, uncategorizedSec: 60 }))
+      .toBe("nothing-classified");
+    expect(productivityDataState({ ...kpis, totalSec: 60, uncategorizedSec: 0 }))
+      .toBe("ready");
   });
 });

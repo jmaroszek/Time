@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Category } from "../lib/classify";
-import { rollingMean } from "../lib/metrics";
+import { rollingMeanObserved } from "../lib/metrics";
 import {
   bucketActivityHours,
   isCompleteHoursBucket,
@@ -16,7 +16,7 @@ import {
   type HoursBucket,
   type OverviewGranularity,
 } from "../lib/overview";
-import { addDays, type Range } from "../lib/time";
+import { addDays, calendarDays, type Range } from "../lib/time";
 import type { WeekStart } from "../lib/time";
 import { DAY_NAMES, FULL_DAY_NAMES, MONTH_NAMES_SHORT, fmtShortDate } from "../lib/format";
 import EChart, { type EChartsOption } from "./EChart";
@@ -60,6 +60,16 @@ export function categorySeries(
     { name: UNCATEGORIZED_LABEL, color: uncategorizedMark(theme) },
   ];
   const out: Array<CategorySeries & { configuredIndex: number; totalSeconds: number }> = [];
+  const uncategorizedTotal = buckets.reduce(
+    (total, bucket) => total + (bucket.categorySeconds.get(UNCATEGORIZED_LABEL) ?? 0),
+    0,
+  );
+  const categorizedTotal = buckets.reduce(
+    (total, bucket) => total + [...bucket.categorySeconds.entries()]
+      .filter(([name]) => name !== UNCATEGORIZED_LABEL)
+      .reduce((bucketTotal, [, seconds]) => bucketTotal + seconds, 0),
+    0,
+  );
   for (const [configuredIndex, { name, color }] of ordered.entries()) {
     const totalSeconds = buckets.reduce(
       (total, bucket) => total + (bucket.categorySeconds.get(name) ?? 0),
@@ -74,6 +84,7 @@ export function categorySeries(
     const meetsThreshold =
       name === UNCATEGORIZED_LABEL
         ? totalSeconds >= MIN_UNCATEGORIZED_SERIES_HOURS * 3600
+          || (uncategorizedTotal > 0 && categorizedTotal === 0)
         : totalSeconds > 0;
     if (meetsThreshold) out.push({ name, color, hours, configuredIndex, totalSeconds });
   }
@@ -98,8 +109,7 @@ const MIN_UNCATEGORIZED_SERIES_HOURS = 1;
  */
 export function visibleAverageHours(value: number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
-  const rounded = Math.round(value * 100) / 100;
-  return rounded > 0 ? rounded : null;
+  return Math.round(value * 100) / 100;
 }
 
 // Legend geometry, derived from the `legend` option the chart actually sets so
@@ -231,13 +241,20 @@ export default function ProductiveHoursChart({
         labelMode === "weekday" ? DAY_NAMES[day.date.getDay()] : fmtShortDate(day.date),
       );
       tooltipHeaders = visibleDays.map((day) =>
-        labelMode === "weekday" ? FULL_DAY_NAMES[day.date.getDay()] : fmtShortDate(day.date),
+        `${labelMode === "weekday" ? FULL_DAY_NAMES[day.date.getDay()] : fmtShortDate(day.date)}${
+          day.observation === "partial" ? " · partial day" : ""
+        }`,
       );
       prodBars = visibleDays.map((day) => round2(day.productiveSeconds / 3600));
       neutralBars = visibleDays.map((day) => round2(day.neutralSeconds / 3600));
       unproductiveBars = visibleDays.map((day) => round2(day.unproductiveSeconds / 3600));
       uncategorizedBars = visibleDays.map((day) => round2(day.uncategorizedSeconds / 3600));
-      avgLine = rollingMean(historyDays.map((day) => day.productiveSeconds / 3600), 7)
+      avgLine = rollingMeanObserved(
+        historyDays.map((day) =>
+          day.observation === "complete" ? day.productiveSeconds / 3600 : null
+        ),
+        7,
+      )
         .slice(offset)
         .map(visibleAverageHours);
     } else {
@@ -249,8 +266,10 @@ export default function ProductiveHoursChart({
       };
       const historyBuckets = bucketActivityHours(historyDays, historyRange, granularity, weekStart);
       const averageWindow = AVERAGE_WINDOWS[granularity];
-      const averages = rollingMean(
-        historyBuckets.map((bucket) => bucket.productiveSeconds / 3600),
+      const averages = rollingMeanObserved(
+        historyBuckets.map((bucket) =>
+          bucket.observation === "complete" ? bucket.productiveSeconds / 3600 : null
+        ),
         averageWindow,
       );
       const averageByKey = new Map(
@@ -263,7 +282,7 @@ export default function ProductiveHoursChart({
       });
       tooltipHeaders = buckets.map((bucket) => {
         const period = granularity === "weekly" ? "week" : granularity === "yearly" ? "year" : "month";
-        const partial = isCompleteHoursBucket(bucket, granularity) ? "" : ` · partial ${period}`;
+        const partial = bucket.observation === "partial" ? ` · partial ${period}` : "";
         return `${formatHoursBucketRange(bucket)}${partial}`;
       });
       prodBars = buckets.map((bucket) => round2(bucket.productiveSeconds / 3600));
@@ -275,7 +294,10 @@ export default function ProductiveHoursChart({
       );
     }
 
-    const hasUncategorized = shouldShowUncategorized(uncategorizedBars);
+    const hasUncategorized = shouldShowUncategorized(
+      uncategorizedBars,
+      prodBars.map((hours, index) => hours + neutralBars[index] + unproductiveBars[index]),
+    );
     const stateStacks: CategorySeries[] = [
       { name: "Productive", color: palette.productive, hours: prodBars },
       { name: "Neutral", color: palette.neutral, hours: neutralBars },
@@ -389,7 +411,13 @@ export default function ProductiveHoursChart({
 
   return (
     <div ref={wrapRef}>
-      <EChart option={option} height={254} />
+      <EChart
+        option={option}
+        height={254}
+        accessibleDescription={`Stacked ${granularity} activity hours for the selected ${
+          calendarDays(range)
+        }-day period, broken down by ${stackBy === "state" ? "productivity state" : "category"} with a productive-time rolling average.`}
+      />
     </div>
   );
 }
@@ -413,6 +441,12 @@ function formatPeriodDate(date: Date): string {
 
 /** Uncategorized is supporting context, not a primary series. Suppress it
  *  until the selected range contains at least one hour in total. */
-export function shouldShowUncategorized(hoursByPeriod: number[]): boolean {
-  return hoursByPeriod.reduce((total, hours) => total + hours, 0) >= MIN_UNCATEGORIZED_SERIES_HOURS;
+export function shouldShowUncategorized(
+  hoursByPeriod: number[],
+  otherHoursByPeriod: number[] = [],
+): boolean {
+  const uncategorizedHours = hoursByPeriod.reduce((total, hours) => total + hours, 0);
+  const otherHours = otherHoursByPeriod.reduce((total, hours) => total + hours, 0);
+  return uncategorizedHours >= MIN_UNCATEGORIZED_SERIES_HOURS
+    || (uncategorizedHours > 0 && otherHours === 0);
 }

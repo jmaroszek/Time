@@ -120,7 +120,11 @@ export default function ActivityCalendar({
   const rows = orientation === "vertical" ? weekColumns : 7;
   return (
     <div ref={containerRef} className="min-w-0 overflow-hidden">
-      <EChart option={option} height={cellPx === null ? 220 : cellPx * rows + 56} />
+      <EChart
+        option={option}
+        height={cellPx === null ? 220 : cellPx * rows + 56}
+        accessibleDescription={`Calendar heatmap of ${metric} time by day across the selected ${calendarDays(range)}-day period, showing daily activity patterns.`}
+      />
     </div>
   );
 }
@@ -164,7 +168,9 @@ export function formatActivityCalendarTooltip(
   metric: ActivityMetric = "tracked",
 ): string {
   return metricTooltipBody(day, metric, {
-    headline: `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES_LONG[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}`,
+    headline: `${FULL_DAY_NAMES[day.date.getDay()]}, ${MONTH_NAMES_LONG[day.date.getMonth()]} ${day.date.getDate()}, ${day.date.getFullYear()}${
+      day.observation === "partial" ? " · partial day" : ""
+    }`,
     valueLabel: metricLabel(metric),
     longestFocusSeconds: day.longestFocusSeconds,
   });

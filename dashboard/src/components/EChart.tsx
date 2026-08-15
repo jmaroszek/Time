@@ -9,6 +9,7 @@ import {
 import { BarChart, CustomChart, HeatmapChart, LineChart } from "echarts/charts";
 import {
   AxisPointerComponent,
+  AriaComponent,
   CalendarComponent,
   GridComponent,
   LegendComponent,
@@ -39,6 +40,7 @@ use([
   // Drives tooltip.trigger "axis". TooltipComponent installs it anyway; naming
   // it keeps the list a complete account of what the options rely on.
   AxisPointerComponent,
+  AriaComponent,
   CalendarComponent,
   GridComponent,
   LegendComponent,
@@ -52,10 +54,12 @@ export default function EChart({
   option,
   height,
   onClick,
+  accessibleDescription,
 }: {
   option: EChartsOption;
   height: number;
   onClick?: (params: ECElementEvent) => void;
+  accessibleDescription: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ECharts | null>(null);
@@ -119,8 +123,11 @@ export default function EChart({
   }, []);
 
   useEffect(() => {
-    chartRef.current?.setOption(option, { notMerge: true });
-  }, [option]);
+    chartRef.current?.setOption({
+      ...option,
+      aria: { enabled: true, description: accessibleDescription },
+    }, { notMerge: true });
+  }, [option, accessibleDescription]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -131,9 +138,15 @@ export default function EChart({
 
   return (
     <div
-      ref={containerRef}
+      role="img"
+      aria-label={accessibleDescription}
+      data-insights-chart="true"
       className="min-w-0 max-w-full"
       style={{ height, width: "100%" }}
-    />
+    >
+      {/* ECharts owns and mutates its host element. Keep the semantic wrapper
+          outside that boundary so its accessible name remains stable. */}
+      <div ref={containerRef} aria-hidden="true" style={{ height: "100%", width: "100%" }} />
+    </div>
   );
 }

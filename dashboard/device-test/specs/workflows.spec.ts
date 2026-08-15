@@ -468,6 +468,54 @@ test("@workflow Insights switches from ranked apps to exact-host websites", asyn
   );
 });
 
+test("@workflow new-user presets explain when longer durations show the same history", async ({
+  page,
+}) => {
+  await page.goto("/?fixture=newuser");
+  const preset = page.getByRole("combobox", { name: "Date range preset" });
+  await preset.click();
+  await expect(page.getByRole("option", { name: "Week", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Month", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Quarter", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Year", exact: true })).toBeVisible();
+  await page.getByRole("option", { name: "Month", exact: true }).click();
+  await expect(page.getByText(
+    "Only 3 days recorded, so Month currently shows all available history.",
+    { exact: true },
+  )).toBeVisible();
+});
+
+test("@workflow every Insights canvas has a meaningful accessible description", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("canvas").first()).toBeVisible();
+  const canvasCount = await page.locator("canvas").count();
+  const charts = page.locator('[data-insights-chart="true"]');
+  const descriptions = await charts.evaluateAll((items) =>
+    items.map((chart) => chart.getAttribute("aria-label")),
+  );
+  expect(descriptions.length).toBe(canvasCount);
+  expect(descriptions.length).toBeGreaterThanOrEqual(2);
+  expect(descriptions.every((description) =>
+    description !== null
+    && description.length > 40
+    && /selected|complete/.test(description)
+    && /showing|show|broken down/.test(description)
+  )).toBe(true);
+});
+
+test("@workflow configured Goal pace shares the missing-data states", async ({ page }) => {
+  for (const [url, note] of [
+    ["/?fixture=firstrun&goal=20", "Nothing recorded yet"],
+    ["/?fixture=unclassified", "Nothing classified yet"],
+  ] as const) {
+    await page.goto(url);
+    const card = page.getByLabel(/^Goal pace\./).locator("xpath=../..");
+    await expect(card).toContainText("—");
+    await expect(card).toContainText(note);
+    await expect(card).not.toContainText(/of \d+h/);
+  }
+});
+
 test("@workflow website tracking confirmation appears only for newly arriving data", async ({
   page,
 }) => {

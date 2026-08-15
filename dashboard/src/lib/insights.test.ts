@@ -14,6 +14,7 @@ import {
   buildInsightsModelFromPacked,
   packInsightsRequest,
   packInsightsRequestInChunks,
+  websiteComparisonIsAvailable,
 } from "./insights";
 import { dailyActivitySummaries, overviewGranularity, overviewHistoryStart } from "./overview";
 import { previousRange, type Range } from "./time";
@@ -34,6 +35,10 @@ const classifier = buildClassifier(categories, rules, new Set());
 const range: Range = { start: new Date(2026, 5, 8), end: new Date(2026, 5, 11) };
 const at = (day: number, hour: number, minute = 0) =>
   new Date(2026, 5, day, hour, minute).getTime() / 1000;
+const observation = {
+  firstObservedSec: at(5, 9),
+  analysisCutoffSec: range.end.getTime() / 1000,
+};
 const make = (
   id: number,
   start: number,
@@ -82,7 +87,19 @@ describe("aggregateInsightsSessions", () => {
       historyRange.end.getTime() / 1000,
     );
 
-    const actual = aggregateInsightsSessions(sessions, range, classifier, 120, "Sunday");
+    const firstObservedSec = sessions[0].start;
+    const analysisCutoffSec = range.end.getTime() / 1000;
+    const actual = aggregateInsightsSessions(
+      sessions,
+      range,
+      classifier,
+      120,
+      "Sunday",
+      undefined,
+      new Set(),
+      firstObservedSec,
+      analysisCutoffSec,
+    );
 
     expect(actual.current).toEqual(current);
     expect(actual.kpis).toEqual(computeKpis(current, classifier, 120));
@@ -90,7 +107,15 @@ describe("aggregateInsightsSessions", () => {
     expect(actual.previousRanked).toEqual(topApps(prior, classifier));
     expect(actual.currentDaily).toEqual(dailySecondsByApp(current, range));
     expect(actual.previousDaily).toEqual(dailySecondsByApp(prior, previous));
-    expect(actual.historyDays).toEqual(dailyActivitySummaries(history, historyRange, classifier));
+    expect(actual.historyDays).toEqual(dailyActivitySummaries(
+      history,
+      historyRange,
+      classifier,
+      120,
+      undefined,
+      firstObservedSec,
+      analysisCutoffSec,
+    ));
   });
 
   it("still matches it once aliases merge rows", () => {
@@ -169,6 +194,7 @@ describe("minimum app time", () => {
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date",
+      ...observation,
     });
 
   it("scales the bar by days that recorded activity, not calendar days", () => {
@@ -208,6 +234,7 @@ describe("minimum app time", () => {
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date",
+      ...observation,
     });
     expect(model.apps.map((app) => app.name)).toEqual(["Code", "Time"]);
     expect(model.hiddenAppCount).toBe(0);
@@ -246,6 +273,7 @@ describe("ranked websites", () => {
     dayStartHour: 0,
     dayEndHour: 24,
     labelMode: "date",
+    ...observation,
   });
 
   it("ranks exact normalized hosts instead of folding them into a parent", () => {
@@ -271,6 +299,76 @@ describe("ranked websites", () => {
   });
 });
 
+describe("comparison observation and website coverage", () => {
+  const coverage = (missingFraction: number) => ({
+    totalSeconds: 100,
+    missingSeconds: 100 * missingFraction,
+    missingFraction,
+  });
+
+  it("uses inclusive 80% coverage and 10-point drift boundaries", () => {
+    expect(websiteComparisonIsAvailable(true, coverage(0.2), coverage(0.1))).toBe(true);
+    expect(websiteComparisonIsAvailable(true, coverage(0.21), coverage(0.1))).toBe(false);
+    expect(websiteComparisonIsAvailable(true, coverage(0), coverage(0.11))).toBe(false);
+    expect(websiteComparisonIsAvailable(false, coverage(0), coverage(0))).toBe(false);
+  });
+
+  it("suppresses website changes when the extension signal appears between periods", () => {
+    expect(websiteComparisonIsAvailable(true, coverage(0), coverage(0.9))).toBe(false);
+  });
+
+  it("matches the previous period's last day to the current local cutoff", () => {
+    const currentRange = { start: new Date(2026, 5, 8), end: new Date(2026, 5, 11) };
+    const priorMorning = make(80, at(7, 9), at(7, 10), "code.exe");
+    const priorAfternoon = make(81, at(7, 13), at(7, 14), "code.exe");
+    const current = make(82, at(10, 9), at(10, 11), "code.exe");
+    const model = buildInsightsModel({
+      sessions: [priorMorning, priorAfternoon, current],
+      range: currentRange,
+      categories,
+      rules,
+      browserProcesses: [],
+      weekStart: "Sunday",
+      weeklyGoalHours: 0,
+      minAppSecondsPerDay: 0,
+      aliases: {},
+      focusChainMaxGapSeconds: 120,
+      hideUtilityApps: false,
+      dayStartHour: 0,
+      dayEndHour: 24,
+      labelMode: "date",
+      firstObservedSec: new Date(2026, 5, 5).getTime() / 1000,
+      analysisCutoffSec: at(10, 12),
+    });
+    expect(model.apps[0].previousSeconds).toBe(3600);
+    expect(model.appComparisonAvailable).toBe(true);
+    expect(model.historyDays.slice(-3).map((day) => day.observation))
+      .toEqual(["complete", "complete", "partial"]);
+
+    const unavailable = buildInsightsModel({
+      ...{
+        sessions: [priorMorning, priorAfternoon, current],
+        range: currentRange,
+        categories,
+        rules,
+        browserProcesses: [],
+        weekStart: "Sunday" as const,
+        weeklyGoalHours: 0,
+        minAppSecondsPerDay: 0,
+        aliases: {},
+        focusChainMaxGapSeconds: 120,
+        hideUtilityApps: false,
+        dayStartHour: 0,
+        dayEndHour: 24,
+        labelMode: "date" as const,
+        analysisCutoffSec: at(10, 12),
+      },
+      firstObservedSec: new Date(2026, 5, 5, 1).getTime() / 1000,
+    });
+    expect(unavailable.appComparisonAvailable).toBe(false);
+  });
+});
+
 describe("packed Insights transport", () => {
   it("preserves long-range model output without transferring titles", () => {
     const longRange: Range = {
@@ -292,6 +390,7 @@ describe("packed Insights transport", () => {
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date" as const,
+      ...observation,
     };
     expect(buildInsightsModelFromPacked(packInsightsRequest(request))).toEqual(
       buildInsightsModel(request),
@@ -321,6 +420,7 @@ describe("packed Insights transport", () => {
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date" as const,
+      ...observation,
     };
     const packed = packInsightsRequest(request);
 
@@ -345,6 +445,7 @@ describe("packed Insights transport", () => {
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date" as const,
+      ...observation,
     };
     let yields = 0;
     const chunked = await packInsightsRequestInChunks(
@@ -385,6 +486,7 @@ describe("utility rows in the Insights rankings", () => {
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date",
+      ...observation,
     });
 
   it("drops unclassified plumbing and installers from Top Apps", () => {
@@ -429,6 +531,7 @@ describe("utility rows in the Insights rankings", () => {
       dayStartHour: 0,
       dayEndHour: 24,
       labelMode: "date",
+      ...observation,
     });
     // Putting an entity in a category says it matters, and that outranks the
     // name heuristic — the same precedence the Activity Library gives.

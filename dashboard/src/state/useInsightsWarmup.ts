@@ -7,6 +7,7 @@ import { loadSessionWindow } from "../lib/sessionWindowCache";
 import {
   addDays,
   allTimeRange,
+  clampRangeStart,
   previousRange,
   rangeForPreset,
   type Range,
@@ -28,7 +29,7 @@ export function useInsightsWarmup(
 ): void {
   useEffect(() => {
     if (!request || !current) return;
-    const yearRange = rangeForPreset("last365");
+    const yearRange = clampRangeStart(rangeForPreset("last365"), firstSessionSec);
     const yearWindow = insightsFetchWindow(yearRange);
     let cancelled = false;
     const warm = () => {
@@ -36,8 +37,8 @@ export function useInsightsWarmup(
         await loadSessionWindow(yearWindow.startSec, yearWindow.endSec, fetchSessions);
         if (cancelled) return;
         for (const warmRange of [
-          rangeForPreset("last30"),
-          rangeForPreset("last90"),
+          clampRangeStart(rangeForPreset("last30"), firstSessionSec),
+          clampRangeStart(rangeForPreset("last90"), firstSessionSec),
           yearRange,
         ]) {
           const warmWindow = insightsFetchWindow(warmRange);

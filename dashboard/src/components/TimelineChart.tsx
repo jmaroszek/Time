@@ -195,7 +195,11 @@ export default function TimelineChart({
   }, [segments, days, aliases, dayStartHour, dayEndHour, hourInterval, theme]);
 
   const chart = (
-    <EChart option={option} height={Math.max(days.length * 34 + 40, 110)} />
+    <EChart
+      option={option}
+      height={Math.max(days.length * 34 + 40, 110)}
+      accessibleDescription={`Timeline of recorded activity across the selected ${days.length}-day period, showing when apps and categories were active.`}
+    />
   );
   return days.length > 14
     ? <div className="scroll-well max-h-[516px] overflow-y-auto pr-1">{chart}</div>

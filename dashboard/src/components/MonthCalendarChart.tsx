@@ -115,7 +115,11 @@ export default function MonthCalendarChart({
   // center it; scroll vertically once the years outgrow the card.
   const chart = (
     <div style={{ maxWidth: MAX_WIDTH, margin: "0 auto" }}>
-      <EChart option={option} height={height} />
+      <EChart
+        option={option}
+        height={height}
+        accessibleDescription={`Calendar heatmap of ${metric} time by month across ${years.length} ${years.length === 1 ? "year" : "years"}, showing long-term activity patterns.`}
+      />
     </div>
   );
   return years.length > SCROLL_ROWS
@@ -128,7 +132,9 @@ export function formatMonthCalendarTooltip(
   metric: ActivityMetric = "tracked",
 ): string {
   return metricTooltipBody(month, metric, {
-    headline: `${MONTH_NAMES_LONG[month.month]} ${month.year}`,
+    headline: `${MONTH_NAMES_LONG[month.month]} ${month.year}${
+      month.observation === "partial" ? " · partial month" : ""
+    }`,
     valueLabel: metricLabel(metric),
     longestFocusSeconds: month.longestFocusSeconds,
   });

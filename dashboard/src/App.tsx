@@ -37,7 +37,10 @@ import {
 } from "./lib/trackerHealth";
 import {
   allTimeRange,
+  calendarDays,
   clampRangeStart,
+  clampCustomRange,
+  rangesEqual,
   isRollingPreset,
   rangeForCalendarPreset,
   rangeForPreset,
@@ -130,13 +133,21 @@ function Shell() {
   // when the date does. Without it, an app left open overnight keeps reporting
   // yesterday as "Today" until something unrelated re-renders.
   const range = useMemo<Range>(() => {
-    if (preset === "custom") return customRange ?? rangeForPreset("last7");
+    if (preset === "custom") {
+      return clampCustomRange(customRange ?? rangeForPreset("last7"), firstSessionSec);
+    }
     if (preset === "alltime") return allTimeRange(firstSessionSec);
     const fixed = !rolling && isRollingPreset(preset)
       ? rangeForCalendarPreset(preset, meta.weekStart)
       : rangeForPreset(preset);
     return clampRangeStart(fixed, firstSessionSec);
   }, [preset, rolling, customRange, firstSessionSec, meta.weekStart, liveTick]);
+
+  useEffect(() => {
+    if (!customRange) return;
+    const clamped = clampCustomRange(customRange, firstSessionSec);
+    if (!rangesEqual(clamped, customRange)) setCustomRange(clamped);
+  }, [customRange, firstSessionSec, liveTick]);
 
   // An empty DB (the tracker hasn't run yet) is a waiting state, not an
   // error. Retry until the tracker's first bootstrap creates the schema.
@@ -362,6 +373,33 @@ function Shell() {
     tab === "insights" || (tab === "activity" && activityView === "library");
 
   const openSettings = () => setTab("settings");
+  const handlePreset = (next: PresetOrCustom) => {
+    if (
+      next !== preset
+      && next !== "custom"
+      && next !== "alltime"
+      && firstSessionSec !== null
+    ) {
+      const requested = !rolling && isRollingPreset(next)
+        ? rangeForCalendarPreset(next, meta.weekStart)
+        : rangeForPreset(next);
+      const effective = clampRangeStart(requested, firstSessionSec);
+      if (effective.start > requested.start && rangesEqual(effective, range)) {
+        const labels: Record<Exclude<PresetOrCustom, "custom" | "alltime">, string> = {
+          today: "Today",
+          last7: "Week",
+          last14: "Two weeks",
+          last30: "Month",
+          last90: "Quarter",
+          last365: "Year",
+        };
+        banner.show(
+          `Only ${calendarDays(effective)} days recorded, so ${labels[next]} currently shows all available history.`,
+        );
+      }
+    }
+    setPreset(next);
+  };
   const handleStarted = (needsStartup: boolean | null) => {
     if (needsStartup === null) return;
     setStartPending(true);
@@ -461,12 +499,13 @@ function Shell() {
             preset={preset}
             range={range}
             rolling={rolling}
-            onPreset={setPreset}
+            onPreset={handlePreset}
             onRollingChange={setRolling}
             onCustomRange={(r) => {
-              setCustomRange(r);
+              setCustomRange(clampCustomRange(r, firstSessionSec));
               setPreset("custom");
             }}
+            firstSessionSec={firstSessionSec}
           />
         )}
       </header>

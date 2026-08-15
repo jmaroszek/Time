@@ -4,9 +4,11 @@ import {
   addDays,
   allTimeRange,
   calendarDays,
+  clampCustomRange,
   clampRangeStart,
   dayKey,
   listDays,
+  matchedPreviousRange,
   parseDateInput,
   previousRange,
   rangeForCalendarPreset,
@@ -134,6 +136,26 @@ describe("clampRangeStart", () => {
   });
 });
 
+describe("clampCustomRange", () => {
+  const firstSec = new Date(2026, 5, 7, 14).getTime() / 1000;
+
+  it("limits custom dates to the first tracked day through today", () => {
+    expect(clampCustomRange(
+      { start: new Date(2026, 4, 1), end: new Date(2026, 6, 1) },
+      firstSec,
+      NOW,
+    )).toEqual({ start: new Date(2026, 5, 7), end: new Date(2026, 5, 10) });
+  });
+
+  it("re-clamps a range whose prior history was deleted", () => {
+    expect(clampCustomRange(
+      { start: new Date(2026, 4, 1), end: new Date(2026, 4, 3) },
+      firstSec,
+      NOW,
+    )).toEqual({ start: new Date(2026, 5, 7), end: new Date(2026, 5, 8) });
+  });
+});
+
 describe("calendarDays across DST", () => {
   it("counts calendar days even when a day is 23h or 25h", () => {
     // US spring-forward 2026: Mar 8. Mar 7 -> Mar 10 is 3 calendar days
@@ -149,6 +171,24 @@ describe("previousRange", () => {
     const prev = previousRange(r);
     expect(prev.start).toEqual(new Date(2026, 5, 4));
     expect(prev.end).toEqual(new Date(2026, 5, 7));
+  });
+});
+
+describe("matchedPreviousRange", () => {
+  it("clips today's comparison to the same local time", () => {
+    const current = { start: new Date(2026, 5, 9), end: new Date(2026, 5, 10) };
+    expect(matchedPreviousRange(current, NOW)).toEqual({
+      start: new Date(2026, 5, 8),
+      end: new Date(2026, 5, 8, 15, 30),
+    });
+  });
+
+  it("matches the partial last day of a longer window", () => {
+    const current = { start: new Date(2026, 5, 3), end: new Date(2026, 5, 10) };
+    expect(matchedPreviousRange(current, NOW)).toEqual({
+      start: new Date(2026, 4, 27),
+      end: new Date(2026, 5, 2, 15, 30),
+    });
   });
 });
 

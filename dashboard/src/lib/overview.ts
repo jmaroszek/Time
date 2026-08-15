@@ -21,6 +21,36 @@ import {
 
 export type OverviewGranularity = "daily" | "weekly" | "monthly" | "yearly";
 
+/** Whether the whole calendar period was available to Time for measurement. */
+export type ObservationState = "unobserved" | "partial" | "complete";
+
+export function observationStateForPeriod(
+  periodStart: Date,
+  periodEnd: Date,
+  includedStart: Date,
+  includedEnd: Date,
+  firstObservedSec: number | null,
+  analysisCutoffSec: number,
+): ObservationState {
+  const includedStartSec = includedStart.getTime() / 1000;
+  const includedEndSec = includedEnd.getTime() / 1000;
+  if (
+    firstObservedSec === null
+    || analysisCutoffSec <= includedStartSec
+    || firstObservedSec >= includedEndSec
+  ) {
+    return "unobserved";
+  }
+  const coversCalendarPeriod =
+    includedStart.getTime() === periodStart.getTime()
+    && includedEnd.getTime() === periodEnd.getTime();
+  return coversCalendarPeriod
+    && firstObservedSec <= periodStart.getTime() / 1000
+    && analysisCutoffSec >= periodEnd.getTime() / 1000
+    ? "complete"
+    : "partial";
+}
+
 /**
  * Which quantity a heatmap shades by. Both the rhythm grid and the calendar
  * honor it, and the ramp follows it — blue for amount, green for productive,
@@ -136,6 +166,7 @@ export const MONTH_CALENDAR_MIN_DAYS = 425;
 export interface DailyActivitySummary extends ActivityTotals {
   date: Date;
   key: string;
+  observation: ObservationState;
   uncategorizedSeconds: number;
   /** Seconds per category name, UNCATEGORIZED_LABEL for unmatched sessions. */
   categorySeconds: Map<string, number>;
@@ -233,6 +264,8 @@ export function weekdayRhythmSummaries(
   startHour: number,
   endHour: number,
   aliases?: Record<string, string>,
+  firstObservedSec: number | null = range.start.getTime() / 1000,
+  analysisCutoffSec = range.end.getTime() / 1000,
 ): WeekdayRhythmSummary {
   const cells: (RhythmCell & { appSeconds: TopAppSeconds })[] = [];
   const byKey = new Map<number, (typeof cells)[number]>();
@@ -254,7 +287,23 @@ export function weekdayRhythmSummaries(
     }
   }
   const weekdayCounts = Array(7).fill(0) as number[];
-  for (const day of listDays(range)) weekdayCounts[day.getDay()] += 1;
+  const completeDayKeys = new Set<string>();
+  for (const day of listDays(range)) {
+    const visibleStart = new Date(
+      day.getFullYear(), day.getMonth(), day.getDate(), startHour,
+    ).getTime() / 1000;
+    const visibleEnd = new Date(
+      day.getFullYear(), day.getMonth(), day.getDate(), endHour,
+    ).getTime() / 1000;
+    if (
+      firstObservedSec !== null
+      && firstObservedSec <= visibleStart
+      && analysisCutoffSec >= visibleEnd
+    ) {
+      completeDayKeys.add(dayKey(day));
+      weekdayCounts[day.getDay()] += 1;
+    }
+  }
 
   const startSec = range.start.getTime() / 1000;
   const endSec = range.end.getTime() / 1000;
@@ -272,6 +321,10 @@ export function weekdayRhythmSummaries(
         date.getHours() + 1,
       ).getTime() / 1000;
       const chunkEnd = Math.min(session.end, nextHour > cursor ? nextHour : cursor + 3600);
+      if (!completeDayKeys.has(dayKey(date))) {
+        cursor = chunkEnd;
+        continue;
+      }
       const cell = byKey.get(date.getDay() * 24 + date.getHours());
       if (cell) {
         const seconds = chunkEnd - cursor;
@@ -300,6 +353,8 @@ export function dailyActivitySummaries(
   classifier: Classifier,
   focusChainMaxGapSeconds = 300,
   aliases?: Record<string, string>,
+  firstObservedSec: number | null = range.start.getTime() / 1000,
+  analysisCutoffSec = range.end.getTime() / 1000,
 ): DailyActivitySummary[] {
   const days = listDays(range);
   const byKey = new Map(
@@ -308,6 +363,14 @@ export function dailyActivitySummaries(
       {
         date,
         key: dayKey(date),
+        observation: observationStateForPeriod(
+          date,
+          addDays(date, 1),
+          date,
+          addDays(date, 1),
+          firstObservedSec,
+          analysisCutoffSec,
+        ),
         trackedSeconds: 0,
         productiveSeconds: 0,
         neutralSeconds: 0,
@@ -359,6 +422,7 @@ export interface MonthlyActivitySummary extends ActivityTotals {
   /** Local month, 0 = January. */
   month: number;
   key: string;
+  observation: ObservationState;
   uncategorizedSeconds: number;
   categorySeconds: Map<string, number>;
   /** Busiest app row of the bucket, already named and merged. */
@@ -380,6 +444,8 @@ export function monthlyActivitySummaries(
   classifier: Classifier,
   focusChainMaxGapSeconds = 300,
   aliases?: Record<string, string>,
+  firstObservedSec: number | null = range.start.getTime() / 1000,
+  analysisCutoffSec = range.end.getTime() / 1000,
 ): MonthlyActivitySummary[] {
   const byKey = new Map<
     string,
@@ -391,10 +457,21 @@ export function monthlyActivitySummaries(
   const first = new Date(range.start.getFullYear(), range.start.getMonth(), 1);
   for (let m = first; m < range.end; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
     const key = monthKey(m.getFullYear(), m.getMonth());
+    const periodEnd = new Date(m.getFullYear(), m.getMonth() + 1, 1);
+    const includedStart = m < range.start ? range.start : m;
+    const includedEnd = periodEnd > range.end ? range.end : periodEnd;
     byKey.set(key, {
       year: m.getFullYear(),
       month: m.getMonth(),
       key,
+      observation: observationStateForPeriod(
+        m,
+        periodEnd,
+        includedStart,
+        includedEnd,
+        firstObservedSec,
+        analysisCutoffSec,
+      ),
       trackedSeconds: 0,
       productiveSeconds: 0,
       neutralSeconds: 0,
@@ -447,6 +524,7 @@ export interface HoursBucket extends ActivityTotals {
   includedStart: Date;
   /** Exclusive selected-range end represented by this bucket. */
   includedEnd: Date;
+  observation: ObservationState;
   uncategorizedSeconds: number;
   categorySeconds: Map<string, number>;
 }
@@ -486,6 +564,7 @@ export function bucketActivityHours(
       periodStart,
       includedStart: periodStart < rangeStart ? rangeStart : periodStart,
       includedEnd: periodEnd > range.end ? range.end : periodEnd,
+      observation: "unobserved",
       trackedSeconds: 0,
       productiveSeconds: 0,
       neutralSeconds: 0,
@@ -516,6 +595,24 @@ export function bucketActivityHours(
     }
   }
 
+  for (const bucket of buckets) {
+    const includedDays = days.filter(
+      (day) => day.date >= bucket.includedStart && day.date < bucket.includedEnd,
+    );
+    const hasObservedDay = includedDays.some((day) => day.observation !== "unobserved");
+    const periodEnd = nextPeriodStart(bucket.periodStart, granularity);
+    const coversCalendarPeriod =
+      bucket.includedStart.getTime() === bucket.periodStart.getTime()
+      && bucket.includedEnd.getTime() === periodEnd.getTime();
+    bucket.observation = !hasObservedDay
+      ? "unobserved"
+      : coversCalendarPeriod
+        && includedDays.length > 0
+        && includedDays.every((day) => day.observation === "complete")
+        ? "complete"
+        : "partial";
+  }
+
   return buckets;
 }
 
@@ -535,11 +632,7 @@ export function overviewHistoryStart(
 
 export function isCompleteHoursBucket(
   bucket: HoursBucket,
-  granularity: BucketGranularity,
+  _granularity: BucketGranularity,
 ): boolean {
-  const periodEnd = nextPeriodStart(bucket.periodStart, granularity);
-  return (
-    bucket.includedStart.getTime() === bucket.periodStart.getTime() &&
-    bucket.includedEnd.getTime() === periodEnd.getTime()
-  );
+  return bucket.observation === "complete";
 }

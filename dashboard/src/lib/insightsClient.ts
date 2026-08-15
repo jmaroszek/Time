@@ -31,6 +31,8 @@ export function insightsRequestKey(request: InsightsRequest): string {
     request.dayStartHour,
     request.dayEndHour,
     request.labelMode,
+    request.firstObservedSec,
+    request.analysisCutoffSec,
   ].join(":");
 }
 

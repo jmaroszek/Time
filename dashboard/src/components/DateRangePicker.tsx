@@ -1,5 +1,13 @@
 import { Checkbox, MenuSelect, TextInput, type MenuOption } from "./ui";
-import { addDays, isRollingPreset, parseDateInput, type Preset, type Range } from "../lib/time";
+import {
+  addDays,
+  allTimeRange,
+  clampCustomRange,
+  isRollingPreset,
+  parseDateInput,
+  type Preset,
+  type Range,
+} from "../lib/time";
 
 export type PresetOrCustom = Preset | "custom" | "alltime";
 
@@ -28,6 +36,7 @@ export default function DateRangePicker({
   onPreset,
   onRollingChange,
   onCustomRange,
+  firstSessionSec,
 }: {
   preset: PresetOrCustom;
   range: Range;
@@ -35,16 +44,21 @@ export default function DateRangePicker({
   onPreset: (p: PresetOrCustom) => void;
   onRollingChange: (rolling: boolean) => void;
   onCustomRange: (r: Range) => void;
+  firstSessionSec: number | null;
 }) {
   // range.end is exclusive; the UI shows the inclusive last day.
   const lastDay = addDays(range.end, -1);
   const supportsRolling = preset !== "custom" && preset !== "alltime" && isRollingPreset(preset);
-
+  const earliestDay = allTimeRange(firstSessionSec).start;
+  const today = addDays(allTimeRange(firstSessionSec).end, -1);
   const commitCustom = (startStr: string, endStr: string) => {
     const start = parseDateInput(startStr);
     const endInclusive = parseDateInput(endStr);
     if (!start || !endInclusive || endInclusive < start) return;
-    onCustomRange({ start, end: addDays(endInclusive, 1) });
+    onCustomRange(clampCustomRange(
+      { start, end: addDays(endInclusive, 1) },
+      firstSessionSec,
+    ));
   };
 
   return (
@@ -70,6 +84,7 @@ export default function DateRangePicker({
       <TextInput
         type="date"
         value={toInputValue(range.start)}
+        min={toInputValue(earliestDay)}
         max={toInputValue(lastDay)}
         onChange={(v) => commitCustom(v, toInputValue(lastDay))}
         className="min-w-0 w-32 shadow-control sm:w-36"
@@ -79,6 +94,7 @@ export default function DateRangePicker({
         type="date"
         value={toInputValue(lastDay)}
         min={toInputValue(range.start)}
+        max={toInputValue(today)}
         onChange={(v) => commitCustom(toInputValue(range.start), v)}
         className="min-w-0 w-32 shadow-control sm:w-36"
       />

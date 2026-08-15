@@ -21,6 +21,7 @@ import type { Session } from "./metrics";
 import { calendarGrid, formatActivityCalendarTooltip } from "../components/ActivityCalendar";
 import { formatMonthCalendarTooltip } from "../components/MonthCalendarChart";
 import { formatRhythmTooltip } from "../components/RhythmChart";
+import { insightsWebsiteCoverageFooter } from "../components/TopUsageList";
 import {
   categorySeries,
   formatHoursTooltipValue,
@@ -68,8 +69,9 @@ describe("overviewGranularity", () => {
 
 describe("chart visibility thresholds", () => {
   it("requires one total hour before showing Uncategorized", () => {
-    expect(shouldShowUncategorized([0.2, 0.3, 0.49])).toBe(false);
-    expect(shouldShowUncategorized([0.2, 0.3, 0.5])).toBe(true);
+    expect(shouldShowUncategorized([0.2, 0.3, 0.49], [1])).toBe(false);
+    expect(shouldShowUncategorized([0.2, 0.3, 0.5], [1])).toBe(true);
+    expect(shouldShowUncategorized([0.1], [0])).toBe(true);
   });
 });
 
@@ -176,6 +178,25 @@ describe("dailyActivitySummaries", () => {
     expect(tooltip).not.toContain("Tracked: 1h 30m");
     expect(tooltip).not.toContain("Top app:");
   });
+
+  it("marks the exact first and current days partial while retaining their activity", () => {
+    const range = rangeFrom(new Date(2026, 5, 8), 3);
+    const firstObserved = new Date(2026, 5, 8, 9).getTime() / 1000;
+    const cutoff = new Date(2026, 5, 10, 12).getTime() / 1000;
+    const days = dailyActivitySummaries(
+      [session(firstObserved, firstObserved + 3600, "code.exe")],
+      range,
+      classify,
+      300,
+      undefined,
+      firstObserved,
+      cutoff,
+    );
+    expect(days.map((day) => day.observation)).toEqual(["partial", "complete", "partial"]);
+    expect(days[0].trackedSeconds).toBe(3600);
+    expect(formatActivityCalendarTooltip(days[0])).toContain("partial day");
+    expect(formatActivityCalendarTooltip(days[1])).not.toContain("partial day");
+  });
 });
 
 describe("monthlyActivitySummaries", () => {
@@ -213,6 +234,20 @@ describe("monthlyActivitySummaries", () => {
   it("zero-fills every month in range with year and month indices", () => {
     expect(summaries.map((m) => m.key)).toEqual(["2025-11", "2025-12", "2026-01"]);
     expect(month("2026-01")).toMatchObject({ year: 2026, month: 0, trackedSeconds: 3600 });
+  });
+
+  it("marks clipped observation months partial and labels their tooltips", () => {
+    const observed = monthlyActivitySummaries(
+      [],
+      { start: new Date(2026, 0, 1), end: new Date(2026, 2, 1) },
+      classify,
+      300,
+      undefined,
+      new Date(2026, 0, 5, 9).getTime() / 1000,
+      new Date(2026, 2, 1).getTime() / 1000,
+    );
+    expect(observed.map((entry) => entry.observation)).toEqual(["partial", "complete"]);
+    expect(formatMonthCalendarTooltip(observed[0])).toContain("partial month");
   });
 
   it("splits a session across the month and year boundary", () => {
@@ -378,6 +413,15 @@ describe("categorySeries", () => {
     expect(series.map((s) => s.name)).toEqual(["Dev"]);
   });
 
+  it("keeps sub-hour Uncategorized when it is the only activity", () => {
+    const series = categorySeries(
+      [{ categorySeconds: new Map([["Uncategorized", 60]]) }],
+      CATEGORIES,
+      "dark",
+    );
+    expect(series.map((item) => item.name)).toEqual(["Uncategorized"]);
+  });
+
   it("puts a later configured category at the bottom when it has more total time", () => {
     const series = categorySeries(
       [{ categorySeconds: new Map([["Dev", 3600], ["Neutral", 7200]]) }],
@@ -418,9 +462,9 @@ describe("formatHoursTooltipValue", () => {
 });
 
 describe("visibleAverageHours", () => {
-  it("hides zero rolling averages and preserves positive values", () => {
-    expect(visibleAverageHours(0)).toBeNull();
-    expect(visibleAverageHours(0.004)).toBeNull();
+  it("preserves observed zeroes and omits unavailable values", () => {
+    expect(visibleAverageHours(0)).toBe(0);
+    expect(visibleAverageHours(0.004)).toBe(0);
     expect(visibleAverageHours(null)).toBeNull();
     expect(visibleAverageHours(1.236)).toBe(1.24);
   });
@@ -582,6 +626,50 @@ describe("weekdayRhythmSummaries", () => {
     expect(metricSeconds(totals, "productive")).toBe(3600);
     expect(metricSeconds(totals, "unproductive")).toBe(1800);
     expect(metricSeconds(totals, "neutral")).toBe(0);
+  });
+
+  it("excludes days whose visible-hour window was only partly observable", () => {
+    const firstObserved = at(8, 10);
+    const cutoff = at(22, 10);
+    const partial = weekdayRhythmSummaries(
+      [
+        session(at(8, 9), at(8, 10), "code.exe"),
+        session(at(15, 9), at(15, 10), "code.exe"),
+        session(at(22, 9), at(22, 10), "code.exe"),
+      ],
+      range,
+      classify,
+      9,
+      12,
+      undefined,
+      firstObserved,
+      cutoff,
+    );
+    expect(partial.weekdayCounts[1]).toBe(1);
+    expect(partial.cells.find((entry) => entry.weekday === 1 && entry.hour === 9)?.trackedSeconds)
+      .toBe(3600);
+  });
+});
+
+describe("website coverage footer", () => {
+  it("appears at ten percent missing and explains suppressed changes", () => {
+    const coverage = {
+      totalSeconds: 600,
+      missingSeconds: 60,
+      missingFraction: 0.1,
+    };
+    expect(insightsWebsiteCoverageFooter(coverage, false))
+      .toBe("90% of browser time identified");
+    expect(insightsWebsiteCoverageFooter(coverage, true))
+      .toBe("90% of browser time identified · Changes unavailable");
+  });
+
+  it("stays hidden for immaterial missing time unless changes need explanation", () => {
+    const coverage = { totalSeconds: 600, missingSeconds: 0, missingFraction: 0 };
+    expect(insightsWebsiteCoverageFooter(coverage, false)).toBeNull();
+    expect(insightsWebsiteCoverageFooter(coverage, true))
+      .toBe("100% of browser time identified · Changes unavailable");
+    expect(insightsWebsiteCoverageFooter({ ...coverage, totalSeconds: 59 }, true)).toBeNull();
   });
 });
 

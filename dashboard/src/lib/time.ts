@@ -94,6 +94,36 @@ export function clampRangeStart(range: Range, firstSessionSec: number | null): R
   return firstDay > range.start ? { start: firstDay, end: range.end } : range;
 }
 
+/** Keep a user-entered range inside the history Time can actually describe. */
+export function clampCustomRange(
+  range: Range,
+  firstSessionSec: number | null,
+  now: Date = new Date(),
+): Range {
+  const today = startOfDay(now);
+  const latestEnd = addDays(today, 1);
+  const earliest = firstSessionSec == null
+    ? today
+    : startOfDay(new Date(firstSessionSec * 1000));
+  const start = range.start < earliest
+    ? earliest
+    : range.start >= latestEnd
+      ? today
+      : startOfDay(range.start);
+  const requestedEnd = startOfDay(range.end);
+  const end = requestedEnd > latestEnd
+    ? latestEnd
+    : requestedEnd <= start
+      ? addDays(start, 1)
+      : requestedEnd;
+  return { start, end };
+}
+
+export function rangesEqual(left: Range, right: Range): boolean {
+  return left.start.getTime() === right.start.getTime()
+    && left.end.getTime() === right.end.getTime();
+}
+
 export function calendarDays(r: Range): number {
   const days = Math.round((r.end.getTime() - r.start.getTime()) / 86_400_000);
   return Math.max(days, 1);
@@ -102,6 +132,30 @@ export function calendarDays(r: Range): number {
 /** The equal-length period immediately before `r` (for delta comparisons). */
 export function previousRange(r: Range): Range {
   return { start: addDays(r.start, -calendarDays(r)), end: r.start };
+}
+
+/**
+ * Equal-calendar-span comparison ending at the same local clock time reached
+ * in the current range. A range ending before the cutoff keeps its full prior
+ * period; a range containing today compares its partial last day with the same
+ * partial day in the preceding period.
+ */
+export function matchedPreviousRange(r: Range, cutoff: Date): Range {
+  const previous = previousRange(r);
+  const currentLastDay = addDays(r.end, -1);
+  if (cutoff >= r.end) return previous;
+  if (cutoff <= currentLastDay) return { start: previous.start, end: previous.start };
+  const previousLastDay = addDays(previous.end, -1);
+  const end = new Date(
+    previousLastDay.getFullYear(),
+    previousLastDay.getMonth(),
+    previousLastDay.getDate(),
+    cutoff.getHours(),
+    cutoff.getMinutes(),
+    cutoff.getSeconds(),
+    cutoff.getMilliseconds(),
+  );
+  return { start: previous.start, end };
 }
 
 /** Local midnights of every day in the range, in order. */

@@ -23,6 +23,8 @@ const day = 86_400;
  *  Insights lists them as a single row. Behind a fixture flag because the
  *  merged row changes every app total the default fixture's layout tests read. */
 const mergedApps = fixtureParams.get("fixture") === "merged";
+const newUser = fixtureParams.get("fixture") === "newuser";
+const unclassified = fixtureParams.get("fixture") === "unclassified";
 const processes = [
   {
     process: "code.exe",
@@ -108,6 +110,8 @@ const firstRun = fixtureParams.get("fixture") === "firstrun";
 
 let sessions = firstRun
   ? []
+  : newUser
+    ? recentSessions.slice(0, 3 * processes.length).sort((a, b) => a.start - b.start)
   : [
       {
         id: 10_000,
@@ -181,6 +185,8 @@ const ruleRows = [
   })),
 ];
 
+if (unclassified) ruleRows.splice(0, ruleRows.length);
+
 // "?browser=classified" models the reader the website-rule hint is written for:
 // websites are being recorded, the browser itself has a category, and no
 // website rule has ever been written. Dropping the seeded domain rules is the
@@ -223,7 +229,7 @@ const settings: Record<string, string> = {
     fixtureParams.get("tracker") === "missing" ? "0" : String(now - 5),
   // Fresh installs ship no goal (DEFAULT_USER_SETTINGS), which is the only
   // state where the Goal pace tile offers its own way into Settings.
-  weekly_goal_hours: firstRun ? "0" : "20",
+  weekly_goal_hours: fixtureParams.get("goal") ?? (firstRun ? "0" : "20"),
   idle_threshold_seconds: "300",
   heartbeat_seconds: "15",
   week_start: "Sunday",

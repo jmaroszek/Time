@@ -55,7 +55,12 @@ export default function HourlyActivityChart({
     const chrome = chartChrome(theme);
     const toMinutes = (seconds: number) => Math.round(seconds / 6) / 10;
     const uncategorizedMinutes = hours.map((hour) => toMinutes(hour.uncategorizedSeconds));
-    const hasUncategorized = shouldShowUncategorized(uncategorizedMinutes.map((minutes) => minutes / 60));
+    const hasUncategorized = shouldShowUncategorized(
+      uncategorizedMinutes.map((minutes) => minutes / 60),
+      hours.map((hour) =>
+        (hour.productiveSeconds + hour.neutralSeconds + hour.unproductiveSeconds) / 3600
+      ),
+    );
 
     const stateStacks: CategorySeries[] = [
       { name: "Productive", color: palette.productive, hours: hours.map((hour) => toMinutes(hour.productiveSeconds)) },
@@ -144,7 +149,11 @@ export default function HourlyActivityChart({
 
   return (
     <div ref={wrapRef}>
-      <EChart option={option} height={254} />
+      <EChart
+        option={option}
+        height={254}
+        accessibleDescription={`Hourly activity for the selected day, broken down by ${stackBy === "state" ? "productivity state" : "category"} to show when tracked time occurred.`}
+      />
     </div>
   );
 }

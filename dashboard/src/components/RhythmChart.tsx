@@ -108,7 +108,14 @@ export default function RhythmChart({
     };
   }, [summary, metric, weekStart, dayStartHour, dayEndHour, palette, theme, hourInterval]);
 
-  return <EChart option={option} height={260} />;
+  const completeDays = summary.weekdayCounts.reduce((total, count) => total + count, 0);
+  return (
+    <EChart
+      option={option}
+      height={260}
+      accessibleDescription={`Heatmap of average ${metric} time by weekday and hour across ${completeDays} complete ${completeDays === 1 ? "day" : "days"}, showing the typical activity rhythm.`}
+    />
+  );
 }
 
 export function formatRhythmTooltip(

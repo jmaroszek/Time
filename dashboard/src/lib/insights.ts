@@ -38,6 +38,7 @@ import {
   overviewHistoryStart,
   weekdayRhythmSummaries,
   MONTH_CALENDAR_MIN_DAYS,
+  observationStateForPeriod,
   UNCATEGORIZED_LABEL,
   type DailyActivitySummary,
   type HourlyActivitySummary,
@@ -49,7 +50,7 @@ import {
   calendarDays,
   dayKey,
   listDays,
-  previousRange,
+  matchedPreviousRange,
   type Range,
   type WeekStart,
 } from "./time";
@@ -71,6 +72,7 @@ interface InsightsAggregation {
   currentWebsiteDaily: Map<string, number[]>;
   previousWebsiteDaily: Map<string, number[]>;
   websiteCoverage: BrowserDomainCoverage;
+  previousWebsiteCoverage: BrowserDomainCoverage;
   historyDays: DailyActivitySummary[];
   /** Days in range that recorded any non-AFK activity. */
   activeDays: number;
@@ -95,6 +97,10 @@ export interface InsightsRequest {
   dayStartHour: number;
   dayEndHour: number;
   labelMode: "weekday" | "date";
+  /** Exact beginning of Time's observable history, not merely its calendar day. */
+  firstObservedSec: number | null;
+  /** Exact end of the current observation window for partial-period math. */
+  analysisCutoffSec: number;
 }
 
 export interface InsightsModel {
@@ -108,6 +114,9 @@ export interface InsightsModel {
   apps: AppDelta[];
   websites: WebsiteDelta[];
   websiteCoverage: BrowserDomainCoverage;
+  previousWebsiteCoverage: BrowserDomainCoverage;
+  appComparisonAvailable: boolean;
+  websiteComparisonAvailable: boolean;
   hiddenAppCount: number;
   historyDays: DailyActivitySummary[];
   timelineSessions: Session[] | null;
@@ -146,7 +155,12 @@ function clipped(session: Session, startSec: number, endSec: number): Session | 
     : { ...session, start, end };
 }
 
-function makeDays(range: Range, focusChainMaxGapSeconds: number): Map<string, MutableDay> {
+function makeDays(
+  range: Range,
+  focusChainMaxGapSeconds: number,
+  firstObservedSec: number | null,
+  analysisCutoffSec: number,
+): Map<string, MutableDay> {
   return new Map(
     listDays(range).map((date) => {
       const key = dayKey(date);
@@ -155,6 +169,14 @@ function makeDays(range: Range, focusChainMaxGapSeconds: number): Map<string, Mu
         {
           date,
           key,
+          observation: observationStateForPeriod(
+            date,
+            new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1),
+            date,
+            new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1),
+            firstObservedSec,
+            analysisCutoffSec,
+          ),
           trackedSeconds: 0,
           productiveSeconds: 0,
           neutralSeconds: 0,
@@ -222,19 +244,26 @@ export function aggregateInsightsSessions(
   weekStart: WeekStart,
   aliases?: Record<string, string>,
   browserProcesses: ReadonlySet<string> = new Set(),
+  firstObservedSec: number | null = range.start.getTime() / 1000,
+  analysisCutoffSec: number = range.end.getTime() / 1000,
 ): InsightsAggregation {
-  const previous = previousRange(range);
+  const previous = matchedPreviousRange(range, new Date(analysisCutoffSec * 1000));
   const granularity = overviewGranularity(range);
   const historyRange = {
     start: overviewHistoryStart(range, granularity, weekStart),
     end: range.end,
   };
   const rangeStart = range.start.getTime() / 1000;
-  const rangeEnd = range.end.getTime() / 1000;
+  const rangeEnd = Math.min(range.end.getTime() / 1000, analysisCutoffSec);
   const previousStart = previous.start.getTime() / 1000;
   const previousEnd = previous.end.getTime() / 1000;
   const historyStart = historyRange.start.getTime() / 1000;
-  const historyDays = makeDays(historyRange, focusChainMaxGapSeconds);
+  const historyDays = makeDays(
+    historyRange,
+    focusChainMaxGapSeconds,
+    firstObservedSec,
+    analysisCutoffSec,
+  );
   const currentDayIndex = new Map(listDays(range).map((date, index) => [dayKey(date), index]));
   const previousDayIndex = new Map(
     listDays(previous).map((date, index) => [dayKey(date), index]),
@@ -254,6 +283,8 @@ export function aggregateInsightsSessions(
   let uncategorizedSec = 0;
   let browserSeconds = 0;
   let missingDomainSeconds = 0;
+  let previousBrowserSeconds = 0;
+  let previousMissingDomainSeconds = 0;
   const rangeChain = focusChain(focusChainMaxGapSeconds);
 
   // Keyed by ranked row, not by raw session: `withDeltas` looks these series up
@@ -302,7 +333,12 @@ export function aggregateInsightsSessions(
       const seconds = inPrevious.end - inPrevious.start;
       addAppSeconds(previousApps, inPrevious.process, aliases, category, seconds);
       const values = appDailyArray(previousDaily, inPrevious.process, previousDayIndex.size);
-      const previousWebsiteKey = browserProcesses.has(inPrevious.process.toLowerCase())
+      const previousIsBrowser = browserProcesses.has(inPrevious.process.toLowerCase());
+      if (previousIsBrowser) {
+        previousBrowserSeconds += seconds;
+        if (!inPrevious.domain) previousMissingDomainSeconds += seconds;
+      }
+      const previousWebsiteKey = previousIsBrowser
         ? inPrevious.domain?.toLowerCase() ?? null
         : null;
       if (previousWebsiteKey) {
@@ -382,16 +418,38 @@ export function aggregateInsightsSessions(
       missingSeconds: missingDomainSeconds,
       missingFraction: browserSeconds === 0 ? 0 : missingDomainSeconds / browserSeconds,
     },
+    previousWebsiteCoverage: {
+      totalSeconds: previousBrowserSeconds,
+      missingSeconds: previousMissingDomainSeconds,
+      missingFraction:
+        previousBrowserSeconds === 0 ? 0 : previousMissingDomainSeconds / previousBrowserSeconds,
+    },
     historyDays: finalizeDays(historyDays),
     activeDays: activeDayKeys.size,
   };
+}
+
+export function websiteComparisonIsAvailable(
+  observationComparisonAvailable: boolean,
+  current: BrowserDomainCoverage,
+  previous: BrowserDomainCoverage,
+): boolean {
+  if (!observationComparisonAvailable) return false;
+  const currentDetected = 1 - current.missingFraction;
+  const previousDetected = 1 - previous.missingFraction;
+  return currentDetected >= 0.8
+    && previousDetected >= 0.8
+    && Math.abs(currentDetected - previousDetected) <= 0.1 + Number.EPSILON;
 }
 
 function buildInsightsModelWithClassifier(
   request: InsightsRequest,
   classifier: Classifier,
 ): InsightsModel {
-  const previous = previousRange(request.range);
+  const previous = matchedPreviousRange(
+    request.range,
+    new Date(request.analysisCutoffSec * 1000),
+  );
   const granularity = overviewGranularity(request.range);
   const rangeDays = calendarDays(request.range);
   const aggregation = aggregateInsightsSessions(
@@ -402,6 +460,17 @@ function buildInsightsModelWithClassifier(
     request.weekStart,
     request.aliases,
     new Set(request.browserProcesses),
+    request.firstObservedSec,
+    request.analysisCutoffSec,
+  );
+  const appComparisonAvailable =
+    request.firstObservedSec !== null
+    && previous.end > previous.start
+    && previous.start.getTime() / 1000 >= request.firstObservedSec;
+  const websiteComparisonAvailable = websiteComparisonIsAvailable(
+    appComparisonAvailable,
+    aggregation.websiteCoverage,
+    aggregation.previousWebsiteCoverage,
   );
   // The filter is a rate, not a total: a flat "hide under 2 minutes" bar is
   // most of a day's use of a rare app on Today and invisible on Year, so the
@@ -465,6 +534,8 @@ function buildInsightsModelWithClassifier(
           request.dayStartHour,
           request.dayEndHour,
           request.aliases,
+          request.firstObservedSec,
+          request.analysisCutoffSec,
         )
       : null;
   const monthly =
@@ -475,6 +546,8 @@ function buildInsightsModelWithClassifier(
           classifier,
           request.focusChainMaxGapSeconds,
           request.aliases,
+          request.firstObservedSec,
+          request.analysisCutoffSec,
         )
       : null;
   const hourly =
@@ -499,6 +572,9 @@ function buildInsightsModelWithClassifier(
     apps,
     websites,
     websiteCoverage: aggregation.websiteCoverage,
+    previousWebsiteCoverage: aggregation.previousWebsiteCoverage,
+    appComparisonAvailable,
+    websiteComparisonAvailable,
     hiddenAppCount: aggregation.currentRanked.length - aboveThreshold.length,
     historyDays: aggregation.historyDays,
     timelineSessions,

@@ -73,6 +73,8 @@ function packed(): PackedInsightsRequest {
  *  same key and a freshly built one never is. Tests pick deliberately. */
 function request(overrides: Partial<InsightsRequest> = {}): InsightsRequest {
   return {
+    firstObservedSec: 0,
+    analysisCutoffSec: new Date(2026, 6, 8).getTime() / 1000,
     sessions: [],
     range: { start: new Date(2026, 6, 1), end: new Date(2026, 6, 8) },
     categories: [],

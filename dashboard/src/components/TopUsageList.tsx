@@ -3,7 +3,6 @@
 
 import type { AppDelta, WebsiteDelta } from "../lib/metrics";
 import type { BrowserDomainCoverage } from "../lib/domainCoverage";
-import { shouldShowDomainCoverageHint } from "../lib/domainCoverage";
 import { fmtDuration } from "../lib/format";
 import { uncategorizedMark } from "../lib/chartTheme";
 import { useMeta } from "../state/meta";
@@ -20,6 +19,7 @@ export default function TopUsageList({
   comparisonAvailable,
   hiddenAppCount,
   websiteCoverage,
+  showChangesUnavailable = false,
 }: {
   items: UsageItem[];
   kind: RankedKind;
@@ -27,15 +27,17 @@ export default function TopUsageList({
   comparisonAvailable: boolean;
   hiddenAppCount: number;
   websiteCoverage: BrowserDomainCoverage;
+  showChangesUnavailable?: boolean;
 }) {
   const meta = useMeta();
   const { browserSet, minAppSecondsPerDay } = meta;
   const max = items[0]?.seconds ?? 1;
-  const showCoverageHint =
+  const coverageFooter =
     kind === "websites"
     && items.length > 0
-    && shouldShowDomainCoverageHint(websiteCoverage);
-  const hasFooter = (kind === "apps" && hiddenAppCount > 0) || showCoverageHint;
+      ? insightsWebsiteCoverageFooter(websiteCoverage, showChangesUnavailable)
+      : null;
+  const hasFooter = (kind === "apps" && hiddenAppCount > 0) || coverageFooter !== null;
 
   if (items.length === 0) {
     return <EmptyState kind={kind} websiteCoverage={websiteCoverage} />;
@@ -94,18 +96,30 @@ export default function TopUsageList({
           </p>
         </div>
       )}
-      {showCoverageHint && (
+      {coverageFooter && (
         <div className="mt-2 flex h-[15px] items-center">
           <p
             className="translate-y-px truncate text-xs text-ink-3"
             title={`${Math.round(websiteCoverage.missingFraction * 100)}% of browser time had no detected website`}
           >
-            Most browser time could not be assigned to a website
+            {coverageFooter}
           </p>
         </div>
       )}
     </div>
   );
+}
+
+export function insightsWebsiteCoverageFooter(
+  coverage: BrowserDomainCoverage,
+  changesUnavailable: boolean,
+): string | null {
+  if (coverage.totalSeconds < 60) return null;
+  if (coverage.missingFraction < 0.1 && !changesUnavailable) return null;
+  const identified = Math.round((1 - coverage.missingFraction) * 100);
+  return `${identified}% of browser time identified${
+    changesUnavailable ? " · Changes unavailable" : ""
+  }`;
 }
 
 function EmptyState({

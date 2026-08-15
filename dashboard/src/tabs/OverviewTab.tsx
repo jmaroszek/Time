@@ -10,6 +10,7 @@ import ProductiveHoursChart from "../components/ProductiveHoursChart";
 import { Card, MenuSelect, MetricCard, Spinner } from "../components/ui";
 import { fmtDuration, fmtPct } from "../lib/format";
 import type { InsightsRequest } from "../lib/insights";
+import { productivityDataState } from "../lib/metrics";
 import { hidesUtilities } from "../lib/noise";
 import { calendarDays, type Range } from "../lib/time";
 import {
@@ -115,6 +116,10 @@ export default function OverviewTab({
 
   const { startSec: fetchStart, endSec: fetchEnd } = insightsFetchWindow(range);
   const sessionData = useSessions(fetchStart, fetchEnd, historyRevision, liveTick);
+  const analysisCutoffSec = useMemo(
+    () => Math.min(Date.now() / 1000, range.end.getTime() / 1000),
+    [range, historyRevision, liveTick, sessionData.sessions],
+  );
   const request = useMemo<InsightsRequest | null>(() => {
     if (!sessionData.ready) return null;
     return {
@@ -132,8 +137,10 @@ export default function OverviewTab({
       dayStartHour: meta.dayStartHour,
       dayEndHour: meta.dayEndHour,
       labelMode: preset === "last7" ? "weekday" : "date",
+      firstObservedSec: firstSessionSec,
+      analysisCutoffSec,
     };
-  }, [sessionData.ready, sessionData.sessions, range, meta, preset]);
+  }, [sessionData.ready, sessionData.sessions, range, meta, preset, firstSessionSec, analysisCutoffSec]);
   const analyzed = useInsightsModel(request);
   const model = analyzed.model;
   useInsightsWarmup(request, analyzed.current, firstSessionSec);
@@ -185,10 +192,12 @@ export default function OverviewTab({
   // instead of measuring it. A genuine zero, where activity exists and is
   // classified but none of it is productive, is a real measurement and keeps
   // its number.
-  const nothingRecorded = kpis.totalSec === 0;
-  const nothingClassified = kpis.totalSec > 0 && kpis.uncategorizedSec === kpis.totalSec;
-  const emptyReason = nothingRecorded || nothingClassified ? "—" : null;
-  const emptyNote = nothingRecorded ? "Nothing recorded yet" : "Nothing classified yet";
+  const dataState = productivityDataState(kpis);
+  const emptyReason = dataState === "ready" ? null : "—";
+  const emptyNote = dataState === "nothing-recorded"
+    ? "Nothing recorded yet"
+    : "Nothing classified yet";
+  const goalConfigured = meta.weeklyGoalHours > 0;
 
   return (
     <div className="relative flex flex-col gap-4" aria-busy={refreshing}>
@@ -232,7 +241,7 @@ export default function OverviewTab({
             typographic ranks say that, and a slash does not. */}
         <MetricCard
           label="Goal pace"
-          value={meta.weeklyGoalHours > 0 ? (
+          value={goalConfigured && emptyReason ? emptyReason : goalConfigured ? (
             <span className="flex items-baseline gap-1.5 tabular-nums">
               {`${pace.doneHours.toFixed(0)}h`}
               {/* tracking-normal resets the tile's -.02em, which is drawn for
@@ -253,10 +262,17 @@ export default function OverviewTab({
               Set a goal
             </button>
           )}
-          mark={meta.weeklyGoalHours > 0 && pace.doneHours > pace.targetHours
+          sub={goalConfigured
+            ? emptyReason
+              ? emptyNote
+              : pace.roundedTieWhileBehind
+                ? "<1h left"
+                : undefined
+            : undefined}
+          mark={goalConfigured && !emptyReason && pace.met
             ? <GoalMetMark />
             : undefined}
-          hint={meta.weeklyGoalHours > 0
+          hint={goalConfigured
             ? "Productive time in this range vs your weekly goal, prorated to the range's length."
             : "An optional weekly goal. Opens Settings, where you can set one."}
         />
@@ -380,9 +396,18 @@ export default function OverviewTab({
               items={rankedItems}
               kind={rankedEntityKind}
               comparisonDays={calendarDays(prev)}
-              comparisonAvailable={preset !== "alltime"}
+              comparisonAvailable={preset !== "alltime" && (
+                rankedEntityKind === "apps"
+                  ? model.appComparisonAvailable
+                  : model.websiteComparisonAvailable
+              )}
               hiddenAppCount={rankedEntityKind === "apps" && rankedItems.length < topN ? hiddenAppCount : 0}
               websiteCoverage={model.websiteCoverage}
+              showChangesUnavailable={
+                rankedEntityKind === "websites"
+                && preset !== "alltime"
+                && !model.websiteComparisonAvailable
+              }
             />
           </div>
         </Card>

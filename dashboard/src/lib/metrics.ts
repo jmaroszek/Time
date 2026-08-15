@@ -204,6 +204,10 @@ export interface GoalPace {
   dailyGoalHours: number;
   /** Trailing average productive hours per day over the range. */
   avgPerDayHours: number;
+  /** Exact target state; display rounding must never decide completion. */
+  met: boolean;
+  /** Rounded figures look equal although the exact target is still ahead. */
+  roundedTieWhileBehind: boolean;
 }
 
 /**
@@ -220,12 +224,16 @@ export function goalPace(prodSec: number, range: Range, weeklyGoalHours: number)
   const targetDays = calendarDays(range);
   const targetHours = (weeklyGoalHours * targetDays) / 7;
   const doneHours = prodSec / 3600;
+  const met = doneHours >= targetHours;
   return {
     doneHours,
     targetHours,
     fraction: targetHours > 0 ? doneHours / targetHours : 0,
     dailyGoalHours: weeklyGoalHours / 7,
     avgPerDayHours: targetDays > 0 ? doneHours / targetDays : 0,
+    met,
+    roundedTieWhileBehind:
+      !met && Math.round(doneHours) === Math.round(targetHours),
   };
 }
 
@@ -596,5 +604,27 @@ export function rollingMean(values: number[], window: number): number[] {
     const from = Math.max(0, i - window + 1);
     const slice = values.slice(from, i + 1);
     return slice.reduce((a, b) => a + b, 0) / slice.length;
+  });
+}
+
+export type ProductivityDataState = "nothing-recorded" | "nothing-classified" | "ready";
+
+export function productivityDataState(kpis: Kpis): ProductivityDataState {
+  if (kpis.totalSec === 0) return "nothing-recorded";
+  if (kpis.uncategorizedSec === kpis.totalSec) return "nothing-classified";
+  return "ready";
+}
+
+/** Trailing mean over observed values only; unavailable positions stay gaps. */
+export function rollingMeanObserved(
+  values: Array<number | null>,
+  window: number,
+): Array<number | null> {
+  const observed: number[] = [];
+  return values.map((value) => {
+    if (value === null) return null;
+    observed.push(value);
+    const slice = observed.slice(Math.max(0, observed.length - window));
+    return slice.reduce((total, item) => total + item, 0) / slice.length;
   });
 }
