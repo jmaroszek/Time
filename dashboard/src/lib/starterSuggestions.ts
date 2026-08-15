@@ -34,8 +34,10 @@
 // It does not explain itself either. Each role used to carry a sentence — "A
 // developer tool" — shown beside the suggestion, and the surfaces that printed
 // it are gone: the menu marks its entry with a word, and the review sheet lists
-// a duration. RECOGNIZED_NOT_SUGGESTED still carries prose because a refusal
-// genuinely needs one; an offer the reader can simply decline does not.
+// a duration. RECOGNIZED_NOT_SUGGESTED lost its own prose the same way: the
+// review sheet no longer lists what it declines to suggest, on the reasoning
+// that "Time recognizes this but won't guess" is a fact about the backend, not
+// something the reader can act on — they classify it by hand either way.
 
 import type { ActivityEntityKind } from "./activity";
 import { entityId } from "./entityIdentity";
@@ -230,8 +232,7 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
 };
 
 /**
- * Apps Time can name but will not place, and why — shown so the silence reads as
- * a decision rather than a gap.
+ * Apps Time can name but will not place.
  *
  * The browsers are here because a category on the container would cover every
  * site inside it. The rest are genuinely bimodal: the same app is work for one
@@ -239,19 +240,19 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
  * things worth telling apart. This list also exists so the next contributor does
  * not helpfully add discord.exe to the catalog above.
  */
-export const RECOGNIZED_NOT_SUGGESTED: Readonly<Record<string, string>> = {
-  "chrome.exe": "Time can't tell which sites without Time Web Extension",
-  "msedge.exe": "Time can't tell which sites without Time Web Extension",
-  "firefox.exe": "Time can't tell which sites without Time Web Extension",
-  "brave.exe": "Time can't tell which sites without Time Web Extension",
-  "opera.exe": "Time can't tell which sites without Time Web Extension",
-  "vivaldi.exe": "Time can't tell which sites without Time Web Extension",
-  "arc.exe": "Time can't tell which sites without Time Web Extension",
-  "chromium.exe": "Time can't tell which sites without Time Web Extension",
-  "discord.exe": "Work chat for some people, leisure for others",
-  "obs64.exe": "Screen recording is work for some people, streaming is not for others",
-  "obs32.exe": "Screen recording is work for some people, streaming is not for others",
-};
+export const RECOGNIZED_NOT_SUGGESTED: ReadonlySet<string> = new Set([
+  "chrome.exe",
+  "msedge.exe",
+  "firefox.exe",
+  "brave.exe",
+  "opera.exe",
+  "vivaldi.exe",
+  "arc.exe",
+  "chromium.exe",
+  "discord.exe",
+  "obs64.exe",
+  "obs32.exe",
+]);
 
 /**
  * Naming conventions that identify a family no catalog could enumerate.
@@ -281,11 +282,6 @@ export interface SuggestibleEntity {
 export interface StarterSuggestion<T extends SuggestibleEntity> {
   entity: T;
   categoryId: number;
-}
-
-export interface RecognizedEntity<T extends SuggestibleEntity> {
-  entity: T;
-  reason: string;
 }
 
 export function suggestionKey(entity: SuggestibleEntity): string {
@@ -349,7 +345,7 @@ export function suggestForTriage<T extends SuggestibleEntity>(
     // The configured set, not just the names above: a browser this user added by
     // hand must be as untouchable as one that shipped in the defaults.
     if (browserProcesses.has(name)) continue;
-    if (name in RECOGNIZED_NOT_SUGGESTED) continue;
+    if (RECOGNIZED_NOT_SUGGESTED.has(name)) continue;
     if (dismissed.has(suggestionKey(entity))) continue;
     const role = roleForProcess(name);
     if (!role) continue;
@@ -358,23 +354,4 @@ export function suggestForTriage<T extends SuggestibleEntity>(
     suggestions.push({ entity, categoryId });
   }
   return suggestions;
-}
-
-/** Entities Time recognizes and is declining to place, with the reason. Shown
- *  below the suggestions so the reader learns where the line is. */
-export function recognizedWithoutSuggestion<T extends SuggestibleEntity>(
-  entities: readonly T[],
-  browserProcesses: ReadonlySet<string>,
-): RecognizedEntity<T>[] {
-  const recognized: RecognizedEntity<T>[] = [];
-  for (const entity of entities) {
-    if (entity.kind !== "app") continue;
-    const name = entity.key.trim().toLowerCase();
-    const reason = RECOGNIZED_NOT_SUGGESTED[name]
-      ?? (browserProcesses.has(name)
-        ? "Time can't tell which sites without Time Web Extension"
-        : null);
-    if (reason) recognized.push({ entity, reason });
-  }
-  return recognized;
 }

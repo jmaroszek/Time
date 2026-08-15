@@ -81,15 +81,9 @@ export type DeleteScope = {
  * ticked and every row individually changeable or removable. That is the whole
  * bargain — Time recognized these apps, it has not decided anything, and one
  * button turns the recognition into rules the user could have written by hand.
- *
- * The apps it recognizes but will not place sit below, stated rather than
- * omitted. A gap looks like an oversight; a sentence explaining that a browser
- * or Discord means different things to different people is the part of this
- * feature most worth reading.
  */
 export function StarterSuggestionDialog({
   suggestions,
-  recognized,
   categories,
   pendingTotal,
   onClose,
@@ -97,7 +91,6 @@ export function StarterSuggestionDialog({
   onApply,
 }: {
   suggestions: StarterSuggestion<ActivityTriageItem>[];
-  recognized: { entity: ActivityTriageItem; reason: string }[];
   categories: Category[];
   pendingTotal: number;
   onClose: () => void;
@@ -186,34 +179,17 @@ export function StarterSuggestionDialog({
           })}
         </div>
 
-        {recognized.length > 0 && (
-          <div className="mt-4 border-t border-edge pt-3">
-            <p className="text-xs font-medium text-ink-2">
-              Time recognizes these but won't guess what they mean to you
-            </p>
-            <ul className="mt-1.5 space-y-1">
-              {recognized.map(({ entity, reason }) => (
-                <li key={entity.id} className="flex items-baseline gap-2 text-micro text-ink-3">
-                  <span className="shrink-0 font-medium text-ink-2">{entity.displayName}</span>
-                  <span className="min-w-0 flex-1 truncate">{reason}</span>
-                  <span className="shrink-0 tabular-nums">{fmtDuration(entity.seconds)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* The rule is what separates the list from the buttons; the sentence
-            only has to be true. It names Unclassified because the count is
-            about the section behind this dialog, not about the rows just above
-            it — a bare "n items would still be unclassified" reads as a comment
-            on the list you are looking at, which is the one thing it is not.
+        {/* Space separates the groups here, not a rule, and matches the gap
+            above the list so the dialog reads as evenly spaced rather than
+            heavier on one side. The sentence names Unclassified because the
+            count is about the section behind this dialog, not about the rows
+            just above it.
 
             It is here at all because the starter list reaches work apps far
             better than it reaches games, and a screen that implied this
             finished the job would leave the reader with a productive share
             flattered by whatever it could not name. */}
-        <div className="mt-4 border-t border-edge pt-3">
+        <div className="mt-4">
           {remaining > 0 && (
             <p className="mb-3 text-xs text-ink-3">
               Unclassified will still have {remaining} item{remaining === 1 ? "" : "s"} after this.

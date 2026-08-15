@@ -28,11 +28,7 @@ import {
   type ActivityWindowSort,
 } from "../lib/activity";
 import { parseDismissed, serializeDismissed } from "../lib/domainConsolidation";
-import {
-  recognizedWithoutSuggestion,
-  suggestForTriage,
-  suggestionKey,
-} from "../lib/starterSuggestions";
+import { suggestForTriage, suggestionKey } from "../lib/starterSuggestions";
 import {
   browserDomainCoverage,
   shouldShowDomainCoverageHint,
@@ -574,10 +570,6 @@ export default function ActivityTab({
     () => new Map(starterSuggestions.map((suggestion) => [suggestion.entity.id, suggestion])),
     [starterSuggestions],
   );
-  const recognizedPending = useMemo(
-    () => (result ? recognizedWithoutSuggestion(result.triage.pendingApps, meta.browserSet) : []),
-    [result, meta.browserSet],
-  );
   const [reviewingSuggestions, setReviewingSuggestions] = useState(false);
 
 
@@ -1097,7 +1089,6 @@ export default function ActivityTab({
       {reviewingSuggestions && (
         <StarterSuggestionDialog
           suggestions={starterSuggestions}
-          recognized={recognizedPending}
           categories={meta.categories}
           pendingTotal={result?.triage.total ?? 0}
           onClose={() => setReviewingSuggestions(false)}

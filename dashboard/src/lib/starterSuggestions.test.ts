@@ -5,7 +5,6 @@ import type { Category } from "./classify";
 import {
   RECOGNIZED_NOT_SUGGESTED,
   STARTER_APPS,
-  recognizedWithoutSuggestion,
   resolveRoleCategories,
   roleForProcess,
   suggestForTriage,
@@ -61,14 +60,14 @@ describe("the catalog itself", () => {
     }
   });
 
-  it("recognizes every default browser without suggesting one", () => {
+  it("lists every default browser as recognized but unsuggested", () => {
     for (const process of BROWSERS) {
-      expect(RECOGNIZED_NOT_SUGGESTED[process], `${process} should be explained`).toBeTruthy();
+      expect(RECOGNIZED_NOT_SUGGESTED.has(process), `${process} should be listed`).toBe(true);
     }
   });
 
   it("shares no process between the catalog and the recognized list", () => {
-    for (const process of Object.keys(RECOGNIZED_NOT_SUGGESTED)) {
+    for (const process of RECOGNIZED_NOT_SUGGESTED) {
       expect(STARTER_APPS[process]).toBeUndefined();
     }
   });
@@ -239,27 +238,6 @@ describe("suggesting", () => {
 
   it("keeps system tools visible instead of hiding them", () => {
     expect(suggest([app("explorer.exe")])[0]?.categoryId).toBe(5);
-  });
-});
-
-describe("recognized without a suggestion", () => {
-  it("explains a browser rather than skipping it silently", () => {
-    const [recognized] = recognizedWithoutSuggestion([app("chrome.exe")], BROWSERS);
-    expect(recognized?.reason).toContain("Time Web Extension");
-  });
-
-  it("explains a bimodal app in terms of people, not the app", () => {
-    const [recognized] = recognizedWithoutSuggestion([app("discord.exe")], BROWSERS);
-    expect(recognized?.reason).toBe("Work chat for some people, leisure for others");
-  });
-
-  it("explains a browser the user configured themselves", () => {
-    const recognized = recognizedWithoutSuggestion([app("thorium.exe")], new Set(["thorium.exe"]));
-    expect(recognized).toHaveLength(1);
-  });
-
-  it("stays silent about apps it has no opinion on", () => {
-    expect(recognizedWithoutSuggestion([app("fire.exe"), app("code.exe")], BROWSERS)).toEqual([]);
   });
 });
 
