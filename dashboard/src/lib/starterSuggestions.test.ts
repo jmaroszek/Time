@@ -238,6 +238,18 @@ describe("suggesting", () => {
 
   it("keeps system tools visible instead of hiding them", () => {
     expect(suggest([app("explorer.exe")])[0]?.categoryId).toBe(5);
+    expect(suggest([app("calculatorapp.exe")])[0]?.categoryId).toBe(5);
+  });
+
+  it("offers Windows plumbing only to the ignored category", () => {
+    expect(suggest([app("sihost.exe")])[0]?.categoryId).toBe(6);
+    expect(suggest([app("systemsettingsbroker.exe")])[0]?.categoryId).toBe(6);
+  });
+
+  it("keeps creative and media tools in their intended roles", () => {
+    expect(suggest([app("mspaint.exe")])[0]?.categoryId).toBe(1);
+    expect(suggest([app("davinciresolve.exe")])[0]?.categoryId).toBe(1);
+    expect(suggest([app("vlc.exe")])[0]?.categoryId).toBe(4);
   });
 });
 
