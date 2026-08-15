@@ -694,19 +694,6 @@ export default function SettingsTab({
             />
           }
         />
-        {/* The extension is how websites get recorded at all, so it belongs
-            with the other decisions about what is captured. It sat in Advanced,
-            which is the heading that tells people not to touch what is under
-            it — the wrong place for the one thing here they may need to go
-            install. The process list it depends on is genuinely advanced and
-            stays there; its help names this row. */}
-        <Row
-          stacked
-          compact
-          label="Website detection"
-          help="Time Web Extension allows you to track activity in web browsers. Download in the Chrome or Firefox web store."
-          control={<ExtensionLinks />}
-        />
         {/* The only network request Time makes. Installing stays a separate,
             manual act: the control for it appears beside the tabs when a
             version is waiting. */}
@@ -727,6 +714,19 @@ export default function SettingsTab({
               }
             />
           }
+        />
+        {/* The extension is how websites get recorded at all, so it belongs
+            with the other decisions about what is captured. It sat in Advanced,
+            which is the heading that tells people not to touch what is under
+            it — the wrong place for the one thing here they may need to go
+            install. The process list it depends on is genuinely advanced and
+            stays there; its help names this row. */}
+        <Row
+          stacked
+          compact
+          label="Website detection"
+          help="Time Web Extension allows you to track activity in web browsers. Download in the Chrome or Firefox web store."
+          control={<ExtensionLinks />}
         />
         <ExclusionSummary onManage={onManageExclusions} />
       </Section>
@@ -764,6 +764,18 @@ export default function SettingsTab({
                 </span>
               )}
             </span>
+          }
+        />
+        <Row
+          label="Show tray icon"
+          help="Show tracker icon, status, and controls in the Windows system tray."
+          control={
+            <PrivacyToggle
+              label="Show tray icon"
+              enabled={(drafts.show_tray_icon ?? meta.settings.show_tray_icon ?? "1") !== "0"}
+              disabled={savingKeys.has("show_tray_icon")}
+              onChange={(enabled) => selectSetting("show_tray_icon", enabled ? "1" : "0")}
+            />
           }
         />
         <Row
@@ -830,18 +842,6 @@ export default function SettingsTab({
             </div>
           </div>
         )}
-        <Row
-          label="Show tray icon"
-          help="Show tracker icon, status, and controls in the Windows system tray."
-          control={
-            <PrivacyToggle
-              label="Show tray icon"
-              enabled={(drafts.show_tray_icon ?? meta.settings.show_tray_icon ?? "1") !== "0"}
-              disabled={savingKeys.has("show_tray_icon")}
-              onChange={(enabled) => selectSetting("show_tray_icon", enabled ? "1" : "0")}
-            />
-          }
-        />
       </Section>
 
       {/* Directly under what gets recorded, because these two numbers
