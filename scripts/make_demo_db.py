@@ -1,10 +1,9 @@
 """Generate a deterministic demo database for screenshots and documentation.
 
-Builds data/demo.db with several weeks of plausible synthetic sessions (a
-software-developer persona: weekday work blocks, lunch breaks, evening gaming
-and media, lazier weekends) using the real schema bootstrap from tracker.db,
-then adds a clearly synthetic persona's categories and rules. Fresh production
-installs deliberately ship without those opinions.
+Builds data/demo.db with several weeks of plausible synthetic sessions for a
+broadly relatable work-and-personal Windows profile. The history uses the real
+schema bootstrap from tracker.db, the shipped starter categories, and generic
+app/site names rather than borrowing a real person's activity.
 
 Point a debug dashboard at it with:  TIME_DB_PATH=<repo>/data/demo.db
 
@@ -20,10 +19,13 @@ The output is regenerated from scratch on every run (the file is marked with a
 from __future__ import annotations
 
 import argparse
+import json
+import math
 import random
 import sqlite3
 import sys
 import time as time_mod
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -33,157 +35,320 @@ from tracker.db import open_db  # noqa: E402
 
 SEED = 20260101
 
-# (process, title pool, domain, weight) — domain only set for browser sessions.
-CODING = [
-    ("code.exe", ["session_manager.py - demoapp - Visual Studio Code",
-                  "metrics.ts - demoapp - Visual Studio Code",
-                  "App.tsx - demoapp - Visual Studio Code",
-                  "db.py - demoapp - Visual Studio Code",
-                  "README.md - dotfiles - Visual Studio Code"], None, 5.0),
-    ("windowsterminal.exe", ["pwsh - demoapp", "py -m pytest", "git log"], None, 2.0),
-    ("claude.exe", ["Claude Code"], None, 2.0),
-    ("chrome.exe", ["python - How do I profile a slow query? - Stack Overflow"],
-     "stackoverflow.com", 1.5),
-    ("chrome.exe", ["demoapp: Pull requests"], "github.com", 1.5),
-    ("chrome.exe", ["sqlite3 - DB-API 2.0 interface - Python docs"], "docs.python.org", 1.0),
-    ("db browser for sqlite.exe", ["DB Browser for SQLite - demo.db"], None, 0.5),
-]
-NOTES = [
-    ("obsidian.exe", ["Weekly review - vault - Obsidian", "Project ideas - vault - Obsidian"],
-     None, 3.0),
-    ("notepad.exe", ["scratch.txt - Notepad"], None, 1.0),
-    ("chrome.exe", ["Trip planning - Google Docs"], "docs.google.com", 1.5),
-]
-BROWSE = [
-    ("chrome.exe", ["Hacker News"], "news.ycombinator.com", 2.0),
-    ("chrome.exe", ["Inbox - Outlook"], "outlook.com", 2.0),
-    ("chrome.exe", ["The Weather Channel"], "weather.com", 1.0),
-    ("chrome.exe", ["Wikipedia - History of timekeeping"], "wikipedia.org", 1.0),
-    ("chrome.exe", ["Amazon.com"], "amazon.com", 1.0),
-]
-MEDIA = [
-    ("chrome.exe", ["lofi hub - radio - YouTube"], "youtube.com", 2.0),
-    ("chrome.exe", ["Mechanical watches explained - YouTube"], "youtube.com", 1.5),
-    ("chrome.exe", ["Netflix"], "netflix.com", 1.5),
-    ("chrome.exe", ["streamer_one - Twitch"], "twitch.tv", 1.0),
-    ("chrome.exe", ["r/programming - Reddit"], "reddit.com", 1.5),
-]
-GAMING = [
-    ("rocketleague.exe", ["Rocket League"], None, 2.0),
-    ("r5apex_dx12.exe", ["Apex Legends"], None, 2.0),
-    ("steam.exe", ["Steam"], None, 0.5),
-]
-SYSTEM = [
-    ("explorer.exe", ["Downloads"], None, 1.0),
-    ("searchhost.exe", ["Search"], None, 0.5),
-]
 
-# Demo-only taxonomy and rules. These are intentionally kept out of production
-# bootstrap so screenshots stay rich without assigning values to real users.
-# Colors come from the dashboard's category swatch list, which stays clear of
-# the hues productivity reserves — screenshots are where a collision shows.
-DEMO_CATEGORIES = [
-    ("Notes", "#9c8ff0", 1, 0, 1),
-    ("Dev", "#2f6fc0", 1, 0, 2),
-    ("AI tools", "#56c8d8", 1, 0, 3),
-    ("Browsing", "#e0a53a", 0, 1, 4),
-    ("Gaming", "#b06fd8", 0, 1, 5),
-    ("Media", "#e75fa0", 0, 0, 6),
-    ("System", "#828994", 0, 1, 7),
-]
+@dataclass(frozen=True)
+class AppSpec:
+    display_name: str
+    category: str
+    titles: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WebsiteSpec:
+    domain: str
+    display_name: str
+    category: str
+    titles: tuple[str, ...]
+    weight: float
+
+
+# Order is the intended current-week Top Apps ranking. Aliases make the labels
+# part of the synthetic profile rather than teaching production code to guess
+# friendly names from executable filenames.
+APP_SPECS = {
+    "chrome.exe": AppSpec("Google Chrome", "Browsing", ()),
+    "winword.exe": AppSpec(
+        "Microsoft Word",
+        "Work",
+        (
+            "Project proposal - Microsoft Word",
+            "Meeting notes - Microsoft Word",
+            "Quarterly report - Microsoft Word",
+        ),
+    ),
+    "outlook.exe": AppSpec(
+        "Outlook",
+        "Communication",
+        ("Inbox - Outlook", "Calendar - Outlook", "Sent Items - Outlook"),
+    ),
+    "spotify.exe": AppSpec(
+        "Spotify",
+        "Entertainment",
+        ("Discover Weekly - Spotify", "Daily Mix - Spotify", "Focus playlist - Spotify"),
+    ),
+    "excel.exe": AppSpec(
+        "Microsoft Excel",
+        "Work",
+        ("Monthly budget - Microsoft Excel", "Project tracker - Microsoft Excel"),
+    ),
+    "zoom.exe": AppSpec(
+        "Zoom",
+        "Communication",
+        ("Zoom Meeting", "Team check-in - Zoom"),
+    ),
+    "photoshop.exe": AppSpec(
+        "Adobe Photoshop",
+        "Work",
+        ("Website banner.psd - Adobe Photoshop", "Product photo edit - Adobe Photoshop"),
+    ),
+    "discord.exe": AppSpec(
+        "Discord",
+        "Communication",
+        ("Friends - Discord", "General - Discord"),
+    ),
+    "steam.exe": AppSpec(
+        "Steam",
+        "Entertainment",
+        ("Steam Library", "Steam"),
+    ),
+    "explorer.exe": AppSpec(
+        "File Explorer",
+        "System",
+        ("Documents - File Explorer", "Downloads - File Explorer"),
+    ),
+}
+
+WEBSITES = (
+    WebsiteSpec("google.com", "Google", "Browsing", ("Google Search",), 17),
+    WebsiteSpec("mail.google.com", "Gmail", "Communication", ("Inbox - Gmail",), 12),
+    WebsiteSpec("docs.google.com", "Google Docs", "Work", ("Shared document - Google Docs",), 16),
+    WebsiteSpec("youtube.com", "YouTube", "Entertainment", ("YouTube", "Music video - YouTube"), 15),
+    WebsiteSpec("amazon.com", "Amazon", "Browsing", ("Amazon.com",), 8),
+    WebsiteSpec("wikipedia.org", "Wikipedia", "Browsing", ("Wikipedia",), 8),
+    WebsiteSpec("reddit.com", "Reddit", "Entertainment", ("Popular - Reddit",), 8),
+    WebsiteSpec("netflix.com", "Netflix", "Entertainment", ("Netflix",), 6),
+    WebsiteSpec("canva.com", "Canva", "Work", ("Social graphic - Canva",), 6),
+    WebsiteSpec("weather.com", "Weather", "Browsing", ("Local weather",), 4),
+)
+
+PROCESS_ALIASES = {
+    **{process: spec.display_name for process, spec in APP_SPECS.items()},
+    **{website.domain: website.display_name for website in WEBSITES},
+}
 
 DEMO_RULES = [
-    ("process", "obsidian.exe", "Notes", 3),
-    ("process", "notepad.exe", "Notes", 3),
-    ("process", "code.exe", "Dev", 3),
-    ("process", "windowsterminal.exe", "Dev", 3),
-    ("process", "db browser for sqlite.exe", "Dev", 3),
-    ("process", "claude.exe", "AI tools", 3),
-    ("process", "chrome.exe", "Browsing", 3),
-    ("process", "rocketleague.exe", "Gaming", 3),
-    ("process", "r5apex_dx12.exe", "Gaming", 3),
-    ("process", "steam.exe", "Gaming", 3),
-    ("process", "explorer.exe", "System", 3),
-    ("process", "searchhost.exe", "System", 3),
-    ("domain", "github.com", "Dev", 1),
-    ("domain", "stackoverflow.com", "Dev", 1),
-    ("domain", "docs.python.org", "Dev", 1),
-    ("domain", "docs.google.com", "Notes", 1),
-    ("domain", "youtube.com", "Media", 1),
-    ("domain", "netflix.com", "Media", 1),
-    ("domain", "twitch.tv", "Media", 1),
-    ("domain", "reddit.com", "Media", 1),
+    *(("process", process, spec.category, 3) for process, spec in APP_SPECS.items()),
+    *(("domain", website.domain, website.category, 1) for website in WEBSITES),
 ]
 
-# Mix = weighted activity pools a block draws from.
-WORK_MIX = [(CODING, 70), (NOTES, 10), (BROWSE, 12), (SYSTEM, 4), (MEDIA, 4)]
-EVENING_MIX = [(MEDIA, 40), (GAMING, 35), (NOTES, 10), (BROWSE, 10), (CODING, 5)]
-WEEKEND_MIX = [(GAMING, 35), (MEDIA, 30), (BROWSE, 15), (CODING, 12), (NOTES, 8)]
+# Historical profiles: app-share percentages within a day's active total.
+# Productive shares deliberately differ so the heatmap and rolling average tell
+# a story instead of rendering the same workday at slightly different lengths.
+PROFILE_WEIGHTS = {
+    "deep": {
+        "chrome.exe": 13, "winword.exe": 30, "outlook.exe": 5,
+        "spotify.exe": 3, "excel.exe": 20, "zoom.exe": 3,
+        "photoshop.exe": 17, "discord.exe": 1, "steam.exe": 1,
+        "explorer.exe": 7,
+    },
+    "standard": {
+        "chrome.exe": 15, "winword.exe": 30, "outlook.exe": 7,
+        "spotify.exe": 5, "excel.exe": 18, "zoom.exe": 4,
+        "photoshop.exe": 12, "discord.exe": 2, "steam.exe": 2,
+        "explorer.exe": 5,
+    },
+    "communication": {
+        "chrome.exe": 15, "winword.exe": 18, "outlook.exe": 20,
+        "spotify.exe": 5, "excel.exe": 14, "zoom.exe": 12,
+        "photoshop.exe": 8, "discord.exe": 4, "steam.exe": 1,
+        "explorer.exe": 3,
+    },
+    "light": {
+        "chrome.exe": 20, "winword.exe": 22, "outlook.exe": 10,
+        "spotify.exe": 10, "excel.exe": 14, "zoom.exe": 6,
+        "photoshop.exe": 9, "discord.exe": 5, "steam.exe": 2,
+        "explorer.exe": 2,
+    },
+    "weekend": {
+        "chrome.exe": 25, "winword.exe": 8, "outlook.exe": 5,
+        "spotify.exe": 18, "excel.exe": 4, "zoom.exe": 2,
+        "photoshop.exe": 3, "discord.exe": 12, "steam.exe": 20,
+        "explorer.exe": 3,
+    },
+}
+
+PROFILE_HOURS = {
+    "deep": (8.5, 9.5),
+    "standard": (6.5, 8.0),
+    "communication": (5.5, 7.0),
+    "light": (3.0, 5.0),
+    "weekend": (1.0, 4.0),
+}
+
+# The current and previous weeks are a controlled comparison pair. These totals
+# remain believable, preserve the requested ranking, and clear the dashboard's
+# real delta gates without any chart-specific fixture or UI shortcut.
+CURRENT_WEEK_HOURS = {
+    "chrome.exe": 11.5,
+    "winword.exe": 8.0,
+    "outlook.exe": 5.5,
+    "spotify.exe": 4.0,
+    "excel.exe": 3.5,
+    "zoom.exe": 3.0,
+    "photoshop.exe": 2.6,
+    "discord.exe": 2.0,
+    "steam.exe": 1.5,
+    "explorer.exe": 1.0,
+}
+
+PREVIOUS_WEEK_HOURS = {
+    "chrome.exe": 12.0,
+    "winword.exe": 5.7,
+    "outlook.exe": 5.2,
+    "spotify.exe": 2.86,
+    "excel.exe": 3.3,
+    "zoom.exe": 2.8,
+    "photoshop.exe": 1.73,
+    "discord.exe": 1.9,
+    "steam.exe": 2.31,
+    "explorer.exe": 0.95,
+}
+
+DAY_SHARES = {
+    "chrome.exe": (0.14, 0.20, 0.10, 0.20, 0.14, 0.12, 0.10),
+    "winword.exe": (0.17, 0.29, 0.10, 0.27, 0.17, 0.00, 0.00),
+    "outlook.exe": (0.16, 0.28, 0.12, 0.28, 0.16, 0.00, 0.00),
+    "spotify.exe": (0.13, 0.18, 0.11, 0.18, 0.13, 0.14, 0.13),
+    "excel.exe": (0.17, 0.29, 0.10, 0.27, 0.17, 0.00, 0.00),
+    "zoom.exe": (0.16, 0.28, 0.12, 0.28, 0.16, 0.00, 0.00),
+    "photoshop.exe": (0.17, 0.29, 0.10, 0.27, 0.17, 0.00, 0.00),
+    "discord.exe": (0.11, 0.13, 0.10, 0.13, 0.11, 0.22, 0.20),
+    "steam.exe": (0.00, 0.00, 0.08, 0.00, 0.08, 0.42, 0.42),
+    "explorer.exe": (0.15, 0.25, 0.10, 0.25, 0.15, 0.05, 0.05),
+}
 
 
-def _pick(rng: random.Random, mix):
-    pools, weights = zip(*mix)
-    pool = rng.choices(pools, weights=weights)[0]
-    process, titles, domain, _w = rng.choices(pool, weights=[e[3] for e in pool])[0]
-    return process, rng.choice(titles), domain
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
-def _block(rng, rows, start: float, end: float, mix, mean_min: float) -> None:
-    """Fill [start, end) with contiguous app sessions drawn from `mix`."""
-    cur = start
-    while cur < end - 60:
-        dur = min(rng.lognormvariate(0, 0.6) * mean_min * 60, end - cur)
-        dur = max(45.0, dur)
-        process, title, domain = _pick(rng, mix)
-        rows.append((int(cur), int(min(cur + dur, end)), process, title, domain, 0))
-        cur += dur
+def _recent_targets(day: datetime, weekly_hours: dict[str, float]) -> dict[str, float]:
+    weekday = day.weekday()
+    return {
+        process: hours * DAY_SHARES[process][weekday]
+        for process, hours in weekly_hours.items()
+        if hours * DAY_SHARES[process][weekday] > 0
+    }
 
 
-def _afk(rows, start: float, minutes: float, reason: str = "idle") -> float:
+def _historical_targets(
+    rng: random.Random,
+    day: datetime,
+    week_index: int,
+) -> dict[str, float]:
+    weekday = day.weekday() < 5
+    if weekday:
+        # Roughly five percent of weekdays and a quarter of weekends are truly
+        # off. Across a mature history that produces the blank heatmap cells a
+        # real computer record has without making the profile look abandoned.
+        if rng.random() < 0.05:
+            return {}
+        profile = rng.choices(
+            ("deep", "standard", "communication", "light"),
+            weights=(22, 43, 20, 15),
+        )[0]
+    else:
+        if rng.random() < 0.25:
+            return {}
+        profile = "weekend" if rng.random() < 0.85 else "light"
+
+    low, high = PROFILE_HOURS[profile]
+    wave = 0.5 + 0.27 * math.sin((week_index + 1) * 1.37) + rng.uniform(-0.2, 0.2)
+    total_hours = low + (high - low) * _clamp(wave, 0.0, 1.0)
+
+    weights: dict[str, float] = {}
+    for process, weight in PROFILE_WEIGHTS[profile].items():
+        # Small destinations do not need to appear every day. Removing some of
+        # them before normalization gives the Activity view realistic absences.
+        if weight <= 4 and rng.random() < 0.38:
+            continue
+        weights[process] = weight * rng.uniform(0.82, 1.18)
+    scale = total_hours / sum(weights.values())
+    return {process: weight * scale for process, weight in weights.items()}
+
+
+def _website_pick(rng: random.Random) -> WebsiteSpec:
+    return rng.choices(WEBSITES, weights=[website.weight for website in WEBSITES])[0]
+
+
+def _activity_chunks(
+    rng: random.Random,
+    targets: dict[str, float],
+) -> list[tuple[str, str, str | None, int]]:
+    chunks: list[tuple[str, str, str | None, int, float]] = []
+    for process, hours in targets.items():
+        remaining = int(round(hours * 3600))
+        while remaining > 0:
+            seconds = min(remaining, int(rng.uniform(7, 34) * 60))
+            if process == "chrome.exe":
+                website = _website_pick(rng)
+                title = rng.choice(website.titles)
+                domain = website.domain
+            else:
+                spec = APP_SPECS[process]
+                title = rng.choice(spec.titles)
+                domain = None
+            # Entertainment naturally clusters later while work and browsing
+            # remain interleaved. Random jitter prevents category stripes.
+            phase = rng.random()
+            if APP_SPECS[process].category == "Entertainment":
+                phase += 0.62
+            elif APP_SPECS[process].category == "Communication":
+                phase += 0.12
+            chunks.append((process, title, domain, seconds, phase))
+            remaining -= seconds
+    chunks.sort(key=lambda chunk: chunk[4])
+    return [(process, title, domain, seconds) for process, title, domain, seconds, _ in chunks]
+
+
+def _afk(rows: list, start: float, minutes: float, reason: str = "idle") -> float:
     end = start + minutes * 60
     rows.append((int(start), int(end), "afk", reason, None, 1))
     return end
 
 
-def _day_sessions(rng: random.Random, day: datetime, recency: float) -> list:
-    """One day of sessions. recency in [0,1]: 1 = most recent week (more
-    coding, less gaming) so Trends and per-app deltas have a visible story."""
+def _day_sessions(
+    rng: random.Random,
+    day: datetime,
+    targets: dict[str, float],
+) -> list:
+    if not targets:
+        return []
+
     rows: list = []
-    weekday = day.weekday() < 5  # Mon-Fri
+    weekday = day.weekday() < 5
     base = day.timestamp()
+    total_active = sum(targets.values()) * 3600
+    start_hour = rng.uniform(8.15, 9.15) if weekday else rng.uniform(9.75, 11.25)
+    current = base + start_hour * 3600
+    active = 0
+    lunch_done = False
+    short_break_done = False
+    evening_gap_done = False
 
-    work_mix = [(p, w * (1 + 0.5 * recency) if p is CODING else w) for p, w in WORK_MIX]
-    fun_mix = [(p, w * (1.4 - 0.6 * recency) if p is GAMING else w)
-               for p, w in (EVENING_MIX if weekday else WEEKEND_MIX)]
+    for process, title, domain, seconds in _activity_chunks(rng, targets):
+        if weekday and not lunch_done and active >= 3.1 * 3600:
+            current = _afk(rows, current, rng.uniform(35, 58), "idle")
+            lunch_done = True
+        if weekday and not short_break_done and active >= 6.1 * 3600:
+            current = _afk(rows, current, rng.uniform(8, 16), "idle")
+            short_break_done = True
+        if (
+            weekday
+            and not evening_gap_done
+            and total_active >= 8 * 3600
+            and active >= total_active * 0.78
+        ):
+            current += rng.uniform(45, 85) * 60
+            evening_gap_done = True
+        if not weekday and not lunch_done and total_active >= 3 * 3600 and active >= 2 * 3600:
+            current = _afk(rows, current, rng.uniform(25, 55), "idle")
+            lunch_done = True
 
-    if weekday:
-        t = base + rng.uniform(8.25, 9.5) * 3600
-        morning_end = base + rng.uniform(11.9, 12.7) * 3600
-        _block(rng, rows, t, t + rng.uniform(15, 35) * 60, [(BROWSE, 80), (NOTES, 20)], 6)
-        _block(rng, rows, rows[-1][1], morning_end, work_mix, 14)
-        t = _afk(rows, morning_end, rng.uniform(30, 60))  # lunch
-        afternoon_end = base + rng.uniform(16.5, 17.8) * 3600
-        coffee = t + rng.uniform(1.0, 2.5) * 3600
-        _block(rng, rows, t, coffee, work_mix, 16)
-        t = _afk(rows, coffee, rng.uniform(5, 18))
-        _block(rng, rows, t, afternoon_end, work_mix, 12)
-        if rng.random() < 0.7:  # most evenings back at the PC
-            t = base + rng.uniform(18.7, 19.8) * 3600
-            night_end = base + rng.uniform(20.8, 22.6) * 3600
-            _block(rng, rows, t, night_end, fun_mix, 22)
-    else:
-        t = base + rng.uniform(9.5, 11.2) * 3600
-        _block(rng, rows, t, t + rng.uniform(25, 50) * 60, [(BROWSE, 70), (MEDIA, 30)], 8)
-        t = rows[-1][1]
-        midday_end = base + rng.uniform(12.5, 13.5) * 3600
-        _block(rng, rows, t, midday_end, fun_mix, 18)
-        t = _afk(rows, midday_end, rng.uniform(45, 120), "idle")
-        if rng.random() < 0.6:  # weekend afternoon hobby block
-            _block(rng, rows, t, t + rng.uniform(1.2, 2.5) * 3600, work_mix, 15)
-            t = rows[-1][1]
-        if rng.random() < 0.85:
-            t = max(t, base + rng.uniform(19.0, 20.0) * 3600)
-            _block(rng, rows, t, base + rng.uniform(21.3, 23.0) * 3600, fun_mix, 25)
+        end = current + seconds
+        rows.append((int(current), int(end), process, title, domain, 0))
+        current = end
+        active += seconds
     return rows
 
 
@@ -191,19 +356,25 @@ def generate(out: Path, weeks: int, end_day: datetime, now_ts: int | None) -> in
     rng = random.Random(SEED)
     days = weeks * 7
     rows: list = []
+    current_week_start = end_day - timedelta(days=end_day.weekday())
+    previous_week_start = current_week_start - timedelta(days=7)
+
     for i in range(days):
         day = end_day - timedelta(days=days - 1 - i)
-        recency = i / max(days - 1, 1)
-        rows.extend(_day_sessions(rng, day, recency))
+        if current_week_start <= day < current_week_start + timedelta(days=7):
+            targets = _recent_targets(day, CURRENT_WEEK_HOURS)
+        elif previous_week_start <= day < current_week_start:
+            targets = _recent_targets(day, PREVIOUS_WEEK_HOURS)
+        else:
+            targets = _historical_targets(rng, day, i // 7)
+        rows.extend(_day_sessions(rng, day, targets))
 
-    if now_ts is not None:  # truncate "today" at now and end on an open live
-        rows = [r for r in rows if r[0] < now_ts]  # session so the dashboard
+    if now_ts is not None:
+        # A default run may include today. Retain only activity that has really
+        # reached the current wall clock; unlike the former developer fixture,
+        # do not invent a late-night foreground session just to end on one.
+        rows = [r for r in rows if r[0] < now_ts]
         rows = [(s, min(e, now_ts), p, t, d, a) for s, e, p, t, d, a in rows]
-        last_end = rows[-1][1] if rows else now_ts - 1800
-        start = max(last_end, now_ts - 1500)
-        if start < now_ts:
-            rows.append((start, now_ts, "code.exe",
-                         "metrics.ts - demoapp - Visual Studio Code", None, 0))
 
     conn = open_db(out)
     try:
@@ -211,28 +382,28 @@ def generate(out: Path, weeks: int, end_day: datetime, now_ts: int | None) -> in
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('recording_consent','1')")
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('record_window_titles','1')")
         # Without these, App.tsx's privacy_onboarding_complete gate shows the
-        # consent screen on every fresh demo.db — and both of its buttons
-        # write to the real Windows registry (launch-at-login) regardless of
-        # which one is clicked, which has nothing to do with this demo file.
+        # consent screen on every fresh demo.db — and both of its buttons write
+        # to the real Windows registry regardless of which one is clicked.
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('privacy_onboarding_complete','1')"
         )
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('starter_categories_pending','0')"
         )
-        # The persona's productive hours land around 35-40/wk; match the goal.
         conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES ('weekly_goal_hours','35')"
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('weekly_goal_hours','15')"
         )
-        conn.executemany(
-            "INSERT OR IGNORE INTO categories"
-            " (name,color,is_productive,is_neutral,sort_order) VALUES (?,?,?,?,?)",
-            DEMO_CATEGORIES,
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('process_aliases',?)",
+            (json.dumps(PROCESS_ALIASES, sort_keys=True),),
         )
         cat_ids = {r[1]: r[0] for r in conn.execute("SELECT id, name FROM categories")}
         conn.executemany(
             "INSERT INTO rules (match_type, pattern, category_id, priority) VALUES (?,?,?,?)",
-            [(mt, pat, cat_ids[cat], prio) for mt, pat, cat, prio in DEMO_RULES],
+            [
+                (match_type, pattern, cat_ids[category], priority)
+                for match_type, pattern, category, priority in DEMO_RULES
+            ],
         )
         conn.executemany(
             "INSERT INTO sessions (start_ts, end_ts, process, title, domain, is_afk, source)"
@@ -274,14 +445,26 @@ def main() -> int:
         for suffix in ("", "-wal", "-shm"):
             Path(str(out) + suffix).unlink(missing_ok=True)
     except PermissionError:
-        # Cloud-sync filter drivers (e.g. Google Drive) can hold the file open
-        # without blocking writes; fall back to wiping tables in place.
+        # Cloud-sync filter drivers can hold the file open without blocking
+        # writes; fall back to wiping user data in place. Keep schema_version:
+        # open_db needs it to distinguish a current database from an abandoned
+        # pre-release schema before it can reseed the starter rows.
         with sqlite3.connect(out) as conn:
-            for table in ("sessions", "rules", "categories", "settings"):
+            for table in (
+                "session_corrections",
+                "tracking_exclusions",
+                "sessions",
+                "rules",
+                "categories",
+            ):
                 try:
                     conn.execute(f"DELETE FROM {table}")
                 except sqlite3.OperationalError:
-                    pass  # table absent in an older/partial file
+                    pass
+            try:
+                conn.execute("DELETE FROM settings WHERE key<>'schema_version'")
+            except sqlite3.OperationalError:
+                pass
 
     if args.end:
         end_day = datetime.strptime(args.end, "%Y-%m-%d")

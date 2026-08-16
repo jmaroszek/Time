@@ -17,8 +17,8 @@ installer download. Its activity-data flow remains entirely local:
 - Fresh installations include no personal categories, aliases, preferences, or
   classification rules.
 - Startup registration is per-user and created only after consent.
-- Users can pause recording, delete selected history, erase all sessions, and
-  make consistent local backups from the dashboard.
+- Users can pause recording from the system tray, delete selected history,
+  erase all sessions, and make consistent local backups from the dashboard.
 
 ## Local storage and threat model
 
@@ -32,10 +32,11 @@ device encryption or BitLocker when protection at rest matters.
 Window titles can contain document names, message subjects, or other sensitive
 text. Leave title storage off unless that detail is worth the privacy cost.
 The optional first-party Time Web Extension requires broad
-HTTP/HTTPS site access so it can add the current origin and path to the
-OS-visible browser title. It excludes queries, fragments, and private browsing;
-it has no storage, network, telemetry, or named browser API permission. Time
-derives the normalized domain and discards the raw origin/path before recording.
+HTTP/HTTPS site access so it can add the current origin to the
+OS-visible browser title. It never includes the page path, queries, fragments,
+or credentials, and does not run in private browsing; it has no storage,
+network, telemetry, or named browser API permission. Time derives the
+normalized domain and discards the raw origin before recording.
 
 SQLite `secure_delete` is enabled. History deletion checkpoints the WAL and
 compacts the database, but separate backup files are intentionally retained and
