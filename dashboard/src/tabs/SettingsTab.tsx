@@ -632,7 +632,7 @@ export default function SettingsTab({
               : ""}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 rounded-[13px] border border-edge bg-surface-dim px-4 py-4 sm:px-[18px]">
+        <div className="flex flex-wrap items-center gap-3 rounded-[13px] border border-card-edge bg-surface-dim px-4 py-4 sm:px-[18px]">
           <span className={`h-[9px] w-[9px] rounded-full ${trackerDot}`} />
           <div className="min-w-0">
             <p className="text-row font-semibold text-ink">
@@ -971,7 +971,7 @@ export default function SettingsTab({
                     handleRadioKey(event, PALETTES.map((palette) => palette.id), index, (value) =>
                       selectSetting("color_palette", value),
                     )}
-                  className={`flex items-center gap-3 rounded-[11px] border px-3 py-2.5 text-left transition-colors ${selected ? "border-accent/70 bg-surface-3" : "border-edge bg-surface-2 hover:bg-surface-3"}`}
+                  className={`flex items-center gap-3 rounded-[11px] border px-3 py-2.5 text-left transition-colors ${selected ? "border-accent/70 bg-selected-strong" : "border-card-edge bg-raised hover:bg-selected-strong"}`}
                 >
                   <span className="flex shrink-0 gap-1" aria-hidden="true">
                     {previewSwatches(paletteForTheme(option, meta.theme)).map((swatch) => (
@@ -1012,7 +1012,7 @@ export default function SettingsTab({
                       index,
                       (value) => selectSetting("productivity_style", value),
                     )}
-                  className={`flex items-center gap-2 rounded-[10px] border px-2.5 py-1.5 transition-colors ${selected ? "border-accent/70 bg-surface-3" : "border-edge bg-surface-2 hover:bg-surface-3"}`}
+                  className={`flex items-center gap-2 rounded-[10px] border px-2.5 py-1.5 transition-colors ${selected ? "border-accent/70 bg-selected-strong" : "border-card-edge bg-raised hover:bg-selected-strong"}`}
                 >
                   <span className="flex gap-1" aria-hidden="true">
                     <span className="h-4 w-4 rounded" style={{ backgroundColor: themedChoice(choice).productive }} />

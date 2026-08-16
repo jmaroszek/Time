@@ -279,6 +279,7 @@ export default function OverviewTab({
       </div>
 
       <Card
+        surface="chart"
         title={middleView === "timeline"
           ? "Timeline"
           : middleView === "rhythm"

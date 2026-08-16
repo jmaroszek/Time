@@ -861,7 +861,7 @@ export function DeleteActivityDialog({
               disabled={deleting}
               className="bg-surface-2"
               buttonClassName="flex-1 px-2.5"
-              selectedClassName="bg-surface-3 text-ink"
+              selectedClassName="bg-selected-strong text-ink"
             />
           )}
           {loading || !preview ? (

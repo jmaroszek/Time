@@ -8,14 +8,18 @@ export function Card({
   right,
   children,
   className = "",
+  surface = "default",
 }: {
   title?: ReactNode;
   right?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** Large analytical canvases use a barely tinted light surface to reduce
+   *  glare. Dark aliases it to the existing card, so that theme does not move. */
+  surface?: "default" | "chart";
 }) {
   return (
-    <div className={`min-w-0 rounded-[14px] border border-edge bg-surface p-4 sm:p-5 ${className}`}>
+    <div className={`time-card-shadow min-w-0 rounded-[14px] border border-card-edge ${surface === "chart" ? "bg-chart-surface" : "bg-surface"} p-4 sm:p-5 ${className}`}>
       {(title || right) && (
         <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
           <h2 className="min-w-0 text-sm font-semibold text-ink">{title}</h2>
@@ -45,7 +49,7 @@ export function MetricCard({
   mark?: ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-edge bg-surface px-4 py-3">
+    <div className="time-card-shadow rounded-xl border border-card-edge bg-surface px-4 py-3">
       <div className="flex items-center gap-1.5">
         <p
           tabIndex={hint ? 0 : undefined}
@@ -68,7 +72,7 @@ function InfoHint({ text }: { text: string }) {
   return (
     <span
       role="tooltip"
-      className="pointer-events-none invisible absolute left-0 top-5 z-20 w-56 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-meta font-normal leading-snug text-ink-2 opacity-0 shadow-menu transition-opacity delay-0 duration-100 group-hover:visible group-hover:opacity-100 group-hover:delay-500 group-focus:visible group-focus:opacity-100 group-focus:delay-0"
+      className="pointer-events-none invisible absolute left-0 top-5 z-20 w-56 rounded-lg border border-raised-edge bg-raised px-2.5 py-1.5 text-meta font-normal leading-snug text-ink-2 opacity-0 shadow-menu transition-opacity delay-0 duration-100 group-hover:visible group-hover:opacity-100 group-hover:delay-500 group-focus:visible group-focus:opacity-100 group-focus:delay-0"
     >
       {text}
     </span>
@@ -144,7 +148,7 @@ export function FloatingTooltip({
           style={{ left: position.left, top: position.top }}
           // Above menus, which are above dialogs: a tooltip explains whatever
           // is frontmost, so it can never be the thing that gets covered.
-          className="pointer-events-none fixed z-[85] w-52 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-left text-meta font-normal leading-snug text-ink-2 shadow-menu"
+          className="pointer-events-none fixed z-[85] w-52 rounded-lg border border-raised-edge bg-raised px-2.5 py-1.5 text-left text-meta font-normal leading-snug text-ink-2 shadow-menu"
         >
           {text}
         </span>,
@@ -542,7 +546,7 @@ export function MenuSelect({
         onClick={() => (open ? close() : (setActive(selected), setOpen(true)))}
         onKeyDown={onKeyDown}
         className={`flex items-center justify-between gap-2 border outline-none transition-colors disabled:cursor-not-allowed ${SIZES[size]} ${
-          open ? "border-accent/60 bg-surface-3 text-ink" : VARIANTS[variant]
+          open ? "border-accent/60 bg-selected-strong text-ink" : VARIANTS[variant]
         } ${className}`}
       >
         {/* A placeholder is normally dimmed because it stands for a value not
@@ -593,7 +597,7 @@ export function MenuSelect({
           }}
           // Above the dialog layer (z-70): a menu belongs on top of whatever
           // opened it, and these are used inside modals as well as on the page.
-          className="menu-pop fixed z-[80] rounded-[11px] border border-edge-2 bg-surface-2 p-1 shadow-menu"
+          className="menu-pop fixed z-[80] rounded-[11px] border border-raised-edge bg-raised p-1 shadow-menu"
         >
           {/* The popup is a raised fill, so its two text ranks take the -raised
               inks. This is the pair's motivating case: the header sits directly
@@ -614,7 +618,7 @@ export function MenuSelect({
                 onClick={() => commit(i)}
                 onMouseEnter={() => setActive(i)}
                 className={`flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
-                  i === active ? "bg-surface-3 text-ink" : "text-ink-2-raised"
+                  i === active ? "bg-selected-strong text-ink" : "text-ink-2-raised"
                 }`}
               >
                 <span className="flex min-w-0 items-center gap-2">

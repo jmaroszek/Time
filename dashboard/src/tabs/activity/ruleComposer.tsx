@@ -206,7 +206,7 @@ function RuleTypeSelector({
       {pill && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute top-0.5 bottom-0.5 rounded-md bg-surface-3 transition-[transform,width] duration-200 ease-out motion-reduce:transition-none"
+          className="pointer-events-none absolute top-0.5 bottom-0.5 rounded-md bg-selected-strong transition-[transform,width] duration-200 ease-out motion-reduce:transition-none"
           style={{ width: pill.width, transform: `translateX(${pill.left}px)`, left: 0 }}
         />
       )}

@@ -116,7 +116,7 @@ describe("theme tokens", () => {
   it("declares a dark value for every token, since dark is the default", () => {
     expect(COLOR_TOKENS.length).toBeGreaterThan(15);
     for (const token of COLOR_TOKENS) expect(DARK[token]).toBeTruthy();
-    for (const shadow of ["--shadow-menu", "--shadow-panel", "--shadow-control"]) {
+    for (const shadow of ["--shadow-menu", "--shadow-panel", "--shadow-control", "--shadow-card"]) {
       expect(DARK[shadow]).toBeTruthy();
       expect(LIGHT[shadow]).not.toBe(DARK[shadow]);
     }
@@ -139,6 +139,29 @@ describe("theme tokens", () => {
   it("keeps chart tooltip ink mirrored to the CSS theme", () => {
     expect(tooltipStyle("dark").textStyle.color).toBe(DARK["--color-ink"]);
     expect(tooltipStyle("light").textStyle.color).toBe(LIGHT["--color-ink"]);
+    expect(tooltipStyle("dark").backgroundColor).toBe(DARK["--color-raised"]);
+    expect(tooltipStyle("dark").borderColor).toBe(DARK["--color-card-edge"]);
+    expect(tooltipStyle("light").backgroundColor).toBe(LIGHT["--color-raised"]);
+    expect(tooltipStyle("light").borderColor).toBe(LIGHT["--color-raised-edge"]);
+  });
+
+  it("keeps dark's semantic surface aliases visually unchanged", () => {
+    expect(DARK["--color-card-edge"]).toBe(DARK["--color-edge"]);
+    expect(DARK["--color-raised-edge"]).toBe(DARK["--color-edge-2"]);
+    expect(DARK["--color-raised"]).toBe(DARK["--color-surface-2"]);
+    expect(DARK["--color-selected"]).toBe(DARK["--color-surface-2"]);
+    expect(DARK["--color-selected-strong"]).toBe(DARK["--color-surface-3"]);
+    expect(DARK["--color-chart-surface"]).toBe(DARK["--color-surface"]);
+  });
+
+  it("gives light raised and selected states meanings distinct from recesses", () => {
+    expect(LIGHT["--color-raised"]).toBe(LIGHT["--color-surface"]);
+    expect(LIGHT["--color-selected"]).not.toBe(LIGHT["--color-surface-2"]);
+    expect(LIGHT["--color-selected-strong"]).not.toBe(LIGHT["--color-surface-3"]);
+    expect(LIGHT["--color-chart-surface"]).not.toBe(LIGHT["--color-surface"]);
+    expect(contrast(LIGHT["--color-card-edge"], LIGHT["--color-surface"])).toBeLessThan(
+      contrast(LIGHT["--color-edge"], LIGHT["--color-surface"]),
+    );
   });
 
   it("separates controls from records only where the light theme needs it", () => {

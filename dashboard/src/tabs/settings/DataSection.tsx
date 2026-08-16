@@ -120,7 +120,7 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
 
   return (
     <Section title="Data management">
-      <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
+      <div className="overflow-hidden rounded-[13px] border border-card-edge bg-surface-dim">
         <div className="p-4">
           <p className="mb-[9px] text-xs text-ink-3">Database path</p>
           <div className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface-2 p-[9px] pl-[13px]">

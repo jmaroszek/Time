@@ -112,10 +112,12 @@ export function stackedBarLegend(
   } as const;
 }
 
-/** Tooltip surface and border, mirroring --color-surface-2 / --color-edge. */
+/** Tooltip surface and border, mirroring --color-raised / --color-raised-edge.
+ * Dark aliases those to its established raised grays; light returns floating
+ * content to white instead of making it share a recessed record-row fill. */
 const TOOLTIP_BY_THEME: Record<ThemeName, { backgroundColor: string; borderColor: string }> = {
   dark: { backgroundColor: "#1d2026", borderColor: "#2a2e36" },
-  light: { backgroundColor: "#eaecf1", borderColor: "#d9dce3" },
+  light: { backgroundColor: "#ffffff", borderColor: "#d9dce3" },
 };
 
 /** The one tooltip look, spread into any ECharts `tooltip` option. In-chart

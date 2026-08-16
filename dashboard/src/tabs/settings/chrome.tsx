@@ -15,7 +15,7 @@ export function Section({ title, intro, children }: { title: string; intro?: str
   return (
     <SettingsSection title={title}>
       <SectionLabel>{title}</SectionLabel>
-      <div className="overflow-hidden rounded-[13px] border border-edge bg-surface-dim">
+      <div className="overflow-hidden rounded-[13px] border border-card-edge bg-surface-dim">
         {intro && <p className="px-4 pb-3 pt-4 text-xs leading-snug text-ink-3">{intro}</p>}
         {children}
       </div>
@@ -152,7 +152,7 @@ export function SectionRail() {
           aria-current={active === title ? "true" : undefined}
           className={`truncate rounded-md px-2 py-[5px] text-xs transition-colors ${
             active === title
-              ? "bg-surface-2 font-medium text-ink"
+              ? "bg-selected font-medium text-ink"
               : "text-ink-3 hover:bg-hover hover:text-ink-2"
           }`}
         >

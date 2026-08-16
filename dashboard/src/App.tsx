@@ -614,7 +614,7 @@ function TabBar({
       {pill && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute top-1 bottom-1 rounded-lg bg-surface-2 transition-[transform,width] duration-200 ease-out motion-reduce:transition-none"
+          className="pointer-events-none absolute top-1 bottom-1 rounded-lg bg-selected transition-[transform,width] duration-200 ease-out motion-reduce:transition-none"
           style={{ width: pill.width, transform: `translateX(${pill.left}px)`, left: 0 }}
         />
       )}

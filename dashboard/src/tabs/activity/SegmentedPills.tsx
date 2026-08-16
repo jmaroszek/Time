@@ -12,7 +12,7 @@ export default function SegmentedPills<T extends string | number | boolean>({
   disabled = false,
   className = "",
   buttonClassName = "",
-  selectedClassName = "bg-surface-3 text-ink-2",
+  selectedClassName = "bg-selected-strong text-ink-2",
 }: {
   label: string;
   value: T;

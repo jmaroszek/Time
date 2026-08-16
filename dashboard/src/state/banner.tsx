@@ -87,7 +87,7 @@ export function BannerProvider({ children }: { children: ReactNode }) {
             // Polite for a confirmation, assertive for a failure: one is worth
             // interrupting what a screen reader is saying, the other is not.
             role={banner.tone === "bad" ? "alert" : "status"}
-            className={`flex max-w-xl items-center gap-3 rounded-[11px] border bg-surface-2 px-4 py-2.5 text-xs text-ink shadow-menu ${
+            className={`flex max-w-xl items-center gap-3 rounded-[11px] border bg-raised px-4 py-2.5 text-xs text-ink shadow-menu ${
               banner.tone === "bad" ? "border-bad/40" : "border-good/40"
             }`}
           >
