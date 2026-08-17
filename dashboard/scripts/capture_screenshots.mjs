@@ -11,11 +11,13 @@
 // Then, from another terminal in dashboard/:
 //
 //   node scripts/capture_screenshots.mjs
+//   node scripts/capture_screenshots.mjs --theme light
+//   node scripts/capture_screenshots.mjs --only insights-hero-week,insights-timeline-week-tooltip
 //
-// The ignored data/website-screenshots directory receives full component
-// masters and exact-ratio website derivatives. The script never opens the
-// production database; TIME_DB_PATH belongs to the debug app that it attaches
-// to, and should always name an explicit demo database.
+// The ignored data/website-screenshots/<theme> directory receives native-DPR
+// PNG captures. The script never opens the production database; TIME_DB_PATH
+// belongs to the debug app that it attaches to, and should always name an
+// explicit demo database.
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,18 +26,29 @@ import { chromium } from "playwright";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
+const argumentValue = (name) => {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : null;
+};
+const THEME = (argumentValue("--theme") ?? "dark").toLowerCase();
+if (!new Set(["dark", "light"]).has(THEME)) {
+  throw new Error("--theme must be dark or light");
+}
 const OUT_DIR = path.resolve(
-  process.env.TIME_SCREENSHOT_OUT ?? path.join(REPO_ROOT, "data", "website-screenshots"),
+  process.env.TIME_SCREENSHOT_OUT
+    ?? path.join(REPO_ROOT, "data", "website-screenshots", THEME),
 );
-const MASTER_DIR = path.join(OUT_DIR, "masters");
-const WEB_DIR = path.join(OUT_DIR, "web");
-const DESIGN_CROP_DIR = path.join(OUT_DIR, "design-crops");
 const CDP_URL = process.env.TIME_SCREENSHOT_CDP_URL ?? "http://127.0.0.1:9222";
 const CAPTURE_TIME = process.env.TIME_SCREENSHOT_TIME ?? "2026-08-16T13:55:00-05:00";
+const onlyValue = argumentValue("--only");
+const ONLY = onlyValue !== null
+  ? new Set(onlyValue.split(",").filter(Boolean))
+  : null;
 
-mkdirSync(MASTER_DIR, { recursive: true });
-mkdirSync(WEB_DIR, { recursive: true });
-mkdirSync(DESIGN_CROP_DIR, { recursive: true });
+if (ONLY?.size === 0) throw new Error("--only requires a comma-separated list of asset names");
+const requested = (name) => ONLY === null || ONLY.has(name);
+
+mkdirSync(OUT_DIR, { recursive: true });
 
 const browser = await chromium.connectOverCDP(CDP_URL);
 const contexts = browser.contexts();
@@ -54,18 +67,26 @@ async function waitForInsights() {
   await page.waitForTimeout(700);
 }
 
+async function waitForActivity() {
+  await page.getByRole("button", { name: "Activity", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Apps & Websites", exact: true }).waitFor();
+  await page.waitForFunction(() => !document.querySelector('[aria-busy="true"]'));
+  await page.waitForTimeout(500);
+}
+
 async function selectMenu(label, option) {
   await page.getByRole("combobox", { name: label, exact: true }).click();
   await page.getByRole("option", { name: option, exact: true }).click();
   await waitForInsights();
 }
 
-async function ensureDarkTheme() {
-  if (await page.evaluate(() => document.documentElement.dataset.theme === "dark")) return;
+async function ensureTheme(theme) {
+  if (await page.evaluate((value) => document.documentElement.dataset.theme === value, theme)) return;
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const theme = page.getByRole("radiogroup", { name: "Theme", exact: true });
-  await theme.getByRole("radio", { name: "Dark", exact: true }).click();
-  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  const themeGroup = page.getByRole("radiogroup", { name: "Theme", exact: true });
+  const themeLabel = theme[0].toUpperCase() + theme.slice(1);
+  await themeGroup.getByRole("radio", { name: themeLabel, exact: true }).click();
+  await page.waitForFunction((value) => document.documentElement.dataset.theme === value, theme);
   await page.getByRole("button", { name: "Insights", exact: true }).click();
   await waitForInsights();
 }
@@ -78,81 +99,41 @@ function cardByTitle(title) {
     .locator("xpath=../..");
 }
 
-async function resizePng(buffer, width, height, fit = "cover") {
-  const dataUrl = `data:image/png;base64,${buffer.toString("base64")}`;
-  const output = await page.evaluate(
-    async ({ source, targetWidth, targetHeight, mode }) => {
-      const response = await fetch(source);
-      const bitmap = await createImageBitmap(await response.blob());
-      const canvas = document.createElement("canvas");
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("2D canvas is unavailable");
-      context.imageSmoothingEnabled = true;
-      context.imageSmoothingQuality = "high";
-
-      const scale = mode === "contain"
-        ? Math.min(targetWidth / bitmap.width, targetHeight / bitmap.height)
-        : Math.max(targetWidth / bitmap.width, targetHeight / bitmap.height);
-      const drawWidth = bitmap.width * scale;
-      const drawHeight = bitmap.height * scale;
-      const x = (targetWidth - drawWidth) / 2;
-      const y = (targetHeight - drawHeight) / 2;
-      context.fillStyle = "#1f2227";
-      context.fillRect(0, 0, targetWidth, targetHeight);
-      context.drawImage(bitmap, x, y, drawWidth, drawHeight);
-      bitmap.close();
-      return canvas.toDataURL("image/png").split(",")[1];
-    },
-    { source: dataUrl, targetWidth: width, targetHeight: height, mode: fit },
-  );
-  return Buffer.from(output, "base64");
-}
-
-async function resizePngToWidth(buffer, width) {
-  const dataUrl = `data:image/png;base64,${buffer.toString("base64")}`;
-  const output = await page.evaluate(
-    async ({ source, targetWidth }) => {
-      const response = await fetch(source);
-      const bitmap = await createImageBitmap(await response.blob());
-      const targetHeight = Math.round(bitmap.height * targetWidth / bitmap.width);
-      const canvas = document.createElement("canvas");
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("2D canvas is unavailable");
-      context.imageSmoothingEnabled = true;
-      context.imageSmoothingQuality = "high";
-      context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
-      bitmap.close();
-      return canvas.toDataURL("image/png").split(",")[1];
-    },
-    { source: dataUrl, targetWidth: width },
-  );
-  return Buffer.from(output, "base64");
-}
-
-async function writeCapture(name, locator, webSize, options = {}) {
+async function writeCapture(name, locator, options = {}) {
   await locator.scrollIntoViewIfNeeded();
+  if (!options.preserveHover) await page.mouse.move(0, 0);
   await page.waitForTimeout(250);
-  const master = await locator.screenshot({ animations: "disabled" });
-  const masterPath = path.join(MASTER_DIR, `${name}.png`);
-  writeFileSync(masterPath, master);
+  const capture = await locator.screenshot({ animations: "disabled" });
+  const outputPath = path.join(OUT_DIR, `${name}.png`);
+  writeFileSync(outputPath, capture);
+  console.log(`captured ${name}: ${outputPath}`);
+}
 
-  const web = await resizePngToWidth(master, webSize.width);
-  const webPath = path.join(WEB_DIR, `${name}.png`);
-  writeFileSync(webPath, web);
-
-  const designCrop = await resizePng(
-    master,
-    webSize.width,
-    webSize.height,
-    options.fit ?? "cover",
-  );
-  const designCropPath = path.join(DESIGN_CROP_DIR, `${name}.png`);
-  writeFileSync(designCropPath, designCrop);
-  console.log(`captured ${name}: ${masterPath} -> ${webPath}`);
+async function writeScreenCapture(name, contentBounds = null) {
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(250);
+  let master;
+  if (contentBounds) {
+    const shellBounds = await page.locator(".time-shell").boundingBox();
+    const content = await contentBounds.boundingBox();
+    if (!shellBounds || !content) throw new Error(`${name} capture bounds are unavailable`);
+    master = await page.screenshot({
+      animations: "disabled",
+      captureBeyondViewport: true,
+      clip: {
+        x: shellBounds.x,
+        y: shellBounds.y,
+        width: content.x + content.width - shellBounds.x,
+        height: content.y + content.height - shellBounds.y,
+      },
+    });
+  } else {
+    master = await page.locator(".time-shell").screenshot({ animations: "disabled" });
+  }
+  const outputPath = path.join(OUT_DIR, `${name}.png`);
+  writeFileSync(outputPath, master);
+  console.log(`captured ${name}: ${outputPath}`);
 }
 
 async function visibleChartTooltip(chart) {
@@ -226,65 +207,160 @@ await page.addStyleTag({
   `,
 });
 await waitForInsights();
-await ensureDarkTheme();
+const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme ?? "dark");
+await ensureTheme(THEME);
 const viewport = await page.evaluate(() => ({
   width: window.innerWidth,
   height: window.innerHeight,
   devicePixelRatio: window.devicePixelRatio,
 }));
 console.log(
-  `capturing maximized WebView at ${viewport.width}x${viewport.height} CSS px, DPR ${viewport.devicePixelRatio}`,
+  `capturing ${THEME} theme from maximized WebView at ${viewport.width}x${viewport.height} CSS px, DPR ${viewport.devicePixelRatio}`,
 );
 
-// Preserve the maximized desktop layout in the source capture. The website's
-// 16:10 derivative is made afterward; capture automation never narrows or
-// zooms the app itself.
-await page.evaluate(() => scrollTo(0, 0));
-await page.waitForTimeout(500);
-const shellBounds = await page.locator(".time-shell").boundingBox();
-const bottomCardBounds = await cardByTitle("Top Apps").boundingBox();
-if (!shellBounds || !bottomCardBounds) throw new Error("Hero capture bounds are unavailable");
-const heroMaster = await page.screenshot({
-  animations: "disabled",
-  captureBeyondViewport: true,
-  clip: {
-    x: shellBounds.x,
-    y: shellBounds.y,
-    width: shellBounds.width,
-    height: bottomCardBounds.y + bottomCardBounds.height - shellBounds.y + 16,
-  },
-});
-writeFileSync(path.join(MASTER_DIR, "insights-hero-week.png"), heroMaster);
-writeFileSync(
-  path.join(WEB_DIR, "insights-hero-week.png"),
-  await resizePngToWidth(heroMaster, 2176),
-);
-writeFileSync(
-  path.join(DESIGN_CROP_DIR, "insights-hero-week.png"),
-  await resizePng(heroMaster, 2176, 1360, "cover"),
-);
-console.log("captured insights-hero-week");
+// Preserve the maximized desktop layout in the source capture. Capture
+// automation never narrows or zooms the app itself.
+if (requested("insights-hero-week")) {
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.waitForTimeout(500);
+  const shellBounds = await page.locator(".time-shell").boundingBox();
+  const bottomCardBounds = await cardByTitle("Top Apps").boundingBox();
+  if (!shellBounds || !bottomCardBounds) throw new Error("Hero capture bounds are unavailable");
+  const heroMaster = await page.screenshot({
+    animations: "disabled",
+    captureBeyondViewport: true,
+    clip: {
+      x: shellBounds.x,
+      y: shellBounds.y,
+      width: shellBounds.width,
+      height: bottomCardBounds.y + bottomCardBounds.height - shellBounds.y + 16,
+    },
+  });
+  writeFileSync(path.join(OUT_DIR, "insights-hero-week.png"), heroMaster);
+  console.log("captured insights-hero-week");
+}
 
-const timeline = cardByTitle("Timeline");
-await showTooltip(timeline, { x: 0.5, y: 0.45 });
-await writeCapture("insights-timeline-week-tooltip", timeline, { width: 800, height: 600 });
+if (requested("insights-timeline-week-tooltip")) {
+  const timeline = cardByTitle("Timeline");
+  await showTooltip(timeline, { x: 0.5, y: 0.45 });
+  await writeCapture(
+    "insights-timeline-week-tooltip",
+    timeline,
+    { preserveHover: true },
+  );
+}
 
-await selectMenu("Date range preset", "Quarter");
-const calendar = cardByTitle("Activity Calendar");
-await showTooltip(calendar, { x: 0.55, y: 0.5 });
-await writeCapture("insights-calendar-quarter-tooltip", calendar, { width: 800, height: 600 });
+const quarterRequested = [
+  "insights-calendar-quarter-tooltip",
+  "insights-rhythm-quarter-tooltip",
+  "insights-weekly-hours-quarter",
+  "insights-weekly-hours-quarter-categories",
+].some(requested);
+if (quarterRequested) await selectMenu("Date range preset", "Quarter");
 
-await selectMenu("Aggregate view", "Rhythm");
-const rhythm = cardByTitle("Activity Rhythm");
-await showTooltip(rhythm, { x: 0.5, y: 0.45 });
-await writeCapture("insights-rhythm-quarter-tooltip", rhythm, { width: 800, height: 600 });
+if (requested("insights-calendar-quarter-tooltip")) {
+  const calendar = cardByTitle("Activity Calendar");
+  await showTooltip(calendar, { x: 0.55, y: 0.5 });
+  await writeCapture(
+    "insights-calendar-quarter-tooltip",
+    calendar,
+    { preserveHover: true },
+  );
+}
 
-const quarterHours = cardByTitle("Weekly Hours");
-await writeCapture("insights-weekly-hours-quarter", quarterHours, { width: 520, height: 520 });
+if (requested("insights-rhythm-quarter-tooltip")) {
+  await selectMenu("Aggregate view", "Rhythm");
+  const rhythm = cardByTitle("Activity Rhythm");
+  await showTooltip(rhythm, { x: 0.5, y: 0.45 });
+  await writeCapture(
+    "insights-rhythm-quarter-tooltip",
+    rhythm,
+    { preserveHover: true },
+  );
+}
 
-await selectMenu("Date range preset", "Week");
-const topApps = cardByTitle("Top Apps");
-await writeCapture("insights-top-apps-week", topApps, { width: 520, height: 520 });
+if (requested("insights-weekly-hours-quarter")) {
+  const quarterHours = cardByTitle("Weekly Hours");
+  await writeCapture("insights-weekly-hours-quarter", quarterHours);
+}
+
+if (requested("insights-weekly-hours-quarter-categories")) {
+  await selectMenu("Stack bars by", "Categories");
+  const quarterCategories = cardByTitle("Weekly Hours");
+  await writeCapture(
+    "insights-weekly-hours-quarter-categories",
+    quarterCategories,
+  );
+  await selectMenu("Stack bars by", "Productivity");
+}
+
+const weekRankingRequested = requested("insights-top-apps-week")
+  || requested("insights-top-websites-week");
+if (quarterRequested && weekRankingRequested) {
+  await selectMenu("Date range preset", "Week");
+}
+
+if (requested("insights-top-apps-week")) {
+  const topApps = cardByTitle("Top Apps");
+  await writeCapture("insights-top-apps-week", topApps);
+}
+
+if (requested("insights-top-websites-week")) {
+  await selectMenu("Ranked activity type", "Websites");
+  const topWebsites = cardByTitle("Top Websites");
+  await writeCapture("insights-top-websites-week", topWebsites);
+  await selectMenu("Ranked activity type", "Apps");
+}
+
+if (quarterRequested && !weekRankingRequested) {
+  // Leave the debug app in its default rolling-week state even when a selective
+  // run only needed a quarter view for one capture.
+  await selectMenu("Date range preset", "Week");
+}
+
+const activityRequested = requested("activity-apps-websites-week")
+  || requested("activity-categories-rules-work-expanded");
+if (activityRequested) {
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await waitForActivity();
+}
+
+if (requested("activity-apps-websites-week")) {
+  await page.getByRole("button", { name: "Apps & Websites", exact: true }).click();
+  await page.getByRole("columnheader", { name: "Name", exact: true }).waitFor();
+  await page.locator(".overflow-auto").evaluateAll((nodes) => {
+    for (const node of nodes) node.scrollTop = 0;
+  });
+  await writeScreenCapture("activity-apps-websites-week");
+}
+
+if (requested("activity-categories-rules-work-expanded")) {
+  await page.getByRole("button", { name: "Categories & Rules", exact: true }).click();
+  await page.getByText("Rules classify matching historical and future activity.").waitFor();
+
+  // Make this deterministic if the debug session had retained expansion state:
+  // close every category first, then open only Work.
+  const expandedCategories = page.getByRole("button", { name: /^Collapse .+ rules$/ });
+  while (await expandedCategories.count()) await expandedCategories.first().click();
+  await page.getByRole("button", { name: "Expand Work rules", exact: true }).click();
+  await page.getByRole("button", { name: "Collapse Work rules", exact: true }).waitFor();
+  await page.locator(".overflow-auto").evaluateAll((nodes) => {
+    for (const node of nodes) node.scrollTop = 0;
+  });
+  const rulesSurface = page
+    .getByRole("button", { name: "Categories & Rules", exact: true })
+    .locator("xpath=ancestor::div[contains(@class, 'max-w-[800px]')][1]");
+  await writeScreenCapture("activity-categories-rules-work-expanded", rulesSurface);
+}
+
+if (activityRequested) {
+  await page.getByRole("button", { name: "Insights", exact: true }).click();
+  await waitForInsights();
+}
+
+if (originalTheme !== THEME && new Set(["dark", "light"]).has(originalTheme)) {
+  await ensureTheme(originalTheme);
+}
 
 console.log(`website screenshots are ready in ${OUT_DIR}`);
 process.exit(0);
