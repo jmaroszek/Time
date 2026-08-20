@@ -325,10 +325,7 @@ export default function ProductiveHoursChart({
         const rows = [...(showProductiveAverage ? [averageName] : []), ...stackNames]
           .map((name) => byName.get(name))
           .filter((p): p is NonNullable<typeof p> => p !== undefined)
-          .flatMap((p) => {
-            const value = formatHoursTooltipValue(p.value);
-            return value === null ? [] : [`${p.marker}${p.seriesName}: <b>${value}</b>`];
-          });
+          .flatMap((p) => formatHoursTooltipRow(p, averageName));
         return [`<b>${tooltipHeaders[params[0].dataIndex]}</b>`, ...rows].join("<br/>");
       },
     };
@@ -426,6 +423,24 @@ export function formatHoursTooltipValue(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
   const hours = Number(value);
   return Number.isFinite(hours) ? `${hours.toFixed(1)}h` : null;
+}
+
+/**
+ * One tooltip line for a state/category stack segment or the average line.
+ * Zero-hour stack segments (a productivity state or category with no time in
+ * this bucket) are noise in the tooltip and are dropped; the average line is
+ * a real measurement even when it's zero, so it's always shown.
+ */
+export function formatHoursTooltipRow(
+  p: { marker: string; seriesName: string; value: unknown },
+  averageName: string,
+): string[] {
+  const value = formatHoursTooltipValue(p.value);
+  // Stack values are rounded to hundredths, one digit finer than the tooltip's
+  // toFixed(1) display, so compare against the DISPLAYED zero ("0.0h") rather
+  // than the raw number — a value like 0.03 must still show, not just >0.
+  if (value === null || (p.seriesName !== averageName && value === "0.0h")) return [];
+  return [`${p.marker}${p.seriesName}: <b>${value}</b>`];
 }
 
 export function formatHoursBucketRange(bucket: HoursBucket): string {

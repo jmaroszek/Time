@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { estimateLegendRows, legendContentWidth } from "./ProductiveHoursChart";
+import { estimateLegendRows, formatHoursTooltipRow, legendContentWidth } from "./ProductiveHoursChart";
+
+describe("formatHoursTooltipRow", () => {
+  it("omits a zero-hour stack segment", () => {
+    expect(formatHoursTooltipRow({ marker: "●", seriesName: "Unproductive", value: 0 }, "7-day productive avg")).toEqual([]);
+  });
+
+  it("omits a stack segment that rounds to 0.0h even though it isn't a true zero", () => {
+    // Stack values are rounded to hundredths (e.g. 0.03), one digit finer than
+    // the tooltip's toFixed(1) display, so this must be caught too.
+    expect(formatHoursTooltipRow({ marker: "●", seriesName: "Media", value: 0.03 }, "7-day productive avg")).toEqual([]);
+  });
+
+  it("keeps a non-zero stack segment", () => {
+    expect(formatHoursTooltipRow({ marker: "●", seriesName: "Productive", value: 6 }, "7-day productive avg"))
+      .toEqual(["●Productive: <b>6.0h</b>"]);
+  });
+
+  it("shows the average line even when it's zero", () => {
+    expect(formatHoursTooltipRow({ marker: "●", seriesName: "7-day productive avg", value: 0 }, "7-day productive avg"))
+      .toEqual(["●7-day productive avg: <b>0.0h</b>"]);
+  });
+
+  it("still omits the average line when it's missing", () => {
+    expect(formatHoursTooltipRow({ marker: "●", seriesName: "7-day productive avg", value: "-" }, "7-day productive avg")).toEqual([]);
+  });
+});
 
 describe("estimateLegendRows", () => {
   // A deterministic stand-in for canvas text measurement: 10px per character.
