@@ -34,6 +34,7 @@ import {
   readerIsNew,
   recordingState,
   TRACKER_ALERT_STALE_SECONDS,
+  TRACKER_LAUNCH_GRACE_SECONDS,
 } from "./lib/trackerHealth";
 import {
   allTimeRange,
@@ -210,6 +211,16 @@ function Shell() {
   const [startPending, setStartPending] = useState(false);
   const [offerStartup, setOfferStartup] = useState(false);
   const [pauseNoticeDismissed, setPauseNoticeDismissed] = useState(false);
+  // The launch grace, held as state flipped by a timer rather than computed from
+  // a mount timestamp on each render: the alarm it defers has to appear when the
+  // grace ends, and a rendered comparison only re-evaluates when something else
+  // causes a render. On an established install with a genuinely dead tracker
+  // nothing else would, and the warning would wait for the minute poll.
+  const [launchGraceOver, setLaunchGraceOver] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setLaunchGraceOver(true), TRACKER_LAUNCH_GRACE_SECONDS * 1000);
+    return () => clearTimeout(id);
+  }, []);
 
   const heartbeatAgeSec = status?.lastHeartbeat == null || status.lastHeartbeat <= 0
     ? null
@@ -225,6 +236,7 @@ function Shell() {
       nowSec: Date.now() / 1000,
       totalSessionCount: status.totalSessionCount,
       starting: startPending,
+      launchGrace: !launchGraceOver,
     });
   // At most one banner, resolved from one state. Two surfaces reporting the same
   // fact used to be prevented by a suppression clause maintained by hand at each
@@ -241,6 +253,17 @@ function Shell() {
   // running while either is up even once the first session exists.
   const panelWatchesTracker = bannerPlan?.id === "welcome"
     || bannerPlan?.id === "start_recording";
+  // The states a reader is actively waiting to leave: the stopped alarm, a start
+  // the tracker has not confirmed, and the launch grace during which nothing is
+  // claimed at all. None was covered above, so all fell through to the minute
+  // poll below, and a banner that outlives the tray icon and the Settings dot by
+  // most of a minute reads as the button having done nothing. Each is transient
+  // by construction -- `starting` and `unconfirmed` expire into `stopped`, and
+  // `stopped` ends on the first stamp -- so the fast cadence cannot become the
+  // resting state of an application that is working.
+  const awaitingTrackerTransition = trackerState?.kind === "stopped"
+    || trackerState?.kind === "starting"
+    || trackerState?.kind === "unconfirmed";
 
   // A start that never confirms must not sit as "starting" forever, or the one
   // alarm worth interrupting for would be suppressed by the reader's own
@@ -274,7 +297,10 @@ function Shell() {
   // those panels show a live/stopped dot, and a dot that stopped refreshing when
   // the first session landed would report a tracker state minutes out of date.
   useEffect(() => {
-    if (!ready || (!awaitingFirstSession && !panelWatchesTracker)) return;
+    if (
+      !ready
+      || (!awaitingFirstSession && !panelWatchesTracker && !awaitingTrackerTransition)
+    ) return;
     let cancelled = false;
     const load = () =>
       void fetchTrackerStatus()
@@ -298,12 +324,15 @@ function Shell() {
         })
         .catch(() => {});
     load();
-    const id = setInterval(load, 10_000);
+    // The tracker stamps health every 5s and stamps once on startup, so two
+    // seconds is the point past which a shorter interval stops buying anything:
+    // what is being waited on is the stamp, not the read.
+    const id = setInterval(load, awaitingTrackerTransition ? 2_000 : 10_000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [ready, awaitingFirstSession, panelWatchesTracker]);
+  }, [ready, awaitingFirstSession, panelWatchesTracker, awaitingTrackerTransition]);
 
   // The health signal behind TrackerAlert. The poll above stops once the first
   // session exists and the welcome panel is gone, which is exactly when a
@@ -457,6 +486,12 @@ function Shell() {
         );
       case "stopped":
         return <TrackerAlert onOpenSettings={openSettings} />;
+      case "unconfirmed":
+        // Unreachable: bannerFor gives this state no plan, so
+        // `trackerBannerVisible` above is already false. Spelled out anyway so
+        // the union stays exhaustive and a future banner for it has to be a
+        // decision someone makes here rather than a fallthrough.
+        return null;
     }
   };
 

@@ -31,6 +31,7 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Jonah Maroszek",
     "targets": ["nsis"],
     "createUpdaterArtifacts": true,
     "externalBin": ["binaries/time-tracker"],

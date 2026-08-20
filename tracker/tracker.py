@@ -284,6 +284,7 @@ def run() -> None:
                         app_user_model_id=snap.app_user_model_id,
                         domain=domain,
                         browser_processes=manager.settings.browser_processes,
+                        media_domains=manager.settings.media_domains,
                     ),
                 )
             manager.tick(snap)

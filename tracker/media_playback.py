@@ -5,20 +5,29 @@ Windows exposes playback state through Global System Media Transport Controls
 tab identifier, so browser playback also requires a known media domain from
 Time's existing URL-in-title signal. Ambiguous or unavailable state deliberately
 falls back to ordinary AFK handling.
+
+Apps need no list: GSMTC names its own source, and `source_matches_foreground`
+matches that name against the foreground process. Only the browser gate needs
+to know which sites are media, which is why the settings field this module
+accepts extra domains from is a *website* field.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Collection
+from itertools import chain
 import logging
 import re
 from typing import Any
 
 
-# This is product knowledge, not user configuration: it only narrows a positive
-# Windows playback signal so a background media tab cannot exempt an unrelated
-# foreground browser tab. Subdomains match their parent entry.
+# Product knowledge rather than a default the user edits: it only narrows a
+# positive Windows playback signal so a background media tab cannot exempt an
+# unrelated foreground browser tab. Subdomains match their parent entry. The
+# reader adds what this misses through the media_domains setting, which is kept
+# separate so this list can grow in a later version without touching their
+# entries, and so a settings panel never has to show forty-odd familiar names.
 _MEDIA_DOMAINS = frozenset(
     {
         "audible.com",
@@ -72,14 +81,20 @@ _GENERIC_PROCESS_STEMS = frozenset(
 _SOURCE_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
-def is_media_domain(domain: str | None) -> bool:
-    """Whether a captured browser domain is a known playback destination."""
+def is_media_domain(
+    domain: str | None, extra_domains: Collection[str] = ()
+) -> bool:
+    """Whether a captured browser domain is a known playback destination.
+
+    `extra_domains` carries the reader's own entries, which are matched exactly
+    as the built-ins are: an entry protects itself and its subdomains.
+    """
     if not domain:
         return False
     normalized = domain.lower().strip().rstrip(".")
     return any(
         normalized == candidate or normalized.endswith(f".{candidate}")
-        for candidate in _MEDIA_DOMAINS
+        for candidate in chain(_MEDIA_DOMAINS, extra_domains)
     )
 
 
@@ -124,12 +139,13 @@ class MediaPlaybackMonitor:
         app_user_model_id: str | None,
         domain: str | None,
         browser_processes: Collection[str],
+        media_domains: Collection[str] = (),
     ) -> bool:
         if process is None:
             return False
         normalized_process = process.lower()
         is_browser = normalized_process in browser_processes
-        if is_browser and not is_media_domain(domain):
+        if is_browser and not is_media_domain(domain, media_domains):
             return False
 
         try:

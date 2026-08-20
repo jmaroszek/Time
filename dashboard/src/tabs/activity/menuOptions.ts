@@ -27,9 +27,28 @@ import type { Category } from "../../lib/classify";
  * or deleted: the user's taxonomy wins, and a suggestion aimed at a category
  * they no longer keep disappears rather than following it somewhere else.
  */
-export function triageCategoryOptions(
+/**
+ * Every category a row can be sent to, ignored ones last behind a rule.
+ *
+ * Shared by every menu that assigns a category, because the ordering is a fact
+ * about Ignored rather than about any one menu. The row-detail menus each built
+ * their own list from `categories` in stored order, which put Ignored wherever
+ * its sort_order happened to fall — so a category created after it appeared
+ * *below* it, reading as a member of the same special group.
+ *
+ * `suggestedId` marks Time's guess where it already sits rather than promoting
+ * it: classifying a run of rows is muscle memory, and a list that reorders
+ * itself per row means the position just learned is wrong on the next one.
+ * Marking is not selecting — the row's value stays empty, so no entry takes a
+ * check and the trigger still reads "Classify".
+ *
+ * A suggested id naming no current category marks nothing, the same direction
+ * starterSuggestions.ts fails in: the user's taxonomy wins.
+ */
+export function categoryDestinationOptions(
   categories: Category[],
   suggestedId?: number | null,
+  { dividerOffset = 0 }: { dividerOffset?: number } = {},
 ): MenuOption[] {
   const destinations = [
     ...categories.filter((category) => !category.isIgnored),
@@ -42,7 +61,9 @@ export function triageCategoryOptions(
     dot: category.color,
     hint: suggestedId != null && category.id === suggestedId ? "suggested" : undefined,
     // Never on the opening entry, where a rule would sit against the top of the
-    // listbox rather than between two things.
-    divider: index === firstIgnored && index > 0,
+    // listbox rather than between two things. `dividerOffset` accounts for
+    // callers that prepend their own entries, so "first in the list" is judged
+    // against the rendered menu and not against this slice of it.
+    divider: index === firstIgnored && index + dividerOffset > 0,
   }));
 }

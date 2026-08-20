@@ -20,7 +20,7 @@ export const THEME_PREFERENCES: ThemePreference[] = ["dark", "light", "system"];
 export const THEME_PREFERENCE_LABELS: Record<ThemePreference, string> = {
   dark: "Dark",
   light: "Light",
-  system: "Follow system",
+  system: "System",
 };
 
 /** The stored value, defaulting when absent or unrecognised — a value written by

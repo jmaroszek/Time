@@ -189,7 +189,14 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('week_start','auto'),
     ('browser_processes','chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe'),
     ('min_app_seconds_per_day','0'),
-    ('activity_noise_filter','utilities'),
+    -- Extra media sites, on top of the built-in list in
+    -- tracker/media_playback.py. Empty on a fresh install by design.
+    ('media_domains',''),
+    -- off | one_off | utilities_only | utilities, where 'utilities' is the
+    -- historical value meaning *both* filters and 'utilities_only' is the
+    -- narrower one. Ships as utilities_only; see the mode constants in
+    -- dashboard/src/lib/noise.ts.
+    ('activity_noise_filter','utilities_only'),
     ('activity_noise_max_seconds','120'),
     ('activity_noise_max_sessions','1'),
     ('color_palette','slate'),
@@ -206,6 +213,7 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('tracking_schedule_end_minute','1020'),
     ('recording_consent','0'),
     ('record_window_titles','0'),
+    ('record_browser_domains','1'),
     ('privacy_onboarding_complete','0'),
     ('launch_at_login','0'),
     ('show_tray_icon','1'),

@@ -12,20 +12,29 @@
 // in Unclassified, where it already was — while a wrong one teaches the reader
 // to dismiss the next without reading it.
 //
-// Three things deliberately get no suggestion:
+// Two things deliberately get no suggestion:
 //
-//   browsers    A browser's category would cover every site visited inside it.
-//               Domains are only visible when Time Web Extension (or a
-//               compatible legacy extension) is installed, so most browser time
-//               carries none, and a browser rule would swallow it *and* take the
-//               browser out of the queue that would have prompted a fix.
-//               RECOGNIZED_NOT_SUGGESTED lists them, and the caller's live
-//               `browser_processes` set is checked too.
 //   bimodal     Discord and OBS serve work and leisure for different people. A
 //               single default merges two things a tracker exists to separate.
 //   everything  An unlisted app is not a failure. Games in particular cannot be
 //   unlisted    cataloged — they ship under names like r5apex_dx12.exe — which is
 //               what NAME_SHAPES is for, and past that the queue is the answer.
+//
+// Browsers were a third until a VM test pass produced the counter-evidence.
+// The argument for excluding them was that a browser's category "would cover
+// every site visited inside it" and swallow website time. It does not: rules
+// resolve domain before process, so an exported session for youtube.com lands in
+// Entertainment while the same browser with no detected domain lands in
+// Browsing. A browser rule is a *fallback* for the browser time nothing else
+// explains, which is what a reader means by classifying it.
+//
+// What the old reasoning got right is that the state it creates is misleading on
+// its own — a classified browser looks finished, so nothing suggests the sites
+// inside could be separated. That is real, and it already has an owner:
+// shouldShowWebsiteRuleHint in domainCoverage.ts exists for exactly this reader
+// and fires once websites are being recorded and no domain rule exists. Suppress
+// the suggestion and browsers are simply the one recognized app that offers a
+// new user nothing on day one.
 //
 // This is not a source of display names. cleanProcessName in format.ts stays
 // mechanical ("production code never guesses app identities"); the catalog only
@@ -50,6 +59,7 @@ import type { Category } from "./classify";
 export type StarterRole =
   | "system"
   | "plumbing"
+  | "browsing"
   | "messaging"
   | "development"
   | "writing"
@@ -74,6 +84,7 @@ export type StarterRole =
 const ROLE_CATEGORY: Record<StarterRole, string> = {
   system: "system",
   plumbing: "ignored",
+  browsing: "browsing",
   messaging: "communication",
   development: "work",
   writing: "work",
@@ -116,6 +127,27 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
   "tabtip.exe": "system",
   "7zfm.exe": "system",
   "winrar.exe": "system",
+  "winstore.app.exe": "system",
+  // Shells ship as Windows utilities rather than developer tools. A developer
+  // will reclassify them to Work in one step; suggesting Work to everyone else
+  // asserts that opening a terminal was a job, which is the wrong way round for
+  // the reader who has one open because something told them to run a command.
+  "windowsterminal.exe": "system",
+  "powershell.exe": "system",
+  "pwsh.exe": "system",
+  "cmd.exe": "system",
+  // Browsers. The suggestion is a fallback for browser time no domain explains —
+  // sites that were detected classify on their own, ahead of this. Listed here as
+  // well as covered by the caller's live `browser_processes` set, so a reader who
+  // prunes that set still gets the offer for a browser Time plainly recognizes.
+  "chrome.exe": "browsing",
+  "msedge.exe": "browsing",
+  "firefox.exe": "browsing",
+  "brave.exe": "browsing",
+  "opera.exe": "browsing",
+  "vivaldi.exe": "browsing",
+  "arc.exe": "browsing",
+  "chromium.exe": "browsing",
   // Sync clients and peripheral vendor apps: ordinary Windows time nobody wants
   // to think about, under stable and unambiguous names.
   "onedrive.exe": "system",
@@ -134,6 +166,7 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
   "credentialuibroker.exe": "plumbing",
   "lockapp.exe": "plumbing",
   "startmenuexperiencehost.exe": "plumbing",
+  "openwith.exe": "plumbing",
   "shellexperiencehost.exe": "plumbing",
   "shellhost.exe": "plumbing",
   "applicationframehost.exe": "plumbing",
@@ -168,10 +201,6 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
   "devenv.exe": "development",
   "sublime_text.exe": "development",
   "notepad++.exe": "development",
-  "windowsterminal.exe": "development",
-  "powershell.exe": "development",
-  "pwsh.exe": "development",
-  "cmd.exe": "development",
   "idea64.exe": "development",
   "pycharm64.exe": "development",
   "webstorm64.exe": "development",
@@ -261,21 +290,16 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
 /**
  * Apps Time can name but will not place.
  *
- * The browsers are here because a category on the container would cover every
- * site inside it. The rest are genuinely bimodal: the same app is work for one
- * person and leisure for the next, and a default would merge exactly the two
- * things worth telling apart. This list also exists so the next contributor does
- * not helpfully add discord.exe to the catalog above.
+ * These are genuinely bimodal: the same app is work for one person and leisure
+ * for the next, and a default would merge exactly the two things worth telling
+ * apart. This list also exists so the next contributor does not helpfully add
+ * discord.exe to the catalog above.
+ *
+ * Browsers used to be here. They are in the catalog now, under the `browsing`
+ * role — see the header for why the "a browser rule swallows website time"
+ * argument does not survive contact with how rules actually resolve.
  */
 export const RECOGNIZED_NOT_SUGGESTED: ReadonlySet<string> = new Set([
-  "chrome.exe",
-  "msedge.exe",
-  "firefox.exe",
-  "brave.exe",
-  "opera.exe",
-  "vivaldi.exe",
-  "arc.exe",
-  "chromium.exe",
   "discord.exe",
   "obs64.exe",
   "obs32.exe",
@@ -369,12 +393,13 @@ export function suggestForTriage<T extends SuggestibleEntity>(
   for (const entity of entities) {
     if (entity.kind !== "app") continue;
     const name = entity.key.trim().toLowerCase();
-    // The configured set, not just the names above: a browser this user added by
-    // hand must be as untouchable as one that shipped in the defaults.
-    if (browserProcesses.has(name)) continue;
     if (RECOGNIZED_NOT_SUGGESTED.has(name)) continue;
     if (dismissed.has(suggestionKey(entity))) continue;
-    const role = roleForProcess(name);
+    // The configured set outranks the catalog: a browser this user added by hand
+    // is a browser on their say-so, which is better evidence than any list
+    // shipped here — including for a name the catalog happens to know as
+    // something else.
+    const role = browserProcesses.has(name) ? "browsing" : roleForProcess(name);
     if (!role) continue;
     const categoryId = roleCategories.get(role);
     if (categoryId === undefined) continue;

@@ -118,6 +118,7 @@ export interface InsightsModel {
   appComparisonAvailable: boolean;
   websiteComparisonAvailable: boolean;
   hiddenAppCount: number;
+  hiddenWebsiteCount: number;
   historyDays: DailyActivitySummary[];
   timelineSessions: Session[] | null;
   rhythm: WeekdayRhythmSummary | null;
@@ -477,14 +478,23 @@ function buildInsightsModelWithClassifier(
   // same list would churn purely from changing the range. Scaling by days that
   // recorded something — not calendar days — keeps holidays and pre-install
   // stretches inside a long range from inflating the bar.
-  const minAppThresholdSeconds =
+  //
+  // One bar for both rankings. It was app-only when Insights had no website
+  // ranking to apply it to, and the reasoning for keeping it that way once the
+  // ranking arrived — that website traffic is more fragmented, so the same rate
+  // erases more of it — describes what the reader is asking for rather than an
+  // argument against it: the panel offers one switch between two lists, and a
+  // minimum that silently stops applying when that switch moves is the harder
+  // behavior to predict. Both counts are reported, so a bar set too high for
+  // fragmented traffic says so in the footer instead of just emptying the list.
+  const minThresholdSeconds =
     request.minAppSecondsPerDay * Math.max(aggregation.activeDays, 1);
   // Two independent reasons a row can leave the list, kept apart because only
   // the first one is reported. The footer names a duration preference, so
   // folding utilities into its count would have it explain a row's absence with
   // a threshold that row never met.
   const aboveThreshold = aggregation.currentRanked.filter(
-    (app) => app.seconds >= minAppThresholdSeconds,
+    (app) => app.seconds >= minThresholdSeconds,
   );
   // Utility rows drop out of the ranking but not out of any total: the KPIs and
   // the hourly chart above still count every second the plumbing spent in the
@@ -503,12 +513,14 @@ function buildInsightsModelWithClassifier(
     currentDaily: aggregation.currentDaily,
     previousDaily: aggregation.previousDaily,
   });
-  // The minimum-app preference stays app-specific. Website traffic is naturally
-  // more fragmented, and applying the same bar silently would erase short but
-  // still top-ranked destinations from the first website analysis in Insights.
-  // The utility test still applies: for a website it catches a local file the
-  // browser rendered, which is no more a destination than msiexec is an app.
-  const eligibleWebsites = aggregation.currentWebsiteRanked.filter(
+  // Same two-step as apps, and same order, so the reported count means the same
+  // thing in both lists: the threshold first and countable, then the utility
+  // test, which for a website catches a local file the browser rendered — no
+  // more a destination than msiexec is an app.
+  const websitesAboveThreshold = aggregation.currentWebsiteRanked.filter(
+    (site) => site.seconds >= minThresholdSeconds,
+  );
+  const eligibleWebsites = websitesAboveThreshold.filter(
     (site) =>
       !(
         request.hideUtilityApps
@@ -576,6 +588,8 @@ function buildInsightsModelWithClassifier(
     appComparisonAvailable,
     websiteComparisonAvailable,
     hiddenAppCount: aggregation.currentRanked.length - aboveThreshold.length,
+    hiddenWebsiteCount:
+      aggregation.currentWebsiteRanked.length - websitesAboveThreshold.length,
     historyDays: aggregation.historyDays,
     timelineSessions,
     rhythm,

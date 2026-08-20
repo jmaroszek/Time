@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Callable, TypeVar
 
+from tracker.domains import normalize_host
 from tracker.session_manager import Settings
 from tracker.tracking_schedule import (
     DEFAULT_DAYS,
@@ -186,9 +187,18 @@ DEFAULT_SETTINGS = {
         "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe"
     ),
     "min_app_seconds_per_day": "0",
+    # Sites the reader added to the built-in media list in
+    # tracker/media_playback.py, which stays in the code because it is product
+    # knowledge. Empty on a fresh install: the built-ins already cover the
+    # mainstream services, so this holds only what Time did not know about.
+    "media_domains": "",
     # Activity Library noise filtering (dashboard-only; the tracker records
-    # everything regardless). off | one_off | utilities_only | utilities.
-    "activity_noise_filter": "utilities",
+    # everything regardless). off | one_off | utilities_only | utilities --
+    # where "utilities" is the historical value meaning *both* filters, not
+    # utilities alone. Ships as utilities_only: see DEFAULT_NOISE_POLICY in
+    # dashboard/src/lib/noise.ts for why rare items are no longer hidden by
+    # default. Existing databases keep whatever they stored.
+    "activity_noise_filter": "utilities_only",
     "activity_noise_max_seconds": "120",
     "activity_noise_max_sessions": "1",
     "color_palette": "slate",
@@ -214,6 +224,10 @@ DEFAULT_SETTINGS = {
     # separate opt-in because they can contain document names or message text.
     "recording_consent": "0",
     "record_window_titles": "0",
+    # On by default, unlike the titles opt-in: a domain only reaches Time when
+    # the reader has already installed the extension, which is the opt-in
+    # gesture. This switch is for turning that back off without uninstalling it.
+    "record_browser_domains": "1",
     "privacy_onboarding_complete": "0",
     "launch_at_login": "0",
     # Controls only the notification-area affordance. Recording and Windows
@@ -243,6 +257,22 @@ def normalize_browser_processes(raw: str) -> frozenset[str]:
         if base:
             names.add(base if "." in base else base + ".exe")
     return frozenset(names)
+
+
+def normalize_media_domains(raw: str) -> frozenset[str]:
+    """Parse the comma-separated extra media sites into stored-host shape.
+
+    The dashboard normalizes on save; this repeats it for the same reason
+    `normalize_browser_processes` does — the row can also be hand-edited or
+    written by an older build, and an entry that is not a normalized host would
+    silently protect nothing.
+    """
+    hosts: set[str] = set()
+    for part in raw.split(","):
+        host = normalize_host(part)
+        if host:
+            hosts.add(host)
+    return frozenset(hosts)
 
 
 def pause_until(raw: dict[str, str]) -> float:
@@ -573,8 +603,14 @@ def get_settings(conn: sqlite3.Connection, now: float | None = None) -> Settings
         recording_schedule_window_start=recording_schedule.current_window_start or 0.0,
         recording_consent=raw.get("recording_consent") == "1",
         record_window_titles=raw.get("record_window_titles") == "1",
+        # Defaults on for a key that may be absent, unlike the titles opt-in
+        # above. A database written before this setting existed was recording
+        # domains, and reading a missing key as "off" would silently stop that
+        # on upgrade.
+        record_browser_domains=raw.get("record_browser_domains", "1") == "1",
         excluded_processes=excluded_processes,
         excluded_domains=excluded_domains,
+        media_domains=normalize_media_domains(raw.get("media_domains", "")),
     )
 
 

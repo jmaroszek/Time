@@ -57,7 +57,7 @@ import {
 } from "../../lib/titleRuleAnalysis";
 import { useBanner } from "../../state/banner";
 import Chevron from "./Chevron";
-import { triageCategoryOptions } from "./menuOptions";
+import { categoryDestinationOptions } from "./menuOptions";
 import { toggleSetValue } from "../../lib/setUpdates";
 import SegmentedPills from "./SegmentedPills";
 import {
@@ -159,7 +159,7 @@ export function StarterSuggestionDialog({
                     value={String(categoryId)}
                     onChange={(value) =>
                       setMoved((current) => ({ ...current, [item.id]: Number(value) }))}
-                    options={triageCategoryOptions(categories)}
+                    options={categoryDestinationOptions(categories)}
                   />
                 </span>
                 {/* Permanent, like the consolidation notice's. A suggestion that

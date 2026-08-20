@@ -137,3 +137,38 @@ def test_manager_failure_falls_back_and_logs_once(caplog):
     records = [r.getMessage() for r in caplog.records]
     assert len(records) == 1
     assert "private media metadata" not in records[0]
+
+
+def test_reader_added_domains_extend_the_built_in_list():
+    assert not is_media_domain("cineby.at")
+    assert is_media_domain("cineby.at", {"cineby.at"})
+    # Additions match subdomains exactly as the built-ins do.
+    assert is_media_domain("watch.cineby.at", {"cineby.at"})
+    # And they only widen: an addition cannot retire a built-in.
+    assert is_media_domain("youtube.com", {"cineby.at"})
+
+
+def test_added_domain_protects_a_browser_the_built_in_list_misses():
+    monitor = _monitor(_Session("chrome.exe"))
+    base = {
+        "process": "chrome.exe",
+        "app_user_model_id": None,
+        "browser_processes": BROWSERS,
+    }
+    assert not monitor.is_foreground_playing(domain="cineby.at", **base)
+    assert monitor.is_foreground_playing(
+        domain="cineby.at", media_domains={"cineby.at"}, **base
+    )
+
+
+def test_added_domain_cannot_protect_an_unrelated_foreground_tab():
+    # The domain gate widens; the source gate does not. A playing Spotify tab
+    # must not exempt a browser sitting on an added site.
+    monitor = _monitor(_Session("Spotify.exe"))
+    assert not monitor.is_foreground_playing(
+        process="chrome.exe",
+        app_user_model_id=None,
+        domain="cineby.at",
+        browser_processes=BROWSERS,
+        media_domains={"cineby.at"},
+    )

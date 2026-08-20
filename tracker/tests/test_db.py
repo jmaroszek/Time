@@ -374,6 +374,22 @@ def test_empty_browser_processes_fall_back_to_the_shipped_list(conn):
     assert {"chrome.exe", "msedge.exe", "firefox.exe"} <= browsers
 
 
+def test_media_domains_are_normalized_to_stored_host_names(conn):
+    conn.execute(
+        "UPDATE settings SET value=? WHERE key='media_domains'",
+        ("https://www.Cineby.at/watch/123 , nebula.tv:443 ,, /nonsense",),
+    )
+    assert db.get_settings(conn).media_domains == frozenset(
+        {"cineby.at", "nebula.tv"}
+    )
+
+
+def test_media_domains_default_to_the_built_in_list_alone(conn):
+    # Empty is the shipped state and a valid one: it means no additions, not a
+    # missing setting to fall back from.
+    assert db.get_settings(conn).media_domains == frozenset()
+
+
 def test_store_open_heartbeat_close_roundtrip(conn):
     store = db.SqliteStore(conn)
     sid = store.open_session(1000.0, "code.exe", "main.py", None, False)

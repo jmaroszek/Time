@@ -45,6 +45,7 @@ import ClearableInput from "./ClearableInput";
 import MatchedTitle from "./MatchedTitle";
 import ShareBar from "./ShareBar";
 import { RowTag } from "./ActivityTables";
+import { categoryDestinationOptions } from "./menuOptions";
 import { AUTOMATIC_CLASSIFICATION, RULE_LABELS } from "./ruleComposer";
 
 function GroupSessions({
@@ -548,12 +549,12 @@ export function WindowPanel({
                   // per visit. It leads for that reason as much as for parity
                   // with the correction dialog's own first entry.
                   { value: AUTOMATIC_CLASSIFICATION, label: "Use automatic classification" },
-                  ...categories.map((category, i) => ({
-                    value: String(category.id),
-                    label: category.name,
-                    dot: category.color,
-                    divider: i === 0,
-                  })),
+                  // The prepended entry is the menu's first line, so the
+                  // categories that follow all need a divider offset of one:
+                  // the rule above Ignored still has something above it, and the
+                  // rule below this entry is its own.
+                  ...categoryDestinationOptions(categories, null, { dividerOffset: 1 })
+                    .map((option, i) => (i === 0 ? { ...option, divider: true } : option)),
                 ]}
               />
             </>
@@ -970,11 +971,7 @@ export function EntityPanel({
               // raised on assignment already states the scope, at the one
               // moment it is about to matter.
               onChange={(value) => void onAssign(Number(value))}
-              options={categories.map((category) => ({
-                value: String(category.id),
-                label: category.name,
-                dot: category.color,
-              }))}
+              options={categoryDestinationOptions(categories)}
             />
           </span>
           {/* What decided it, opposite what it is. The trigger already names the
@@ -1114,12 +1111,8 @@ export function EntityPanel({
                   onClassifyWindows(value === AUTOMATIC_CLASSIFICATION ? null : Number(value))}
                 options={[
                   { value: AUTOMATIC_CLASSIFICATION, label: "Use automatic classification" },
-                  ...categories.map((category, i) => ({
-                    value: String(category.id),
-                    label: category.name,
-                    dot: category.color,
-                    divider: i === 0,
-                  })),
+                  ...categoryDestinationOptions(categories, null, { dividerOffset: 1 })
+                    .map((option, i) => (i === 0 ? { ...option, divider: true } : option)),
                 ]}
               />
             </div>

@@ -1,6 +1,7 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { normalizeBrowserProcesses } from "../../lib/browsers";
+import { coveringMediaSite, normalizeMediaSites } from "../../lib/mediaSites";
 
 /** Keep number-field drafts within the syntax every Settings spec accepts. */
 export function sanitizeNumericDraft(raw: string, allowDecimal: boolean): string {
@@ -123,6 +124,7 @@ export function Row({
   bare = false,
   compact = false,
   stacked = false,
+  footer,
 }: {
   label: string;
   help: string;
@@ -133,20 +135,200 @@ export function Row({
   compact?: boolean;
   /** Places a wide control below its description instead of in the right rail. */
   stacked?: boolean;
+  /** Extra content on its own line below the label/help/control line, at the
+   *  row's full width rather than squeezed into the control rail beside the
+   *  help text. For a control that keeps its place in the rail (a toggle) but
+   *  has a second element too wide to share that column with a three-line
+   *  description — see the "Record websites" row, whose store-link buttons
+   *  used to narrow the help text into an unusually tall paragraph. */
+  footer?: ReactNode;
 }) {
   return (
-    <div
-      className={`${stacked ? "" : "flex items-center justify-between gap-4 max-sm:block"} ${
-        bare ? "" : "border-t border-surface-2 px-4 py-[15px] first:border-t-0"
-      }`}
-    >
-      <div className="min-w-0">
-        <p className={`font-medium text-ink ${compact ? "text-xs" : "text-row"}`}>{label}</p>
-        <p className="mt-[5px] max-w-[400px] text-meta leading-snug text-ink-3">
-          {help}
-        </p>
+    <div className={bare ? "" : "border-t border-surface-2 px-4 py-[15px] first:border-t-0"}>
+      <div className={stacked ? "" : "flex items-center justify-between gap-4 max-sm:block"}>
+        <div className="min-w-0">
+          <p className={`font-medium text-ink ${compact ? "text-xs" : "text-row"}`}>{label}</p>
+          <p className="mt-[5px] max-w-[400px] text-meta leading-snug text-ink-3">
+            {help}
+          </p>
+        </div>
+        <div className={stacked ? "mt-3" : "shrink-0 max-sm:mt-3"}>{control}</div>
       </div>
-      <div className={stacked ? "mt-3" : "shrink-0 max-sm:mt-3"}>{control}</div>
+      {footer && <div className="mt-3">{footer}</div>}
+    </div>
+  );
+}
+
+/** The chip-list field Settings uses wherever a setting is a set of names the
+ *  reader can extend — browser processes, media sites.
+ *
+ *  Everything specific to a list lives in the props: how typed text parses into
+ *  entries (`normalize`), how many must survive (`minimum`), and whether an
+ *  entry is redundant rather than new (`describeCovered`, whose message is
+ *  shown below the field instead of adding a chip). The keyboard contract —
+ *  Enter or comma to add, Left Arrow from the empty input to reach the chips,
+ *  Delete to remove — is the part worth having in one place. */
+function ChipEditor({
+  values,
+  onChange,
+  normalize,
+  groupLabel,
+  collectionName,
+  addLabel,
+  instructionsId,
+  display = (value) => value,
+  minimum = 0,
+  minimumHint,
+  describeCovered,
+}: {
+  values: string[];
+  onChange: (values: string[]) => void;
+  normalize: (raw: string) => string[];
+  /** Names the field for assistive technology: "Browser processes". */
+  groupLabel: string;
+  /** Names the set inside a chip's remove label: "browser processes". */
+  collectionName: string;
+  /** Verb phrase for the input: "Add a browser process". */
+  addLabel: string;
+  instructionsId: string;
+  display?: (value: string) => string;
+  minimum?: number;
+  minimumHint?: string;
+  describeCovered?: (value: string, current: string[]) => string | null;
+}) {
+  const [input, setInput] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const chipRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const commit = (raw = input) => {
+    const additions = normalize(raw);
+    if (additions.length > 0) {
+      const next = [...values];
+      let covered: string | null = null;
+      for (const addition of additions) {
+        // Redundancy is reported, not silently accepted: pressing Enter and
+        // watching nothing happen reads as a broken field.
+        const message = describeCovered?.(addition, next);
+        if (message) {
+          covered ??= message;
+          continue;
+        }
+        if (!next.includes(addition)) next.push(addition);
+      }
+      setNotice(covered);
+      if (next.length !== values.length) onChange(next);
+    }
+    setInput("");
+  };
+
+  const remove = (index: number) => {
+    if (values.length <= minimum) return;
+    onChange(values.filter((_, valueIndex) => valueIndex !== index));
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const focusChip = (index: number) => {
+    chipRefs.current[index]?.focus();
+  };
+
+  return (
+    <div>
+      <div
+        className="flex min-h-[42px] flex-wrap items-center gap-2 rounded-[10px] border border-control-edge bg-control px-2.5 py-2 transition-colors focus-within:border-accent/60"
+        role="group"
+        aria-label={groupLabel}
+        aria-describedby={instructionsId}
+      >
+        {values.map((value, index) => {
+          const label = display(value);
+          const removable = values.length > minimum;
+          return (
+            <button
+              key={value}
+              ref={(element) => {
+                chipRefs.current[index] = element;
+              }}
+              type="button"
+              tabIndex={-1}
+              aria-label={
+                removable
+                  ? `Remove ${label} from ${collectionName}`
+                  : `${label}; ${minimumHint ?? ""}`
+              }
+              aria-disabled={!removable}
+              title={removable ? `Remove ${label}` : minimumHint}
+              onClick={() => remove(index)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  focusChip(Math.max(0, index - 1));
+                } else if (event.key === "ArrowRight") {
+                  event.preventDefault();
+                  if (index === values.length - 1) inputRef.current?.focus();
+                  else focusChip(index + 1);
+                } else if (event.key === "Delete" || event.key === "Backspace") {
+                  event.preventDefault();
+                  remove(index);
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  inputRef.current?.focus();
+                }
+              }}
+              className={`flex h-7 items-center gap-1.5 rounded-[8px] border border-edge bg-surface-3 px-2.5 font-mono text-xs text-ink transition-colors ${
+                removable ? "hover:border-edge-2 hover:bg-hover-2" : "cursor-default"
+              }`}
+            >
+              <span>{label}</span>
+              <span aria-hidden="true" className={removable ? "text-ink-3" : "text-ink-3/40"}>×</span>
+            </button>
+          );
+        })}
+        <input
+          ref={inputRef}
+          type="text"
+          spellCheck={false}
+          autoComplete="off"
+          value={input}
+          aria-label={addLabel}
+          placeholder={`${addLabel}…`}
+          onChange={(event) => {
+            setInput(event.target.value);
+            setNotice(null);
+          }}
+          onPaste={(event) => {
+            const pasted = event.clipboardData.getData("text");
+            if (input.trim() || !/[\r\n,]/.test(pasted)) return;
+            event.preventDefault();
+            commit(pasted);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === ",") {
+              event.preventDefault();
+              commit();
+            } else if (
+              event.key === "ArrowLeft"
+              && input.length === 0
+              && event.currentTarget.selectionStart === 0
+              && values.length > 0
+            ) {
+              event.preventDefault();
+              focusChip(values.length - 1);
+            }
+          }}
+          className="h-7 min-w-0 flex-1 basis-full bg-transparent px-1 font-mono text-xs text-ink outline-none placeholder:font-sans placeholder:text-ink-3 sm:min-w-[168px] sm:basis-auto"
+        />
+        <span id={instructionsId} className="sr-only">
+          Press Enter or comma to add. From the empty input, press Left Arrow to manage existing entries, then Delete to remove one.
+        </span>
+      </div>
+      {/* Polite, not an alert: a redundant entry is a correction to the reader's
+          expectation, not an error they have to clear. */}
+      {notice && (
+        <p role="status" className="mt-2 pl-0.5 text-meta text-ink-3">
+          {notice}
+        </p>
+      )}
     </div>
   );
 }
@@ -158,120 +340,46 @@ export function BrowserProcessEditor({
   value: string;
   onChange: (processes: string[]) => void;
 }) {
-  const processes = normalizeBrowserProcesses(value);
-  const [input, setInput] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const chipRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const instructionsId = "browser-process-instructions";
-
-  const commit = (raw = input) => {
-    const additions = normalizeBrowserProcesses(raw);
-    if (additions.length > 0) {
-      const next = [...processes];
-      for (const process of additions) {
-        if (!next.includes(process)) next.push(process);
-      }
-      if (next.length !== processes.length) onChange(next);
-    }
-    setInput("");
-  };
-
-  const remove = (index: number) => {
-    if (processes.length <= 1) return;
-    onChange(processes.filter((_, processIndex) => processIndex !== index));
-    requestAnimationFrame(() => inputRef.current?.focus());
-  };
-
-  const focusChip = (index: number) => {
-    chipRefs.current[index]?.focus();
-  };
-
   return (
-    <div
-      className="flex min-h-[42px] flex-wrap items-center gap-2 rounded-[10px] border border-control-edge bg-control px-2.5 py-2 transition-colors focus-within:border-accent/60"
-      role="group"
-      aria-label="Browser processes"
-      aria-describedby={instructionsId}
-    >
-      {processes.map((process, index) => {
-        const label = process.replace(/\.exe$/i, "");
-        const removable = processes.length > 1;
-        return (
-          <button
-            key={process}
-            ref={(element) => {
-              chipRefs.current[index] = element;
-            }}
-            type="button"
-            tabIndex={-1}
-            aria-label={
-              removable
-                ? `Remove ${label} from browser processes`
-                : `${label}; at least one browser process is required`
-            }
-            aria-disabled={!removable}
-            title={removable ? `Remove ${label}` : "At least one browser process is required"}
-            onClick={() => remove(index)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowLeft") {
-                event.preventDefault();
-                focusChip(Math.max(0, index - 1));
-              } else if (event.key === "ArrowRight") {
-                event.preventDefault();
-                if (index === processes.length - 1) inputRef.current?.focus();
-                else focusChip(index + 1);
-              } else if (event.key === "Delete" || event.key === "Backspace") {
-                event.preventDefault();
-                remove(index);
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                inputRef.current?.focus();
-              }
-            }}
-            className={`flex h-7 items-center gap-1.5 rounded-[8px] border border-edge bg-surface-3 px-2.5 font-mono text-xs text-ink transition-colors ${
-              removable ? "hover:border-edge-2 hover:bg-hover-2" : "cursor-default"
-            }`}
-          >
-            <span>{label}</span>
-            <span aria-hidden="true" className={removable ? "text-ink-3" : "text-ink-3/40"}>×</span>
-          </button>
-        );
-      })}
-      <input
-        ref={inputRef}
-        type="text"
-        spellCheck={false}
-        autoComplete="off"
-        value={input}
-        aria-label="Add a browser process"
-        placeholder="Add a browser process…"
-        onChange={(event) => setInput(event.target.value)}
-        onPaste={(event) => {
-          const pasted = event.clipboardData.getData("text");
-          if (input.trim() || !/[\r\n,]/.test(pasted)) return;
-          event.preventDefault();
-          commit(pasted);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === ",") {
-            event.preventDefault();
-            commit();
-          } else if (
-            event.key === "ArrowLeft"
-            && input.length === 0
-            && event.currentTarget.selectionStart === 0
-            && processes.length > 0
-          ) {
-            event.preventDefault();
-            focusChip(processes.length - 1);
-          }
-        }}
-        className="h-7 min-w-0 flex-1 basis-full bg-transparent px-1 font-mono text-xs text-ink outline-none placeholder:font-sans placeholder:text-ink-3 sm:min-w-[168px] sm:basis-auto"
-      />
-      <span id={instructionsId} className="sr-only">
-        Press Enter or comma to add. From the empty input, press Left Arrow to manage existing processes, then Delete to remove one.
-      </span>
-    </div>
+    <ChipEditor
+      values={normalizeBrowserProcesses(value)}
+      onChange={onChange}
+      normalize={normalizeBrowserProcesses}
+      groupLabel="Browser processes"
+      collectionName="browser processes"
+      addLabel="Add a browser process"
+      instructionsId="browser-process-instructions"
+      display={(process) => process.replace(/\.exe$/i, "")}
+      minimum={1}
+      minimumHint="At least one browser process is required"
+    />
+  );
+}
+
+/** The reader's additions to the built-in media list. Empty is the normal
+ *  state — the built-ins are deliberately not shown as removable chips, so the
+ *  field stays one line for everyone Time already covers. */
+export function MediaSiteEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (sites: string[]) => void;
+}) {
+  return (
+    <ChipEditor
+      values={normalizeMediaSites(value)}
+      onChange={onChange}
+      normalize={normalizeMediaSites}
+      groupLabel="Media sites"
+      collectionName="media sites"
+      addLabel="Add a media site"
+      instructionsId="media-site-instructions"
+      describeCovered={(site, current) => {
+        const covering = coveringMediaSite(site, current);
+        return covering ? `Time already recognizes ${covering}.` : null;
+      }}
+    />
   );
 }
 
@@ -312,7 +420,7 @@ export function NumberStepper({
   return (
     <div className="inline-flex items-center rounded-[10px] border border-control-edge bg-control p-[3px] transition-colors focus-within:border-accent/60">
       <button type="button" aria-label={`Decrease ${label}`} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink" onClick={onMinus}>−</button>
-      <div className={`flex items-baseline justify-center ${display ? "w-[46px]" : unit ? "min-w-[34px] gap-1" : "min-w-[34px]"}`}>
+      <div className={`flex items-baseline justify-center ${unit ? "min-w-[34px] gap-1" : "min-w-[34px]"}`}>
         <input
           type={readOnly ? "text" : "number"}
           inputMode={readOnly ? undefined : "decimal"}
@@ -322,14 +430,19 @@ export function NumberStepper({
           step={readOnly ? undefined : step}
           aria-label={label}
           value={display ?? value}
-          style={unit ? { width: `${Math.max((display ?? value).length, 1)}ch` } : undefined}
+          // Always sized to its own content, never left at the browser's default
+          // intrinsic width for type="number" (which `w-full` fell back to when
+          // the parent had no width of its own to resolve a percentage against —
+          // the no-unit branch used to render nearly a digit wider than every
+          // unit-carrying stepper as a result).
+          style={{ width: `${Math.max((display ?? value).length, 1)}ch` }}
           onChange={(event) => onChange(event.target.value)}
           onBlur={onBlur}
           onKeyDown={(event) => {
             if (event.key === "Enter") { event.currentTarget.blur(); return; }
             if (!readOnly) blockNonNumericKeys(event);
           }}
-          className={`${unit ? "text-right" : "w-full text-center"} bg-transparent text-row font-semibold tabular-nums text-ink outline-none`}
+          className={`${unit ? "text-right" : "text-center"} bg-transparent text-row font-semibold tabular-nums text-ink outline-none`}
         />
         {unit && <span className="text-xs text-ink-3">{unit}</span>}
       </div>

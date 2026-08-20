@@ -26,9 +26,28 @@ export function browserDomainCoverage(
   };
 }
 
-/** Avoid transient/new-tab noise; one minute is enough to help a new user. */
+/** Browser time with no split before saying so is worth an interruption.
+ *
+ *  One minute was enough to prove the mechanism and far too little to earn the
+ *  message. It put the hint on screen within a minute of the onboarding screen
+ *  where the reader had just answered this exact question, which reads as the
+ *  app not having heard the answer. Half an hour of unsplit browsing is where
+ *  the absent split is costing them something they can see. */
+export const DOMAIN_HINT_MIN_BROWSER_SECONDS = 1_800;
+
+/** Browser time before the *positive* signal means anything. Deliberately far
+ *  lower than the hint: confirming data is arriving interrupts nobody. */
+export const WEBSITE_SIGNAL_MIN_BROWSER_SECONDS = 60;
+
+/** Above this share of browser time carrying no domain, treat the split as
+ *  absent rather than partial. */
+const MOSTLY_MISSING = 0.9;
+
 export function shouldShowDomainCoverageHint(coverage: BrowserDomainCoverage): boolean {
-  return coverage.totalSeconds >= 60 && coverage.missingFraction > 0.9;
+  return (
+    coverage.totalSeconds >= DOMAIN_HINT_MIN_BROWSER_SECONDS
+    && coverage.missingFraction > MOSTLY_MISSING
+  );
 }
 
 /**
@@ -37,8 +56,13 @@ export function shouldShowDomainCoverageHint(coverage: BrowserDomainCoverage): b
  * There is no way to ask Windows whether a browser extension is installed, and
  * a message that guessed would be worse than none. This asks the only question
  * that matters anyway — is the data arriving — which is also the question the
- * reader has. It is the exact complement of `shouldShowDomainCoverageHint`
- * above the same minute of browser time, so the two can never both be true.
+ * reader has.
+ *
+ * Stated as its own condition on the *evidence*, not as "the hint is not
+ * showing". Those were once equivalent and stopped being so the moment the two
+ * thresholds diverged: between one minute and half an hour with no domains at
+ * all, negating the hint would have reported that website tracking works
+ * precisely because too little time had passed to complain that it does not.
  *
  * Note the lag this implies: the tracker sees a domain only once a browser
  * window with a page open has been in the foreground. Confirmation can trail an
@@ -47,7 +71,10 @@ export function shouldShowDomainCoverageHint(coverage: BrowserDomainCoverage): b
  * installed") — the latter reads as broken during the gap.
  */
 export function websiteSignalConfirmed(coverage: BrowserDomainCoverage): boolean {
-  return coverage.totalSeconds >= 60 && !shouldShowDomainCoverageHint(coverage);
+  return (
+    coverage.totalSeconds >= WEBSITE_SIGNAL_MIN_BROWSER_SECONDS
+    && coverage.missingFraction <= MOSTLY_MISSING
+  );
 }
 
 /**
@@ -73,6 +100,10 @@ export function shouldShowWebsiteRuleHint(
   browserClassified: boolean,
   hasWebsiteRule: boolean,
 ): boolean {
-  if (shouldShowDomainCoverageHint(coverage)) return false;
-  return coverage.totalSeconds >= 60 && browserClassified && !hasWebsiteRule;
+  // Gated on the positive signal rather than on the absence of the hint above.
+  // Suggesting a website rule only makes sense once websites are actually being
+  // recorded, and while the thresholds differ "no hint yet" no longer implies
+  // that — it would have advised writing a rule for sites Time cannot see.
+  if (!websiteSignalConfirmed(coverage)) return false;
+  return browserClassified && !hasWebsiteRule;
 }

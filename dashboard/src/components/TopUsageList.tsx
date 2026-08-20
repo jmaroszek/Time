@@ -17,27 +17,42 @@ export default function TopUsageList({
   kind,
   comparisonDays,
   comparisonAvailable,
-  hiddenAppCount,
+  hiddenCount,
   websiteCoverage,
-  showChangesUnavailable = false,
 }: {
   items: UsageItem[];
   kind: RankedKind;
   comparisonDays: number;
   comparisonAvailable: boolean;
-  hiddenAppCount: number;
+  /** Rows of *this* kind held back by the minimum-time preference. */
+  hiddenCount: number;
   websiteCoverage: BrowserDomainCoverage;
-  showChangesUnavailable?: boolean;
 }) {
   const meta = useMeta();
   const { browserSet, minAppSecondsPerDay } = meta;
   const max = items[0]?.seconds ?? 1;
-  const coverageFooter =
-    kind === "websites"
-    && items.length > 0
-      ? insightsWebsiteCoverageFooter(websiteCoverage, showChangesUnavailable)
+  const noun = kind === "apps" ? "app" : "site";
+  // Both facts can be true of one website list, so the footers are a list and
+  // the well gives back exactly the height they take. Fixed steps rather than a
+  // computed style: the panel sits beside others of the same height, and that
+  // alignment should not depend on arithmetic done at render time.
+  const coverage =
+    kind === "websites" && items.length > 0
+      ? insightsWebsiteCoverageFooter(websiteCoverage)
       : null;
-  const hasFooter = (kind === "apps" && hiddenAppCount > 0) || coverageFooter !== null;
+  const footers: { text: string; title?: string }[] = [];
+  if (hiddenCount > 0) {
+    footers.push({
+      text: `${hiddenCount} ${hiddenCount === 1 ? noun : `${noun}s`} under ${fmtDuration(minAppSecondsPerDay)}/day hidden`,
+    });
+  }
+  if (coverage) {
+    footers.push({
+      text: coverage,
+      title: `${Math.round(websiteCoverage.missingFraction * 100)}% of browser time had no detected website`,
+    });
+  }
+  const wellHeight = ["max-h-[250px]", "max-h-[231px]", "max-h-[212px]"][footers.length];
 
   if (items.length === 0) {
     return <EmptyState kind={kind} websiteCoverage={websiteCoverage} />;
@@ -46,7 +61,7 @@ export default function TopUsageList({
   return (
     <div>
       <div
-        className={`scroll-well flex flex-col gap-2.5 overflow-y-auto pr-2 sm:pr-4 ${hasFooter ? "max-h-[231px]" : "max-h-[250px]"}`}
+        className={`scroll-well flex flex-col gap-2.5 overflow-y-auto pr-2 sm:pr-4 ${wellHeight}`}
       >
         {items.map((item) => {
           const rawIdentity = "processes" in item
@@ -89,37 +104,36 @@ export default function TopUsageList({
           );
         })}
       </div>
-      {kind === "apps" && hiddenAppCount > 0 && (
-        <div className="mt-2 flex h-[15px] items-center">
-          <p className="translate-y-px text-xs text-ink-3">
-            {hiddenAppCount} {hiddenAppCount === 1 ? "app" : "apps"} under {fmtDuration(minAppSecondsPerDay)}/day hidden
+      {footers.map((footer) => (
+        <div key={footer.text} className="mt-2 flex h-[15px] items-center">
+          <p className="translate-y-px truncate text-xs text-ink-3" title={footer.title}>
+            {footer.text}
           </p>
         </div>
-      )}
-      {coverageFooter && (
-        <div className="mt-2 flex h-[15px] items-center">
-          <p
-            className="translate-y-px truncate text-xs text-ink-3"
-            title={`${Math.round(websiteCoverage.missingFraction * 100)}% of browser time had no detected website`}
-          >
-            {coverageFooter}
-          </p>
-        </div>
-      )}
+      ))}
     </div>
   );
 }
 
+/**
+ * How much of this range's browser time Time could name a site for.
+ *
+ * One fact, about coverage, shown only when coverage is worth mentioning. It
+ * used to carry a second: a "· Changes unavailable" suffix reporting that the
+ * per-row delta badges had no previous period to compare against. That is a
+ * different subject wearing this sentence's clothes, and it read as a statement
+ * about coverage to the one person who knew it was not. It also dragged this
+ * footer onto screens that had not earned it — the old second clause fired even
+ * at 98% coverage, so a healthy install got a line implying something was
+ * missing. Missing delta badges announce themselves by being absent.
+ */
 export function insightsWebsiteCoverageFooter(
   coverage: BrowserDomainCoverage,
-  changesUnavailable: boolean,
 ): string | null {
   if (coverage.totalSeconds < 60) return null;
-  if (coverage.missingFraction < 0.1 && !changesUnavailable) return null;
+  if (coverage.missingFraction < 0.1) return null;
   const identified = Math.round((1 - coverage.missingFraction) * 100);
-  return `${identified}% of browser time identified${
-    changesUnavailable ? " · Changes unavailable" : ""
-  }`;
+  return `${identified}% of browser time identified`;
 }
 
 function EmptyState({

@@ -7,6 +7,7 @@ import { ExtensionLinks } from "../components/ExtensionLinks";
 import { displayBrowserProcesses, normalizeBrowserProcesses } from "../lib/browsers";
 import { fmtDuration } from "../lib/format";
 import { KeyedSerialQueue } from "../lib/keyedSerialQueue";
+import { normalizeMediaSites } from "../lib/mediaSites";
 import {
   hidesRareItems,
   hidesUtilities,
@@ -61,6 +62,7 @@ import {
 } from "./settings/chrome";
 import {
   BrowserProcessEditor,
+  MediaSiteEditor,
   NumberStepper,
   PrivacyToggle,
   Row,
@@ -142,9 +144,13 @@ function settingDraftValue(
   return settings[key] ?? "";
 }
 
-function clockHour(value: number): string {
+/** Split rather than one formatted string, so the hour renders in the same
+ *  bright weight as every other stepper's value and "am"/"pm" renders in the
+ *  same muted weight as every other stepper's unit — matching "20 hrs" and
+ *  "3 min" instead of standing out as the one all-bright value in the section. */
+function clockHour(value: number): { hour: string; meridiem: "am" | "pm" } {
   const normalized = value % 24;
-  return `${normalized % 12 || 12} ${normalized < 12 ? "AM" : "PM"}`;
+  return { hour: String(normalized % 12 || 12), meridiem: normalized < 12 ? "am" : "pm" };
 }
 
 function resolvedNoiseMode(raw: string | undefined): NoiseMode {
@@ -387,6 +393,12 @@ export default function SettingsTab({
     const draftValue = displayBrowserProcesses(storedValue);
     queueSetting("browser_processes", storedValue, draftValue);
   };
+  const saveMediaDomains = (sites: string[]) => {
+    // Empty is a valid state here, unlike the browser list: it means Time's
+    // built-in media sites are the whole set, which is the default.
+    const storedValue = normalizeMediaSites(sites.join(",")).join(",");
+    queueSetting("media_domains", storedValue, storedValue);
+  };
   const selectSetting = (key: string, value: string) => {
     queueSetting(key, value);
   };
@@ -577,12 +589,14 @@ export default function SettingsTab({
   const themedChoice = (choice: ProductivityOption) =>
     meta.theme === "light" ? choice.light : choice;
 
-  const numberControl = (spec: NumericSpec, label: string, unit?: string, hour = false) => (
+  const numberControl = (spec: NumericSpec, label: string, unit?: string, hour = false) => {
+    const clock = hour ? clockHour(Number(drafts[spec.key]) || 0) : null;
+    return (
     <NumberStepper
       label={label}
       value={drafts[spec.key] ?? ""}
-      display={hour ? clockHour(Number(drafts[spec.key]) || 0) : undefined}
-      unit={unit}
+      display={clock?.hour}
+      unit={clock?.meridiem ?? unit}
       readOnly={hour}
       min={spec.min}
       max={spec.max}
@@ -597,7 +611,8 @@ export default function SettingsTab({
       onMinus={() => step(spec, -1)}
       onPlus={() => step(spec, 1)}
     />
-  );
+    );
+  };
 
   return (
     // One column of settings, not two. Any masonry layout re-balances whenever a
@@ -715,18 +730,41 @@ export default function SettingsTab({
             />
           }
         />
-        {/* The extension is how websites get recorded at all, so it belongs
-            with the other decisions about what is captured. It sat in Advanced,
-            which is the heading that tells people not to touch what is under
-            it — the wrong place for the one thing here they may need to go
-            install. The process list it depends on is genuinely advanced and
-            stays there; its help names this row. */}
+        {/* The switch and the install link, in one row, because a reader looking
+            for one goes to the other.
+
+            They were two rows for a defensible reason: the extension decides
+            whether a site can reach Time at all, this decides whether Time keeps
+            it, and the second is a lighter and more reversible act than
+            uninstalling the first. That distinction is true and it did not
+            survive contact with the page. Both rows said "website", sat
+            adjacent, and the heading that names the feature — "Website
+            detection" — owned only the links. Time's own author went looking for
+            the recording switch underneath it, did not find it, and reported it
+            missing. Anyone hunting for a website setting reads that heading
+            first, so the setting has to be there.
+
+            One row, then, titled for what the reader can decide, with the store
+            links under the switch: install it, then choose whether Time keeps
+            what it sends. The distinction the two rows were drawing lives in the
+            help text, which is where a nuance that fine belongs. */}
         <Row
-          stacked
-          compact
-          label="Website detection"
-          help="Time Web Extension allows you to track activity in web browsers. Download in the Chrome or Firefox web store."
-          control={<ExtensionLinks />}
+          label="Record websites"
+          help="Stores the site a browser was on, so browser time splits by website. Turning this off records browser time without saying where it went. Needs Time Web Extension, below."
+          control={
+            <PrivacyToggle
+              label="Record websites"
+              enabled={
+                (drafts.record_browser_domains
+                  ?? meta.settings.record_browser_domains
+                  ?? "1") !== "0"
+              }
+              onChange={(enabled) =>
+                selectSetting("record_browser_domains", enabled ? "1" : "0")
+              }
+            />
+          }
+          footer={<ExtensionLinks />}
         />
         <ExclusionSummary onManage={onManageExclusions} />
       </Section>
@@ -845,13 +883,41 @@ export default function SettingsTab({
       </Section>
 
       {/* Directly under what gets recorded, because these two numbers
-          decide what the recording *means*: the idle threshold draws the line
-          between computer use and time away from it, and the chain gap decides
-          where one stretch of focus ends. Every section below reads or draws
-          the totals they define. */}
+          decide what the recording *means*: the chain gap decides where one
+          stretch of focus ends, and the idle threshold draws the line between
+          computer use and time away from it. Every section below reads or draws
+          the totals they define.
+
+          Idle goes second, against the section title's order, because its media
+          exception hangs off it in an indented group — and an indent that is
+          not the last thing in the card leaves the row below it looking like it
+          might be inside the group too. */}
       <Section title="Focus & idle">
-        <Row label="AFK idle threshold" help="No input for this long marks you Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use." control={numberControl(SPECS.idle, "AFK idle threshold", "min")} />
         <Row label="Focus chain max gap" help="Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration, while unproductive or AFK time ends it immediately." control={numberControl(SPECS.focus, "Focus chain max gap", "min")} />
+        <SettingGroup
+          dependents={
+            <Row
+              bare
+              compact
+              stacked
+              label="Media sites"
+              help="Video or audio playing on these sites keeps you from being marked AFK. Time already recognizes the major streaming and music services — add any it misses. Apps need no entry here."
+              control={
+                <MediaSiteEditor
+                  value={drafts.media_domains ?? ""}
+                  onChange={saveMediaDomains}
+                />
+              }
+            />
+          }
+        >
+          <Row
+            bare
+            label="AFK idle threshold"
+            help="No input for this long marks you Away From Keyboard (AFK). AFK time is not classified and does not count towards computer use."
+            control={numberControl(SPECS.idle, "AFK idle threshold", "min")}
+          />
+        </SettingGroup>
       </Section>
 
       {/* One section, not the two this was — "Insights" and "Timeline window"
@@ -859,14 +925,15 @@ export default function SettingsTab({
           answer, which is how "Week starts on" ended up filed under a window it
           has nothing to do with while pacing the goal two sections above it.
           Read together they are the frame the numbers are measured in: the
-          target, the week it is paced against, and the hours drawn. */}
+          week everything else is measured against, the target paced against
+          it, and the hours drawn. */}
       <Section title="Goals & time">
-        <Row label="Weekly productivity goal" help="Set to 0 hours to leave your goal unset." control={numberControl(SPECS.goal, "Weekly productivity goal", "h")} />
         <Row
           label="Week starts on"
           help="Affects weekly presets, bucketing, and goal pacing."
           control={<Segmented label="Week starts on" options={["Sunday", "Monday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
         />
+        <Row label="Weekly productivity goal" help="Set to 0 hours to leave your goal unset." control={numberControl(SPECS.goal, "Weekly productivity goal", "hrs")} />
         <Row label="Day starts at" help="First hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.start, "Day starts at", undefined, true)} />
         <Row label="Day ends at" help="Last hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.end, "Day ends at", undefined, true)} />
       </Section>
@@ -881,10 +948,13 @@ export default function SettingsTab({
         title="Hidden items"
         intro="Keep low-signal items out of the lists you read. Nothing here changes a total — the time is still recorded and still counted — and categorized items always remain visible."
       >
+        {/* The stored key is still min_app_seconds_per_day: it was app-only
+            before Insights ranked websites, and renaming a settings key costs a
+            migration to buy nothing the label cannot say. */}
         <Row
-          label="Minimum app time"
-          help="Hides apps averaging less than this per tracked day from Insights' Top Apps."
-          control={numberControl(SPECS.minimum, "Minimum app time", "min/day")}
+          label="Minimum daily time"
+          help="Hides apps and websites averaging less than this per tracked day from the Insights panel that ranks them. Whichever list is on screen reports how many rows it held back."
+          control={numberControl(SPECS.minimum, "Minimum daily time", "min")}
         />
         {/* Utilities are recognized by name alone, so this switch stands on its
             own and leads. The rare-item switch cannot be read without the two
@@ -915,7 +985,7 @@ export default function SettingsTab({
                 compact
                 label="Session limit"
                 help="…and no more than this many sessions."
-                control={numberControl(SPECS.noiseSessions, "Rare-item session limit", "sessions")}
+                control={numberControl(SPECS.noiseSessions, "Rare-item session limit")}
               />
             </>
           )}
@@ -1046,7 +1116,7 @@ export default function SettingsTab({
         <Row
           stacked
           label="Browser processes"
-          help="Processes treated as browsers for Website detection and Website or Window rules."
+          help="Processes treated as browsers for Record websites and Website or Window rules."
           control={
             <BrowserProcessEditor
               value={drafts.browser_processes ?? ""}

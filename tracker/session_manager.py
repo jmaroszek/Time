@@ -54,6 +54,10 @@ class Settings:
     # stay enabled here so isolated state-machine callers retain useful behavior.
     recording_consent: bool = True
     record_window_titles: bool = True
+    # Whether a browser session keeps the site it was on. Off makes browser time
+    # one undifferentiated block, which is the reader's call to make: the
+    # extension puts the URL in the window title whether or not Time wants it.
+    record_browser_domains: bool = True
     # Set from the tray (or dashboard) via the tracking_paused settings keys;
     # picked up by the live tracker on its next one-second poll.
     tracking_paused: bool = False
@@ -66,6 +70,10 @@ class Settings:
     # exclusions do not weaken the title-privacy default.
     excluded_processes: frozenset[str] = frozenset()
     excluded_domains: frozenset[str] = frozenset()
+    # Read by the media gate in tracker.py, not by this state machine, which
+    # sees only the `media_playing` verdict that gate produces. It rides here
+    # because this is the settings bag the tracker already refreshes each poll.
+    media_domains: frozenset[str] = frozenset()
 
 
 def is_idle(snap: Snapshot, settings: Settings) -> bool:
@@ -221,7 +229,7 @@ class SessionManager:
         # is visible, the previous allowed session ends immediately and no part
         # of the excluded identity is opened as a session.
         if snap.process is not None:
-            _, domain = self._privacy_fields(snap.process, snap.title)
+            domain = self._exclusion_domain(snap.process, snap.title)
             if self._is_excluded(snap.process, domain):
                 if cur is not None:
                     self._finalize_current(snap.now)
@@ -326,15 +334,21 @@ class SessionManager:
         if self._current is not None and not self._current.is_afk:
             process = self._current.process
             domain = self._current.domain
+            # Already open, so already past the exclusion gate. Its stored
+            # domain is the only one this branch has and the right one to match.
+            exclusion_domain = domain
         elif snap.process is not None:
             process = snap.process
             _, domain = self._privacy_fields(process, snap.title)
+            exclusion_domain = self._exclusion_domain(process, snap.title)
         else:
             return AFK_PROCESS, None
 
         # An exclusion is a promise not to store the identity at all, including
-        # after that app or website becomes idle.
-        if self._is_excluded(process, domain):
+        # after that app or website becomes idle, and including when website
+        # detection is off. Hence two domains: the derived one decides whether
+        # this identity may be stored, and `domain` is what storing it means.
+        if self._is_excluded(process, exclusion_domain):
             return AFK_PROCESS, None
         return process, domain
 
@@ -348,7 +362,26 @@ class SessionManager:
             and domain.lower() in self.settings.excluded_domains
         )
 
+    def _exclusion_domain(self, process: str, raw_title: str) -> str | None:
+        """The domain used only to match a website exclusion.
+
+        Derived even when the reader has turned website detection off, and never
+        returned to a caller that stores anything. "Never record this site" is a
+        stronger promise than "do not split browser time by site", so switching
+        the second one off must not quietly retire the first.
+        """
+        if process not in self.settings.browser_processes:
+            return None
+        return browser_privacy_fields(raw_title).domain
+
     def _privacy_fields(self, process: str, raw_title: str) -> tuple[str, str | None]:
+        """The title and domain as they will be stored.
+
+        Both halves have to be the stored values, not the derived ones, because
+        the caller also compares this tuple against the open session's stored
+        identity to decide where a session ends. Returning a domain that storage
+        then dropped made every tick look like a new website.
+        """
         is_browser = process in self.settings.browser_processes
         if is_browser:
             # Parse once so the title and domain cannot disagree about whether
@@ -357,7 +390,7 @@ class SessionManager:
             fields = browser_privacy_fields(raw_title)
             return (
                 fields.title if self.settings.record_window_titles else "",
-                fields.domain,
+                fields.domain if self.settings.record_browser_domains else None,
             )
         if not self.settings.record_window_titles:
             return "", None

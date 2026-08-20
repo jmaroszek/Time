@@ -50,19 +50,18 @@ function suggest(
 }
 
 describe("the catalog itself", () => {
-  // The load-bearing one. A browser in the catalog would file every site visited
-  // inside it under one category and take the browser out of the queue that
-  // would have prompted the correction — the single failure this feature could
-  // cause that the user would never be shown.
-  it("never names a browser", () => {
+  // Every browser Time ships knowledge of offers the same role, so the one app
+  // class a new reader is guaranteed to have does not greet them with silence.
+  it("names every default browser as browsing", () => {
     for (const process of BROWSERS) {
-      expect(STARTER_APPS[process], `${process} must not be suggestible`).toBeUndefined();
+      expect(STARTER_APPS[process], `${process} should be suggestible`).toBe("browsing");
     }
   });
 
-  it("lists every default browser as recognized but unsuggested", () => {
+  it("no longer withholds a suggestion from browsers", () => {
     for (const process of BROWSERS) {
-      expect(RECOGNIZED_NOT_SUGGESTED.has(process), `${process} should be listed`).toBe(true);
+      expect(RECOGNIZED_NOT_SUGGESTED.has(process), `${process} should not be withheld`)
+        .toBe(false);
     }
   });
 
@@ -175,12 +174,29 @@ describe("suggesting", () => {
     expect(suggest([app("start_protected_game.exe")])[0]?.categoryId).toBe(4);
   });
 
-  it("never suggests for a browser, listed or configured", () => {
-    expect(suggest([app("chrome.exe")])).toEqual([]);
-    // A browser this user added by hand is as untouchable as a shipped one.
+  it("suggests Browsing for a browser, listed or configured", () => {
+    expect(suggest([app("chrome.exe")])[0]?.categoryId).toBe(3);
+    // A browser this user added by hand is a browser on their say-so.
     expect(
-      suggestForTriage([app("thorium.exe")], SEEDED, new Set(), new Set(["thorium.exe"])),
-    ).toEqual([]);
+      suggestForTriage([app("thorium.exe")], SEEDED, new Set(), new Set(["thorium.exe"]))[0]
+        ?.categoryId,
+    ).toBe(3);
+  });
+
+  it("lets the configured browser set outrank a catalog entry", () => {
+    // Naming an app as a browser is a statement about this machine; the catalog
+    // is a guess about every machine.
+    expect(
+      suggestForTriage([app("code.exe")], SEEDED, new Set(), new Set(["code.exe"]))[0]
+        ?.categoryId,
+    ).toBe(3);
+  });
+
+  it("says nothing about a browser when the reader deleted Browsing", () => {
+    // The user's taxonomy wins: a role whose starter category is gone makes no
+    // suggestion rather than reaching for the nearest survivor.
+    const withoutBrowsing = SEEDED.filter((entry) => entry.name !== "Browsing");
+    expect(suggest([app("chrome.exe")], withoutBrowsing)).toEqual([]);
   });
 
   it("never suggests for a bimodal app", () => {

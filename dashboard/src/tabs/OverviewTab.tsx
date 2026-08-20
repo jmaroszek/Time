@@ -184,7 +184,7 @@ export default function OverviewTab({
   const refreshing =
     !updateError &&
     (sessionData.refreshing || sessionData.loading || analyzed.refreshing || !analyzed.current);
-  const { kpis, pace, hiddenAppCount } = model;
+  const { kpis, pace, hiddenAppCount, hiddenWebsiteCount } = model;
   // A bare "0s" is an assertion: it says the reader was productive for no time
   // at all. On a fresh install that is not what happened — nothing has been
   // measured yet, or nothing has been classified — and three confident zeros in
@@ -402,13 +402,12 @@ export default function OverviewTab({
                   ? model.appComparisonAvailable
                   : model.websiteComparisonAvailable
               )}
-              hiddenAppCount={rankedEntityKind === "apps" && rankedItems.length < topN ? hiddenAppCount : 0}
-              websiteCoverage={model.websiteCoverage}
-              showChangesUnavailable={
-                rankedEntityKind === "websites"
-                && preset !== "alltime"
-                && !model.websiteComparisonAvailable
+              hiddenCount={
+                rankedItems.length < topN
+                  ? (rankedEntityKind === "apps" ? hiddenAppCount : hiddenWebsiteCount)
+                  : 0
               }
+              websiteCoverage={model.websiteCoverage}
             />
           </div>
         </Card>

@@ -99,13 +99,19 @@ describe("recordingState", () => {
   const resolve = (
     settings: Record<string, string>,
     heartbeatAgeSec: number | null,
-    extra: { totalSessionCount?: number; starting?: boolean; nowSec?: number } = {},
+    extra: {
+      totalSessionCount?: number;
+      starting?: boolean;
+      nowSec?: number;
+      launchGrace?: boolean;
+    } = {},
   ) => recordingState({
     heartbeatAgeSec,
     settings,
     nowSec: extra.nowSec ?? NOW,
     totalSessionCount: extra.totalSessionCount,
     starting: extra.starting,
+    launchGrace: extra.launchGrace,
   });
 
   it("reports a pause even while the tracker is stamping health", () => {
@@ -144,6 +150,52 @@ describe("recordingState", () => {
     expect(resolve(recording, null).kind).toBe("stopped");
     // A start that has landed is recording, not still starting.
     expect(resolve(recording, 1, { starting: true }).kind).toBe("recording");
+  });
+
+  it("waits out the launch grace before calling a silent tracker stopped", () => {
+    // The fresh-install flash this exists for: the dashboard is up and the
+    // tracker is still unpacking itself, so the first read of a healthy launch
+    // looks identical to a dead process.
+    expect(resolve(recording, null, { launchGrace: true })).toEqual({ kind: "unconfirmed" });
+    expect(resolve(recording, null, { launchGrace: false }).kind).toBe("stopped");
+  });
+
+  it("covers a stale stamp at launch too, not just a missing one", () => {
+    // A clean shutdown zeroes the stamp, so a fresh launch usually reads null —
+    // but a crash, a Task Manager kill, or a machine powered off mid-session
+    // leaves the last stamp behind at whatever age it had reached. That number
+    // describes the previous run and says nothing about the process that started
+    // half a second ago, so it is the same ambiguity and gets the same grace.
+    const stale = TRACKER_ALERT_STALE_SECONDS + 1;
+    expect(resolve(recording, stale, { launchGrace: true }).kind).toBe("unconfirmed");
+    expect(resolve(recording, stale, { launchGrace: false }).kind).toBe("stopped");
+  });
+
+  it("prefers the reader's own start over the launch grace", () => {
+    // Both suppress the alarm, but `starting` names who is waiting and mounts a
+    // panel that escalates on its own, so it has to win.
+    expect(resolve(recording, null, { starting: true, launchGrace: true }).kind)
+      .toBe("starting");
+  });
+
+  it("keeps a chosen silence ahead of the launch grace", () => {
+    // Consent, pause, and schedule are resolved before liveness is consulted at
+    // all, so the grace must not repaint any of them as an unknown.
+    expect(resolve({ recording_consent: "0" }, null, { launchGrace: true }).kind)
+      .toBe("never_started");
+    expect(resolve({ ...recording, tracking_paused: "1" }, null, { launchGrace: true }).kind)
+      .toBe("paused");
+  });
+
+  it("shows no banner at all during the launch grace", () => {
+    // Not even the welcome copy: it asserts recording is under way, which is
+    // exactly what has not been established yet.
+    const plan = bannerFor({ kind: "unconfirmed" }, {
+      readerIsNew: true,
+      settings: recording,
+      pauseNoticeDismissed: false,
+    });
+    expect(plan).toBeNull();
   });
 
   it("agrees with trackerNeedsAttention on every input", () => {

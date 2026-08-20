@@ -32,7 +32,7 @@ import { LoadMore, NoResults } from "./ActivityFeedback";
 import ClearableInput from "./ClearableInput";
 import MatchedTitle from "./MatchedTitle";
 import ShareBar from "./ShareBar";
-import { triageCategoryOptions } from "./menuOptions";
+import { categoryDestinationOptions } from "./menuOptions";
 
 export type ActivityView = "library" | "rules";
 
@@ -302,7 +302,7 @@ function TriageRow({
         placeholder="Classify"
         value=""
         onChange={(value) => onAssign(item, Number(value))}
-        options={triageCategoryOptions(categories, suggested?.id)}
+        options={categoryDestinationOptions(categories, suggested?.id)}
       />
     </div>
   );

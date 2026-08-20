@@ -33,6 +33,28 @@ export const TRACKER_LIVE_STALE_SECONDS = 8;
 /** "Something is wrong", for a warning that follows the reader. */
 export const TRACKER_ALERT_STALE_SECONDS = 120;
 
+/**
+ * How long after the dashboard opens a silent tracker is still just booting.
+ *
+ * The two processes start together — the installer launches the dashboard, which
+ * launches the tracker, and Windows sign-in starts them side by side — and the
+ * dashboard wins that race every time. It is a webview with a database already
+ * on disk; the tracker is a PyInstaller bundle that has to unpack itself, import
+ * its world, and build a tray icon before it reaches the loop that stamps
+ * health. So the first status read of a perfectly healthy launch says "no
+ * heartbeat", and reporting that verbatim greeted every fresh install with the
+ * one banner reserved for a broken tracker, cleared a second or two later.
+ *
+ * Eight seconds is above what that boot takes even on a slow machine — a VM with
+ * Defender scanning a newly written executable — and far below the point where a
+ * reader would rather have been told sooner. Nothing is claimed during the wait:
+ * the state is `unconfirmed` and every banner stays silent, because the honest
+ * answer to "is it recording" is not yet known. Guessing "yes" would be the
+ * cheaper fix and the wrong one — this is a tracker, and it does not get to
+ * imply that recording is happening on no evidence.
+ */
+export const TRACKER_LAUNCH_GRACE_SECONDS = 8;
+
 /** Settings keys that permanently retire a notice the reader has read. Written
  *  on demand and read as `!== "1"`, so they need no bootstrap default — and
  *  deliberately outside DEFAULT_USER_SETTINGS, because restoring default
@@ -63,6 +85,9 @@ export type RecordingState =
   | { kind: "consent_withdrawn" }
   /** A start has been issued and the tracker has not confirmed it yet. */
   | { kind: "starting" }
+  /** The dashboard has only just opened and the tracker has not answered yet —
+   *  too early to call it either way. See TRACKER_LAUNCH_GRACE_SECONDS. */
+  | { kind: "unconfirmed" }
   /** Running and recording. */
   | { kind: "recording" }
   /** Paused from the tray or the dashboard. `until` is null when indefinite. */
@@ -82,6 +107,12 @@ export interface RecordingStateInput {
   /** True while the reader's own start is still unconfirmed, so the moments
    *  after pressing the button are not reported as a dead tracker. */
   starting?: boolean;
+  /** True while the dashboard is still inside its launch grace, so a tracker
+   *  that has not answered yet is reported as unconfirmed rather than stopped.
+   *  Surfaces the reader is watching on purpose — the Settings dot — leave this
+   *  off: they asked for the current answer and a correction costs them
+   *  nothing. See TRACKER_LAUNCH_GRACE_SECONDS. */
+  launchGrace?: boolean;
 }
 
 /** Kept as its own type because `trackerNeedsAttention` predates the state
@@ -99,7 +130,14 @@ export type TrackerAlertInput = RecordingStateInput;
  * about a process they had already told to stop working.
  */
 export function recordingState(
-  { heartbeatAgeSec, settings, nowSec, totalSessionCount = 0, starting = false }: RecordingStateInput,
+  {
+    heartbeatAgeSec,
+    settings,
+    nowSec,
+    totalSessionCount = 0,
+    starting = false,
+    launchGrace = false,
+  }: RecordingStateInput,
   staleAfterSec: number = TRACKER_ALERT_STALE_SECONDS,
 ): RecordingState {
   if (settings.recording_consent !== "1") {
@@ -113,10 +151,23 @@ export function recordingState(
   if (schedule.enabled && !schedule.recordingAllowed) {
     return { kind: "off_schedule", nextStart: schedule.nextStart, valid: schedule.valid };
   }
-  // Null means the tracker has never checked in at all. That is the strongest
-  // possible version of this signal, not a reason to stay quiet.
+  // Null means the tracker has never checked in, or checked out cleanly: the
+  // shutdown path zeroes the stamp on purpose. Either way it is the strongest
+  // version of this signal and not a reason to stay quiet — once there has been
+  // time for an answer.
   if (heartbeatAgeSec !== null && heartbeatAgeSec < staleAfterSec) return { kind: "recording" };
   if (starting) return { kind: "starting" };
+  // A start the reader asked for outranks this: it names who is waiting and
+  // carries its own escalation. What is left is a silence nobody asked about,
+  // which is only worth reporting once the tracker has had time to speak.
+  //
+  // Not gated on a null stamp, though null is the common case — a clean shutdown
+  // zeroes it on purpose. A crash, a kill from Task Manager, or a machine cut
+  // mid-session leaves the last stamp at whatever age it reached, and at launch
+  // that number describes the *previous* run: it cannot distinguish a tracker
+  // that died from one that started moments ago and has not stamped yet. Same
+  // ambiguity, same grace.
+  if (launchGrace) return { kind: "unconfirmed" };
   return { kind: "stopped" };
 }
 
@@ -194,6 +245,13 @@ export function bannerFor(state: RecordingState, context: BannerContext): Banner
       // expires into `stopped` and the alarm covers it.
       if (!context.readerIsNew) return null;
       return { id: "start_recording", scope: "insights", dismissible: false, dismissKey: null };
+    case "unconfirmed":
+      // Silence, deliberately, and for every reader. Nothing is known yet, so
+      // there is nothing any banner here could say that would still be true a
+      // second later — including the welcome copy, which asserts that recording
+      // is under way. The state expires into `recording` or `stopped` within
+      // TRACKER_LAUNCH_GRACE_SECONDS and whichever arrives gets its banner then.
+      return null;
     case "consent_withdrawn":
       if (dismissed(RECORDING_OFF_DISMISSED_KEY)) return null;
       return {

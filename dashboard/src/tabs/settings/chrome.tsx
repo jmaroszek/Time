@@ -81,9 +81,15 @@ export function SettingsSection({ title, children }: { title: string; children: 
  * without scrolling all of it.
  *
  * So the rail says what is here and jumps to it, and it lives in the dead space
- * beside a 600px column rather than taking any width from it. It appears only at
- * the app's "large" layout class and above (lib/responsive.ts), because that is
- * where the space exists — below it the page is exactly as it was.
+ * beside the settings column rather than reflowing it.
+ *
+ * It appears from 832px, which is where the space actually runs out rather than
+ * where the app's layout classes change: the panel's own 774px cap, plus the
+ * shell's 48px of horizontal padding and the viewport's 10px scrollbar
+ * reservation. It was pinned to the "large" class (1008px) instead, which cost
+ * the rail the ~175px band where it fits perfectly well — the window has to be
+ * shrunk barely at all before the index vanishes with room to spare beside it.
+ * Below 832 the page is exactly as it was.
  *
  * It sits to the *right* of the column. On the left it read as a second-level
  * tab bar competing with the real one directly above it, and it pushed the
@@ -143,7 +149,7 @@ export function SectionRail() {
   return (
     <nav
       aria-label="Settings sections"
-      className="sticky top-2 hidden w-[150px] shrink-0 flex-col gap-px self-start min-[1008px]:flex"
+      className="sticky top-2 hidden w-[150px] shrink-0 flex-col gap-px self-start min-[832px]:flex"
     >
       {SETTINGS_SECTIONS.map((title) => (
         <a

@@ -462,7 +462,12 @@ export default function ActivityTab({
     ).filter((session) => !session.isAfk);
     return browserDomainCoverage(clipped, meta.browserSet);
   }, [sessionData.ready, sessionData.sessions, range.start, range.end, meta.browserSet]);
-  const showDomainHint = domainCoverage !== null && shouldShowDomainCoverageHint(domainCoverage);
+  const showDomainHint = domainCoverage !== null
+    && shouldShowDomainCoverageHint(domainCoverage)
+    && meta.settings.domain_coverage_hint_dismissed !== "1"
+    // Nothing to report to a reader who has switched website recording off:
+    // browser time carries no domain because they asked for that.
+    && meta.settings.record_browser_domains !== "0";
 
   /**
    * The other half of the browser problem. `showDomainHint` covers the reader
@@ -541,6 +546,22 @@ export default function ActivityTab({
     } catch (cause) {
       banner.report(cause, "dismissing the website classification hint");
       setDismissingWebsiteRuleHint(false);
+    }
+  };
+  // A reader who is not going to install the extension has to be able to stop
+  // being told about it. Without this the notice was permanent for them: the
+  // condition it tests is exactly the condition their decision creates, so it
+  // could never retire on its own. Retires for good rather than per-session --
+  // declining an extension is not a thing to be asked again every launch.
+  const [dismissingDomainHint, setDismissingDomainHint] = useState(false);
+  const dismissDomainHint = async () => {
+    setDismissingDomainHint(true);
+    try {
+      await updateSetting("domain_coverage_hint_dismissed", "1");
+      await meta.refresh();
+    } catch (cause) {
+      banner.report(cause, "dismissing the website detection hint");
+      setDismissingDomainHint(false);
     }
   };
   const { applySuggestions, assignEntity, assignFromTriage, removeExactRules } =
@@ -850,8 +871,11 @@ export default function ActivityTab({
             Browser time is not being split by website. Time reads websites from browser window
             titles; install the first-party Time Web Extension to add that signal.
           </p>
-          <div className="mt-2.5">
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
             <ExtensionLinks />
+            <Button disabled={dismissingDomainHint} onClick={() => void dismissDomainHint()}>
+              {dismissingDomainHint ? "Saving…" : "Don't show again"}
+            </Button>
           </div>
         </section>
       )}

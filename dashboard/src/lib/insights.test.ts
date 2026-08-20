@@ -265,8 +265,8 @@ describe("ranked websites", () => {
     browserProcesses: ["chrome.exe"],
     weekStart: "Sunday",
     weeklyGoalHours: 0,
-    // Deliberately too high for any app: it must not silently erase websites.
-    minAppSecondsPerDay: 3_600,
+    // This block is about ranking hosts; the bar has its own tests below.
+    minAppSecondsPerDay: 0,
     aliases: { "docs.google.com": "Google Docs" },
     focusChainMaxGapSeconds: 120,
     hideUtilityApps: false,
@@ -287,7 +287,45 @@ describe("ranked websites", () => {
     ]);
     expect(model.websites.map((website) => website.category?.name)).toEqual(["Focus", "Media"]);
     expect(model.websites.map((website) => website.previousSeconds)).toEqual([600, 120]);
-    expect(model.apps).toEqual([]);
+    // The same browser time ranks as an app as well: the two lists are two
+    // views of one recording, not a partition of it.
+    expect(model.apps.map((app) => app.key)).toEqual(["chrome", "firefox"]);
+  });
+
+  it("applies the daily minimum to websites and reports what it held back", () => {
+    // The same request, with a bar above mail.google.com's 300s and below
+    // docs.google.com's 1,200s on the one active day in range.
+    const filtered = buildInsightsModel({
+      sessions: websiteSessions,
+      range,
+      categories,
+      rules: websiteRules,
+      browserProcesses: ["chrome.exe"],
+      weekStart: "Sunday",
+      weeklyGoalHours: 0,
+      minAppSecondsPerDay: 600,
+      aliases: { "docs.google.com": "Google Docs" },
+      focusChainMaxGapSeconds: 120,
+      hideUtilityApps: false,
+      dayStartHour: 0,
+      dayEndHour: 24,
+      labelMode: "date",
+      ...observation,
+    });
+    expect(filtered.websites.map((website) => website.key)).toEqual(["docs.google.com"]);
+    expect(filtered.hiddenWebsiteCount).toBe(1);
+    // And the bar means the same thing on the other list: Firefox's 600s is at
+    // the bar and stays, Chrome's 3,300s clears it, so nothing is held back
+    // there — one preference, two lists, no silent exemption for either.
+    expect(filtered.apps.map((app) => app.key)).toEqual(["chrome", "firefox"]);
+    expect(filtered.hiddenAppCount).toBe(0);
+    // Coverage is a fact about the recording, not about the visible list, so
+    // hiding a row must not change it.
+    expect(filtered.websiteCoverage).toEqual(model.websiteCoverage);
+  });
+
+  it("counts nothing as held back when every site clears the bar", () => {
+    expect(model.hiddenWebsiteCount).toBe(0);
   });
 
   it("reports browser time that could not be assigned to a website", () => {

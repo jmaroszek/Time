@@ -27,6 +27,26 @@ import type { ActivityEntityKind, ActivityStatus } from "./activity";
 export type NoiseMode = "off" | "one_off" | "utilities_only" | "utilities";
 export type NoiseReason = "one_off" | "utility";
 
+/**
+ * The stored values, named for what they actually filter.
+ *
+ * `NOISE_MODE_BOTH` is the string `"utilities"`, and that is the trap these
+ * constants exist to defuse: it dates from when this setting had three states
+ * and that one meant the whole filter. When utilities-without-rare became
+ * reachable, the newcomer took the name `utilities_only` and the wider value
+ * kept the narrower-sounding one. So `"utilities"` hides rare items too, and
+ * `"utilities_only"` is the one that does not.
+ *
+ * Reading the literal misleads reliably enough that it has already happened
+ * while diagnosing a report about this very default. Renaming the stored value
+ * would change the settings contract between the tracker and the dashboard, so
+ * the honest names live here: compare against these, never the strings.
+ */
+export const NOISE_MODE_OFF = "off";
+export const NOISE_MODE_RARE_ONLY = "one_off";
+export const NOISE_MODE_UTILITIES_ONLY = "utilities_only";
+export const NOISE_MODE_BOTH = "utilities";
+
 export interface NoisePolicy {
   mode: NoiseMode;
   /** Upper bound (exclusive) on lifetime time for the rare-item test. */
@@ -35,28 +55,35 @@ export interface NoisePolicy {
   maxSessions: number;
 }
 
+/** Utilities hidden, rare items shown.
+ *
+ *  Hiding rare items by default cost more than it saved: a new app appears in
+ *  Top Apps and not in Activity until its second session, which reads as Time
+ *  losing data rather than filtering it. The author hit this on a clean install
+ *  and had to check the filter control to explain his own app. Utilities are
+ *  different — an installer nobody ran on purpose has no second reading. */
 export const DEFAULT_NOISE_POLICY: NoisePolicy = {
-  mode: "utilities",
+  mode: NOISE_MODE_UTILITIES_ONLY,
   maxSeconds: 120,
   maxSessions: 1,
 };
 
 export function hidesRareItems(mode: NoiseMode): boolean {
-  return mode === "one_off" || mode === "utilities";
+  return mode === NOISE_MODE_RARE_ONLY || mode === NOISE_MODE_BOTH;
 }
 
 export function hidesUtilities(mode: NoiseMode): boolean {
-  return mode === "utilities_only" || mode === "utilities";
+  return mode === NOISE_MODE_UTILITIES_ONLY || mode === NOISE_MODE_BOTH;
 }
 
 /** The UI presents two independent switches while the database keeps one
- *  backwards-compatible value. `utilities` remains the historical "both"
- *  value; only the missing utilities-only combination is new. */
+ *  backwards-compatible value. See the mode constants above for why the "both"
+ *  value is spelled `utilities`. */
 export function noiseModeFor(rare: boolean, utilities: boolean): NoiseMode {
-  if (rare && utilities) return "utilities";
-  if (rare) return "one_off";
-  if (utilities) return "utilities_only";
-  return "off";
+  if (rare && utilities) return NOISE_MODE_BOTH;
+  if (rare) return NOISE_MODE_RARE_ONLY;
+  if (utilities) return NOISE_MODE_UTILITIES_ONLY;
+  return NOISE_MODE_OFF;
 }
 
 /** The fields the filter looks at — a structural subset of ActivityEntitySummary. */
@@ -135,10 +162,10 @@ export function noisePolicyFromSettings(settings: Record<string, string>): Noise
   const mode = settings.activity_noise_filter;
   return {
     mode:
-      mode === "off"
-      || mode === "one_off"
-      || mode === "utilities_only"
-      || mode === "utilities"
+      mode === NOISE_MODE_OFF
+      || mode === NOISE_MODE_RARE_ONLY
+      || mode === NOISE_MODE_UTILITIES_ONLY
+      || mode === NOISE_MODE_BOTH
         ? mode
         : DEFAULT_NOISE_POLICY.mode,
     maxSeconds: positiveNumber(settings.activity_noise_max_seconds, DEFAULT_NOISE_POLICY.maxSeconds),

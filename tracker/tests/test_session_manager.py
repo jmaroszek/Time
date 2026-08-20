@@ -418,10 +418,106 @@ def test_v1_path_only_change_does_not_create_a_session_boundary(manager, store):
 
 
 def test_malformed_v1_marker_fails_closed_without_legacy_domain(manager, store):
+    """No domain, and the refused URL does not reach storage either.
+
+    A query string is why this marker is refused, so storing the title verbatim
+    persisted exactly what the rejection was protecting against.
+    """
     raw = "Account [[https://example.com/private?secret=1:TIME_URL_V1]]"
     manager.tick(active(1000.0, process="chrome.exe", title=raw))
-    assert store.opened[0][3] == raw
+    stored_title = store.opened[0][3]
+    assert stored_title == "Account"
+    assert "secret" not in stored_title
     assert store.opened[0][4] is None
+
+
+def test_website_recording_off_stores_browser_time_without_a_domain(store):
+    manager = SessionManager(
+        store=store, settings=Settings(record_browser_domains=False)
+    )
+    manager.tick(
+        active(1000.0, process="chrome.exe", title="Docs [[https://example.com/a:TIME_URL_V1]]")
+    )
+    assert store.opened[0][4] is None
+    # The title is still cleaned of the marker and its URL: the reader turned off
+    # keeping the site, not off having it stripped.
+    assert "example.com" not in store.opened[0][3]
+
+
+def test_website_recording_off_does_not_split_a_session_per_page(store):
+    """The regression that made returning a derived domain here unworkable.
+
+    The open session's stored domain is None while the parsed one is not, so
+    comparing the two identities reported a new website on every tick and closed
+    a session each time. Browser time has to stay one block.
+    """
+    manager = SessionManager(
+        store=store,
+        settings=Settings(record_browser_domains=False, record_window_titles=False),
+    )
+    for offset, host in enumerate(["a.example", "b.example", "c.example"]):
+        for tick in range(3):
+            manager.tick(
+                active(
+                    1000.0 + offset * 3 + tick,
+                    process="chrome.exe",
+                    title=f"Page [[https://{host}/x:TIME_URL_V1]]",
+                )
+            )
+    assert len(store.opened) == 1
+    assert store.closed == {}
+
+
+def test_website_exclusion_still_applies_when_website_recording_is_off(store):
+    """Turning off the split must not retire a promise never to record a site.
+
+    "Never record this site" is the stronger of the two statements, so the
+    exclusion keeps matching on a domain that is derived, used, and discarded.
+    """
+    manager = SessionManager(
+        store=store,
+        settings=Settings(
+            record_browser_domains=False,
+            excluded_domains=frozenset({"private.example"}),
+        ),
+    )
+    manager.tick(
+        active(
+            1000.0,
+            process="chrome.exe",
+            title="Secret [[https://private.example/x:TIME_URL_V1]]",
+        )
+    )
+    assert store.opened == []
+
+
+def test_website_recording_off_keeps_domains_out_of_afk_identity(store):
+    """The AFK path stores the identity it retains, so it needs the stored domain.
+
+    Matching the exclusion needs the derived one. Using a single value for both
+    put the domain into an AFK row precisely when the reader had asked for it not
+    to be kept.
+    """
+    manager = SessionManager(
+        store=store,
+        settings=Settings(
+            record_browser_domains=False,
+            idle_threshold_seconds=IDLE_THRESHOLD,
+        ),
+    )
+    manager.tick(
+        active(1000.0, process="chrome.exe", title="Docs [[https://example.com/a:TIME_URL_V1]]")
+    )
+    manager.tick(
+        active(
+            1000.0 + IDLE_THRESHOLD + 1,
+            process="chrome.exe",
+            title="Docs [[https://example.com/a:TIME_URL_V1]]",
+            idle=IDLE_THRESHOLD + 1,
+        )
+    )
+    for opened in store.opened:
+        assert opened[4] is None
 
 
 def test_non_browser_process_does_not_interpret_v1_marker(manager, store):

@@ -106,7 +106,8 @@ describe("noise filtering", () => {
   it("falls back per-field on missing or unparseable settings", () => {
     expect(noisePolicyFromSettings({})).toEqual(DEFAULT_NOISE_POLICY);
     expect(DEFAULT_NOISE_POLICY.maxSessions).toBe(1);
-    expect(noisePolicyFromSettings({ activity_noise_filter: "nonsense" }).mode).toBe("utilities");
+    expect(noisePolicyFromSettings({ activity_noise_filter: "nonsense" }).mode)
+      .toBe(DEFAULT_NOISE_POLICY.mode);
     expect(noisePolicyFromSettings({ activity_noise_max_seconds: "-5" }).maxSeconds).toBe(120);
     expect(
       noisePolicyFromSettings({

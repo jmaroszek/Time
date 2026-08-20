@@ -652,24 +652,23 @@ describe("weekdayRhythmSummaries", () => {
 });
 
 describe("website coverage footer", () => {
-  it("appears at ten percent missing and explains suppressed changes", () => {
+  it("appears at ten percent missing", () => {
     const coverage = {
       totalSeconds: 600,
       missingSeconds: 60,
       missingFraction: 0.1,
     };
-    expect(insightsWebsiteCoverageFooter(coverage, false))
+    expect(insightsWebsiteCoverageFooter(coverage))
       .toBe("90% of browser time identified");
-    expect(insightsWebsiteCoverageFooter(coverage, true))
-      .toBe("90% of browser time identified · Changes unavailable");
   });
 
-  it("stays hidden for immaterial missing time unless changes need explanation", () => {
+  it("stays hidden when coverage is fine or the range is too small to judge", () => {
+    // Nothing else can drag this line onto the screen any more: it used to also
+    // appear at full coverage to report that the delta badges had no previous
+    // period, which told a healthy install something was missing.
     const coverage = { totalSeconds: 600, missingSeconds: 0, missingFraction: 0 };
-    expect(insightsWebsiteCoverageFooter(coverage, false)).toBeNull();
-    expect(insightsWebsiteCoverageFooter(coverage, true))
-      .toBe("100% of browser time identified · Changes unavailable");
-    expect(insightsWebsiteCoverageFooter({ ...coverage, totalSeconds: 59 }, true)).toBeNull();
+    expect(insightsWebsiteCoverageFooter(coverage)).toBeNull();
+    expect(insightsWebsiteCoverageFooter({ ...coverage, totalSeconds: 59 })).toBeNull();
   });
 });
 

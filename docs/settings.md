@@ -16,7 +16,7 @@ What Time is allowed to capture, and the one request that leaves your machine.
 | --- | --- |
 | **Record activity** | Allows the tracker to record app names and times. |
 | **Store window titles** | Stores window titles in the database. This enables window-based classification rules, but stored data may contain sensitive information. |
-| **Website detection** | Links to the Time Web Extension for Chrome and Firefox, which is what lets browser activity be recorded as individual websites rather than one browser. Nothing is installed from here — the links open the stores. |
+| **Record websites** | Whether Time stores the site a browser was on, so browser time splits by website instead of sitting under the browser. Carries the Time Web Extension store links for Chrome and Firefox, which is what makes any of it possible — nothing is installed from here, the links open the stores. |
 | **Check for updates** | Check for updates once per day. Time will not install a new version without your consent. |
 
 The updater is the only Time feature that uses the network, so it is worth being precise
@@ -61,20 +61,21 @@ what gets drawn and listed.
 
 | Setting | What it controls |
 | --- | --- |
-| **AFK idle threshold** | No input for this long marks you Away From Keyboard (AFK). Time will not mark you idle if it detects media playing in the foreground window. AFK time is not classified and does not count towards computer use. |
 | **Focus chain max gap** | Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration, while unproductive or AFK time ends it immediately. |
+| **AFK idle threshold** | No input for this long marks you Away From Keyboard (AFK). AFK time is not classified and does not count towards computer use. |
+| **Media sites** | Extra websites whose playing video or audio keeps you from being marked AFK, shown indented under the idle threshold it qualifies. Time already recognizes the mainstream streaming and music services, so this field ships empty and holds only what those miss; adding a site Time already covers reports the entry that covers it instead of adding a duplicate. Apps need no entry — Windows names the app that is playing, so any media app is recognized on sight. |
 | **Weekly productivity goal** | The target the Insights goal-pace card measures against. Set to 0 hours to leave your goal unset. |
 | **Week starts on** | Affects weekly presets, bucketing, and goal pacing. |
 | **Day starts/ends at** | The hour window drawn on the Timeline and Hour-of-Day plots. Activity outside the window still counts in all totals. |
-| **Minimum app time** | A rate: apps averaging less than this per tracked day are hidden only from Insights' Top Apps. Because it scales with the days that recorded activity, the same apps clear the bar on Today and on Year. Activity always shows the complete catalog. |
+| **Minimum daily time** | A rate: apps and websites averaging less than this per tracked day are hidden only from the Insights panel that ranks them — both lists, so the bar does not stop applying when the panel's selector moves between them. Because it scales with the days that recorded activity, the same rows clear the bar on Today and on Year. Whichever list is showing reports its own held-back count, and Activity always shows the complete catalog. |
 | **Hide system utilities** | Hides uncategorized installers, drivers, and temporary files. |
 | **Hide rare items** | Hides uncategorized items only when their all-history time and session count are both below the configured limits. Grouped in Settings with the two limits that define "rare", since neither reads correctly alone. |
 | **Rare-item time limit** / **Rare-item session limit** | An item counts as rare only when its all-history time is under the time limit *and* its all-history session count is at or under the session limit. The result does not change with the visible date range. |
 | **Heartbeat interval** | How often data is saved to the database. |
 | **Browser processes** | Which apps can be split into Websites and use Website or Window rules. Each process appears as a removable chip; type or paste a name or installation path and press Enter to add another. Several comma-separated or line-separated names can be pasted at once. Common browsers ship without `.exe` suffixes, while matching keeps canonical executable names internally. |
 
-Switches, selectors, and browser-process removals save immediately; numeric
-fields save on Enter or focus-out. A browser process is added with Enter or a
+Switches, selectors, and chip removals save immediately; numeric fields save on
+Enter or focus-out. A browser process or media site is added with Enter or a
 comma, and multi-value paste adds its entries together. A small status at the
 top confirms when writes finish, and a failed write restores the database value
 instead of leaving a false selection on screen. The tracker re-reads its

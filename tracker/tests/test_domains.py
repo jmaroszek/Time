@@ -9,6 +9,7 @@ import pytest
 
 from tracker.domains import (
     browser_privacy_fields,
+    normalize_host,
     parse_browser_title,
     parse_domain,
 )
@@ -196,7 +197,15 @@ def test_v1_parser_removes_only_one_owned_separator_and_terminal_marker():
     assert parsed.reduced_url == "https://new.example/current"
 
 
-def test_non_terminal_and_unknown_markers_bypass_legacy_url_parsing_and_sanitizing():
+def test_non_terminal_and_unknown_markers_bypass_legacy_domain_parsing():
+    """The domain fails closed, but the refused URL must not reach the title.
+
+    These titles previously came back verbatim, which meant the one case the
+    validated path rejects a marker *for* -- a query string -- was the case that
+    got stored intact once title capture was enabled. Failing closed is about
+    not deriving a domain from a marker Time could not validate; it was never a
+    reason to persist the URL inside it.
+    """
     titles = [
         "Page [[https://example.com/path:TIME_URL_V1]] after",
         "Page [[https://example.com/path:TIME_URL_V2]]",
@@ -205,7 +214,10 @@ def test_non_terminal_and_unknown_markers_bypass_legacy_url_parsing_and_sanitizi
     for title in titles:
         fields = browser_privacy_fields(title)
         assert fields.domain is None
-        assert fields.title == title
+        assert "example.com" not in fields.title
+        assert "secret" not in fields.title
+        assert "TIME_URL_V" not in fields.title
+        assert fields.title.startswith("Page")
 
 
 # The extension writes a marker that is terminal in ``document.title``. The
@@ -214,12 +226,44 @@ def test_non_terminal_and_unknown_markers_bypass_legacy_url_parsing_and_sanitizi
 # cases are deliberately absent from the shared protocol fixture: the fixture
 # defines the marker grammar both repositories implement, and a browser's own
 # window-title suffix is not part of that grammar.
+#
+# The Edge entries are the shapes a VM pass on 2026-08-17 found unparsed on a
+# working extension: Edge renders its own name with a zero-width space, and
+# appends a tab count when more than one tab is open. Either one alone left
+# website time unattributed for every Edge user.
 BROWSER_WINDOW_SUFFIXES = [
     " - Google Chrome",
     " - Mozilla Firefox",
     " - Microsoft Edge",
     " - Brave",
+    " - Opera",
+    " - Opera GX",
+    " - Vivaldi",
+    " - Microsoft​ Edge",
+    " - Microsoft  Edge",
+    " and 2 more pages - Microsoft Edge",
+    " and 12 more pages - Microsoft​ Edge",
+    " and 1 more page - Google Chrome",
+    " - Personal - Microsoft​ Edge",
+    " - Work - Brave",
+    " - Jonah - Google Chrome",
+    " and 4 more pages - Personal - Microsoft  Edge",
 ]
+
+
+def test_edge_window_title_captured_from_a_clean_install():
+    """The exact title that went unattributed during the 2026-08-17 VM pass.
+
+    Kept verbatim rather than reduced to the pattern it exposed, because the
+    reason this survived to a release candidate is that every case in this file
+    was written from what the grammar says a browser does. This one is what a
+    browser was observed doing.
+    """
+    fields = browser_privacy_fields(
+        "YouTube [[https://www.youtube.com/:TIME_URL_V1]] - Personal - Microsoft​ Edge"
+    )
+    assert fields.domain == "youtube.com"
+    assert fields.title == "YouTube"
 
 
 @pytest.mark.parametrize("suffix", BROWSER_WINDOW_SUFFIXES)
@@ -261,6 +305,61 @@ def test_browser_suffix_retry_does_not_invent_a_marker():
         assert browser_privacy_fields(title).domain is None
 
 
+def test_profile_label_strip_refuses_a_segment_carrying_a_url():
+    """A trailing segment with a URL in it is page text, not a profile label.
+
+    Without this the profile strip could consume the marker it exists to expose,
+    and a page could earn a domain for a marker it placed mid-title by appending
+    a segment of its own.
+    """
+    fields = browser_privacy_fields(
+        "Draft [[https://evil.example/a:TIME_URL_V1]] - see https://other.example/b"
+        " - Google Chrome"
+    )
+    assert fields.domain is None
+    assert "evil.example" not in fields.title
+    assert "other.example" not in fields.title
+
+
+def test_tab_count_is_only_stripped_behind_a_browser_name():
+    """Matching a browser name is what licenses removing anything else.
+
+    Without that gate the tab-count pattern would strip a page-authored ending
+    off any title, which is also how a page could get a mid-title marker of its
+    own accepted.
+    """
+    fields = browser_privacy_fields(
+        "Draft [[https://evil.example/a:TIME_URL_V1]] and 2 more pages"
+    )
+    assert fields.domain is None
+    assert "evil.example" not in fields.title
+
+
 def test_page_authored_double_bracket_survives_when_no_url_is_stripped():
     fields = browser_privacy_fields("Notes [[ - Google Chrome")
     assert fields.title == "Notes [["
+
+
+def test_normalize_host_accepts_what_a_settings_field_receives():
+    assert normalize_host("YouTube.com") == "youtube.com"
+    assert normalize_host("  www.netflix.com/browse  ") == "netflix.com"
+    assert normalize_host("https://user:pass@music.apple.com:443/us?x=1#y") == (
+        "music.apple.com"
+    )
+    assert normalize_host("cineby.at.") == "cineby.at"
+
+
+def test_normalize_host_rejects_what_could_never_be_a_stored_domain():
+    assert normalize_host("") is None
+    assert normalize_host("   ") is None
+    assert normalize_host("not a host") is None
+    assert normalize_host("1.2.3") is None  # digits, but not an address
+    assert normalize_host("https:///path") is None
+    assert normalize_host("-leading.example") is None
+
+
+def test_normalize_host_keeps_the_hosts_a_local_media_server_is_reached_by():
+    # A self-hosted Jellyfin or Plex is a media site too, and it answers to a
+    # bare name or an address rather than a registrable domain.
+    assert normalize_host("http://localhost:8096/web") == "localhost"
+    assert normalize_host("192.168.1.50:32400") == "192.168.1.50"
