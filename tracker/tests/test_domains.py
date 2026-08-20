@@ -266,6 +266,51 @@ def test_edge_window_title_captured_from_a_clean_install():
     assert fields.title == "YouTube"
 
 
+def test_brave_window_title_captured_from_the_vm():
+    """Observed in the 2026-08-20 VM pass, and kept for the same reason as Edge.
+
+    Brave writes the marker flush against the page name with no separating
+    space -- "Perplexity[[...]]" rather than "YouTube [[...]]" -- which is the
+    detail a title written from convention would not have thought to include.
+    """
+    fields = browser_privacy_fields(
+        "Perplexity[[https://www.perplexity.ai/:TIME_URL_V1]] - Brave"
+    )
+    assert fields.domain == "perplexity.ai"
+    assert fields.title == "Perplexity"
+
+
+def test_opera_window_title_captured_from_the_vm():
+    """Observed in the 2026-08-20 VM pass.
+
+    Carries a page name with spaces in it, which is what makes it worth keeping
+    beside the others: the sanitized title has to survive whole rather than
+    being trimmed back to its first word.
+    """
+    fields = browser_privacy_fields(
+        "Welcome to Costco Wholesale [[https://www.costco.com/:TIME_URL_V1]] - Opera"
+    )
+    assert fields.domain == "costco.com"
+    assert fields.title == "Welcome to Costco Wholesale"
+
+
+def test_vivaldi_window_title_captured_from_the_vm():
+    """Observed in the 2026-08-20 VM pass, and the busiest real title collected.
+
+    Three things at once that the tidy examples elsewhere in this file do not
+    have: a pipe inside the page name, a hyphen with no spaces around it
+    ("VTI-Vanguard") that must not be mistaken for the spaced hyphen the browser
+    suffix is written against, and a host whose subdomain is not "www", which is
+    kept rather than reduced to the registrable domain.
+    """
+    fields = browser_privacy_fields(
+        "VTI-Vanguard Morningstar Total Stock Market ETF | Vanguard"
+        " [[https://investor.vanguard.com/:TIME_URL_V1]] - Vivaldi"
+    )
+    assert fields.domain == "investor.vanguard.com"
+    assert fields.title == "VTI-Vanguard Morningstar Total Stock Market ETF | Vanguard"
+
+
 @pytest.mark.parametrize("suffix", BROWSER_WINDOW_SUFFIXES)
 def test_marker_is_recognized_behind_a_browser_window_suffix(suffix):
     title = f"Docs [[https://developer.chrome.com/:TIME_URL_V1]]{suffix}"

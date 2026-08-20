@@ -62,6 +62,22 @@ def test_source_matches_desktop_image_and_packaged_image_token():
     )
 
 
+def test_browsers_match_the_source_ids_windows_was_observed_publishing():
+    # Captured from a live GSMTC session (scripts/capture_gsmtc.py) rather than
+    # assumed: Edge publishes "MSEdge" and Chrome publishes "Chrome". Pinned
+    # here because the plausible-sounding guess -- "Microsoft.Edge" -- is not
+    # reachable from stem `msedge` by any rule above, so a future change made
+    # against the guess rather than the observation would look correct and
+    # silently stop exempting browser media from AFK.
+    assert source_matches_foreground("MSEdge", "msedge.exe", None)
+    assert source_matches_foreground("Chrome", "chrome.exe", None)
+
+
+def test_a_browser_source_does_not_vouch_for_a_different_browser():
+    assert not source_matches_foreground("MSEdge", "chrome.exe", None)
+    assert not source_matches_foreground("Chrome", "msedge.exe", None)
+
+
 def test_generic_process_stem_does_not_fuzzily_match_an_aumid():
     assert not source_matches_foreground(
         "Contoso.MusicPlayer_123!App",

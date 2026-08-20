@@ -396,6 +396,21 @@ export function StartRecordingPanel({
     return () => clearTimeout(id);
   }, [startAttempted, live, setStartAttempted]);
 
+  // The button stays pending until the tracker is *confirmed*, not until the
+  // command that launches it returns. `starting` covers only the latter: the
+  // invoke resolves as soon as the process is spawned, while the tracker takes
+  // several seconds more to unpack itself and stamp health. The button was
+  // flicking to "Starting…" and straight back to "Start tracking" while nothing
+  // visible changed, which reads as a click that did not register -- and the
+  // reader clicks again, launching another start into a tracker that is already
+  // coming up.
+  //
+  // `startUnconfirmed` is the release valve: at TRACKER_CONFIRM_MS the panel
+  // says it could not confirm the start, and the button has to be usable again
+  // for the retry that message invites. Without that clause a tracker that never
+  // comes up would leave the reader holding a permanently disabled button.
+  const startPending = starting || (startAttempted && !startUnconfirmed);
+
   return (
     <section className="rounded-[14px] border border-accent/25 bg-gradient-to-b from-accent/[.06] to-accent/[.02] px-5 py-4 text-xs leading-relaxed">
       <p className="text-row font-semibold">Welcome to Time</p>
@@ -414,10 +429,10 @@ export function StartRecordingPanel({
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
           variant="primary"
-          disabled={starting}
+          disabled={startPending}
           onClick={() => void startTracking().then(onStarted)}
         >
-          {starting ? "Starting…" : "Start tracking"}
+          {startPending ? "Starting…" : "Start tracking"}
         </Button>
         <Button onClick={onOpenSettings}>Open settings</Button>
       </div>
@@ -619,13 +634,25 @@ export function TrackerAlert({ onOpenSettings }: { onOpenSettings: () => void })
   const banner = useBanner();
   const [starting, setStarting] = useState(false);
 
+  // Held past the invoke for the same reason as StartRecordingPanel's button:
+  // the command resolves when the process is spawned, seconds before the tracker
+  // stamps the health this banner is waiting on, so releasing the button there
+  // reads as a click that did nothing. This panel keeps no liveness of its own --
+  // a confirmed start replaces it outright, since `stopped` is the only state
+  // that renders it -- so the timer below is what releases the button if the
+  // start silently failed, rather than leaving it disabled for good.
+  useEffect(() => {
+    if (!starting) return;
+    const id = setTimeout(() => setStarting(false), TRACKER_CONFIRM_MS);
+    return () => clearTimeout(id);
+  }, [starting]);
+
   const start = async () => {
     setStarting(true);
     try {
       await invoke("start_tracker");
     } catch (cause) {
       banner.report(cause, "tracker startup");
-    } finally {
       setStarting(false);
     }
   };

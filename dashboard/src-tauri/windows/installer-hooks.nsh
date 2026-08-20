@@ -1,9 +1,39 @@
 !define TIME_TRACKER_EXE "time-tracker.exe"
 !define TIME_TRACKER_RUN_VALUE "Time Tracker"
 
-; Stop the old sidecar before an upgrade replaces its one-dir files.
+; Names for the two "... is running!" prompts an install can raise. Time runs as
+; two processes and both have to be closed, so two prompts is correct -- but the
+; template names the dashboard by PRODUCTNAME, which is just "Time", so the pair
+; read as the same dialog shown twice rather than as one prompt per process.
+; Naming them for their jobs is the whole point of these strings.
+!define TIME_TRACKER_LABEL "Time tracker"
+!define TIME_DASHBOARD_LABEL "Time dashboard"
+
+; Close both processes before an upgrade replaces their files.
+;
+; Order matters, and is what lets the dashboard prompt be renamed at all. The
+; template runs its own CheckIfAppIsRunning immediately *after* this hook, using
+; PRODUCTNAME as the label. Closing the dashboard here means that later check
+; finds nothing running and stays silent, so the reader sees this hook's wording
+; instead of the template's. Killing it twice is not a risk: the macro prompts
+; only when the process is actually found.
+;
+; The tracker check is load-bearing and was removed once, on the reasoning that
+; the uninstaller an upgrade runs first had already stopped it. Without it an
+; in-place upgrade fails part-way through extraction with "Error opening file for
+; writing" on a _internal\PIL\*.pyd the tracker still has mapped -- because the
+; template's check only ever closes the dashboard, and nothing else in the
+; installer knows the sidecar exists. Do not remove it without reproducing an
+; upgrade over a *running* install first.
 !macro NSIS_HOOK_PREINSTALL
-  !insertmacro CheckIfAppIsRunning "${TIME_TRACKER_EXE}" "Time tracker"
+  !ifndef MAINBINARYNAME
+    ; Guards a silent failure rather than a loud one: an empty name would make
+    ; the check look for ".exe", find nothing, prompt nobody, and leave the
+    ; dashboard holding its files open.
+    !error "MAINBINARYNAME is undefined; the dashboard process check would match nothing."
+  !endif
+  !insertmacro CheckIfAppIsRunning "${TIME_TRACKER_EXE}" "${TIME_TRACKER_LABEL}"
+  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${TIME_DASHBOARD_LABEL}"
 !macroend
 
 ; Recording is never enabled by installation alone. The dashboard's first-run
@@ -20,7 +50,14 @@
 ; The uninstaller's closing RMDir on $INSTDIR is not recursive, so a Data
 ; directory with a database in it survives by refusing to be removed.
 !macro NSIS_HOOK_PREUNINSTALL
-  !insertmacro CheckIfAppIsRunning "${TIME_TRACKER_EXE}" "Time tracker"
+  !ifndef MAINBINARYNAME
+    !error "MAINBINARYNAME is undefined; the dashboard process check would match nothing."
+  !endif
+  ; Both processes, named, and for the same reason as PREINSTALL: the
+  ; uninstaller's own check follows this hook and would otherwise label the
+  ; dashboard "Time".
+  !insertmacro CheckIfAppIsRunning "${TIME_TRACKER_EXE}" "${TIME_TRACKER_LABEL}"
+  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${TIME_DASHBOARD_LABEL}"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" \
     "${TIME_TRACKER_RUN_VALUE}"
 !macroend

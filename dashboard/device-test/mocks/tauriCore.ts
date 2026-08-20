@@ -592,9 +592,10 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
     // Chrome by default so the onboarding extension row renders its published
     // state. "?browser=firefox" exercises the not-yet-published branch,
     // "?browser=unknown" the fallback for a ProgId Time does not recognize, and
-    // "?browser=edge" the store-gate branch — the only browsers that carry a
-    // gate are Edge and Opera, so without one of them the extension row's last
-    // sentence cannot be seen at all.
+    // "?browser=edge" the store-gate branch — Edge is now the only browser that
+    // carries a gate, so without it the extension row's last sentence cannot be
+    // seen at all. (Opera carried one too until its add-on requirement turned
+    // out not to exist.)
     case "default_browser_prog_id":
       result =
         fixtureParams.get("browser") === "firefox"

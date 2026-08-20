@@ -118,6 +118,12 @@ def source_matches_foreground(
     tokens = _SOURCE_TOKEN_RE.findall(source)
     # Win32 players commonly publish "spotify.exe"; packaged players commonly
     # publish an AUMID token such as "AppleMusicWin" for AppleMusic.exe.
+    #
+    # Browsers publish a bare product token: captured live, Edge publishes
+    # "MSEdge" and Chrome publishes "Chrome", both of which the stem rule below
+    # already matches. That was worth confirming rather than assuming -- a guess
+    # of "Microsoft.Edge" here would have been unreachable from stem `msedge`
+    # and invited an alias table for a case that does not arise.
     return source == image or any(
         token == stem or (len(stem) >= 4 and token.startswith(stem))
         for token in tokens

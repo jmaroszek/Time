@@ -80,13 +80,14 @@ const PROG_ID_ROUTES: readonly ProgIdRoute[] = [
     gate: "You may need to enable extensions from other stores in Edge first.",
   },
   { prefix: "BraveHTML", store: "Chrome Web Store" },
-  {
-    prefix: "OperaStable",
-    store: "Chrome Web Store",
-    // A harder gate than Edge's: Opera cannot install from this store at all
-    // until its own add-on is in place, so the store page alone is a dead end.
-    gate: "Opera installs from this store only after you add its own “Install Chrome Extensions” add-on first.",
-  },
+  // Opera carried a gate saying its own "Install Chrome Extensions" add-on had
+  // to come first. Installing the extension in Opera on a clean VM
+  // (2026-08-20) needed no such step -- it installed from the store directly,
+  // like Chrome and Brave -- so the sentence was telling readers to go do
+  // something they do not have to do, about a browser Time cannot see the state
+  // of. A caveat that turns out to be wrong is worse than no caveat: it sends
+  // people off to install an unrelated add-on before the thing they came for.
+  { prefix: "OperaStable", store: "Chrome Web Store" },
   { prefix: "VivaldiHTM", store: "Chrome Web Store" },
   { prefix: "ChromiumHTM", store: "Chrome Web Store" },
   { prefix: "FirefoxURL", store: "Firefox Add-ons" },

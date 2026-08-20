@@ -55,7 +55,14 @@ export default function TopUsageList({
   const wellHeight = ["max-h-[250px]", "max-h-[231px]", "max-h-[212px]"][footers.length];
 
   if (items.length === 0) {
-    return <EmptyState kind={kind} websiteCoverage={websiteCoverage} />;
+    return (
+      <EmptyState
+        kind={kind}
+        websiteCoverage={websiteCoverage}
+        hiddenCount={hiddenCount}
+        minSecondsPerDay={minAppSecondsPerDay}
+      />
+    );
   }
 
   return (
@@ -139,10 +146,38 @@ export function insightsWebsiteCoverageFooter(
 function EmptyState({
   kind,
   websiteCoverage,
+  hiddenCount,
+  minSecondsPerDay,
 }: {
   kind: RankedKind;
   websiteCoverage: BrowserDomainCoverage;
+  /** Rows the minimum-time preference held back. */
+  hiddenCount: number;
+  minSecondsPerDay: number;
 }) {
+  // Before either "nothing here" reading, because this list is not empty — it
+  // was emptied, by a setting, and saying "no activity in range" about time
+  // that was recorded is simply false. The websites branch got this worse than
+  // the apps one: with browser time present but every site under the bar, it
+  // fell through to advice about installing an extension the reader already
+  // has, for a signal Time already had and was hiding on purpose.
+  if (hiddenCount > 0) {
+    const noun = kind === "apps" ? "app" : "site";
+    return (
+      <div className="flex h-[250px] flex-col items-center justify-center px-6 text-center">
+        <p className="text-sm font-medium text-ink-2">
+          Everything here is under the minimum
+        </p>
+        <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-ink-3">
+          {hiddenCount === 1 ? "The one " : `All ${hiddenCount} `}
+          {hiddenCount === 1 ? noun : `${noun}s`} in this range
+          {hiddenCount === 1 ? " averages" : " average"} less than{" "}
+          {fmtDuration(minSecondsPerDay)}/day. Lower “Minimum app time” in Settings to see
+          {hiddenCount === 1 ? " it" : " them"}.
+        </p>
+      </div>
+    );
+  }
   if (kind === "apps") {
     return <p className="py-8 text-center text-xs text-ink-3">No activity in range</p>;
   }

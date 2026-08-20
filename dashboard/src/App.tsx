@@ -216,11 +216,23 @@ function Shell() {
   // grace ends, and a rendered comparison only re-evaluates when something else
   // causes a render. On an established install with a genuinely dead tracker
   // nothing else would, and the warning would wait for the minute poll.
+  //
+  // Anchored to onboarding finishing rather than to this component mounting.
+  // App renders the privacy screen itself, so mount happens while the reader is
+  // still reading it — and a first-run reader spends far longer than the grace
+  // there. The clock ran out before the dashboard existed, the tracker was only
+  // asked to start at the end of that screen, and the first render after it
+  // greeted a brand-new install with the alarm this grace exists to prevent.
+  // On an established install the setting is already "1" at mount, so this runs
+  // immediately and behaves exactly as an unconditional mount timer would.
+  const onboardingComplete = meta.settings.privacy_onboarding_complete === "1";
   const [launchGraceOver, setLaunchGraceOver] = useState(false);
   useEffect(() => {
+    if (!onboardingComplete) return;
+    setLaunchGraceOver(false);
     const id = setTimeout(() => setLaunchGraceOver(true), TRACKER_LAUNCH_GRACE_SECONDS * 1000);
     return () => clearTimeout(id);
-  }, []);
+  }, [onboardingComplete]);
 
   const heartbeatAgeSec = status?.lastHeartbeat == null || status.lastHeartbeat <= 0
     ? null
