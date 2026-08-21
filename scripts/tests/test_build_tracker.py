@@ -1,4 +1,5 @@
 import importlib.metadata
+import struct
 import subprocess
 from pathlib import Path
 
@@ -125,6 +126,53 @@ def test_sidecar_manifest_rejects_missing_dpi_contract(
 
     with pytest.raises(SystemExit, match="manifest does not declare"):
         build_tracker._verify_sidecar_manifest(tmp_path / "time-tracker.exe")
+
+
+def _write_pe_fixture(path: Path, *, subsystem: int) -> None:
+    """Write the smallest PE header needed to exercise subsystem parsing."""
+    pe_offset = 0x80
+    optional_header_offset = (
+        pe_offset + build_tracker._PE_OPTIONAL_HEADER_OFFSET_FROM_PE
+    )
+    contents = bytearray(0x200)
+    contents[:2] = b"MZ"
+    struct.pack_into("<I", contents, 0x3C, pe_offset)
+    contents[pe_offset : pe_offset + 4] = b"PE\0\0"
+    # The COFF optional-header-size field is 16 bytes into the 20-byte header.
+    struct.pack_into("<H", contents, pe_offset + 4 + 16, 0xF0)
+    struct.pack_into(
+        "<H", contents, optional_header_offset, build_tracker._PE32_PLUS_MAGIC
+    )
+    struct.pack_into(
+        "<H",
+        contents,
+        optional_header_offset + build_tracker._PE_SUBSYSTEM_OFFSET,
+        subsystem,
+    )
+    path.write_bytes(contents)
+
+
+def test_sidecar_subsystem_accepts_windows_gui(tmp_path):
+    executable = tmp_path / "time-tracker.exe"
+    _write_pe_fixture(executable, subsystem=build_tracker._WINDOWS_GUI_SUBSYSTEM)
+
+    build_tracker._verify_sidecar_subsystem(executable)
+
+
+def test_sidecar_subsystem_rejects_console_executable(tmp_path):
+    executable = tmp_path / "time-tracker.exe"
+    _write_pe_fixture(executable, subsystem=3)  # IMAGE_SUBSYSTEM_WINDOWS_CUI
+
+    with pytest.raises(SystemExit, match="Windows GUI executable"):
+        build_tracker._verify_sidecar_subsystem(executable)
+
+
+def test_sidecar_subsystem_rejects_truncated_pe(tmp_path):
+    executable = tmp_path / "time-tracker.exe"
+    executable.write_bytes(b"MZ" + bytes(62))
+
+    with pytest.raises(SystemExit, match="missing PE signature"):
+        build_tracker._verify_sidecar_subsystem(executable)
 
 
 def _fake_run(monkeypatch, *, returncode, write_database):

@@ -55,6 +55,15 @@ def _dashboard_path() -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def _dashboard_process_kwargs(path: Path) -> dict[str, object]:
+    """Build portable launch options without flashing a Windows console."""
+    kwargs: dict[str, object] = {"cwd": str(path.parent), "close_fds": True}
+    create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", None)
+    if create_no_window is not None:
+        kwargs["creationflags"] = create_no_window
+    return kwargs
+
+
 def _write_pause(db_path: str | Path, paused: str, until: float) -> None:
     """Set both pause keys in one short-lived connection (tray-thread only)."""
     conn = sqlite3.connect(db_path, timeout=30, isolation_level=None)
@@ -147,7 +156,7 @@ class _TrayActions:
         if path is None:
             return
         try:
-            subprocess.Popen([str(path)], cwd=str(path.parent), close_fds=True)
+            subprocess.Popen([str(path)], **_dashboard_process_kwargs(path))
         except OSError:
             logging.exception("Could not open the Time dashboard")
 

@@ -321,6 +321,23 @@ fn tracker_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "Time executable has no parent directory".into())
 }
 
+/// Keep native children invisible when launched from the GUI host. Windows
+/// console utilities such as `tasklist` and `taskkill` otherwise briefly open
+/// a terminal during lifecycle actions; applying the flag to every child also
+/// keeps this invariant intact if the packaged tracker's subsystem changes.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(windows)]
+fn hide_native_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_native_console(_command: &mut Command) {}
+
 pub(crate) fn system_start_tracker() -> Result<(), String> {
     let path = tracker_path()?;
     if !path.is_file() {
@@ -329,20 +346,20 @@ pub(crate) fn system_start_tracker() -> Result<(), String> {
             path.display()
         ));
     }
-    Command::new(&path)
-        .current_dir(path.parent().ok_or("tracker path has no parent")?)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let mut command = Command::new(&path);
+    command.current_dir(path.parent().ok_or("tracker path has no parent")?);
+    hide_native_console(&mut command);
+    command.spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub(crate) fn system_stop_tracker() -> Result<(), String> {
     #[cfg(windows)]
     {
-        let status = Command::new("taskkill")
-            .args(["/IM", "time-tracker.exe", "/T", "/F"])
-            .status()
-            .map_err(|e| e.to_string())?;
+        let mut command = Command::new("taskkill");
+        command.args(["/IM", "time-tracker.exe", "/T", "/F"]);
+        hide_native_console(&mut command);
+        let status = command.status().map_err(|e| e.to_string())?;
         // taskkill returns 128 when no matching process exists; both states are
         // safe for a privacy erase because no tracker can write afterward.
         if status.success() || status.code() == Some(128) {
@@ -395,11 +412,11 @@ fn system_run_tracker_migration() -> Result<(), String> {
             path.display()
         ));
     }
-    let status = Command::new(&path)
-        .current_dir(path.parent().ok_or("tracker path has no parent")?)
-        .env("TIME_MIGRATE_ONLY", "1")
-        .status()
-        .map_err(|error| error.to_string())?;
+    let mut command = Command::new(&path);
+    command.current_dir(path.parent().ok_or("tracker path has no parent")?);
+    command.env("TIME_MIGRATE_ONLY", "1");
+    hide_native_console(&mut command);
+    let status = command.status().map_err(|error| error.to_string())?;
     if status.success() {
         Ok(())
     } else {
@@ -412,10 +429,10 @@ fn system_run_tracker_migration() -> Result<(), String> {
 pub(crate) fn system_tracker_is_running() -> Result<bool, String> {
     #[cfg(windows)]
     {
-        let output = Command::new("tasklist")
-            .args(["/FI", "IMAGENAME eq time-tracker.exe", "/NH"])
-            .output()
-            .map_err(|error| error.to_string())?;
+        let mut command = Command::new("tasklist");
+        command.args(["/FI", "IMAGENAME eq time-tracker.exe", "/NH"]);
+        hide_native_console(&mut command);
+        let output = command.output().map_err(|error| error.to_string())?;
         if !output.status.success() {
             return Err(format!(
                 "Could not query tracker status ({})",

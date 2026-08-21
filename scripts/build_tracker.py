@@ -107,6 +107,66 @@ def _verify_sidecar_manifest(executable: Path) -> None:
         )
 
 
+_PE_SIGNATURE = b"PE\0\0"
+# The optional header follows the four-byte signature and 20-byte COFF header.
+_PE_OPTIONAL_HEADER_OFFSET_FROM_PE = 4 + 20
+_PE_SUBSYSTEM_OFFSET = 68
+_PE32_MAGIC = 0x10B
+_PE32_PLUS_MAGIC = 0x20B
+_WINDOWS_GUI_SUBSYSTEM = 2
+
+
+def _read_pe_subsystem(executable: Path) -> int:
+    """Read the PE optional-header subsystem without a third-party parser.
+
+    The tracker is launched by Windows startup and by the NSIS post-install
+    hook as well as by the GUI host. Those launchers cannot supply a
+    ``CREATE_NO_WINDOW`` flag, so the executable itself must remain a GUI
+    subsystem binary. Reading the small fixed PE header here keeps that
+    packaging contract dependency-free.
+    """
+    try:
+        with executable.open("rb") as stream:
+            dos_header = stream.read(64)
+            if len(dos_header) < 64 or dos_header[:2] != b"MZ":
+                raise ValueError("missing DOS header")
+            pe_offset = int.from_bytes(dos_header[0x3C:0x40], "little")
+            stream.seek(pe_offset)
+            if stream.read(4) != _PE_SIGNATURE:
+                raise ValueError("missing PE signature")
+            coff_header = stream.read(20)
+            if len(coff_header) < 20:
+                raise ValueError("truncated COFF header")
+            optional_header_size = int.from_bytes(coff_header[16:18], "little")
+            if optional_header_size < _PE_SUBSYSTEM_OFFSET + 2:
+                raise ValueError("truncated optional header")
+            optional_header = stream.read(optional_header_size)
+            if len(optional_header) < optional_header_size:
+                raise ValueError("truncated optional header")
+            magic = int.from_bytes(optional_header[:2], "little")
+            if magic not in {_PE32_MAGIC, _PE32_PLUS_MAGIC}:
+                raise ValueError(f"unsupported optional-header magic 0x{magic:X}")
+            return int.from_bytes(
+                optional_header[_PE_SUBSYSTEM_OFFSET : _PE_SUBSYSTEM_OFFSET + 2],
+                "little",
+            )
+    except OSError as error:
+        raise ValueError(f"could not read executable: {error}") from error
+
+
+def _verify_sidecar_subsystem(executable: Path) -> None:
+    """Reject a tracker that could create a console when launched directly."""
+    try:
+        subsystem = _read_pe_subsystem(executable)
+    except ValueError as error:
+        raise SystemExit(f"Could not inspect packaged tracker PE: {error}") from error
+    if subsystem != _WINDOWS_GUI_SUBSYSTEM:
+        raise SystemExit(
+            "Packaged tracker is not a Windows GUI executable "
+            f"(PE subsystem={subsystem}); PyInstaller must use console=False"
+        )
+
+
 def _target_triple(explicit: str | None) -> str:
     if explicit:
         return explicit
@@ -176,6 +236,7 @@ def build(target_triple: str) -> Path:
         raise SystemExit("PyInstaller did not produce the expected one-dir layout")
 
     _verify_sidecar_manifest(built_exe)
+    _verify_sidecar_subsystem(built_exe)
     _verify_sidecar_starts(built_exe)
 
     if TAURI_BINARIES.exists():

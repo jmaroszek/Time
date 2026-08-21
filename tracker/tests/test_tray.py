@@ -168,10 +168,13 @@ def test_tray_open_dashboard_and_quit_callbacks(tmp_path, monkeypatch):
     actions = tray._TrayActions(tmp_path / "unused.db", stop_event)
 
     actions.open_dashboard(None, None)
+    expected_kwargs = {"cwd": str(dashboard.parent), "close_fds": True}
+    if hasattr(tray.subprocess, "CREATE_NO_WINDOW"):
+        expected_kwargs["creationflags"] = tray.subprocess.CREATE_NO_WINDOW
     assert calls == [
         (
             [str(dashboard)],
-            {"cwd": str(dashboard.parent), "close_fds": True},
+            expected_kwargs,
         )
     ]
 
