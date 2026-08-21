@@ -2,6 +2,7 @@ import threading
 import time
 
 import pystray
+import pytest
 
 from tracker import db, tray
 from tracker.tracking_schedule import schedule_state
@@ -44,6 +45,27 @@ def test_tray_pause_resume_callbacks_persist_state(tmp_path, monkeypatch):
     assert resumed["tracking_paused"] == "0"
     assert resumed["tracking_paused_until"] == "0"
     assert icon.title == "Time: recording"
+
+
+def test_tray_pause_write_rolls_back_both_keys_on_partial_failure(tmp_path, monkeypatch):
+    path = tmp_path / "tray-atomic.db"
+    conn = db.open_db(path)
+    conn.close()
+    tray._write_pause(path, "1", 1900)
+
+    def fail_after_first_write(conn, _values):
+        conn.execute(
+            "UPDATE settings SET value='0' WHERE key='tracking_paused'"
+        )
+        raise RuntimeError("second pause setting failed")
+
+    monkeypatch.setattr(tray, "set_settings", fail_after_first_write)
+    with pytest.raises(RuntimeError):
+        tray._write_pause(path, "0", 2900)
+
+    state = _settings(path)
+    assert state["tracking_paused"] == "1"
+    assert state["tracking_paused_until"] == "1900"
 
 
 def test_tray_tooltip_distinguishes_recording_and_pause_states():

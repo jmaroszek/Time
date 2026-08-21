@@ -84,9 +84,19 @@ class PowerEventMonitor:
                     self._suspend_observed = False
                     self._automatic_resume_seen = True
             elif notification_type == PBT_APMRESUMESUSPEND:
-                # Windows sends this user-present companion after the automatic
-                # resume boundary. It is not a second wake and must not split
-                # the fresh post-resume session.
+                # User-present is a fallback for systems that omit the
+                # automatic resume callback. Once a suspend has been paired,
+                # this notification is only its duplicate companion.
+                if self._suspend_observed and not self._automatic_resume_seen:
+                    event = PowerEvent(
+                        "resume",
+                        self._clock(),
+                        suspend_observed=True,
+                    )
+                    self._suspend_observed = False
+                # This notification closes the current wake cycle. Resetting
+                # here lets a later automatic/critical notification without a
+                # suspend remain a useful fallback for a second wake.
                 self._automatic_resume_seen = False
             if event is not None:
                 self._events.append(event)

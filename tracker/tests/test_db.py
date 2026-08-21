@@ -158,7 +158,7 @@ def test_window_rule_shape_is_explicit_and_constrained(conn):
         )
 
 
-def test_v2_database_migrates_to_v4_resetting_title_rules_and_backing_up(tmp_path):
+def test_v2_database_migrates_to_v5_resetting_title_rules_and_backing_up(tmp_path):
     path = tmp_path / "v2.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -179,7 +179,7 @@ def test_v2_database_migrates_to_v4_resetting_title_rules_and_backing_up(tmp_pat
 
     migrated = db.open_db(path)
     raw = db.read_settings_raw(migrated)
-    assert raw["schema_version"] == "4"
+    assert raw["schema_version"] == "5"
     assert raw["window_rules_reset_v4_count"] == "1"
     assert raw["window_rules_reset_v4_pending"] == "1"
     assert migrated.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0
@@ -199,7 +199,7 @@ def test_v2_database_migrates_to_v4_resetting_title_rules_and_backing_up(tmp_pat
     restored.close()
 
 
-def test_v3_database_migrates_to_v4_preserving_app_and_website_rules(tmp_path):
+def test_v3_database_migrates_to_v5_preserving_app_and_website_rules(tmp_path):
     path = tmp_path / "v3.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -229,7 +229,7 @@ def test_v3_database_migrates_to_v4_preserving_app_and_website_rules(tmp_path):
         (6, "domain", "github.com", "", "", "", ""),
     ]
     raw = db.read_settings_raw(migrated)
-    assert raw["schema_version"] == "4"
+    assert raw["schema_version"] == "5"
     assert raw["window_rules_reset_v4_count"] == "1"
     assert raw["window_rules_reset_v4_pending"] == "1"
     assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
@@ -245,7 +245,7 @@ def test_fresh_database_is_not_backed_up(tmp_path):
     assert list((tmp_path / "Backups").glob("backup_schema*.db")) == []
 
 
-def test_v1_database_migrates_to_v4_in_one_pass(tmp_path):
+def test_v1_database_migrates_to_v5_in_one_pass(tmp_path):
     path = tmp_path / "v1.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -265,8 +265,9 @@ def test_v1_database_migrates_to_v4_in_one_pass(tmp_path):
     conn.close()
 
     migrated = db.open_db(path)
-    # Every step in one open: v1 -> v2 adds tables, v3/v4 rebuild rules.
-    assert db.read_settings_raw(migrated)["schema_version"] == "4"
+    # Every step in one open: v1 -> v2 adds tables, v3/v4 rebuild rules, and
+    # v5 adds the exact-overlap index.
+    assert db.read_settings_raw(migrated)["schema_version"] == "5"
     assert migrated.execute("SELECT process FROM sessions WHERE id=7").fetchone()[0] == "code.exe"
     tables = {
         row[0]
@@ -281,6 +282,41 @@ def test_v1_database_migrates_to_v4_in_one_pass(tmp_path):
         "title_anchor",
     } <= columns
     migrated.close()
+
+
+def test_v4_database_migrates_to_v5_adding_end_index_without_changing_rows(tmp_path):
+    path = tmp_path / "v4.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE sessions (id INTEGER PRIMARY KEY,start_ts INTEGER NOT NULL,"
+        "end_ts INTEGER NOT NULL,process TEXT NOT NULL);"
+        "CREATE INDEX idx_sessions_start ON sessions(start_ts);"
+        "CREATE INDEX idx_sessions_proc ON sessions(process);"
+        "CREATE TABLE settings (key TEXT PRIMARY KEY,value TEXT);"
+        "INSERT INTO settings VALUES ('schema_version','4');"
+        "INSERT INTO sessions VALUES (7,10,20,'code.exe'),(8,30,40,'notes.exe');"
+    )
+    conn.close()
+
+    migrated = db.open_db(path)
+    assert db.read_settings_raw(migrated)["schema_version"] == "5"
+    assert [tuple(row) for row in migrated.execute(
+        "SELECT id,start_ts,end_ts,process FROM sessions ORDER BY id"
+    )] == [(7, 10, 20, "code.exe"), (8, 30, 40, "notes.exe")]
+    assert migrated.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_sessions_end'"
+    ).fetchone() is not None
+    migrated.close()
+
+    backups = list((tmp_path / "Backups").glob("backup_schema4_*.db"))
+    assert len(backups) == 1
+    backup = sqlite3.connect(backups[0])
+    assert backup.execute("SELECT value FROM settings WHERE key='schema_version'").fetchone()[0] == "4"
+    assert backup.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 2
+    assert backup.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_sessions_end'"
+    ).fetchone() is None
+    backup.close()
 
 
 def test_tracker_refuses_newer_schema_without_mutating_it(tmp_path):

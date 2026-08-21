@@ -6,11 +6,16 @@ import {
   backlogOnlyQuery,
   bucketDailyUsage,
   buildActivityIndex,
+  currentActivitySessionIds,
   packActivitySource,
   queryActivityIndex,
+  resolveSelectedWindow,
+  restrictActivitySessionIds,
   unpackActivitySource,
   type ActivityQuery,
+  type ActivityQueryResult,
   type ActivitySource,
+  type ActivityTitleGroup,
 } from "./activity";
 import type { Category, Rule } from "./classify";
 
@@ -1154,15 +1159,43 @@ describe("visits carried for the inspected window", () => {
   });
 
   it("hands the inspected window as many visits as it asks for", () => {
-    const group = queryActivityIndex(many, {
+    const result = queryActivityIndex(many, {
       ...selected,
       selectedWindowKey: windowKey(),
       selectedWindowSessionLimit: 45,
-    }).detailGroups.rows[0];
+    });
+    const group = result.selectedWindow!;
     expect(group.sessions).toHaveLength(45);
     // Newest first, so paging deeper reaches steadily older visits — the ones
     // that could not be ticked or corrected at all before.
     expect(group.sessions[0].start).toBeGreaterThan(group.sessions[44].start);
+  });
+
+  it("returns the inspected window even when its detail row is outside the page", () => {
+    const mixed = buildActivityIndex({
+      categories,
+      browserProcesses: [],
+      aliases: {},
+      rules: [],
+      sessions: [
+        { id: 1, start: 10, end: 20, process: "editor.exe", title: "First - Editor", domain: null, isAfk: false },
+        { id: 2, start: 30, end: 50, process: "editor.exe", title: "Second - Editor", domain: null, isAfk: false },
+      ],
+    });
+    const unpaged = queryActivityIndex(mixed, { ...selected, detailSort: "title", detailDirection: "asc" });
+    const inspectedKey = unpaged.detailGroups.rows[1].key;
+    const result = queryActivityIndex(mixed, {
+      ...selected,
+      detailSort: "title",
+      detailDirection: "asc",
+      detailLimit: 1,
+      selectedWindowKey: inspectedKey,
+    });
+
+    expect(result.detailGroups.rows).toHaveLength(1);
+    expect(result.detailGroups.rows[0].key).not.toBe(inspectedKey);
+    expect(result.selectedWindow?.key).toBe(inspectedKey);
+    expect(result.selectedWindow?.sessions).toHaveLength(1);
   });
 
   it("never hands back more than the window actually has", () => {
@@ -1214,5 +1247,51 @@ describe("visits carried for the inspected window", () => {
     }).detailGroups.rows;
     expect(inspected[0].sessions).toHaveLength(40);
     expect(inspected[1].sessions).toHaveLength(GROUP_SESSION_SAMPLE);
+  });
+});
+
+const selectionGroup = (key: string, sessionIds: number[]): ActivityTitleGroup => ({
+  key,
+  sessionIds,
+} as ActivityTitleGroup);
+
+const selectionResult = (
+  selectedWindow: ActivityTitleGroup | null,
+  detailRows: ActivityTitleGroup[] = [],
+  searchRows: ActivityTitleGroup[] = [],
+): ActivityQueryResult => ({
+  selectedWindow,
+  detailGroups: { rows: detailRows },
+  windowMatches: searchRows.length > 0 ? { rows: searchRows } : null,
+} as unknown as ActivityQueryResult);
+
+describe("Activity selection freshness", () => {
+  it("keeps the old Window only while the replacement result is stale", () => {
+    const oldWindow = selectionGroup("old", [1]);
+    const freshWindow = selectionGroup("fresh", [2]);
+
+    expect(resolveSelectedWindow(oldWindow, selectionResult(freshWindow), false)).toBe(oldWindow);
+    expect(resolveSelectedWindow(oldWindow, selectionResult(freshWindow), true)).toBe(freshWindow);
+  });
+
+  it("closes the Window when the current result no longer contains it", () => {
+    const oldWindow = selectionGroup("old", [1]);
+    expect(resolveSelectedWindow(oldWindow, selectionResult(null), true)).toBeNull();
+  });
+});
+
+describe("Activity mutation session boundary", () => {
+  it("intersects classify/delete IDs with rows in the current result", () => {
+    const freshWindow = selectionGroup("fresh", [20, 21]);
+    const current = selectionResult(
+      freshWindow,
+      [selectionGroup("detail", [10, 11])],
+      [selectionGroup("search", [30])],
+    );
+
+    expect([...currentActivitySessionIds(current)].sort((a, b) => a - b)).toEqual([10, 11, 20, 21, 30]);
+    expect([...restrictActivitySessionIds([1, 10, 21, 999, 10], current)].sort((a, b) => a - b))
+      .toEqual([10, 21]);
+    expect([...restrictActivitySessionIds([10, 21], null)]).toEqual([]);
   });
 });

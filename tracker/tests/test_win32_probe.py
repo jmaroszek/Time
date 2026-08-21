@@ -26,6 +26,56 @@ def test_idle_seconds_handles_last_input_counter_wraparound(monkeypatch):
     assert win32_probe.get_idle_seconds() == 1.024
 
 
+def test_process_name_cache_distinguishes_pid_reuse_by_creation_time(monkeypatch):
+    win32_probe._name_cache.clear()
+    state = {"name": "old.exe", "created": 100.0}
+
+    class FakeProcess:
+        def name(self):
+            return state["name"]
+
+        def create_time(self):
+            return state["created"]
+
+    monkeypatch.setattr(win32_probe.psutil, "Process", lambda _pid: FakeProcess())
+
+    assert win32_probe._proc_name(42) == "old.exe"
+    state.update(name="new.exe", created=200.0)
+    assert win32_probe._proc_name(42) == "new.exe"
+    assert set(win32_probe._name_cache) == {(42, 100.0), (42, 200.0)}
+
+
+def test_app_user_model_id_cache_distinguishes_pid_reuse_by_creation_time(monkeypatch):
+    win32_probe._app_id_cache.clear()
+    state = {"created": 100.0, "app_id": "Old.App"}
+
+    class FakeKernel:
+        def OpenProcess(self, *_args):
+            return 1
+
+        def GetApplicationUserModelId(self, _handle, length, buffer):
+            if buffer is None:
+                length._obj.value = len(state["app_id"]) + 1
+                return win32_probe._ERROR_INSUFFICIENT_BUFFER
+            buffer.value = state["app_id"]
+            return 0
+
+        def CloseHandle(self, _handle):
+            return True
+
+    monkeypatch.setattr(win32_probe, "_kernel32", FakeKernel())
+    monkeypatch.setattr(
+        win32_probe,
+        "_process_cache_key",
+        lambda pid: (pid, state["created"]),
+    )
+
+    assert win32_probe._proc_app_user_model_id(42) == "Old.App"
+    state.update(created=200.0, app_id="New.App")
+    assert win32_probe._proc_app_user_model_id(42) == "New.App"
+    assert set(win32_probe._app_id_cache) == {(42, 100.0), (42, 200.0)}
+
+
 def test_resolve_uwp_pid_ignores_application_frame_host(monkeypatch):
     process_ids = {100: 41, 101: 99}
 

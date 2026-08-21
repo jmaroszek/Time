@@ -1,0 +1,241 @@
+{
+  "cases": [
+    {
+      "input": "EXAMPLE.COM",
+      "expected": "example.com",
+      "note": "Hostnames are stored lowercase."
+    },
+    {
+      "input": "  WWW.Example.com.  ",
+      "expected": "example.com",
+      "note": "Trim field whitespace, remove one www prefix, and accept a trailing root dot."
+    },
+    {
+      "input": "\uFEFFWWW.Example.com.\uFEFF",
+      "expected": "example.com",
+      "note": "The shared field trim includes the ECMAScript BOM boundary whitespace."
+    },
+    {
+      "input": "\u0085example.com\u0085",
+      "expected": null,
+      "note": "NEL is a rejected control boundary, not field-trimmable whitespace."
+    },
+    {
+      "input": "www.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "note": "Remove www before enforcing the 253-character stored-host limit."
+    },
+    {
+      "input": "https://User:Pass@WWW.Example.com:443/path?q=1#section",
+      "expected": "example.com",
+      "note": "A copied URL contributes only its host."
+    },
+    {
+      "input": "HTTP://music.example.com:0/now-playing",
+      "expected": "music.example.com",
+      "note": "Schemes and the complete valid port range are accepted."
+    },
+    {
+      "input": "ftp://media.example.com/archive",
+      "expected": "media.example.com",
+      "note": "A syntactically valid non-HTTP scheme still has a host."
+    },
+    {
+      "input": "example.com:65535",
+      "expected": "example.com",
+      "note": "The maximum valid port is stripped."
+    },
+    {
+      "input": "example.com:00080",
+      "expected": "example.com",
+      "note": "Leading zeroes do not change a valid decimal port."
+    },
+    {
+      "input": "example.com:00000000000000080",
+      "expected": "example.com",
+      "note": "Arbitrarily padded decimal ports are checked by significant digits."
+    },
+    {
+      "input": "example.com:65536",
+      "expected": null,
+      "note": "Out-of-range ports are rejected rather than silently stripped."
+    },
+    {
+      "input": "example.com:443:80",
+      "expected": null,
+      "note": "Ambiguous multi-colon input is not mistaken for a host plus port."
+    },
+    {
+      "input": "example.com:443x",
+      "expected": null,
+      "note": "Ports must contain decimal digits only."
+    },
+    {
+      "input": "example.com:",
+      "expected": null,
+      "note": "An empty port is invalid."
+    },
+    {
+      "input": "localhost",
+      "expected": "localhost"
+    },
+    {
+      "input": "printer",
+      "expected": null,
+      "note": "Single-label names are rejected except for localhost."
+    },
+    {
+      "input": "http://localhost:8096/web?view=home#top",
+      "expected": "localhost",
+      "note": "Local media servers may be identified by localhost."
+    },
+    {
+      "input": "192.168.1.50:32400",
+      "expected": "192.168.1.50",
+      "note": "Private IPv4 hosts are valid storage identities."
+    },
+    {
+      "input": "0.0.0.0",
+      "expected": "0.0.0.0"
+    },
+    {
+      "input": "192.168.001.1",
+      "expected": null,
+      "note": "IPv4 octets with leading zeroes are not accepted as DNS text."
+    },
+    {
+      "input": "999.1.1.1",
+      "expected": null,
+      "note": "Malformed IPv4 addresses are rejected."
+    },
+    {
+      "input": "1.2.3",
+      "expected": null,
+      "note": "An all-numeric, non-address name is ambiguous and rejected."
+    },
+    {
+      "input": "123.456.789.1",
+      "expected": null,
+      "note": "All-numeric address-shaped input must be a real IPv4 address."
+    },
+    {
+      "input": "2001:0DB8:0:0:0:0:0:1",
+      "expected": "2001:db8::1",
+      "note": "Bare IPv6 is stored lowercase and compressed."
+    },
+    {
+      "input": "::ffff:192.0.2.128",
+      "expected": "::ffff:192.0.2.128",
+      "note": "IPv4-mapped IPv6 uses the canonical address form."
+    },
+    {
+      "input": "fe80::1%eth0",
+      "expected": null,
+      "note": "Scoped IPv6 zone identifiers are not portable host identities."
+    },
+    {
+      "input": "[2001:0DB8::1]",
+      "expected": "2001:db8::1",
+      "note": "Bracketed IPv6 is stored without brackets."
+    },
+    {
+      "input": "https://user:pass@[2001:0DB8::1]:443/path",
+      "expected": "2001:db8::1",
+      "note": "Credentials and a valid port may decorate bracketed IPv6."
+    },
+    {
+      "input": "[::1]:65535",
+      "expected": "::1"
+    },
+    {
+      "input": "[::1]:65536",
+      "expected": null,
+      "note": "Out-of-range bracketed IPv6 ports are rejected."
+    },
+    {
+      "input": "[::1]:not-a-port",
+      "expected": null,
+      "note": "Bracketed IPv6 ports must be decimal."
+    },
+    {
+      "input": "[::1",
+      "expected": null,
+      "note": "Missing IPv6 brackets are malformed."
+    },
+    {
+      "input": "::1]",
+      "expected": null,
+      "note": "A stray closing bracket is malformed."
+    },
+    {
+      "input": "[::1]extra",
+      "expected": null,
+      "note": "Bracketed hosts may have only a valid port after the close."
+    },
+    {
+      "input": "[127.0.0.1]",
+      "expected": null,
+      "note": "Brackets are reserved for IPv6 here."
+    },
+    {
+      "input": "example .com",
+      "expected": null,
+      "note": "Whitespace inside a candidate is rejected."
+    },
+    {
+      "input": "https://example.com/path with space",
+      "expected": null,
+      "note": "Whitespace in copied URL decoration is still invalid input."
+    },
+    {
+      "input": "example.com\tpart",
+      "expected": null,
+      "note": "Internal tabs are rejected."
+    },
+    {
+      "input": "example.com\u0000part",
+      "expected": null,
+      "note": "Embedded controls are rejected."
+    },
+    {
+      "input": "-leading.example",
+      "expected": null,
+      "note": "DNS labels cannot begin with a hyphen."
+    },
+    {
+      "input": "trailing-.example",
+      "expected": null,
+      "note": "DNS labels cannot end with a hyphen."
+    },
+    {
+      "input": "empty..label.example",
+      "expected": null,
+      "note": "Empty DNS labels are malformed."
+    },
+    {
+      "input": "https:///path",
+      "expected": null,
+      "note": "A URL without a host is not ambiguous enough to accept."
+    },
+    {
+      "input": "https://",
+      "expected": null,
+      "note": "A scheme without a host is invalid."
+    },
+    {
+      "input": "not a host",
+      "expected": null,
+      "note": "Free-form prose is not a host."
+    },
+    {
+      "input": "example.com/path/http://nested.invalid",
+      "expected": "example.com",
+      "note": "Scheme-looking text inside a removed path cannot replace the outer host."
+    },
+    {
+      "input": "example.com..",
+      "expected": null,
+      "note": "More than one trailing dot leaves a malformed DNS label."
+    }
+  ]
+}

@@ -16,14 +16,22 @@ async function fixtureSettings(page: Page): Promise<Record<string, string>> {
   return page.evaluate(() => ({ ...window.__TIME_DEVICE_TEST__.settings }));
 }
 
+async function lifecycleActions(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    window.__TIME_DEVICE_TEST__.invocations
+      .filter((entry) => entry.command === "run_tracking_lifecycle")
+      .map((entry) => String(entry.args?.action && (entry.args.action as { action?: string }).action)),
+  );
+}
+
 test("@workflow onboarding commits consent before starting the tracker", async ({ page }) => {
   await page.goto("/?fixture=onboarding");
   await page.getByRole("button", { name: "Start tracking" }).click();
   await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeVisible();
 
   const names = await invocationNames(page);
-  expect(names.indexOf("set_launch_at_login")).toBeGreaterThan(-1);
-  expect(names.indexOf("start_tracker")).toBeGreaterThan(names.indexOf("set_launch_at_login"));
+  expect(names).toContain("run_tracking_lifecycle");
+  expect(await lifecycleActions(page)).toContain("complete_onboarding");
   const settings = await fixtureSettings(page);
   expect(settings.recording_consent).toBe("1");
   expect(settings.launch_at_login).toBe("1");
@@ -36,32 +44,22 @@ test("@workflow onboarding Not now never starts or registers tracking", async ({
   await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeVisible();
 
   const names = await invocationNames(page);
-  expect(names).not.toContain("start_tracker");
-  const launchCall = await page.evaluate(() =>
-    window.__TIME_DEVICE_TEST__.invocations.find(
-      (entry) => entry.command === "set_launch_at_login",
-    )
-  );
-  expect(launchCall?.args).toEqual({ enabled: false });
+  expect(await lifecycleActions(page)).toEqual(["complete_onboarding"]);
   const settings = await fixtureSettings(page);
   expect(settings.recording_consent).toBe("0");
   expect(settings.launch_at_login).toBe("0");
 });
 
 test("@workflow onboarding rolls back consent when tracker startup fails", async ({ page }) => {
-  await page.goto("/?fixture=onboarding&fail=start_tracker");
+  await page.goto("/?fixture=onboarding&fail=run_tracking_lifecycle");
   await page.getByRole("button", { name: "Start tracking" }).click();
-  await expect(page.getByText("device fixture forced start_tracker failure")).toBeVisible();
+  await expect(page.getByText("device fixture forced run_tracking_lifecycle failure")).toBeVisible();
 
   const settings = await fixtureSettings(page);
   expect(settings.recording_consent).toBe("0");
   expect(settings.launch_at_login).toBe("0");
-  const launchCalls = await page.evaluate(() =>
-    window.__TIME_DEVICE_TEST__.invocations
-      .filter((entry) => entry.command === "set_launch_at_login")
-      .map((entry) => entry.args)
-  );
-  expect(launchCalls).toEqual([{ enabled: true }, { enabled: false }]);
+  expect(settings.privacy_onboarding_complete).toBe("0");
+  expect(await lifecycleActions(page)).toEqual(["complete_onboarding"]);
 });
 
 // The first-run panel is the only screen a user reaches by declining at the
@@ -83,17 +81,11 @@ test("@workflow first run starts tracking, then offers to register startup", asy
   // ...but starting must not register startup behind the user's back.
   expect(started.launch_at_login).toBe("0");
   const names = await invocationNames(page);
-  expect(names).toContain("start_tracker");
-  expect(names).not.toContain("set_launch_at_login");
+  expect(await lifecycleActions(page)).toContain("set_recording");
 
   await page.getByRole("button", { name: "Start at sign-in" }).click();
   await expect.poll(async () => (await fixtureSettings(page)).launch_at_login).toBe("1");
-  const launchCall = await page.evaluate(() =>
-    window.__TIME_DEVICE_TEST__.invocations.find(
-      (entry) => entry.command === "set_launch_at_login",
-    )
-  );
-  expect(launchCall?.args).toEqual({ enabled: true });
+  expect(await lifecycleActions(page)).toContain("set_startup");
   await expect(page.getByRole("button", { name: "Start at sign-in" })).toHaveCount(0);
 });
 
@@ -110,7 +102,7 @@ test("@workflow a live tracker without consent still offers to start recording",
   await expect(page.getByText("Tracking is on")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Start tracking" })).toBeVisible();
   // Offering is not doing: nothing may start until the reader asks.
-  expect(await invocationNames(page)).not.toContain("start_tracker");
+  expect(await lifecycleActions(page)).toEqual([]);
 });
 
 test("@workflow restore dispatches only after an explicit backup selection", async ({ page }) => {
@@ -128,17 +120,17 @@ test("@workflow restore dispatches only after an explicit backup selection", asy
 test("@workflow recording changes preserve visible feedback after startup failure", async ({
   page,
 }) => {
-  await page.goto("/?fail=set_launch_at_login");
+  await page.goto("/?fail=run_tracking_lifecycle");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("switch", { name: "Record activity" }).click();
   await expect(
-    page.getByText("device fixture forced set_launch_at_login failure"),
+    page.getByText("device fixture forced run_tracking_lifecycle failure"),
   ).toBeVisible();
 
   const settings = await fixtureSettings(page);
   expect(settings.recording_consent).toBe("0");
   expect(settings.launch_at_login).toBe("0");
-  expect(await invocationNames(page)).not.toContain("stop_tracker");
+  expect(await lifecycleActions(page)).toContain("set_recording");
 });
 
 test("@workflow missing tracker can be started from its status card", async ({ page }) => {
@@ -150,14 +142,13 @@ test("@workflow missing tracker can be started from its status card", async ({ p
 
   await expect(page.getByText("Tracker is live")).toBeVisible();
   await expect(page.getByRole("button", { name: "Start tracker" })).toHaveCount(0);
-  await expect.poll(() => invocationNames(page)).toContain("start_tracker");
+  await expect.poll(() => lifecycleActions(page)).toContain("ensure_started");
 });
 
 // Starting and resuming are different operations on different state, and the
-// status card offers whichever one the tracker actually needs. `start_tracker`
-// never touches the pause keys, so on a paused tracker it would spawn a process
-// that reads tracking_paused=1 and stores nothing — a button that visibly did
-// nothing. Before this control a tray pause could only be ended from the tray.
+// status card offers whichever one the tracker actually needs. Resume is a
+// native action so clearing pause keys and starting cannot race a stale status
+// read.
 test("@workflow a paused tracker is resumed, not started, from its status card", async ({
   page,
 }) => {
@@ -189,8 +180,7 @@ test("@workflow a paused tracker is resumed, not started, from its status card",
     tracking_paused_until: "0",
   });
   await expect(page.getByText("Tracker is live")).toBeVisible();
-  // The process was already answering, so resuming must not respawn it.
-  expect(await invocationNames(page)).not.toContain("start_tracker");
+  expect(await lifecycleActions(page)).toContain("resume");
 });
 
 test("@workflow resuming a pause that outlived the tracker also starts it", async ({ page }) => {
@@ -206,16 +196,16 @@ test("@workflow resuming a pause that outlived the tracker also starts it", asyn
 
   // Resuming means "record again", not "clear a flag and leave a second broken
   // state for the reader to find".
-  await expect.poll(() => invocationNames(page)).toContain("start_tracker");
+  await expect.poll(() => lifecycleActions(page)).toContain("resume");
   await expect(page.getByText("Tracker is live")).toBeVisible();
 });
 
 test("@workflow tracker start failure stays actionable", async ({ page }) => {
-  await page.goto("/?tracker=missing&fail=start_tracker");
+  await page.goto("/?tracker=missing&fail=run_tracking_lifecycle");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Start tracker" }).click();
 
-  await expect(page.getByText("device fixture forced start_tracker failure")).toBeVisible();
+  await expect(page.getByText("device fixture forced run_tracking_lifecycle failure")).toBeVisible();
   await expect(page.getByRole("button", { name: "Start tracker" })).toBeEnabled();
 });
 
@@ -229,8 +219,7 @@ test("@workflow tray visibility changes without changing tracker lifecycle", asy
   await expect.poll(async () => (await fixtureSettings(page)).show_tray_icon).toBe("0");
 
   const names = await invocationNames(page);
-  expect(names).not.toContain("start_tracker");
-  expect(names).not.toContain("stop_tracker");
+  expect(await lifecycleActions(page)).toEqual([]);
   const settings = await fixtureSettings(page);
   expect(settings.recording_consent).toBe("1");
   expect(settings.launch_at_login).toBe("1");
@@ -258,12 +247,51 @@ test("@workflow scheduling restores sign-in startup and saves an overnight windo
   await expect.poll(async () => (await fixtureSettings(page)).tracking_schedule_end_minute).toBe("360");
   await expect(page.getByText("Runs overnight into the next day.")).toBeVisible();
 
-  const launchCalls = await page.evaluate(() =>
-    window.__TIME_DEVICE_TEST__.invocations
-      .filter((entry) => entry.command === "set_launch_at_login")
-      .map((entry) => entry.args)
-  );
-  expect(launchCalls).toEqual([{ enabled: false }, { enabled: true }]);
+  expect(await lifecycleActions(page)).toEqual([
+    "set_startup",
+    "set_schedule",
+    "set_schedule",
+    "set_schedule",
+    "set_schedule",
+  ]);
+});
+
+test("@workflow lifecycle busy state gates dependent settings and data mutations", async ({
+  page,
+}) => {
+  await page.goto("/?lifecycleDelay=500");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("switch", { name: "Record activity" }).click();
+
+  // The native operation is intentionally held open by the device fixture.
+  // Every dependent control, including Data actions owned by child sections,
+  // stays disabled until that one lifecycle promise settles.
+  await expect(page.getByRole("switch", { name: "Start at Windows sign-in" })).toBeDisabled();
+  await expect(page.getByRole("switch", { name: "Only record on a schedule" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Restore defaults", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Back up now" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Erase all" })).toBeDisabled();
+
+  await expect(page.getByRole("switch", { name: "Record activity" })).toHaveAttribute("aria-checked", "false");
+});
+
+test("@workflow a banner lifecycle action gates Settings and Data while in flight", async ({
+  page,
+}) => {
+  await page.goto("/?tracker=missing&lifecycleDelay=1000");
+  await expect(page.getByRole("button", { name: "Start tracking" })).toBeVisible();
+  await page.getByRole("button", { name: "Start tracking" }).click();
+
+  // The request originates in an App-level banner, then the reader moves to
+  // Settings while it is still pending. The same transport-owned busy store
+  // must gate controls in the newly mounted Settings tree.
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("switch", { name: "Record activity" })).toBeDisabled();
+  await expect(page.getByRole("switch", { name: "Start at Windows sign-in" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Start tracker" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Back up now" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Erase all" })).toBeDisabled();
+  await expect(page.getByRole("switch", { name: "Record activity" })).toBeEnabled({ timeout: 3000 });
 });
 
 test("@workflow support email includes the installed component versions", async ({ page }) => {
@@ -383,26 +411,33 @@ test("@workflow all-history erase disables recording before stopping and erasing
 
   const calls = await page.evaluate(() => window.__TIME_DEVICE_TEST__.invocations);
   const names = calls.map((entry) => entry.command);
-  const settingAt = (key: string) => calls.findIndex(
-    (entry) => entry.command === "db_execute"
-      && Array.isArray(entry.args?.values)
-      && entry.args.values[0] === key,
-  );
-  const consentAt = settingAt("recording_consent");
-  const launchSettingAt = settingAt("launch_at_login");
-  const registrationAt = names.lastIndexOf("set_launch_at_login");
-  const stopAt = names.lastIndexOf("stop_tracker");
-  const eraseAt = names.lastIndexOf("erase_history");
-  expect(launchSettingAt).toBeGreaterThan(consentAt);
-  expect(registrationAt).toBeGreaterThan(launchSettingAt);
-  expect(stopAt).toBeGreaterThan(registrationAt);
-  expect(eraseAt).toBeGreaterThan(stopAt);
+  expect(names).toContain("run_tracking_lifecycle");
+  expect(await lifecycleActions(page)).toContain("secure_erase");
   const settings = await fixtureSettings(page);
   expect(settings.recording_consent).toBe("0");
   expect(settings.launch_at_login).toBe("0");
   await expect.poll(() =>
     page.evaluate(() => window.__TIME_DEVICE_TEST__.sessionCount())
   ).toBe(0);
+});
+
+test("@workflow restore defaults uses the native lifecycle contract", async ({ page }) => {
+  await page.goto("/?theme=dark");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const theme = page.getByRole("radiogroup", { name: "Theme" });
+  await expect(theme.getByRole("radio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
+
+  await page.getByRole("button", { name: "Restore defaults", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Restore default settings?" });
+  await dialog.getByRole("button", { name: "Restore defaults" }).click();
+  await expect(page.getByRole("button", { name: "Defaults restored" })).toBeVisible();
+
+  expect(await lifecycleActions(page)).toContain("restore_defaults");
+  const settings = await fixtureSettings(page);
+  expect(settings.theme).toBe("system");
+  expect(settings.recording_consent).toBe("0");
+  expect(settings.launch_at_login).toBe("0");
+  expect(settings.tracking_schedule_enabled).toBe("0");
 });
 
 test("@workflow the panel's Manage row offers rename alongside the hover pencil", async ({

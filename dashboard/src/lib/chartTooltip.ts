@@ -22,6 +22,15 @@ export function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/**
+ * Build one ECharts row while keeping its marker HTML intact. ECharts owns the
+ * marker markup; series names can be category names entered by the user and
+ * therefore belong in the escaped text portion of the row.
+ */
+export function tooltipRow(marker: string, label: string, valueHtml: string): string {
+  return `${marker}${escapeHtml(label)}: ${valueHtml}`;
+}
+
 /** A secondary row: present but subordinate to the headline figure. */
 export function tooltipMutedRow(html: string): string {
   return `<div class="chart-tip-muted">${html}</div>`;

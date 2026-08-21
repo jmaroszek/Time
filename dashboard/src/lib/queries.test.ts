@@ -18,6 +18,7 @@ import {
   deleteActivity,
   deleteHistoryBefore,
   eraseAllHistory,
+  fetchSessions,
   inspectDatabaseBackup,
   listDatabaseBackups,
   restoreDatabase,
@@ -25,6 +26,40 @@ import {
   takeRestoreNotice,
   updateRule,
 } from "./queries";
+
+describe("session fetch transport", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    invoke.mockResolvedValue({
+      ids: [1],
+      starts: [100],
+      ends: [200],
+      processes: ["code.exe"],
+      titles: [""],
+      domains: [null],
+      isAfk: [false],
+      categoryOverrideIds: [null],
+      isCorrected: [false],
+    });
+  });
+
+  it("requests the exact overlap window without a legacy start bound", async () => {
+    await expect(fetchSessions(100, 200)).resolves.toEqual([
+      {
+        id: 1,
+        start: 100,
+        end: 200,
+        process: "code.exe",
+        title: "",
+        domain: null,
+        isAfk: false,
+        categoryOverrideId: null,
+        isCorrected: false,
+      },
+    ]);
+    expect(invoke).toHaveBeenCalledWith("fetch_sessions", { startSec: 100, endSec: 200 });
+  });
+});
 
 describe("rule updates", () => {
   beforeEach(() => {
@@ -78,7 +113,7 @@ describe("destructive history commands", () => {
     expect(invoke.mock.calls.map(([command]) => command)).toEqual([
       "delete_activity",
       "delete_history_before",
-      "erase_history",
+      "run_tracking_lifecycle",
     ]);
     expect(invalidateHistory).toHaveBeenCalledTimes(3);
   });
@@ -93,25 +128,26 @@ describe("destructive history commands", () => {
 describe("default settings restoration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getDb.mockResolvedValue({ execute: dbExecute });
-    dbExecute.mockResolvedValue({ rowsAffected: 0 });
+    invoke.mockResolvedValue({
+      recordingConsent: false,
+      launchAtLogin: false,
+      scheduleEnabled: false,
+      trackerStarted: false,
+      deletedCount: 0,
+    });
   });
 
-  it("upserts only the user-facing defaults in one atomic statement", async () => {
+  it("delegates the full defaults reset to the native lifecycle command", async () => {
     await restoreDefaultSettings();
 
-    expect(dbExecute).toHaveBeenCalledOnce();
-    const [sql, values] = dbExecute.mock.calls[0];
-    expect(sql).toContain("INSERT INTO settings");
-    expect(sql).toContain("ON CONFLICT(key) DO UPDATE");
-    expect(values).toEqual(Object.entries(DEFAULT_USER_SETTINGS).flat());
-    expect(DEFAULT_USER_SETTINGS).not.toHaveProperty("privacy_onboarding_complete");
-    expect(DEFAULT_USER_SETTINGS).not.toHaveProperty("process_aliases");
-    expect(DEFAULT_USER_SETTINGS).not.toHaveProperty("tracker_health_heartbeat");
+    expect(invoke).toHaveBeenCalledWith("run_tracking_lifecycle", {
+      action: { action: "restore_defaults" },
+    });
     expect(DEFAULT_USER_SETTINGS.color_palette).toBe("slate");
     expect(DEFAULT_USER_SETTINGS.productivity_style).toBe("vivid");
     expect(DEFAULT_USER_SETTINGS.activity_noise_max_sessions).toBe("1");
     expect(DEFAULT_USER_SETTINGS.show_tray_icon).toBe("1");
+    expect(DEFAULT_USER_SETTINGS.theme).toBe("system");
   });
 });
 

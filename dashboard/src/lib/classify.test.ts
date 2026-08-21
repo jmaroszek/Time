@@ -377,6 +377,17 @@ describe("normalizeRulePattern", () => {
     expect(normalizeRulePattern("domain", "youtube.com")).toBe("youtube.com");
   });
 
+  it("accepts canonical IPv6 hosts and rejects malformed ports", () => {
+    expect(normalizeRulePattern("domain", "https://[2001:0DB8::1]:443/path")).toBe(
+      "2001:db8::1",
+    );
+    expect(normalizeRulePattern("domain", "2001:0DB8:0:0:0:0:0:1")).toBe(
+      "2001:db8::1",
+    );
+    expect(normalizeRulePattern("domain", "example.com:65536")).toBeNull();
+    expect(normalizeRulePattern("domain", "example.com:443:80")).toBeNull();
+  });
+
   it("returns null when nothing matchable remains", () => {
     expect(normalizeRulePattern("domain", "https://")).toBeNull();
     expect(normalizeRulePattern("domain", "   ")).toBeNull();
@@ -386,6 +397,7 @@ describe("normalizeRulePattern", () => {
   it("lowercases and trims title and process patterns without URL surgery", () => {
     expect(normalizeRulePattern("title", "  NetFlix  ")).toBe("netflix");
     expect(normalizeRulePattern("process", "Chrome.EXE")).toBe("chrome.exe");
+    expect(normalizeRulePattern("process", " *TOOL.EXE ")).toBe("*tool.exe");
     // A slash in a title pattern is content, not a URL path.
     expect(normalizeRulePattern("title", "a/b")).toBe("a/b");
   });

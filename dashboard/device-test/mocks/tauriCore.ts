@@ -17,6 +17,7 @@ declare global {
 
 const fixtureParams = new URLSearchParams(window.location.search);
 const forcedFailure = fixtureParams.get("fail");
+const lifecycleDelayMs = Math.max(0, Number(fixtureParams.get("lifecycleDelay") ?? 0));
 const now = Date.now() / 1000;
 const day = 86_400;
 /** A dev build and an installed build of one app, aliased to the same name so
@@ -213,7 +214,7 @@ if (fixtureParams.get("browser") === "classified") {
 let nextRuleId = ruleRows.length + 1;
 
 const settings: Record<string, string> = {
-  schema_version: "4",
+  schema_version: "5",
   privacy_onboarding_complete:
     fixtureParams.get("fixture") === "onboarding" ? "0" : "1",
   starter_categories_pending: fixtureParams.get("fixture") === "onboarding" ? "1" : "0",
@@ -246,6 +247,8 @@ const settings: Record<string, string> = {
   website_signal_seen: fixtureParams.get("browser") === "signal" ? "0" : "1",
   color_palette: "slate",
   productivity_style: "vivid",
+  theme: fixtureParams.get("theme") ?? "system",
+  record_browser_domains: "1",
   focus_chain_max_gap_seconds: "300",
   day_start_hour: "0",
   day_end_hour: "24",
@@ -279,7 +282,10 @@ window.__TIME_DEVICE_TEST__ = {
 };
 
 function failWhenRequested(command: string): void {
-  if (forcedFailure === command) {
+  // Lifecycle failures are injected after the fixture applies the native
+  // command's fail-closed compensation below, so workflows can assert the
+  // persisted state rather than merely seeing an exception.
+  if (forcedFailure === command && command !== "run_tracking_lifecycle") {
     throw new Error(`device fixture forced ${command} failure`);
   }
 }
@@ -341,18 +347,9 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
     case "db_select":
       result = selectFixture(args);
       break;
-    // Settings writes land in the same in-memory map db_select reads, so a
-    // control that changes a setting can actually be driven here. Without it
-    // every write threw and the fixture could only ever show defaults — which
-    // hid the whole theme switch from this harness.
     case "db_execute": {
       const query = normalizedSql(args);
       const values = (args?.values ?? []) as unknown[];
-      if (query.startsWith("insert into settings") && typeof values[0] === "string") {
-        settings[values[0]] = String(values[1] ?? "");
-        result = { rowsAffected: 1, lastInsertId: 0 };
-        break;
-      }
       // Rule writes land in the same array db_select reads, so classifying
       // something here actually reclassifies it — which is the only way to
       // drive the Unclassified section, whose whole subject is a list that
@@ -401,32 +398,210 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
       }
       throw new Error(`Device fixture has no db_execute response for: ${query}`);
     }
+    case "update_user_settings": {
+      const updates = (args?.updates ?? []) as Array<{ key?: string; value?: string }>;
+      for (const update of updates) {
+        if (typeof update.key !== "string") throw new Error("Invalid setting key");
+        if (
+          update.key === "tracking_schedule_days"
+          || update.key === "tracking_schedule_start_minute"
+          || update.key === "tracking_schedule_end_minute"
+        ) {
+          throw new Error(`${update.key} must be changed through set_schedule`);
+        }
+        settings[update.key] = String(update.value ?? "");
+      }
+      result = undefined;
+      break;
+    }
+    case "run_tracking_lifecycle": {
+      if (lifecycleDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, lifecycleDelayMs));
+      }
+      const action = (args?.action ?? {}) as {
+        action?: string;
+        enable?: boolean;
+        enabled?: boolean;
+        recordWindowTitles?: boolean;
+        startAtLogin?: boolean;
+        days?: string;
+        startMinute?: number;
+        endMinute?: number;
+      };
+      const settingsBeforeLifecycle = { ...settings };
+      const sessionsBeforeLifecycle = sessions;
+      switch (action.action) {
+        case "complete_onboarding":
+          settings.privacy_onboarding_complete = "1";
+          settings.record_window_titles = action.enable && action.recordWindowTitles ? "1" : "0";
+          settings.recording_consent = action.enable ? "1" : "0";
+          settings.launch_at_login = action.enable && action.startAtLogin ? "1" : "0";
+          settings.tracking_schedule_enabled = "0";
+          if (action.enable) settings.tracker_health_heartbeat = String(Date.now() / 1000);
+          break;
+        case "set_recording":
+          settings.recording_consent = action.enabled ? "1" : "0";
+          if (!action.enabled) {
+            settings.launch_at_login = "0";
+            settings.tracking_schedule_enabled = "0";
+            settings.tracking_paused = "0";
+            settings.tracking_paused_until = "0";
+          } else {
+            settings.tracker_health_heartbeat = String(Date.now() / 1000);
+          }
+          break;
+        case "set_startup":
+          if (action.enabled && settings.recording_consent !== "1") {
+            throw new Error("Start at sign-in requires recording consent");
+          }
+          settings.launch_at_login = action.enabled ? "1" : "0";
+          break;
+        case "set_schedule":
+          if (action.enabled && settings.recording_consent !== "1") {
+            throw new Error("Recording consent is required for scheduling");
+          }
+          if (
+            action.enabled
+            && (action.days === undefined
+              || action.startMinute === undefined
+              || action.endMinute === undefined)
+          ) {
+            throw new Error("Enabled schedules require days, start time, and end time");
+          }
+          if (
+            (action.days !== undefined
+              || action.startMinute !== undefined
+              || action.endMinute !== undefined)
+            && (action.days === undefined
+              || action.startMinute === undefined
+              || action.endMinute === undefined)
+          ) {
+            throw new Error("Schedule days and times must be provided together");
+          }
+          settings.tracking_schedule_enabled = action.enabled ? "1" : "0";
+          if (action.enabled) {
+            settings.launch_at_login = "1";
+          }
+          if (action.days !== undefined) settings.tracking_schedule_days = action.days;
+          if (action.startMinute !== undefined) settings.tracking_schedule_start_minute = String(action.startMinute);
+          if (action.endMinute !== undefined) settings.tracking_schedule_end_minute = String(action.endMinute);
+          break;
+        case "resume":
+          if (settings.recording_consent !== "1") throw new Error("Recording consent is required to resume tracking");
+          settings.tracking_paused = "0";
+          settings.tracking_paused_until = "0";
+          settings.tracker_health_heartbeat = String(Date.now() / 1000);
+          break;
+        case "ensure_started":
+          if (settings.recording_consent !== "1") throw new Error("Recording consent is required to start tracking");
+          settings.tracker_health_heartbeat = String(Date.now() / 1000);
+          break;
+        case "restore_defaults":
+          Object.assign(settings, {
+            weekly_goal_hours: "0",
+            idle_threshold_seconds: "300",
+            heartbeat_seconds: "15",
+            week_start: "auto",
+            browser_processes: "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe",
+            min_app_seconds_per_day: "0",
+            media_domains: "",
+            activity_noise_filter: "utilities_only",
+            activity_noise_max_seconds: "120",
+            activity_noise_max_sessions: "1",
+            color_palette: "slate",
+            productivity_style: "vivid",
+            theme: "system",
+            focus_chain_max_gap_seconds: "300",
+            day_start_hour: "0",
+            day_end_hour: "24",
+            tracking_paused: "0",
+            tracking_paused_until: "0",
+            tracking_schedule_enabled: "0",
+            tracking_schedule_days: "0,1,2,3,4",
+            tracking_schedule_start_minute: "540",
+            tracking_schedule_end_minute: "1020",
+            recording_consent: "0",
+            record_window_titles: "0",
+            record_browser_domains: "1",
+            launch_at_login: "0",
+            show_tray_icon: "1",
+            check_updates_automatically: "1",
+          });
+          break;
+        case "secure_erase": {
+          settings.recording_consent = "0";
+          settings.launch_at_login = "0";
+          settings.tracking_schedule_enabled = "0";
+          settings.tracking_paused = "0";
+          settings.tracking_paused_until = "0";
+          const count = sessions.length;
+          sessions = [];
+          result = {
+            recordingConsent: false,
+            launchAtLogin: false,
+            scheduleEnabled: false,
+            trackerStarted: false,
+            deletedCount: count,
+          };
+          break;
+        }
+        default:
+          throw new Error(`Device fixture has no lifecycle action: ${String(action.action)}`);
+      }
+      if (forcedFailure === "run_tracking_lifecycle") {
+        if (
+          action.action === "set_recording"
+          || action.action === "resume"
+          || action.action === "ensure_started"
+          || (action.action === "complete_onboarding" && action.enable)
+        ) {
+          settings.recording_consent = "0";
+          settings.launch_at_login = "0";
+          settings.tracking_schedule_enabled = "0";
+          if (action.action === "complete_onboarding") {
+            settings.privacy_onboarding_complete = "0";
+          }
+        } else if (action.action === "set_startup" || action.action === "set_schedule") {
+          settings.recording_consent = settingsBeforeLifecycle.recording_consent;
+          settings.launch_at_login = settingsBeforeLifecycle.launch_at_login;
+          settings.tracking_schedule_enabled = settingsBeforeLifecycle.tracking_schedule_enabled;
+          settings.tracking_schedule_days = settingsBeforeLifecycle.tracking_schedule_days;
+          settings.tracking_schedule_start_minute = settingsBeforeLifecycle.tracking_schedule_start_minute;
+          settings.tracking_schedule_end_minute = settingsBeforeLifecycle.tracking_schedule_end_minute;
+        }
+        if (action.action === "secure_erase") {
+          // Native secure erase deletes only after shutdown confirmation; a
+          // forced command failure must therefore leave history intact.
+          sessions = sessionsBeforeLifecycle;
+        }
+        throw new Error("device fixture forced run_tracking_lifecycle failure");
+      }
+      if (result === undefined) {
+        result = {
+          recordingConsent: settings.recording_consent === "1",
+          launchAtLogin: settings.launch_at_login === "1",
+          scheduleEnabled: settings.tracking_schedule_enabled === "1",
+          trackerStarted: action.action === "ensure_started"
+            || action.action === "resume"
+            || action.action === "set_recording"
+            || action.action === "complete_onboarding",
+          deletedCount: 0,
+        };
+      }
+      break;
+    }
     case "fetch_sessions":
       result = sessionColumns(args);
       break;
     case "take_restore_notice":
       result = null;
       break;
-    case "set_launch_at_login":
-      result = null;
-      break;
-    case "start_tracker":
-      settings.tracker_health_heartbeat = String(Date.now() / 1000);
-      result = null;
-      break;
-    case "stop_tracker":
     case "restore_database":
       result = null;
       break;
     case "backup_database":
       result = "C:\\DeviceFixture\\Backups\\backup_manual_fixed.db";
       break;
-    case "erase_history": {
-      const count = sessions.length;
-      sessions = [];
-      result = count;
-      break;
-    }
     case "preview_activity_delete": {
       const selected = sessions.filter((session) => session.process === "explorer.exe");
       result = {
@@ -579,7 +754,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
           kind: "automatic",
           modifiedSec: now - 3_600,
           bytes: 2_400_000,
-          schemaVersion: 4,
+          schemaVersion: 5,
           compatible: true,
           issue: null,
           legacyLocation: false,

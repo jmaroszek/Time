@@ -1,52 +1,14 @@
-// A short list of common Windows applications, used to *offer* a category for
-// an app the user has not classified yet.
+// A conservative catalog of common Windows applications. It offers a category
+// for review; it never creates a rule or classifies activity on its own.
 //
-// Nothing here classifies anything. A suggestion marks an entry in a menu and
-// fills a review sheet; a rule exists only once the user says yes, and what
-// they accept is an ordinary rule indistinguishable from one they typed. That
-// is the boundary the Window-rule redesign settled and this feature keeps: Time
-// does not silently infer categories.
+// Suggestions fail toward no suggestion: leaving an app unclassified is safer
+// than teaching the user to accept a wrong default. Bimodal apps stay out of
+// the catalog, and unlisted apps fall through to manual classification or the
+// naming patterns below.
 //
-// Every gate below fails toward *not* suggesting, for the same reason
-// domainConsolidation.ts does: a missed suggestion costs nothing — the app sits
-// in Unclassified, where it already was — while a wrong one teaches the reader
-// to dismiss the next without reading it.
-//
-// Two things deliberately get no suggestion:
-//
-//   bimodal     Discord and OBS serve work and leisure for different people. A
-//               single default merges two things a tracker exists to separate.
-//   everything  An unlisted app is not a failure. Games in particular cannot be
-//   unlisted    cataloged — they ship under names like r5apex_dx12.exe — which is
-//               what NAME_SHAPES is for, and past that the queue is the answer.
-//
-// Browsers were a third until a VM test pass produced the counter-evidence.
-// The argument for excluding them was that a browser's category "would cover
-// every site visited inside it" and swallow website time. It does not: rules
-// resolve domain before process, so an exported session for youtube.com lands in
-// Entertainment while the same browser with no detected domain lands in
-// Browsing. A browser rule is a *fallback* for the browser time nothing else
-// explains, which is what a reader means by classifying it.
-//
-// What the old reasoning got right is that the state it creates is misleading on
-// its own — a classified browser looks finished, so nothing suggests the sites
-// inside could be separated. That is real, and it already has an owner:
-// shouldShowWebsiteRuleHint in domainCoverage.ts exists for exactly this reader
-// and fires once websites are being recorded and no domain rule exists. Suppress
-// the suggestion and browsers are simply the one recognized app that offers a
-// new user nothing on day one.
-//
-// This is not a source of display names. cleanProcessName in format.ts stays
-// mechanical ("production code never guesses app identities"); the catalog only
-// informs which category is offered.
-//
-// It does not explain itself either. Each role used to carry a sentence — "A
-// developer tool" — shown beside the suggestion, and the surfaces that printed
-// it are gone: the menu marks its entry with a word, and the review sheet lists
-// a duration. RECOGNIZED_NOT_SUGGESTED lost its own prose the same way: the
-// review sheet no longer lists what it declines to suggest, on the reasoning
-// that "Time recognizes this but won't guess" is a fact about the backend, not
-// something the reader can act on — they classify it by hand either way.
+// Browsers are a fallback for time without a detected domain. Domain rules
+// resolve before process rules, so a browser suggestion cannot swallow site
+// activity. Display names remain mechanical; this catalog only selects a role.
 
 import type { ActivityEntityKind } from "./activity";
 import { entityId } from "./entityIdentity";
@@ -71,12 +33,9 @@ export type StarterRole =
 /**
  * Starter category that satisfies each role.
  *
- * Resolved by current name rather than by ids captured at onboarding, which
- * keeps the seed a plain list and works for existing installs that never saw an
- * onboarding screen. Exact starter names are intentional: deleting or renaming
- * one is the reader declining that piece of Time's taxonomy, so suggestions
- * aimed at it must disappear rather than following the category under a name
- * Time happens to consider synonymous.
+ * Resolved by current name rather than by a stored category id. Exact starter
+ * names are intentional: deleting or renaming one opts out of suggestions for
+ * that role rather than following a similarly named category.
  *
  * A missing starter name resolves to nothing and that role simply makes no
  * suggestions. That is the right outcome, not a gap — the user's taxonomy wins.
@@ -291,13 +250,7 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
  * Apps Time can name but will not place.
  *
  * These are genuinely bimodal: the same app is work for one person and leisure
- * for the next, and a default would merge exactly the two things worth telling
- * apart. This list also exists so the next contributor does not helpfully add
- * discord.exe to the catalog above.
- *
- * Browsers used to be here. They are in the catalog now, under the `browsing`
- * role — see the header for why the "a browser rule swallows website time"
- * argument does not survive contact with how rules actually resolve.
+ * for the next, so a default would merge the two uses worth telling apart.
  */
 export const RECOGNIZED_NOT_SUGGESTED: ReadonlySet<string> = new Set([
   "discord.exe",
@@ -308,13 +261,11 @@ export const RECOGNIZED_NOT_SUGGESTED: ReadonlySet<string> = new Set([
 /**
  * Naming conventions that identify a family no catalog could enumerate.
  *
- * `-Win64-Shipping.exe` is how Unreal Engine packages a shipping build, so it
- * covers titles nobody has heard of yet; the anti-cheat launchers are the same
- * game wearing a second executable name. Measured against a real history these
- * two patterns reached more time than every system-utility entry above combined.
+ * `-Win64-Shipping.exe` identifies Unreal Engine shipping builds, and the
+ * anti-cheat launchers identify the same games under a second executable name.
  *
- * Installer and driver shapes are deliberately absent: noise.ts already folds
- * those out of the catalog, and they were worth a rounding error.
+ * Installer and driver shapes are absent because noise.ts already folds them
+ * out of the catalog.
  */
 const NAME_SHAPES: readonly { pattern: RegExp; role: StarterRole }[] = [
   // How Unreal Engine names a shipping build.

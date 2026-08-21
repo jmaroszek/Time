@@ -20,6 +20,11 @@ PROTOCOL_FIXTURE = json.loads(
         encoding="utf-8"
     )
 )
+HOST_NORMALIZATION_FIXTURE = json.loads(
+    (Path(__file__).parents[2] / "contracts" / "host_normalization.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 def test_full_url_in_title():
@@ -408,3 +413,8 @@ def test_normalize_host_keeps_the_hosts_a_local_media_server_is_reached_by():
     # bare name or an address rather than a registrable domain.
     assert normalize_host("http://localhost:8096/web") == "localhost"
     assert normalize_host("192.168.1.50:32400") == "192.168.1.50"
+
+
+def test_normalize_host_matches_the_shared_fixture():
+    for case in HOST_NORMALIZATION_FIXTURE["cases"]:
+        assert normalize_host(case["input"]) == case["expected"], case.get("note")

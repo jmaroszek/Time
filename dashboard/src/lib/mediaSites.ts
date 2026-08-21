@@ -9,6 +9,8 @@
 // instead of accepting a redundant entry; mediaSites.test.ts compares it
 // against the Python source so the two cannot drift.
 
+import { normalizeHost } from "./hostNormalization";
+
 export const BUILT_IN_MEDIA_SITES: readonly string[] = [
   "audible.com",
   "bandcamp.com",
@@ -55,41 +57,13 @@ export const BUILT_IN_MEDIA_SITES: readonly string[] = [
   "youtube.com",
 ];
 
-const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-// Dotted-quad only, and no leading zeros, matching what Python's ip_address
-// accepts — a self-hosted Jellyfin or Plex is reached by address as often as
-// by name, and "localhost" below is the same case one hop closer.
-const IPV4 = /^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}$/;
-
 /** Normalize one typed or pasted site into the host shape sessions store.
  *
- *  Mirrors normalize_host in tracker/domains.py: a settings field is where
- *  people type "YouTube.com", "www.netflix.com/browse", or a whole copied URL,
- *  and an entry that does not survive that typing would match nothing. Returns
- *  "" for anything that is not host-shaped once the decoration is gone. */
+ *  Uses the shared host-normalization contract implemented by
+ *  tracker/domains.py and hostNormalization.ts. Returns "" for anything that
+ *  is not host-shaped once the decoration is gone. */
 export function normalizeMediaSite(raw: string): string {
-  let candidate = raw.trim().toLowerCase();
-  if (candidate.includes("://")) candidate = candidate.split("://")[1] ?? "";
-  for (const separator of ["/", "?", "#"]) {
-    candidate = candidate.split(separator)[0] ?? "";
-  }
-  // Userinfo before the port: "user:pass@host" holds a colon of its own.
-  const at = candidate.lastIndexOf("@");
-  if (at >= 0) candidate = candidate.slice(at + 1);
-  candidate = candidate.split(":")[0] ?? "";
-  candidate = candidate.replace(/\.+$/, "").replace(/^www\./, "");
-  if (!candidate || candidate.length > 253) return "";
-  if (IPV4.test(candidate)) {
-    return candidate.split(".").every((octet) => Number(octet) <= 255)
-      ? candidate
-      : "";
-  }
-  if (candidate === "localhost") return candidate;
-  const labels = candidate.split(".");
-  if (labels.length < 2) return "";
-  if (labels.every((label) => /^\d+$/.test(label))) return "";
-  if (!labels.every((label) => HOST_LABEL.test(label))) return "";
-  return candidate;
+  return normalizeHost(raw) ?? "";
 }
 
 /** Normalized, de-duplicated, and order-preserving, so the field reads back the

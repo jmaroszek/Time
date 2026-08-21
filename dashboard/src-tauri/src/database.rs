@@ -1,9 +1,11 @@
-//! The one process that holds the SQLite connection.
+//! The dashboard's native SQLite connection (the tracker has its own runtime
+//! connection to the same WAL database).
 //!
-//! The webview never touches the file; it sends SQL text through the `db_select`
-//! and `db_execute` commands, so everything arriving here is untrusted input
-//! from a renderer. `validate_sql` and `validate_mutation_target` are the whole
-//! boundary between that and the user's data — read both before changing either.
+//! The webview never touches the file; it sends reads and fixed structured
+//! writes through native commands. Category/rule SQL still arrives through
+//! `db_execute` as untrusted input; settings use the structured allowlist and
+//! transaction below. `validate_sql` and `validate_mutation_target` are the
+//! boundary for that SQL — read both before changing either.
 //!
 //! The bootstrap schema below is duplicated in `tracker/db.py`, because either
 //! half may legitimately create the database first (dashboard opened before the
@@ -20,12 +22,89 @@ use sqlx::{
 use std::{
     collections::HashSet,
     fs,
+    net::IpAddr,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 4;
-const MAX_SESSION_SPAN_SEC: i64 = 7 * 86_400;
+pub(crate) const SCHEMA_VERSION: i64 = 5;
+const MAX_CORRECTION_SPAN_SEC: i64 = 7 * 86_400;
+
+/// Keys the renderer may persist directly.  Lifecycle-owned state is
+/// intentionally absent: consent, startup registration, scheduling and pause
+/// flags have cross-system invariants and must travel through the native
+/// lifecycle command instead of an arbitrary SQL-shaped write.
+const RENDERER_SETTING_KEYS: &[&str] = &[
+    "weekly_goal_hours",
+    "idle_threshold_seconds",
+    "heartbeat_seconds",
+    "week_start",
+    "browser_processes",
+    "min_app_seconds_per_day",
+    "media_domains",
+    "activity_noise_filter",
+    "activity_noise_max_seconds",
+    "activity_noise_max_sessions",
+    "color_palette",
+    "productivity_style",
+    "theme",
+    "focus_chain_max_gap_seconds",
+    "day_start_hour",
+    "day_end_hour",
+    "record_window_titles",
+    "record_browser_domains",
+    "show_tray_icon",
+    "check_updates_automatically",
+    "process_aliases",
+    "starter_categories_pending",
+    "starter_suggestions_dismissed",
+    "rule_consolidation_dismissed",
+    "window_rules_reset_v4_pending",
+    "website_signal_seen",
+    "website_rule_guidance_seen",
+    "domain_coverage_hint_dismissed",
+    "welcome_dismissed",
+    "recording_off_notice_dismissed",
+    "off_schedule_notice_dismissed",
+];
+
+/// Values reset by the native Restore defaults action.  Keep this list in
+/// lockstep with `DEFAULT_SETTINGS` in tracker/db.py and the dashboard's
+/// displayed defaults; history, organization and metadata are deliberately
+/// not represented here.
+const RESTORE_DEFAULT_SETTINGS: &[(&str, &str)] = &[
+    ("weekly_goal_hours", "0"),
+    ("idle_threshold_seconds", "300"),
+    ("heartbeat_seconds", "15"),
+    ("week_start", "auto"),
+    (
+        "browser_processes",
+        "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe",
+    ),
+    ("min_app_seconds_per_day", "0"),
+    ("media_domains", ""),
+    ("activity_noise_filter", "utilities_only"),
+    ("activity_noise_max_seconds", "120"),
+    ("activity_noise_max_sessions", "1"),
+    ("color_palette", "slate"),
+    ("productivity_style", "vivid"),
+    ("theme", "system"),
+    ("focus_chain_max_gap_seconds", "300"),
+    ("day_start_hour", "0"),
+    ("day_end_hour", "24"),
+    ("tracking_paused", "0"),
+    ("tracking_paused_until", "0"),
+    ("tracking_schedule_enabled", "0"),
+    ("tracking_schedule_days", "0,1,2,3,4"),
+    ("tracking_schedule_start_minute", "540"),
+    ("tracking_schedule_end_minute", "1020"),
+    ("recording_consent", "0"),
+    ("record_window_titles", "0"),
+    ("record_browser_domains", "1"),
+    ("launch_at_login", "0"),
+    ("show_tray_icon", "1"),
+    ("check_updates_automatically", "1"),
+];
 
 fn schedule_minute(raw: &str, fallback: u32) -> u32 {
     raw.parse::<u32>()
@@ -76,6 +155,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     source TEXT NOT NULL DEFAULT 'live'
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(start_ts);
+CREATE INDEX IF NOT EXISTS idx_sessions_end ON sessions(end_ts);
 CREATE INDEX IF NOT EXISTS idx_sessions_proc ON sessions(process);
 CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY,
@@ -181,7 +261,7 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     -- Must track SCHEMA_VERSION above: this is what a database created by the
     -- dashboard rather than the tracker is stamped with, and open() refuses
     -- anything older than the constant.
-    ('schema_version','4'),
+    ('schema_version','5'),
     ('rule_priority_scheme','low-wins-v1'),
     ('weekly_goal_hours','0'),
     ('idle_threshold_seconds','300'),
@@ -270,6 +350,23 @@ pub struct RestoreNotice {
 pub struct ExecuteResult {
     rows_affected: u64,
     last_insert_id: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingUpdate {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LifecycleSettings {
+    pub recording_consent: bool,
+    pub launch_at_login: bool,
+    pub schedule_enabled: bool,
+    pub tracking_paused: bool,
+    pub tracking_paused_value: String,
+    pub tracking_paused_until: String,
 }
 
 /// Columnar session transport keeps the largest dashboard read compact. The
@@ -465,6 +562,11 @@ impl TimeDatabase {
         self.pool.close().await;
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
     pub async fn open(path: PathBuf) -> Result<Self, String> {
         let preexisting = path.metadata().map(|meta| meta.len() > 0).unwrap_or(false);
         let options = SqliteConnectOptions::new()
@@ -617,22 +719,17 @@ impl TimeDatabase {
         &self,
         start_sec: f64,
         end_sec: f64,
-        min_start_sec: f64,
     ) -> Result<SessionColumns, String> {
-        if !start_sec.is_finite()
-            || !end_sec.is_finite()
-            || !min_start_sec.is_finite()
-            || end_sec <= start_sec
-        {
+        if !start_sec.is_finite() || !end_sec.is_finite() || end_sec <= start_sec {
             return Err("Invalid session window".into());
         }
         // Split by whether a correction exists, rather than filtering on
         // COALESCE over the joined column. COALESCE is not sargable, so the
         // single-query form scanned every row of `sessions` no matter how
-        // narrow the window: on a ten-year database a one-row live-edge refresh
-        // cost ~138 ms, all of it scan. Filtering the uncorrected branch on
-        // s.start_ts directly lets idx_sessions_start drive it — the same
-        // refresh measures ~0.2 ms — and the corrected branch stays exact by
+        // narrow the window. Filtering the uncorrected branch on end_ts first
+        // lets idx_sessions_end drive it — a live-edge refresh on a mature
+        // database should visit only recent rows — while start_ts remains the
+        // exact half-open overlap bound. The corrected branch stays exact by
         // keeping the COALESCE, driven from session_corrections, which holds
         // one row per *edited* session rather than one per session.
         //
@@ -641,8 +738,8 @@ impl TimeDatabase {
         let rows = sqlx::query(
             "SELECT s.id,s.start_ts AS effective_start,s.end_ts AS effective_end, \
              s.process,s.title,s.domain,s.is_afk,NULL AS category_id,0 AS is_corrected \
-             FROM sessions s \
-             WHERE s.end_ts>? AND s.start_ts<? AND s.start_ts>? \
+             FROM sessions s INDEXED BY idx_sessions_end \
+             WHERE s.end_ts>? AND s.start_ts<? \
              AND NOT EXISTS (SELECT 1 FROM session_corrections c WHERE c.session_id=s.id) \
              UNION ALL \
              SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts), \
@@ -651,15 +748,12 @@ impl TimeDatabase {
              FROM session_corrections c JOIN sessions s ON s.id=c.session_id \
              WHERE COALESCE(c.corrected_end_ts,s.end_ts)>? \
              AND COALESCE(c.corrected_start_ts,s.start_ts)<? \
-             AND COALESCE(c.corrected_start_ts,s.start_ts)>? \
              ORDER BY effective_start ASC,id ASC",
         )
         .bind(start_sec)
         .bind(end_sec)
-        .bind(min_start_sec)
         .bind(start_sec)
         .bind(end_sec)
-        .bind(min_start_sec)
         .fetch_all(&self.pool)
         .await
         .map_err(|error| error.to_string())?;
@@ -728,11 +822,112 @@ impl TimeDatabase {
         })
     }
 
+    fn validate_renderer_setting_key(key: &str) -> Result<(), String> {
+        if RENDERER_SETTING_KEYS.contains(&key) {
+            return Ok(());
+        }
+        Err(format!(
+            "Setting {key:?} must be changed through its native lifecycle action"
+        ))
+    }
+
+    async fn write_settings_transaction(&self, updates: &[(String, String)]) -> Result<(), String> {
+        self.ensure_writable_schema()?;
+        let mut transaction = self.pool.begin().await.map_err(|error| error.to_string())?;
+        for (key, value) in updates {
+            sqlx::query(
+                "INSERT INTO settings (key,value) VALUES (?,?) \
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            )
+            .bind(key)
+            .bind(value)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| error.to_string())?;
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Persist ordinary renderer-owned preferences in one transaction.  All
+    /// keys are checked before the transaction starts, so a mixed batch can
+    /// never partially update settings before a protected or unknown key is
+    /// rejected.
+    pub async fn update_user_settings(&self, updates: &[SettingUpdate]) -> Result<(), String> {
+        let owned = updates
+            .iter()
+            .map(|update| {
+                Self::validate_renderer_setting_key(&update.key)?;
+                if update.value.len() > 1_048_576 {
+                    return Err(format!("Setting {:?} is too large", update.key));
+                }
+                Ok((update.key.clone(), update.value.clone()))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        self.write_settings_transaction(&owned).await
+    }
+
+    /// Native lifecycle actions use the same transaction primitive but may
+    /// touch protected state after their invariants have been checked.
+    pub(crate) async fn update_lifecycle_settings(
+        &self,
+        updates: &[(&str, &str)],
+    ) -> Result<(), String> {
+        self.write_settings_transaction(
+            &updates
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect::<Vec<_>>(),
+        )
+        .await
+    }
+
+    pub(crate) async fn lifecycle_settings(&self) -> Result<LifecycleSettings, String> {
+        let rows = sqlx::query(
+            "SELECT key,value FROM settings WHERE key IN \
+             ('recording_consent','launch_at_login','tracking_schedule_enabled',\
+              'tracking_paused','tracking_paused_until')",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        let mut state = LifecycleSettings::default();
+        for row in rows {
+            let key: String = row.try_get("key").map_err(|error| error.to_string())?;
+            let value: String = row.try_get("value").map_err(|error| error.to_string())?;
+            match key.as_str() {
+                "recording_consent" => state.recording_consent = value == "1",
+                "launch_at_login" => state.launch_at_login = value == "1",
+                "tracking_schedule_enabled" => state.schedule_enabled = value == "1",
+                "tracking_paused" => {
+                    state.tracking_paused = value == "1";
+                    state.tracking_paused_value = value;
+                }
+                "tracking_paused_until" => state.tracking_paused_until = value,
+                _ => {}
+            }
+        }
+        Ok(state)
+    }
+
+    pub(crate) async fn restore_default_settings(&self) -> Result<(), String> {
+        self.write_settings_transaction(
+            &RESTORE_DEFAULT_SETTINGS
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect::<Vec<_>>(),
+        )
+        .await
+    }
+
     /// Second gate: which tables the webview may write, per verb.
     ///
-    /// The asymmetries are deliberate. `settings` accepts INSERT (the dashboard
-    /// upserts preferences) but not UPDATE or DELETE, so no renderer bug can
-    /// blank a privacy gate or the schema version. Session deletion uses fixed,
+    /// Settings are deliberately absent. They cross a structured native
+    /// command so a batch can be validated completely and committed in one
+    /// transaction, while lifecycle-owned keys cannot be changed by a stale
+    /// renderer or a malformed SQL request. Session deletion uses fixed,
     /// structured native commands instead of renderer-authored SQL; the tracker
     /// remains the sole author of session rows.
     ///
@@ -744,12 +939,11 @@ impl TimeDatabase {
             .filter(|word| !word.is_empty())
             .map(str::to_ascii_uppercase)
             .collect::<Vec<_>>();
-        // Statement shape and the tables it may touch, together: settings
-        // accepts INSERT but not UPDATE or DELETE, and that asymmetry is only
-        // readable if the verb and its table list sit on the same arm.
+        // Statement shape and the tables it may touch are kept together so an
+        // unrecognized SQL shape is rejected rather than allowed by default.
         let (target, allowed_tables): (&str, &[&str]) = match words.as_slice() {
             [verb, into, table, ..] if verb == "INSERT" && into == "INTO" => {
-                (table.as_str(), &["SETTINGS", "RULES", "CATEGORIES"])
+                (table.as_str(), &["RULES", "CATEGORIES"])
             }
             [verb, table, ..] if verb == "UPDATE" => (table.as_str(), &["RULES", "CATEGORIES"]),
             [verb, from, table, ..] if verb == "DELETE" && from == "FROM" => {
@@ -1247,7 +1441,7 @@ impl TimeDatabase {
         if end <= start {
             return Err("Session end must be after its start".into());
         }
-        if end - start > MAX_SESSION_SPAN_SEC {
+        if end - start > MAX_CORRECTION_SPAN_SEC {
             return Err("A corrected session cannot be longer than seven days".into());
         }
         if end > unix_now()? {
@@ -1993,17 +2187,6 @@ impl TimeDatabase {
         Ok(pending)
     }
 
-    pub async fn recording_consent(&self) -> Result<bool, String> {
-        Ok(sqlx::query_scalar::<_, String>(
-            "SELECT value FROM settings WHERE key='recording_consent'",
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|error| error.to_string())?
-        .as_deref()
-            == Some("1"))
-    }
-
     pub async fn refresh_pending_safety_backup(
         &self,
         pending: &mut PendingRestore,
@@ -2207,36 +2390,162 @@ fn normalize_exclusion(kind: &str, raw: &str) -> Result<String, String> {
                 normalized.push_str(".exe");
             }
         }
-        "website" => {
-            if let Some(scheme) = normalized.find("://") {
-                normalized = normalized[(scheme + 3)..].to_owned();
-            }
-            normalized = normalized
-                .split(['/', '?', '#'])
-                .next()
-                .unwrap_or("")
-                .rsplit('@')
-                .next()
-                .unwrap_or("")
-                .split(':')
-                .next()
-                .unwrap_or("")
-                .trim_matches('.')
-                .to_owned();
-            if let Some(stripped) = normalized.strip_prefix("www.") {
-                normalized = stripped.to_owned();
-            }
-            if normalized.is_empty()
-                || normalized.len() > 253
-                || normalized.chars().any(char::is_whitespace)
-                || !normalized.contains('.')
-            {
-                return Err("Enter a website such as example.com".into());
-            }
-        }
+        "website" => return normalize_website_host(raw),
         _ => return Err("Unsupported tracking exclusion kind".into()),
     }
     Ok(normalized)
+}
+
+fn invalid_website_host() -> String {
+    "Enter a website such as example.com".into()
+}
+
+fn valid_port(raw: &str) -> bool {
+    if raw.is_empty() || !raw.chars().all(|character| character.is_ascii_digit()) {
+        return false;
+    }
+    let significant = raw.trim_start_matches('0');
+    significant.is_empty()
+        || (significant.len() <= 5 && significant.parse::<u32>().is_ok_and(|port| port <= 65_535))
+}
+
+fn trim_contract_whitespace(value: &str) -> &str {
+    value.trim_matches(|character: char| {
+        matches!(
+            character,
+            '\u{0009}'..='\u{000D}'
+                | '\u{0020}'
+                | '\u{00A0}'
+                | '\u{1680}'
+                | '\u{2000}'..='\u{200A}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202F}'
+                | '\u{205F}'
+                | '\u{3000}'
+                | '\u{FEFF}'
+        )
+    })
+}
+
+/// Normalize the host portion of a user-entered website identity.  This is
+/// deliberately a small parser rather than URL parsing: the dashboard needs a
+/// stable host identity and must reject ambiguous text instead of guessing
+/// which colons, brackets or path characters the user meant.
+fn normalize_website_host(raw: &str) -> Result<String, String> {
+    let value = trim_contract_whitespace(raw).to_ascii_lowercase();
+    if value.is_empty()
+        || value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return Err(invalid_website_host());
+    }
+
+    let scheme_separator = value
+        .find("://")
+        .filter(|separator| !value[..*separator].contains(['/', '?', '#']));
+    let without_scheme = if let Some(separator) = scheme_separator {
+        let scheme = &value[..separator];
+        let mut characters = scheme.chars();
+        if !characters
+            .next()
+            .is_some_and(|character| character.is_ascii_alphabetic())
+            || !characters.all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
+            })
+        {
+            return Err(invalid_website_host());
+        }
+        &value[separator + 3..]
+    } else {
+        value.as_str()
+    };
+    let authority_end = without_scheme
+        .find(['/', '?', '#'])
+        .unwrap_or(without_scheme.len());
+    let authority = &without_scheme[..authority_end];
+    let host_port = authority.rsplit('@').next().unwrap_or("");
+    if host_port.is_empty() {
+        return Err(invalid_website_host());
+    }
+
+    let host = if host_port.starts_with('[') {
+        let close = host_port.find(']').ok_or_else(invalid_website_host)?;
+        let address = &host_port[1..close];
+        let parsed = address
+            .parse::<IpAddr>()
+            .ok()
+            .filter(IpAddr::is_ipv6)
+            .ok_or_else(invalid_website_host)?;
+        let suffix = &host_port[close + 1..];
+        if !suffix.is_empty() {
+            if !suffix.starts_with(':') || !valid_port(&suffix[1..]) {
+                return Err(invalid_website_host());
+            }
+        }
+        return Ok(parsed.to_string());
+    } else {
+        if host_port.contains(['[', ']']) {
+            return Err(invalid_website_host());
+        }
+        if host_port.matches(':').count() > 1 {
+            // A bare IPv6 address has many colons and no port.  A host plus a
+            // port must use brackets, so anything that is not a valid IPv6
+            // address is rejected rather than split heuristically.
+            return host_port
+                .parse::<IpAddr>()
+                .ok()
+                .filter(IpAddr::is_ipv6)
+                .map(|parsed| parsed.to_string())
+                .ok_or_else(invalid_website_host);
+        }
+        if let Some(colon) = host_port.find(':') {
+            let candidate = &host_port[..colon];
+            if !valid_port(&host_port[colon + 1..]) {
+                return Err(invalid_website_host());
+            }
+            candidate
+        } else {
+            host_port
+        }
+    };
+
+    let host = host.strip_suffix('.').unwrap_or(host);
+    if host.is_empty() || host.ends_with('.') {
+        return Err(invalid_website_host());
+    }
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    if host.is_empty() || host.len() > 253 {
+        return Err(invalid_website_host());
+    }
+    if let Ok(address) = host.parse::<IpAddr>() {
+        return Ok(address.to_string());
+    }
+    // A dotted all-numeric candidate is an IP address claim, not a DNS name;
+    // accepting it as DNS would silently turn malformed addresses into rules
+    // that never match what the tracker records.
+    if host
+        .chars()
+        .all(|character| character.is_ascii_digit() || character == '.')
+    {
+        return Err(invalid_website_host());
+    }
+    if host != "localhost" && !host.contains('.') {
+        return Err(invalid_website_host());
+    }
+    if host.split('.').any(|label| {
+        label.is_empty()
+            || label.len() > 63
+            || label.starts_with('-')
+            || label.ends_with('-')
+            || !label
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '-')
+    }) {
+        return Err(invalid_website_host());
+    }
+    Ok(host.to_owned())
 }
 
 fn bind_value<'q>(
@@ -2302,8 +2611,9 @@ pub fn database_path(base: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        schedule_allows_local, ActivityDeleteRequest, SessionClassificationRequest,
-        SessionCorrectionRequest, TimeDatabase, BOOTSTRAP_SQL, SCHEMA_VERSION,
+        normalize_website_host, schedule_allows_local, ActivityDeleteRequest,
+        SessionClassificationRequest, SessionCorrectionRequest, SettingUpdate, TimeDatabase,
+        BOOTSTRAP_SQL, SCHEMA_VERSION,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2397,7 +2707,7 @@ mod tests {
         assert!(TimeDatabase::validate_mutation_target(
             "INSERT INTO settings (key,value) VALUES ($1,$2)"
         )
-        .is_ok());
+        .is_err());
         assert!(
             TimeDatabase::validate_mutation_target("DELETE FROM sessions WHERE id=$1").is_err()
         );
@@ -2407,6 +2717,104 @@ mod tests {
         );
         assert!(TimeDatabase::validate_mutation_target("UPDATE settings SET value='1'").is_err());
         assert!(TimeDatabase::validate_mutation_target("DELETE FROM settings").is_err());
+    }
+
+    #[test]
+    fn renderer_setting_allowlist_excludes_lifecycle_and_unknown_keys() {
+        assert!(TimeDatabase::validate_renderer_setting_key("theme").is_ok());
+        assert!(
+            TimeDatabase::validate_renderer_setting_key("starter_suggestions_dismissed").is_ok()
+        );
+        assert!(
+            TimeDatabase::validate_renderer_setting_key("rule_consolidation_dismissed").is_ok()
+        );
+        for key in [
+            "recording_consent",
+            "launch_at_login",
+            "tracking_schedule_enabled",
+            "tracking_schedule_days",
+            "tracking_schedule_start_minute",
+            "tracking_schedule_end_minute",
+            "tracking_paused",
+            "tracking_paused_until",
+            "privacy_onboarding_complete",
+            "schema_version",
+            "rule_priority_scheme",
+            "tracker_version",
+            "tracker_health_heartbeat",
+            "not_a_real_setting",
+        ] {
+            assert!(
+                TimeDatabase::validate_renderer_setting_key(key).is_err(),
+                "{key} must stay behind a native boundary",
+            );
+        }
+    }
+
+    #[test]
+    fn user_setting_batches_are_atomic_and_keep_protected_keys_out() {
+        let path = scratch_database("settings-batch-test");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            database
+                .update_user_settings(&[
+                    SettingUpdate {
+                        key: "theme".into(),
+                        value: "dark".into(),
+                    },
+                    SettingUpdate {
+                        key: "show_tray_icon".into(),
+                        value: "0".into(),
+                    },
+                ])
+                .await
+                .unwrap();
+            let theme: String = sqlx::query_scalar("SELECT value FROM settings WHERE key='theme'")
+                .fetch_one(database.test_pool())
+                .await
+                .unwrap();
+            assert_eq!(theme, "dark");
+            let error = database
+                .update_user_settings(&[
+                    SettingUpdate {
+                        key: "theme".into(),
+                        value: "light".into(),
+                    },
+                    SettingUpdate {
+                        key: "recording_consent".into(),
+                        value: "1".into(),
+                    },
+                ])
+                .await
+                .unwrap_err();
+            assert!(error.contains("native lifecycle"));
+            let theme: String = sqlx::query_scalar("SELECT value FROM settings WHERE key='theme'")
+                .fetch_one(database.test_pool())
+                .await
+                .unwrap();
+            assert_eq!(theme, "dark");
+            database.close().await;
+        });
+    }
+
+    #[test]
+    fn website_normalization_matches_shared_contract_fixture() {
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            cases: Vec<Case>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Case {
+            input: String,
+            expected: Option<String>,
+        }
+        let fixture: Fixture =
+            serde_json::from_str(include_str!("../../../contracts/host_normalization.json"))
+                .unwrap();
+        for case in fixture.cases {
+            let actual = normalize_website_host(&case.input).ok();
+            assert_eq!(actual, case.expected, "input {:?}", case.input);
+        }
     }
 
     #[test]
@@ -2519,7 +2927,7 @@ mod tests {
                 .unwrap();
             assert_eq!(raw, (now - 300, now - 250));
             let columns = database
-                .fetch_sessions((now - 400) as f64, now as f64, (now - 500) as f64)
+                .fetch_sessions((now - 400) as f64, now as f64)
                 .await
                 .unwrap();
             assert_eq!(columns.starts[0], now - 290);
@@ -2675,8 +3083,8 @@ mod tests {
 
     #[test]
     fn session_windows_follow_corrected_spans_not_raw_ones() {
-        // fetch_sessions filters the uncorrected rows on the raw columns so the
-        // start_ts index can drive them, and the corrected rows on their
+        // fetch_sessions filters the uncorrected rows on raw end/start columns
+        // so idx_sessions_end can drive them, and the corrected rows on their
         // effective spans. A correction that moves a session across a window
         // boundary is what tells those two branches apart: filtering everything
         // on raw columns would place session 1 in the wrong window, and
@@ -2708,7 +3116,7 @@ mod tests {
                 .unwrap();
 
             let recent = database
-                .fetch_sessions((now - 600) as f64, now as f64, (now - 600 - 604_800) as f64)
+                .fetch_sessions((now - 600) as f64, now as f64)
                 .await
                 .unwrap();
             assert_eq!(recent.ids, vec![2, 1], "ordered by effective start");
@@ -2717,16 +3125,81 @@ mod tests {
 
             // Its raw span is now empty: the correction moved it out entirely.
             let raw_window = database
-                .fetch_sessions(
-                    (now - 10_100) as f64,
-                    (now - 9_800) as f64,
-                    (now - 10_100 - 604_800) as f64,
-                )
+                .fetch_sessions((now - 10_100) as f64, (now - 9_800) as f64)
                 .await
                 .unwrap();
             assert!(
                 raw_window.ids.is_empty(),
                 "a corrected session must not answer for where its raw row sat",
+            );
+        });
+    }
+
+    #[test]
+    fn narrow_window_keeps_a_long_uncorrected_session_that_overlaps_its_start() {
+        let path = scratch_database("database-long-session-window-test");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            let now = super::unix_now().unwrap();
+            sqlx::query(
+                "INSERT INTO sessions (id,start_ts,end_ts,process) VALUES \
+                 (1,?,?,'long-running.exe'),(2,?,?,'outside.exe')",
+            )
+            .bind(now - 30 * 86_400)
+            .bind(now - 1)
+            .bind(now - 3_000)
+            .bind(now - 2_900)
+            .execute(&database.pool)
+            .await
+            .unwrap();
+
+            let sessions = database
+                .fetch_sessions((now - 600) as f64, now as f64)
+                .await
+                .unwrap();
+            assert_eq!(sessions.ids, vec![1]);
+            assert_eq!(sessions.starts, vec![now - 30 * 86_400]);
+        });
+    }
+
+    #[test]
+    fn mature_narrow_session_query_uses_the_end_time_index() {
+        let path = scratch_database("database-session-end-index-test");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            sqlx::query(
+                "WITH RECURSIVE numbers(n) AS (\
+                    SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 50000\
+                 )\
+                 INSERT INTO sessions (id,start_ts,end_ts,process)\
+                 SELECT n,n * 60,n * 60 + 30,'history.exe' FROM numbers",
+            )
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            sqlx::query("ANALYZE")
+                .execute(&database.pool)
+                .await
+                .unwrap();
+
+            let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+                "EXPLAIN QUERY PLAN \
+                 SELECT s.id,s.start_ts AS effective_start,s.end_ts AS effective_end, \
+                        s.process,s.title,s.domain,s.is_afk \
+                 FROM sessions s INDEXED BY idx_sessions_end \
+                 WHERE s.end_ts>? AND s.start_ts<? \
+                 AND NOT EXISTS (SELECT 1 FROM session_corrections c WHERE c.session_id=s.id) \
+                 ORDER BY effective_start ASC,id ASC",
+            )
+            .bind(2_999_900_i64)
+            .bind(3_000_000_i64)
+            .fetch_all(&database.pool)
+            .await
+            .unwrap();
+            assert!(
+                plan.iter()
+                    .any(|(_, _, _, detail)| detail.contains("idx_sessions_end")),
+                "exact-overlap query should use idx_sessions_end, plan: {plan:?}",
             );
         });
     }
@@ -3151,7 +3624,7 @@ mod tests {
                 .unwrap();
             }
 
-            let sessions = database.fetch_sessions(10.0, 100.0, -1.0).await.unwrap();
+            let sessions = database.fetch_sessions(10.0, 100.0).await.unwrap();
             assert_eq!(sessions.ids, vec![2, 1]);
             assert_eq!(sessions.starts, vec![20, 50]);
             assert_eq!(sessions.ends, vec![30, 60]);

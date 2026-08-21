@@ -13,6 +13,7 @@ use windows::Win32::Graphics::Dwm::{
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 mod database;
+mod lifecycle;
 mod restore;
 mod window_state;
 
@@ -24,7 +25,12 @@ use database::{
     database_path, ActivityDeletePreview, ActivityDeleteRequest, ActivityDeleteResult,
     DatabaseBackup, ExecuteResult, RestoreNotice, SessionClassificationRequest,
     SessionClassificationResult, SessionColumns, SessionCorrection, SessionCorrectionRequest,
-    TimeDatabase, TrackingExclusion, TrackingExclusionPreview, TrackingExclusionResult,
+    SettingUpdate, TimeDatabase, TrackingExclusion, TrackingExclusionPreview,
+    TrackingExclusionResult,
+};
+use lifecycle::{
+    execute_tracking_lifecycle, prepare_restore_for_restart, LifecycleCoordinator, LifecycleResult,
+    RealTrackingSystem, TrackingLifecycleAction,
 };
 
 #[cfg(windows)]
@@ -92,15 +98,32 @@ async fn db_execute(
 }
 
 #[tauri::command]
+async fn update_user_settings(
+    lifecycle: tauri::State<'_, LifecycleCoordinator>,
+    database: tauri::State<'_, TimeDatabase>,
+    updates: Vec<SettingUpdate>,
+) -> Result<(), String> {
+    let _guard = lifecycle.gate().lock().await;
+    database.update_user_settings(&updates).await
+}
+
+#[tauri::command]
+async fn run_tracking_lifecycle(
+    lifecycle: tauri::State<'_, LifecycleCoordinator>,
+    database: tauri::State<'_, TimeDatabase>,
+    action: TrackingLifecycleAction,
+) -> Result<LifecycleResult, String> {
+    let _guard = lifecycle.gate().lock().await;
+    execute_tracking_lifecycle(&database, action, &RealTrackingSystem).await
+}
+
+#[tauri::command]
 async fn fetch_sessions(
     database: tauri::State<'_, TimeDatabase>,
     start_sec: f64,
     end_sec: f64,
-    min_start_sec: f64,
 ) -> Result<SessionColumns, String> {
-    database
-        .fetch_sessions(start_sec, end_sec, min_start_sec)
-        .await
+    database.fetch_sessions(start_sec, end_sec).await
 }
 
 #[tauri::command]
@@ -147,22 +170,12 @@ fn choose_database_backup_file(
 #[tauri::command]
 async fn restore_database(
     app: tauri::AppHandle,
+    lifecycle: tauri::State<'_, LifecycleCoordinator>,
     database: tauri::State<'_, TimeDatabase>,
     backup_path: String,
 ) -> Result<(), String> {
-    let tracker_was_enabled = database.recording_consent().await?;
-    let mut pending = database.prepare_restore(PathBuf::from(backup_path)).await?;
-    if let Err(error) = stop_tracker() {
-        database.cancel_pending_restore()?;
-        return Err(error);
-    }
-    if let Err(error) = database.refresh_pending_safety_backup(&mut pending).await {
-        database.cancel_pending_restore()?;
-        if tracker_was_enabled {
-            let _ = start_tracker();
-        }
-        return Err(error);
-    }
+    let _guard = lifecycle.gate().lock().await;
+    prepare_restore_for_restart(&database, PathBuf::from(backup_path), &RealTrackingSystem).await?;
     app.restart()
 }
 
@@ -173,11 +186,6 @@ fn take_restore_notice(app: tauri::AppHandle) -> Result<Option<RestoreNotice>, S
         .local_data_dir()
         .map_err(|error| error.to_string())?;
     TimeDatabase::take_restore_notice(&database_path(&base))
-}
-
-#[tauri::command]
-async fn erase_history(database: tauri::State<'_, TimeDatabase>) -> Result<u64, String> {
-    database.erase_history().await
 }
 
 #[tauri::command]
@@ -313,7 +321,7 @@ fn tracker_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "Time executable has no parent directory".into())
 }
 
-fn system_start_tracker() -> Result<(), String> {
+pub(crate) fn system_start_tracker() -> Result<(), String> {
     let path = tracker_path()?;
     if !path.is_file() {
         return Err(format!(
@@ -328,7 +336,7 @@ fn system_start_tracker() -> Result<(), String> {
     Ok(())
 }
 
-fn system_stop_tracker() -> Result<(), String> {
+pub(crate) fn system_stop_tracker() -> Result<(), String> {
     #[cfg(windows)]
     {
         let status = Command::new("taskkill")
@@ -346,7 +354,7 @@ fn system_stop_tracker() -> Result<(), String> {
     Err("Stopping the tracker is supported only on Windows".into())
 }
 
-fn system_set_launch_at_login(enabled: bool) -> Result<(), String> {
+pub(crate) fn system_set_launch_at_login(enabled: bool) -> Result<(), String> {
     #[cfg(windows)]
     {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -401,19 +409,24 @@ fn system_run_tracker_migration() -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-fn start_tracker() -> Result<(), String> {
-    system_start_tracker()
-}
-
-#[tauri::command]
-fn stop_tracker() -> Result<(), String> {
-    system_stop_tracker()
-}
-
-#[tauri::command]
-fn set_launch_at_login(enabled: bool) -> Result<(), String> {
-    system_set_launch_at_login(enabled)
+pub(crate) fn system_tracker_is_running() -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        let output = Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq time-tracker.exe", "/NH"])
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(format!(
+                "Could not query tracker status ({})",
+                output.status
+            ));
+        }
+        let text = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+        return Ok(text.contains("time-tracker.exe"));
+    }
+    #[cfg(not(windows))]
+    Ok(false)
 }
 
 /// The ProgId Windows records as the handler for https — "ChromeHTML",
@@ -689,12 +702,15 @@ pub fn run() {
             let database =
                 restore::open_database_with_pending_restore(path).map_err(std::io::Error::other)?;
             app.manage(database);
+            app.manage(LifecycleCoordinator::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             db_path,
             db_select,
             db_execute,
+            update_user_settings,
+            run_tracking_lifecycle,
             fetch_sessions,
             backup_database,
             list_database_backups,
@@ -702,7 +718,6 @@ pub fn run() {
             choose_database_backup_file,
             restore_database,
             take_restore_notice,
-            erase_history,
             preview_activity_delete,
             delete_activity,
             delete_history_before,
@@ -715,9 +730,6 @@ pub fn run() {
             reset_session_correction,
             classify_sessions,
             save_activity_export,
-            start_tracker,
-            stop_tracker,
-            set_launch_at_login,
             default_browser_prog_id,
             check_for_update,
             install_update

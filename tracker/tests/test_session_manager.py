@@ -159,11 +159,22 @@ def test_lock_is_immediate_afk(manager, store):
     assert store.opened[1][3] == "locked"
 
 
-def test_idle_then_lock_stays_one_afk_span(manager, store):
+def test_idle_then_lock_splits_at_observed_lock(manager, store):
     manager.tick(active(1000.0))
     manager.tick(active(1180.0, idle=180.0))
+    afk_id = store.opened[1][0]
     manager.tick(active(1200.0, process="lockapp.exe", title="Lock", idle=200.0))
-    assert len(store.opened) == 2  # active + single afk session
+    assert store.closed[afk_id] == 1200.0
+    assert store.opened[2][1:6] == (1200.0, AFK_PROCESS, "locked", None, True)
+
+
+def test_repeated_lock_tick_keeps_the_exact_locked_row(manager, store):
+    manager.tick(active(1000.0))
+    manager.tick(active(1005.0, process="lockapp.exe", title="Lock", idle=5.0))
+    manager.tick(active(1006.0, process="lockapp.exe", title="Lock", idle=6.0))
+
+    assert len(store.opened) == 2
+    assert store.closed == {1: 1005.0}
 
 
 def test_resume_from_afk_opens_fresh_session(manager, store):
@@ -267,6 +278,52 @@ def test_awake_afk_does_not_retain_an_excluded_identity(store):
     manager.tick(active(1000.0, process="spotify.exe", title="Spotify"))
     manager.tick(active(1180.0, process="spotify.exe", title="Spotify", idle=180.0))
     assert store.opened[0][2:6] == (AFK_PROCESS, "idle", None, True)
+
+
+def test_idle_boundary_checks_the_current_excluded_snapshot(store):
+    manager = SessionManager(
+        store=store,
+        settings=Settings(
+            idle_threshold_seconds=IDLE_THRESHOLD,
+            excluded_processes=frozenset({"spotify.exe"}),
+        ),
+    )
+    manager.tick(active(1000.0, process="code.exe", title="Editor"))
+    manager.tick(
+        active(
+            1180.0,
+            process="spotify.exe",
+            title="Private playlist",
+            idle=IDLE_THRESHOLD,
+        )
+    )
+
+    assert store.opened[1][2:6] == (AFK_PROCESS, "idle", None, True)
+    assert all(row[2] != "spotify.exe" for row in store.opened)
+
+
+def test_excluded_snapshot_replaces_a_previously_retained_afk_identity(store):
+    manager = SessionManager(
+        store=store,
+        settings=Settings(
+            idle_threshold_seconds=IDLE_THRESHOLD,
+            excluded_processes=frozenset({"spotify.exe"}),
+        ),
+    )
+    manager.tick(active(1000.0, process="code.exe", title="Editor"))
+    manager.tick(active(1180.0, process="code.exe", title="Editor", idle=IDLE_THRESHOLD))
+    manager.tick(
+        active(
+            1190.0,
+            process="spotify.exe",
+            title="Private playlist",
+            idle=IDLE_THRESHOLD + 10,
+        )
+    )
+
+    assert store.opened[1][2:6] == ("code.exe", "idle", None, True)
+    assert store.opened[2][2:6] == (AFK_PROCESS, "idle", None, True)
+    assert all(row[2] != "spotify.exe" for row in store.opened)
 
 
 # ---------------- system power ----------------

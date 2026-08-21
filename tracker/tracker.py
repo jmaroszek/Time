@@ -171,6 +171,85 @@ class FailureThrottle:
             self._last_report[kind] = now
 
 
+def _cleanup_step(label: str, action) -> bool:
+    """Run one shutdown step without putting private exception text in logs."""
+    try:
+        action()
+    except Exception as exc:
+        logging.error(
+            "Tracker shutdown step failed | step=%s | error=%s",
+            label,
+            type(exc).__name__,
+        )
+        return False
+    return True
+
+
+class _ShutdownCoordinator:
+    """Run tracker cleanup once, keeping later safety steps independent."""
+
+    def __init__(self, stop_event, tray_controller, power_monitor, manager, conn):
+        self._stop_event = stop_event
+        self._tray_controller = tray_controller
+        self._power_monitor = power_monitor
+        self._manager = manager
+        self._conn = conn
+        self._lock = threading.Lock()
+        self._completed = threading.Event()
+        self._owner_thread = None
+        self._started = False
+
+    def __call__(self, *_args) -> bool:
+        current_thread = threading.get_ident()
+        with self._lock:
+            if self._started:
+                if self._owner_thread == current_thread:
+                    # A cleanup callback must not deadlock if it re-enters the
+                    # coordinator on its own thread.
+                    return True
+                wait_for_completion = True
+            else:
+                # Mark before running callbacks: a console control event and
+                # atexit can both reach this function, including from
+                # different threads.
+                self._started = True
+                self._owner_thread = current_thread
+                wait_for_completion = False
+        if wait_for_completion:
+            # A second callback must not let interpreter shutdown outrun the
+            # first callback's session finalization and database close.
+            self._completed.wait()
+            return True
+
+        try:
+            self._stop_event.set()
+            failed: list[str] = []
+            if self._tray_controller is not None and not _cleanup_step(
+                "tray", self._tray_controller.close
+            ):
+                failed.append("tray")
+            if self._power_monitor is not None and not _cleanup_step(
+                "power", self._power_monitor.close
+            ):
+                failed.append("power")
+            if not _cleanup_step("sessions", lambda: self._manager.shutdown(time.time())):
+                failed.append("sessions")
+            if not _cleanup_step("health", lambda: stamp_tracker_health(self._conn, 0)):
+                failed.append("health")
+            if not _cleanup_step("database", self._conn.close):
+                failed.append("database")
+            if failed:
+                logging.error(
+                    "Tracker shutdown completed with cleanup errors | steps=%s",
+                    ",".join(failed),
+                )
+            else:
+                logging.info("Tracker stopped cleanly.")
+        finally:
+            self._completed.set()
+        return True
+
+
 def run() -> None:
     conn = db.open_db(config.DB_PATH)
     # Stamp the running tracker version so the dashboard can show both halves'
@@ -200,27 +279,19 @@ def run() -> None:
     stop_event = threading.Event()
     tray_controller = tray.create_tray_controller(config.DB_PATH, stop_event)
     tray_visible = _sync_tray(tray_controller, raw_settings)
+    shutdown = _ShutdownCoordinator(
+        stop_event,
+        tray_controller,
+        power_monitor,
+        manager,
+        conn,
+    )
 
-    def _shutdown(*_args) -> bool:
-        try:
-            stop_event.set()
-            if tray_controller is not None:
-                tray_controller.close()
-            if power_monitor is not None:
-                power_monitor.close()
-            manager.shutdown(time.time())
-            stamp_tracker_health(conn, 0)
-            conn.close()
-            logging.info("Tracker stopped cleanly.")
-        except Exception:
-            pass
-        return True
-
-    atexit.register(_shutdown)
+    atexit.register(shutdown)
     try:
         import win32api
 
-        win32api.SetConsoleCtrlHandler(_shutdown, True)
+        win32api.SetConsoleCtrlHandler(shutdown, True)
     except Exception:
         pass  # pythonw has no console; atexit still covers normal interpreter exit
 

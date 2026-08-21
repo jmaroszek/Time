@@ -16,8 +16,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { getDb } from "./db";
 import type { Session } from "./metrics";
 import { assertSupportedSchemaVersion } from "./schema";
-import { MAX_SESSION_SPAN_SEC } from "./sessionWindowCache";
 import { invalidateHistory } from "./historyInvalidation";
+import { withLifecycleBusy } from "../state/lifecycleBusy";
 
 interface SessionColumns {
   ids: number[];
@@ -36,7 +36,6 @@ export async function fetchSessions(startSec: number, endSec: number): Promise<S
   const columns = await invoke<SessionColumns>("fetch_sessions", {
     startSec,
     endSec,
-    minStartSec: startSec - MAX_SESSION_SPAN_SEC,
   });
   const count = columns.ids.length;
   if (
@@ -140,23 +139,54 @@ export async function checkSchemaVersion(): Promise<number | null> {
 }
 
 export async function updateSetting(key: string, value: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "INSERT INTO settings (key, value) VALUES ($1, $2)" +
-      " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    [key, value],
-  );
+  await updateSettings([{ key, value }]);
 }
 
-/** End a pause by clearing both keys, exactly as the tray does.
- *
- *  The pair has to move together: `tracking_paused` is the indefinite flag and
- *  `tracking_paused_until` is the timed one, and the tracker resumes only when
- *  neither is set. Clearing one and leaving the other is a pause that looks over
- *  and is not. The tracker picks this up on its next one-second settings read. */
-export async function clearTrackingPause(): Promise<void> {
-  await updateSetting("tracking_paused", "0");
-  await updateSetting("tracking_paused_until", "0");
+export interface SettingUpdate {
+  key: string;
+  value: string;
+}
+
+/** Renderer-owned settings cross one native transaction and allowlist. */
+export async function updateSettings(updates: SettingUpdate[]): Promise<void> {
+  await invoke("update_user_settings", { updates });
+}
+
+export interface LifecycleResult {
+  recordingConsent: boolean;
+  launchAtLogin: boolean;
+  scheduleEnabled: boolean;
+  trackerStarted: boolean;
+  deletedCount: number;
+}
+
+export type TrackingLifecycleAction =
+  | {
+      action: "complete_onboarding";
+      enable: boolean;
+      recordWindowTitles: boolean;
+      startAtLogin: boolean;
+    }
+  | { action: "set_recording"; enabled: boolean }
+  | { action: "set_startup"; enabled: boolean }
+  | {
+      action: "set_schedule";
+      enabled: boolean;
+      days?: string;
+      startMinute?: number;
+      endMinute?: number;
+    }
+  | { action: "resume" }
+  | { action: "ensure_started" }
+  | { action: "restore_defaults" }
+  | { action: "secure_erase" };
+
+export async function runTrackingLifecycle(
+  action: TrackingLifecycleAction,
+): Promise<LifecycleResult> {
+  return withLifecycleBusy(() =>
+    invoke<LifecycleResult>("run_tracking_lifecycle", { action }),
+  );
 }
 
 // Mirrors fresh-install values in tracker/db.py DEFAULT_SETTINGS and the Rust
@@ -175,6 +205,7 @@ export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
   activity_noise_max_sessions: "1",
   color_palette: "slate",
   productivity_style: "vivid",
+  theme: "system",
   focus_chain_max_gap_seconds: "300",
   day_start_hour: "0",
   day_end_hour: "24",
@@ -192,18 +223,11 @@ export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
   check_updates_automatically: "1",
 };
 
-/** Restore only settings represented on the Settings tab. Runtime metadata,
- *  onboarding completion, aliases, exclusions, categories, rules, and history
- *  are intentionally outside this single atomic upsert. */
+/** Ask native lifecycle orchestration to restore only settings represented on
+ *  the Settings tab. Runtime metadata, onboarding completion, aliases,
+ *  exclusions, categories, rules, and history stay outside that action. */
 export async function restoreDefaultSettings(): Promise<void> {
-  const db = await getDb();
-  const entries = Object.entries(DEFAULT_USER_SETTINGS);
-  const placeholders = entries.map((_, index) => `($${index * 2 + 1},$${index * 2 + 2})`);
-  await db.execute(
-    `INSERT INTO settings (key,value) VALUES ${placeholders.join(",")}` +
-      " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-    entries.flat(),
-  );
+  await runTrackingLifecycle({ action: "restore_defaults" });
 }
 
 /** Persist the full process-alias map (lowercased process name -> display name). */
@@ -674,7 +698,7 @@ export async function chooseDatabaseBackupFile(): Promise<string | null> {
 }
 
 export async function restoreDatabase(backupPath: string): Promise<void> {
-  await invoke("restore_database", { backupPath });
+  await withLifecycleBusy(() => invoke("restore_database", { backupPath }));
 }
 
 export async function takeRestoreNotice(): Promise<RestoreNotice | null> {
@@ -684,10 +708,12 @@ export async function takeRestoreNotice(): Promise<RestoreNotice | null> {
 /** Securely erase all recorded sessions, checkpoint the WAL, and compact. */
 export async function eraseAllHistory(): Promise<number> {
   try {
-    return await invoke<number>("erase_history");
+    const result = await runTrackingLifecycle({ action: "secure_erase" });
+    return result.deletedCount;
   } finally {
-    // The native command deletes before checkpoint/compaction. Even if that
-    // cleanup step fails, no renderer cache may keep showing erased rows.
+    // The native lifecycle command deletes only after tracker shutdown and
+    // compaction. Even if that cleanup step fails, no renderer cache may keep
+    // showing erased rows.
     invalidateHistory();
   }
 }

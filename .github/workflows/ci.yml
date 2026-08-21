@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,6 +22,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+      - name: Check release version parity
+        run: python scripts/check_version_parity.py
       - name: Install dependencies
         run: pip install -r tracker/requirements-dev.txt
       - name: Run pytest with branch coverage
@@ -181,16 +184,33 @@ jobs:
     # check inside one repository can only prove self-consistency, so the two
     # copies must be compared against each other.
     #
-    # Inert until EXTENSION_REPOSITORY is set to the extension's "owner/repo".
-    # That repository has no remote yet, so CI cannot fetch it; until then the
-    # comparison runs locally through tracker/tests/test_protocol_parity.py and
-    # is a hard gate in the extension's own `npm run verify:release`. A private
-    # extension repository additionally needs a PAT in EXTENSION_REPO_TOKEN.
-    if: vars.EXTENSION_REPOSITORY != ''
+    # Protected contexts fail when the shared repository is not configured.
+    # Fork PRs may skip this job because their untrusted workflow cannot receive
+    # a private extension-repository token. Same-repository contexts with the
+    # repository configured always run the strict comparison below.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (
+        vars.EXTENSION_REPOSITORY != '' &&
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.head.repo.full_name == github.repository)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      - name: Require the extension repository on protected contexts
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        env:
+          EXTENSION_REPOSITORY: ${{ vars.EXTENSION_REPOSITORY }}
+        run: |
+          if [ -z "$EXTENSION_REPOSITORY" ]; then
+            echo "EXTENSION_REPOSITORY must be configured for main pushes and manual runs." >&2
+            exit 1
+          fi
       - name: Check out the extension repository
         uses: actions/checkout@v5
         with:
@@ -229,13 +249,17 @@ jobs:
           RENDERER_RESULT: ${{ needs.renderer-compatibility.result }}
           WINDOWS_RESULT: ${{ needs.windows-backend.result }}
           PARITY_RESULT: ${{ needs.protocol-parity.result }}
+          PARITY_REQUIRED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (vars.EXTENSION_REPOSITORY != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
         run: |
           test "$TRACKER_RESULT" = success
           test "$DASHBOARD_RESULT" = success
           test "$RENDERER_RESULT" = success
           test "$WINDOWS_RESULT" = success
-          # "skipped" while EXTENSION_REPOSITORY is unset; must pass once it is.
           case "$PARITY_RESULT" in
-            success|skipped) ;;
+            success) ;;
+            skipped)
+              # A skipped parity job is acceptable only outside protected and
+              # configured same-repository contexts (for example, a fork PR).
+              test "$PARITY_REQUIRED" = false ;;
             *) exit 1 ;;
           esac

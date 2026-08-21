@@ -42,6 +42,7 @@ describe("normalizeMediaSite", () => {
   it("keeps the hosts a local media server is reached by", () => {
     expect(normalizeMediaSite("http://localhost:8096/web")).toBe("localhost");
     expect(normalizeMediaSite("192.168.1.50:32400")).toBe("192.168.1.50");
+    expect(normalizeMediaSite("https://[2001:0DB8::1]:443/web")).toBe("2001:db8::1");
   });
 
   it("rejects what could never be a stored domain", () => {
@@ -50,6 +51,8 @@ describe("normalizeMediaSite", () => {
     expect(normalizeMediaSite("1.2.3")).toBe("");
     expect(normalizeMediaSite("999.1.1.1")).toBe("");
     expect(normalizeMediaSite("-leading.example")).toBe("");
+    expect(normalizeMediaSite("example.com:65536")).toBe("");
+    expect(normalizeMediaSite("[::1]:nope")).toBe("");
   });
 });
 

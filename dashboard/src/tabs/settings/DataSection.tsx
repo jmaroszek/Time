@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 
 import { Button, ConfirmDialog, DialogShell, TrashButton } from "../../components/ui";
 import { BackupNameDialog } from "../../components/BackupNameDialog";
@@ -13,19 +12,25 @@ import {
   inspectDatabaseBackup,
   listDatabaseBackups,
   restoreDatabase,
-  updateSetting,
   type DatabaseBackup,
 } from "../../lib/queries";
 import { useBanner } from "../../state/banner";
+import { useLifecycleBusy } from "../../state/lifecycleBusy";
 import { useMeta } from "../../state/meta";
 import { Section } from "./chrome";
 import { NumberStepper, Row, handleRadioKey, sanitizeNumericDraft } from "./fields";
 
 const MAX_RETENTION_DAYS = 36_500;
 
-export default function DataSection({ settingsBusy }: { settingsBusy: boolean }) {
+export default function DataSection({
+  settingsBusy,
+}: {
+  settingsBusy: boolean;
+}) {
   const meta = useMeta();
   const banner = useBanner();
+  const lifecycleBusy = useLifecycleBusy();
+  const mutationsBusy = settingsBusy || lifecycleBusy;
   const [olderDays, setOlderDays] = useState("365");
   const [message, setMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -39,6 +44,16 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
   const [eraseOpen, setEraseOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<"older" | "erase" | null>(null);
   const restoreButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!mutationsBusy) return;
+    // BackupNameDialog predates the shared lifecycle gate and has no disabled
+    // prop; close it if another native operation becomes busy so it cannot
+    // submit a backup around that gate. Restore/delete/erase dialogs receive
+    // an explicit disabled/confirmDisabled state and remain visible so a
+    // failed operation is still actionable.
+    setBackupNameOpen(false);
+  }, [mutationsBusy]);
 
   const normalizeOlderDays = () => {
     const parsed = Math.floor(Number(olderDays));
@@ -64,6 +79,7 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
   // Counting before asking is the point of the dialog: a native confirm could
   // only ever say "older than 365 days", never how many sessions that is.
   const deleteOlder = async () => {
+    if (mutationsBusy) return;
     const days = Math.floor(Number(olderDays));
     if (!Number.isFinite(days) || days < 1 || days > MAX_RETENTION_DAYS) {
       setOlderDays("365");
@@ -84,7 +100,7 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
   };
 
   const runDeleteOlder = async () => {
-    if (!pendingOlder) return;
+    if (!pendingOlder || mutationsBusy) return;
     setBusyAction("older");
     try {
       await deleteHistoryBefore(pendingOlder.cutoff);
@@ -101,12 +117,9 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
   };
 
   const eraseEverything = async () => {
+    if (mutationsBusy) return;
     setBusyAction("erase");
     try {
-      await updateSetting("recording_consent", "0");
-      await updateSetting("launch_at_login", "0");
-      await invoke("set_launch_at_login", { enabled: false });
-      await invoke("stop_tracker");
       const n = await eraseAllHistory();
       setMessage(`Securely erased ${n} recorded session${n === 1 ? "" : "s"}. Separate backups were not deleted.`);
       setEraseOpen(false);
@@ -137,6 +150,7 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
+              disabled={mutationsBusy}
               onClick={() => setBackupNameOpen(true)}
               className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-xs font-semibold text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15"
             >
@@ -148,8 +162,8 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
             <button
               ref={restoreButtonRef}
               type="button"
-              disabled={settingsBusy}
-              title={settingsBusy ? "Wait for settings to finish saving" : undefined}
+              disabled={mutationsBusy}
+              title={mutationsBusy ? "Wait for settings to finish saving" : undefined}
               onClick={() => setRestoreOpen(true)}
               className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-edge bg-surface-2 py-[11px] text-xs font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:bg-surface-3 hover:text-ink disabled:cursor-wait disabled:opacity-50"
             >
@@ -172,12 +186,17 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
                 min={1}
                 max={MAX_RETENTION_DAYS}
                 step={1}
+                disabled={mutationsBusy || busyAction !== null}
                 onChange={(value) => setOlderDays(sanitizeNumericDraft(value, false))}
                 onBlur={normalizeOlderDays}
                 onMinus={() => stepOlderDays(-1)}
                 onPlus={() => stepOlderDays(1)}
               />
-              <TrashButton label="Delete older history" onClick={() => void deleteOlder()} />
+              <TrashButton
+                label="Delete older history"
+                disabled={mutationsBusy || busyAction !== null}
+                onClick={() => void deleteOlder()}
+              />
             </span>
           }
         />
@@ -185,6 +204,7 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
           <p className="text-xs text-ink-3">Securely erase all recorded history</p>
           <button
             type="button"
+            disabled={mutationsBusy || busyAction !== null}
             className="shrink-0 text-xs font-semibold text-bad transition-colors hover:text-bad/80"
             onClick={() => setEraseOpen(true)}
           >
@@ -193,7 +213,12 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
         </div>
         {message && <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-2">{message}</p>}
       </div>
-      {restoreOpen && <RestoreBackupDialog onClose={closeRestore} />}
+      {restoreOpen && (
+        <RestoreBackupDialog
+          disabled={mutationsBusy}
+          onClose={closeRestore}
+        />
+      )}
       {backupNameOpen && (
         <BackupNameDialog
           onClose={() => setBackupNameOpen(false)}
@@ -209,8 +234,10 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
           confirmLabel="Delete"
           busyLabel="Deleting…"
           busy={busyAction === "older"}
+          confirmDisabled={mutationsBusy}
           extraAction={
             <Button
+              disabled={mutationsBusy || busyAction !== null}
               onClick={() => setBackupNameOpen(true)}
             >
               Back up first
@@ -228,6 +255,7 @@ export default function DataSection({ settingsBusy }: { settingsBusy: boolean })
           confirmLabel="Erase everything"
           busyLabel="Erasing…"
           busy={busyAction === "erase"}
+          confirmDisabled={mutationsBusy}
           // The typed gate the window.prompt used to impose, kept — this is the
           // highest-stakes action in the product — but now with the consequences
           // above the field instead of inside the sentence asking for the word.
@@ -260,7 +288,13 @@ function backupPrimaryLabel(backup: DatabaseBackup): string {
   })}`;
 }
 
-function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
+function RestoreBackupDialog({
+  disabled,
+  onClose,
+}: {
+  disabled?: boolean;
+  onClose: () => void;
+}) {
   const banner = useBanner();
   const [backups, setBackups] = useState<DatabaseBackup[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -276,6 +310,7 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
       .finally(() => setLoading(false));
   }, []);
   const chooseAnother = async () => {
+    if (disabled) return;
     try {
       const path = await chooseDatabaseBackupFile();
       if (!path) return;
@@ -290,10 +325,11 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
     }
   };
   const restore = async () => {
-    if (!selected?.compatible) return;
+    if (disabled || !selected?.compatible) return;
     setRestoring(true);
     try {
       await restoreDatabase(selected.path);
+      setRestoring(false);
     } catch (error) {
       banner.report(error, "database restore");
       setRestoring(false);
@@ -347,6 +383,7 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
                     type="button"
                     role="radio"
                     aria-checked={checked}
+                    disabled={disabled || restoring}
                     tabIndex={checked || (selectedPath === null && index === 0) ? 0 : -1}
                     onClick={() => setSelectedPath(backup.path)}
                     onKeyDown={(event) => handleRadioKey(event, paths, index, setSelectedPath)}
@@ -380,7 +417,7 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
 
         <button
           type="button"
-          disabled={restoring}
+          disabled={disabled || restoring}
           onClick={() => void chooseAnother()}
           className="mt-3 text-xs font-semibold text-accent hover:text-accent/80 disabled:opacity-40"
         >
@@ -401,7 +438,7 @@ function RestoreBackupDialog({ onClose }: { onClose: () => void }) {
           </button>
           <button
             type="button"
-            disabled={!selected?.compatible || restoring}
+            disabled={disabled || !selected?.compatible || restoring}
             onClick={() => void restore()}
             className="rounded-[8px] border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
           >

@@ -59,13 +59,21 @@ def _write_pause(db_path: str | Path, paused: str, until: float) -> None:
     """Set both pause keys in one short-lived connection (tray-thread only)."""
     conn = sqlite3.connect(db_path, timeout=30, isolation_level=None)
     try:
-        set_settings(
-            conn,
-            {
-                "tracking_paused": paused,
-                "tracking_paused_until": str(int(until)),
-            },
-        )
+        # The tracker reads the two keys independently on its refresh poll, so
+        # a half-written pause must never be observable as a new state.
+        conn.execute("BEGIN")
+        try:
+            set_settings(
+                conn,
+                {
+                    "tracking_paused": paused,
+                    "tracking_paused_until": str(int(until)),
+                },
+            )
+        except Exception:
+            conn.rollback()
+            raise
+        conn.commit()
     finally:
         conn.close()
 

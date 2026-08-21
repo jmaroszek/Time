@@ -32,6 +32,25 @@ def test_clean_schema_v1_database_passes_read_only(tmp_path: Path):
     assert before > 0
 
 
+def test_clean_current_schema_allows_same_title_pattern_in_distinct_scopes(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "clean-current.db"
+    conn = open_db(db_path)
+    conn.execute(
+        "INSERT INTO rules "
+        "(match_type,pattern,category_id,priority,scope_kind,scope_value,"
+        "title_match_mode,title_anchor) VALUES "
+        "('title','meeting',1,0,'any','','phrase','any'),"
+        "('title','meeting',1,0,'process','code.exe','phrase','any')"
+    )
+    conn.close()
+
+    checks = _by_name(check_database(db_path, now=1_000))
+
+    assert checks["duplicate_rules"]["ok"] is True
+
+
 def test_detects_legacy_anomalies_without_repairing_them(tmp_path: Path):
     db_path = tmp_path / "dirty.db"
     with sqlite3.connect(db_path) as conn:

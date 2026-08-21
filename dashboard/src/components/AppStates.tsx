@@ -12,8 +12,8 @@ import {
 } from "../lib/browserExtensions";
 import { getDbPath } from "../lib/db";
 import {
-  clearTrackingPause,
   deleteCategory,
+  runTrackingLifecycle,
   updateSetting,
 } from "../lib/queries";
 import {
@@ -23,6 +23,7 @@ import {
 } from "../lib/trackerHealth";
 import { formatScheduleResume } from "../lib/trackingSchedule";
 import { useBanner } from "../state/banner";
+import { useLifecycleBusy } from "../state/lifecycleBusy";
 import { useMeta } from "../state/meta";
 import { Button, Checkbox } from "./ui";
 
@@ -40,6 +41,7 @@ export function PrivacyOnboarding() {
   const [storeGate, setStoreGate] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lifecycleBusy = useLifecycleBusy();
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +60,7 @@ export function PrivacyOnboarding() {
   }, []);
 
   const complete = async (enable: boolean) => {
+    if (saving || lifecycleBusy) return;
     setSaving(true);
     setError(null);
     try {
@@ -76,21 +79,17 @@ export function PrivacyOnboarding() {
         }
         await updateSetting("starter_categories_pending", "0");
       }
-      await updateSetting("record_window_titles", enable && windowTitles ? "1" : "0");
-      await updateSetting("launch_at_login", enable && startAtLogin ? "1" : "0");
-      await updateSetting("recording_consent", enable ? "1" : "0");
-      await invoke("set_launch_at_login", { enabled: enable && startAtLogin });
-      if (enable) await invoke("start_tracker");
-      await updateSetting("privacy_onboarding_complete", "1");
+      await runTrackingLifecycle({
+        action: "complete_onboarding",
+        enable,
+        recordWindowTitles: windowTitles,
+        startAtLogin: enable && startAtLogin,
+      });
       if (enable && installExtension && extensionListing && isPublished(extensionListing)) {
         await openExtensionStorePage(extensionListing).catch(() => {});
       }
       await meta.refresh();
     } catch (cause) {
-      // A partial first-run transaction must always fail closed.
-      await updateSetting("recording_consent", "0").catch(() => {});
-      await updateSetting("launch_at_login", "0").catch(() => {});
-      await invoke("set_launch_at_login", { enabled: false }).catch(() => {});
       setError(String(cause));
     } finally {
       setSaving(false);
@@ -166,7 +165,7 @@ export function PrivacyOnboarding() {
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            disabled={saving}
+            disabled={saving || lifecycleBusy}
             onClick={() => void complete(true)}
             className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-opacity disabled:opacity-50"
           >
@@ -174,7 +173,7 @@ export function PrivacyOnboarding() {
           </button>
           <button
             type="button"
-            disabled={saving}
+            disabled={saving || lifecycleBusy}
             onClick={() => void complete(false)}
             className="rounded-lg border border-edge-2 px-4 py-2 text-sm text-ink-2 hover:text-ink disabled:opacity-50"
           >
@@ -224,15 +223,16 @@ function ConsentCheck({
 function useStartTracking(onRefreshStatus: () => Promise<void>) {
   const meta = useMeta();
   const banner = useBanner();
+  const lifecycleBusy = useLifecycleBusy();
   const [starting, setStarting] = useState(false);
   const [startAttempted, setStartAttempted] = useState(false);
 
   const startTracking = async () => {
+    if (starting || lifecycleBusy) return null;
     const needsStartup = meta.settings.launch_at_login !== "1";
     setStarting(true);
     try {
-      await updateSetting("recording_consent", "1");
-      await invoke("start_tracker");
+      await runTrackingLifecycle({ action: "set_recording", enabled: true });
       await Promise.all([meta.refresh(), onRefreshStatus()]);
       setStartAttempted(true);
       return needsStartup;
@@ -246,7 +246,7 @@ function useStartTracking(onRefreshStatus: () => Promise<void>) {
     }
   };
 
-  return { starting, startAttempted, setStartAttempted, startTracking };
+  return { starting, lifecycleBusy, startAttempted, setStartAttempted, startTracking };
 }
 
 /** Persisting a dismissal, with the button state that goes with it. */
@@ -290,6 +290,7 @@ export function WelcomePanel({ offerStartup, onDeclineStartup }: {
 }) {
   const meta = useMeta();
   const banner = useBanner();
+  const lifecycleBusy = useLifecycleBusy();
   const [registering, setRegistering] = useState(false);
   const { dismissing, dismiss } = useDismiss(
     WELCOME_DISMISSED_KEY,
@@ -297,10 +298,10 @@ export function WelcomePanel({ offerStartup, onDeclineStartup }: {
   );
 
   const enableStartup = async () => {
+    if (registering || lifecycleBusy) return;
     setRegistering(true);
     try {
-      await updateSetting("launch_at_login", "1");
-      await invoke("set_launch_at_login", { enabled: true });
+      await runTrackingLifecycle({ action: "set_startup", enabled: true });
       await meta.refresh();
       onDeclineStartup();
     } catch (cause) {
@@ -347,12 +348,12 @@ export function WelcomePanel({ offerStartup, onDeclineStartup }: {
           <div className="mt-2 flex flex-wrap gap-2">
             <Button
               variant="primary"
-              disabled={registering}
+              disabled={registering || lifecycleBusy}
               onClick={() => void enableStartup()}
             >
               {registering ? "Saving…" : "Start at sign-in"}
             </Button>
-            <Button onClick={onDeclineStartup}>Not now</Button>
+            <Button disabled={lifecycleBusy} onClick={onDeclineStartup}>Not now</Button>
           </div>
         </div>
       )}
@@ -382,7 +383,7 @@ export function StartRecordingPanel({
   onStarted: (needsStartup: boolean | null) => void;
 }) {
   const [startUnconfirmed, setStartUnconfirmed] = useState(false);
-  const { starting, startAttempted, setStartAttempted, startTracking } =
+  const { starting, lifecycleBusy, startAttempted, setStartAttempted, startTracking } =
     useStartTracking(onRefreshStatus);
 
   useEffect(() => {
@@ -409,7 +410,7 @@ export function StartRecordingPanel({
   // says it could not confirm the start, and the button has to be usable again
   // for the retry that message invites. Without that clause a tracker that never
   // comes up would leave the reader holding a permanently disabled button.
-  const startPending = starting || (startAttempted && !startUnconfirmed);
+  const startPending = lifecycleBusy || starting || (startAttempted && !startUnconfirmed);
 
   return (
     <section className="rounded-[14px] border border-accent/25 bg-gradient-to-b from-accent/[.06] to-accent/[.02] px-5 py-4 text-xs leading-relaxed">
@@ -495,7 +496,7 @@ export function RecordingOffPanel({
   onOpenSettings: () => void;
   onStarted: (needsStartup: boolean | null) => void;
 }) {
-  const { starting, startTracking } = useStartTracking(onRefreshStatus);
+  const { starting, lifecycleBusy, startTracking } = useStartTracking(onRefreshStatus);
   const { dismissing, dismiss } = useDismiss(
     RECORDING_OFF_DISMISSED_KEY,
     "dismissing the recording notice",
@@ -512,7 +513,7 @@ export function RecordingOffPanel({
         <>
           <Button
             variant="primary"
-            disabled={starting}
+            disabled={starting || lifecycleBusy}
             onClick={() => void startTracking().then(onStarted)}
           >
             {starting ? "Starting…" : "Turn on recording"}
@@ -534,7 +535,7 @@ export function RecordingOffPanel({
  */
 export function PauseNotice({
   until,
-  live,
+  live: _live,
   onDismiss,
   onResumed,
 }: {
@@ -547,16 +548,16 @@ export function PauseNotice({
 }) {
   const meta = useMeta();
   const banner = useBanner();
+  const lifecycleBusy = useLifecycleBusy();
   const [resuming, setResuming] = useState(false);
 
   const resume = async () => {
+    if (resuming || lifecycleBusy) return;
     setResuming(true);
     try {
-      await clearTrackingPause();
-      // Resuming has to mean "record again". Clearing the flags on a tracker
-      // that is not running would hand the reader a second broken state to
-      // notice and fix, having just told them the problem was the pause.
-      if (!live) await invoke("start_tracker");
+      // The native action clears both pause keys and starts the tracker under
+      // the same lifecycle mutex, so a stale liveness read cannot race it.
+      await runTrackingLifecycle({ action: "resume" });
       await meta.refresh();
       onResumed();
     } catch (cause) {
@@ -577,7 +578,7 @@ export function PauseNotice({
       detail={detail}
       onDismiss={onDismiss}
       actions={
-        <Button variant="primary" disabled={resuming} onClick={() => void resume()}>
+        <Button variant="primary" disabled={resuming || lifecycleBusy} onClick={() => void resume()}>
           {resuming ? "Resuming…" : "Resume now"}
         </Button>
       }
@@ -632,6 +633,7 @@ export function OffScheduleNotice({
  */
 export function TrackerAlert({ onOpenSettings }: { onOpenSettings: () => void }) {
   const banner = useBanner();
+  const lifecycleBusy = useLifecycleBusy();
   const [starting, setStarting] = useState(false);
 
   // Held past the invoke for the same reason as StartRecordingPanel's button:
@@ -648,9 +650,10 @@ export function TrackerAlert({ onOpenSettings }: { onOpenSettings: () => void })
   }, [starting]);
 
   const start = async () => {
+    if (starting || lifecycleBusy) return;
     setStarting(true);
     try {
-      await invoke("start_tracker");
+      await runTrackingLifecycle({ action: "ensure_started" });
     } catch (cause) {
       banner.report(cause, "tracker startup");
       setStarting(false);
@@ -668,7 +671,7 @@ export function TrackerAlert({ onOpenSettings }: { onOpenSettings: () => void })
         until it starts again.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button variant="primary" disabled={starting} onClick={() => void start()}>
+        <Button variant="primary" disabled={starting || lifecycleBusy} onClick={() => void start()}>
           {starting ? "Starting…" : "Start tracking"}
         </Button>
         <Button onClick={onOpenSettings}>Open settings</Button>

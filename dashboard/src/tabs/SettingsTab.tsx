@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { Button, ConfirmDialog, Spinner } from "../components/ui";
@@ -38,16 +37,17 @@ import {
 } from "../lib/trackingSchedule";
 import { recordingState, TRACKER_LIVE_STALE_SECONDS } from "../lib/trackerHealth";
 import {
-  clearTrackingPause,
   fetchSettings,
   fetchTrackerStatus,
   listTrackingExclusions,
   restoreDefaultSettings,
+  runTrackingLifecycle,
   updateSetting,
   type TrackerStatus,
 } from "../lib/queries";
 import { SUPPORT_EMAIL, supportEmailUrl } from "../lib/support";
 import { useBanner } from "../state/banner";
+import { useLifecycleBusy } from "../state/lifecycleBusy";
 import { useMeta } from "../state/meta";
 import DataSection from "./settings/DataSection";
 import {
@@ -185,6 +185,7 @@ export default function SettingsTab({
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [startingTracker, setStartingTracker] = useState(false);
   const [resumingTracker, setResumingTracker] = useState(false);
+  const lifecycleBusy = useLifecycleBusy();
   const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
   const [flashedSection, setFlashedSection] = useState<string | null>(null);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -475,51 +476,56 @@ export default function SettingsTab({
 
   const setTrackingEnabled = async (enabled: boolean) => {
     await runImmediateSettingAction("recording_consent", async () => {
-      await updateSetting("recording_consent", enabled ? "1" : "0");
-      if (enabled) {
-        if (scheduleEnabled && meta.settings.launch_at_login !== "1") {
-          await invoke("set_launch_at_login", { enabled: true });
-          await updateSetting("launch_at_login", "1");
-        }
-        await invoke("start_tracker");
-      } else {
-        await updateSetting("launch_at_login", "0");
-        await invoke("set_launch_at_login", { enabled: false });
-        // Stop the process too. Leaving it running with consent withdrawn means
-        // a live health stamp reporting a tracker that records nothing, which
-        // every status surface then has to explain away — and after the next
-        // reboot it would not come back anyway, startup having just been turned
-        // off. Secure erase already stops it for the same reason.
-        await invoke("stop_tracker");
-      }
+      await runTrackingLifecycle({ action: "set_recording", enabled });
     }, "tracking preference");
   };
 
   const setStartAtLogin = async (enabled: boolean) => {
     await runImmediateSettingAction("launch_at_login", async () => {
-      await invoke("set_launch_at_login", { enabled });
-      await updateSetting("launch_at_login", enabled ? "1" : "0");
+      await runTrackingLifecycle({ action: "set_startup", enabled });
     }, "startup preference");
   };
 
-  const setScheduleEnabled = async (enabled: boolean) => {
-    await runImmediateSettingAction("tracking_schedule_enabled", async () => {
-      let enabledStartup = false;
-      try {
-        if (enabled && meta.settings.launch_at_login !== "1") {
-          await invoke("set_launch_at_login", { enabled: true });
-          enabledStartup = true;
-          await updateSetting("launch_at_login", "1");
-        }
-        await updateSetting("tracking_schedule_enabled", enabled ? "1" : "0");
-      } catch (error) {
-        if (enabledStartup) {
-          await invoke("set_launch_at_login", { enabled: false }).catch(() => {});
-          await updateSetting("launch_at_login", "0").catch(() => {});
-        }
-        throw error;
-      }
+  const scheduleValues = (overrides: Partial<{
+    days: string;
+    startMinute: number;
+    endMinute: number;
+  }> = {}) => {
+    const selected = parseTrackingScheduleDays(
+      drafts.tracking_schedule_days
+        ?? meta.settings.tracking_schedule_days
+        ?? DEFAULT_TRACKING_SCHEDULE_DAYS,
+    );
+    const startMinute = Number(
+      drafts.tracking_schedule_start_minute
+        ?? meta.settings.tracking_schedule_start_minute,
+    );
+    const endMinute = Number(
+      drafts.tracking_schedule_end_minute
+        ?? meta.settings.tracking_schedule_end_minute,
+    );
+    return {
+      days: overrides.days ?? selected.sort((a, b) => a - b).join(","),
+      startMinute: overrides.startMinute ?? (
+        Number.isFinite(startMinute) ? startMinute : DEFAULT_TRACKING_SCHEDULE_START_MINUTE
+      ),
+      endMinute: overrides.endMinute ?? (
+        Number.isFinite(endMinute) ? endMinute : DEFAULT_TRACKING_SCHEDULE_END_MINUTE
+      ),
+    };
+  };
+  const saveSchedule = (
+    key: string,
+    enabled: boolean,
+    values: ReturnType<typeof scheduleValues>,
+  ) => {
+    void runImmediateSettingAction(key, async () => {
+      await runTrackingLifecycle({ action: "set_schedule", enabled, ...values });
     }, "tracking schedule");
+  };
+
+  const setScheduleEnabled = async (enabled: boolean) => {
+    saveSchedule("tracking_schedule_enabled", enabled, scheduleValues());
   };
 
   const toggleScheduleDay = (day: number) => {
@@ -532,25 +538,35 @@ export default function SettingsTab({
     } else {
       selected.add(day);
     }
-    selectSetting("tracking_schedule_days", [...selected].sort((a, b) => a - b).join(","));
+    saveSchedule(
+      "tracking_schedule_days",
+      scheduleEnabled,
+      scheduleValues({ days: [...selected].sort((a, b) => a - b).join(",") }),
+    );
   };
 
   const setScheduleTime = (key: string, value: string) => {
     const minute = scheduleInputToMinute(value);
-    if (minute !== null) selectSetting(key, String(minute));
+    if (minute === null) return;
+    saveSchedule(
+      key,
+      scheduleEnabled,
+      scheduleValues(
+        key === "tracking_schedule_start_minute"
+          ? { startMinute: minute }
+          : { endMinute: minute },
+      ),
+    );
   };
 
-  // Starting is not resuming. `start_tracker` spawns the process and never
-  // touches the pause keys, so on a paused tracker it would launch something
-  // that reads tracking_paused=1 and records nothing — a button that visibly
-  // did nothing. Until this existed, a pause set from the tray could only be
-  // ended from the tray.
+  // Starting is not resuming. The lifecycle action clears both pause keys and
+  // starts the process under one native mutex, so a paused tracker cannot be
+  // launched into a second state that keeps recording disabled.
   const resumeTracking = async () => {
-    if (resumingTracker) return;
+    if (resumingTracker || lifecycleBusy) return;
     setResumingTracker(true);
     try {
-      await clearTrackingPause();
-      if (!trackerLive) await invoke("start_tracker");
+      await runTrackingLifecycle({ action: "resume" });
       // The pause poll runs on its own 15s cycle; without this the panel would
       // keep reporting the pause the reader has just ended.
       setPause({ paused: false, until: 0 });
@@ -564,10 +580,10 @@ export default function SettingsTab({
   };
 
   const startTracker = async () => {
-    if (startingTracker) return;
+    if (startingTracker || lifecycleBusy) return;
     setStartingTracker(true);
     try {
-      await invoke("start_tracker");
+      await runTrackingLifecycle({ action: "ensure_started" });
       const deadline = Date.now() + TRACKER_START_TIMEOUT_MS;
       while (Date.now() < deadline) {
         const next = await fetchTrackerStatus();
@@ -661,7 +677,7 @@ export default function SettingsTab({
             <div className="basis-full sm:ml-auto sm:basis-auto">
               <Button
                 variant="primary"
-                disabled={resumingTracker}
+                disabled={resumingTracker || lifecycleBusy}
                 onClick={() => void resumeTracking()}
               >
                 {resumingTracker ? "Resuming…" : "Resume now"}
@@ -677,7 +693,7 @@ export default function SettingsTab({
             <div className="basis-full sm:ml-auto sm:basis-auto">
               <Button
                 variant="primary"
-                disabled={startingTracker}
+                disabled={startingTracker || lifecycleBusy}
                 onClick={() => void startTracker()}
               >
                 {startingTracker ? "Starting…" : "Start tracker"}
@@ -696,7 +712,7 @@ export default function SettingsTab({
         <Row
           label="Record activity"
           help="Allows the tracker to record app names and times."
-          control={<PrivacyToggle label="Record activity" enabled={trackingEnabled} disabled={savingKeys.has("recording_consent") || savingKeys.has("launch_at_login")} onChange={(enabled) => void setTrackingEnabled(enabled)} />}
+          control={<PrivacyToggle label="Record activity" enabled={trackingEnabled} disabled={lifecycleBusy || savingKeys.has("recording_consent") || savingKeys.has("launch_at_login")} onChange={(enabled) => void setTrackingEnabled(enabled)} />}
         />
         <Row
           label="Store window titles"
@@ -788,7 +804,7 @@ export default function SettingsTab({
               <PrivacyToggle
                 label="Start at Windows sign-in"
                 enabled={meta.settings.launch_at_login === "1"}
-                disabled={!trackingEnabled || scheduleEnabled || savingKeys.has("recording_consent") || savingKeys.has("launch_at_login")}
+                disabled={lifecycleBusy || !trackingEnabled || scheduleEnabled || savingKeys.has("recording_consent") || savingKeys.has("launch_at_login")}
                 onChange={(enabled) => void setStartAtLogin(enabled)}
               />
               {!trackingEnabled && (
@@ -823,7 +839,7 @@ export default function SettingsTab({
             <PrivacyToggle
               label="Only record on a schedule"
               enabled={scheduleEnabled}
-              disabled={!trackingEnabled || savingKeys.has("tracking_schedule_enabled")}
+              disabled={lifecycleBusy || !trackingEnabled || savingKeys.has("tracking_schedule_enabled")}
               onChange={(enabled) => void setScheduleEnabled(enabled)}
             />
           }
@@ -837,6 +853,7 @@ export default function SettingsTab({
                   <button
                     key={day.label}
                     type="button"
+                    disabled={lifecycleBusy}
                     aria-label={day.label}
                     aria-pressed={selected}
                     onClick={() => toggleScheduleDay(day.value)}
@@ -859,6 +876,7 @@ export default function SettingsTab({
                   DEFAULT_TRACKING_SCHEDULE_START_MINUTE,
                 )}
                 onChange={(value) => setScheduleTime("tracking_schedule_start_minute", value)}
+                disabled={lifecycleBusy}
               />
               <ScheduleTimeInput
                 label="Until"
@@ -867,6 +885,7 @@ export default function SettingsTab({
                   DEFAULT_TRACKING_SCHEDULE_END_MINUTE,
                 )}
                 onChange={(value) => setScheduleTime("tracking_schedule_end_minute", value)}
+                disabled={lifecycleBusy}
               />
               <p className={`pb-2 text-xs ${schedule.valid ? "text-ink-3" : "text-bad"}`}>
                 {!schedule.valid
@@ -1135,10 +1154,12 @@ export default function SettingsTab({
           something no setting can put back. */}
       <HelpAndFeedbackSection appVersion={appVersion} trackerVersion={meta.settings.tracker_version} />
       <RestoreDefaultsSection
-        disabled={savingKeys.size > 0}
+        disabled={savingKeys.size > 0 || lifecycleBusy}
         onRestored={() => setPause({ paused: false, until: 0 })}
       />
-      <DataSection settingsBusy={savingKeys.size > 0} />
+      <DataSection
+        settingsBusy={savingKeys.size > 0}
+      />
       </div>
       <SectionRail />
     </div>
@@ -1256,12 +1277,10 @@ function RestoreDefaultsSection({
   const [confirming, setConfirming] = useState(false);
 
   const restore = async () => {
+    if (disabled || restoring) return;
     setRestoring(true);
     setRestored(false);
     try {
-      // Remove the external startup registration before the matching database
-      // preference is reset, so a partial failure errs toward not launching.
-      await invoke("set_launch_at_login", { enabled: false });
       await restoreDefaultSettings();
       await meta.refresh();
       onRestored();
@@ -1285,6 +1304,7 @@ function RestoreDefaultsSection({
           confirmLabel="Restore defaults"
           busyLabel="Restoring…"
           busy={restoring}
+          confirmDisabled={disabled}
           // Not "danger": this resets preferences and destroys no data. The red
           // button is reserved for the ones that remove recorded activity.
           variant="default"

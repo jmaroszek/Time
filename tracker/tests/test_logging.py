@@ -8,6 +8,7 @@ strings, so a future log line that leaks content fails them.
 
 import logging
 import sqlite3
+import threading
 from logging.handlers import TimedRotatingFileHandler
 
 import pytest
@@ -109,6 +110,94 @@ def test_health_heartbeat_is_activity_independent(tmp_path):
         assert row["value"] == "1234"
     finally:
         conn.close()
+
+
+def test_shutdown_cleanup_logs_only_exception_type(info_log):
+    secret = "private window title and domain"
+
+    def fail():
+        raise RuntimeError(secret)
+
+    assert tracker._cleanup_step("sessions", fail) is False
+    text = _info_text(info_log)
+    assert "RuntimeError" in text
+    assert secret not in text
+
+
+def test_shutdown_coordinator_continues_after_failures_and_is_idempotent(
+    info_log, monkeypatch
+):
+    class FailingCleanup:
+        def __init__(self, *, gate=False):
+            self.calls = 0
+            self.entered = threading.Event()
+            self.release = threading.Event()
+            self.gate = gate
+
+        def close(self):
+            self.calls += 1
+            if self.gate:
+                self.entered.set()
+                self.release.wait(timeout=2)
+            raise RuntimeError("private cleanup detail")
+
+    class Manager:
+        def __init__(self):
+            self.calls = []
+
+        def shutdown(self, now):
+            self.calls.append(now)
+
+    class Connection:
+        def __init__(self):
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+
+    tray_controller = FailingCleanup(gate=True)
+    power_monitor = FailingCleanup()
+    manager = Manager()
+    conn = Connection()
+    health_calls = []
+    monkeypatch.setattr(
+        tracker,
+        "stamp_tracker_health",
+        lambda target, now: health_calls.append((target, now)),
+    )
+    coordinator = tracker._ShutdownCoordinator(
+        threading.Event(), tray_controller, power_monitor, manager, conn
+    )
+
+    first = threading.Thread(target=coordinator)
+    first.start()
+    assert tray_controller.entered.wait(timeout=1)
+
+    second_started = threading.Event()
+    second_returned = threading.Event()
+
+    def call_second():
+        second_started.set()
+        coordinator()
+        second_returned.set()
+
+    second = threading.Thread(target=call_second)
+    second.start()
+    assert second_started.wait(timeout=1)
+    assert not second_returned.wait(timeout=0.05)
+    tray_controller.release.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert second_returned.is_set()
+    assert coordinator() is True
+    assert tray_controller.calls == 1
+    assert power_monitor.calls == 1
+    assert len(manager.calls) == 1
+    assert health_calls == [(conn, 0)]
+    assert conn.close_calls == 1
+    assert "private cleanup detail" not in info_log.text
 
 
 # --- Fatal startup evidence -----------------------------------------------

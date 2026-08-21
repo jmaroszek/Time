@@ -26,6 +26,13 @@ describe("SessionWindowCache", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a long session that starts before the requested range", async () => {
+    const cache = new SessionWindowCache(() => 1_000);
+    await cache.load(100, 200, async () => [session(1, -1_000_000, 150), session(2, 150, 160)]);
+
+    expect(cache.peek(100, 200)?.sessions.map((row) => row.id)).toEqual([1, 2]);
+  });
+
   it("fetches only a missing edge and de-duplicates its boundary row", async () => {
     const cache = new SessionWindowCache(() => 1_000);
     const fetcher = vi
@@ -85,6 +92,25 @@ describe("SessionWindowCache", () => {
     await cache.load(0, 100, async () => [session(1, 10)]);
     cache.clear();
     expect(cache.peek(0, 100)).toBeNull();
+  });
+
+  it("does not let a deferred fetch repopulate after clear", async () => {
+    let resolveFetch!: (rows: Session[]) => void;
+    const deferred = new Promise<Session[]>((resolve) => {
+      resolveFetch = resolve;
+    });
+    const cache = new SessionWindowCache(() => 1_000);
+    const staleLoad = cache.load(0, 100, () => deferred);
+
+    cache.clear();
+    resolveFetch([session(1, 10)]);
+    await staleLoad;
+
+    expect(cache.peek(0, 100)).toBeNull();
+    const freshFetcher = vi.fn(async () => [session(2, 20)]);
+    await cache.load(0, 100, freshFetcher);
+    expect(freshFetcher).toHaveBeenCalledOnce();
+    expect(cache.peek(0, 100)?.sessions.map((row) => row.id)).toEqual([2]);
   });
 
   it("replaces overlapping data on a forced refresh", async () => {

@@ -51,6 +51,7 @@ import { AUTOMATIC_CLASSIFICATION, RULE_LABELS } from "./ruleComposer";
 function GroupSessions({
   group,
   selected,
+  actionsDisabled,
   onToggle,
   onToggleMany,
   onEdit,
@@ -58,6 +59,7 @@ function GroupSessions({
 }: {
   group: ActivityTitleGroup;
   selected: Set<number>;
+  actionsDisabled: boolean;
   onToggle: (id: number) => void;
   onToggleMany: (ids: number[]) => void;
   onEdit: (id: number) => void;
@@ -65,29 +67,19 @@ function GroupSessions({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      {/* A date per row put "Jul 27, 2026" down the column twenty times over,
-          and the times — the only part that differed — were the last thing the
-          eye reached. The date is said once and the rows carry clocks. */}
-      {/* The margin belongs to the day, not its heading: on the heading,
-          `first:` matched every time — a heading is always the first child of
-          its own group — so the rule that was meant to separate the days never
-          applied to any of them. */}
+      {/* The date is shown once per day; each visit row carries its time. */}
       {groupVisitsByDay(group.sessions).map((day) => {
         const dayIds = day.visits.map((visit) => visit.id);
         const wholeDay = dayIds.every((id) => selected.has(id));
         return (
         <div key={day.key} className="mt-4 flex flex-col gap-1 first:mt-0">
-          {/* The heading ticks its own rows and no others. A day can hold more
-              visits than the sample carries, and a checkbox that quietly took
-              the unloaded remainder would promise more than it shows — the
-              whole-group promise is made once, by the button above, where the
-              count is stated. */}
+          {/* This checkbox covers only the visits loaded for this day. */}
           <Checkbox
             checked={wholeDay}
             indeterminate={dayIds.some((id) => selected.has(id))}
-            onChange={() => onToggleMany(dayIds)}
+            onChange={actionsDisabled ? () => undefined : () => onToggleMany(dayIds)}
             label={`Select the ${countNoun(dayIds.length, "visit")} shown on ${formatVisitDay(day.visits[0].start)}`}
-            className="text-micro uppercase tracking-[.04em] text-ink-3"
+            className={`text-micro uppercase tracking-[.04em] text-ink-3 ${actionsDisabled ? "pointer-events-none opacity-50" : ""}`}
           >
             {formatVisitDay(day.visits[0].start)}
           </Checkbox>
@@ -97,8 +89,9 @@ function GroupSessions({
             <div key={session.id} className="flex items-center gap-2 text-xs">
               <Checkbox
                 checked={selected.has(session.id)}
-                onChange={() => onToggle(session.id)}
+                onChange={actionsDisabled ? () => undefined : () => onToggle(session.id)}
                 label={`Select the visit starting ${formatDateTime(session.start)}`}
+                className={actionsDisabled ? "pointer-events-none opacity-50" : ""}
               />
               <span className="w-[62px] shrink-0 tabular-nums text-ink-2">
                 {new Date(session.start * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
@@ -106,17 +99,8 @@ function GroupSessions({
               <span className="shrink-0 tabular-nums text-ink-3">
                 {fmtDuration(session.seconds)}
               </span>
-              {/* The tag is aligned by anchoring, not by padding the column in
-                  front of it. Durations run "3s" to "2h 28m", so a tag placed
-                  after them lands somewhere different on every row unless the
-                  column is widened to its longest case — which buys the
-                  alignment with a stripe of dead space on every short row, and
-                  still loses it to the one duration that overruns the width.
-                  Against the right edge there is nothing to overrun.
-
-                  Edit is last so that it, not the tag, is the fixed anchor:
-                  rows carrying no tag must not shift the control that every
-                  row has. */}
+              {/* Keep the status tag and Edit control anchored at the right so
+                  rows without a status do not shift the shared control. */}
               <span className="ml-auto flex shrink-0 items-center gap-2">
                 {edited && (
                   <span className="rounded-full bg-accent/10 px-1.5 py-[1px] text-xs text-accent">
@@ -126,7 +110,8 @@ function GroupSessions({
                 <button
                   type="button"
                   onClick={() => onEdit(session.id)}
-                  className="rounded px-1.5 py-0.5 text-xs text-ink-3 hover:bg-accent/10 hover:text-accent"
+                  disabled={actionsDisabled}
+                  className="rounded px-1.5 py-0.5 text-xs text-ink-3 hover:bg-accent/10 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Edit
                 </button>
@@ -138,37 +123,30 @@ function GroupSessions({
         );
       })}
       {group.sessionCount > group.sessions.length && (
-        // Never silently truncated, and no longer a dead end: the older visits
-        // used to be unreachable one at a time, so a correction to anything
-        // but the newest twenty-five was impossible to aim.
+        // Keep paged visits actionable instead of silently truncating the group.
         <LoadMore
           shown={group.sessions.length}
           total={group.sessionCount}
           onClick={onLoadMore}
+          disabled={actionsDisabled}
         />
       )}
     </div>
   );
 }
 /**
- * A window match is in the list for exactly one reason — its stored title
- * contains the search text — so the match is windowed into view and marked,
- * where before it could sit past the column's width and leave the row looking
- * unjustified.
+ * A matching stored title is highlighted and kept within the row width.
  */
 /** Exclusions are per-entity curation, like corrections and deletions, so they
  *  live beside them instead of behind a second CRUD surface in Settings. */
 /**
  * The shell both Activity panels sit in.
  *
- * It is an inspector, not a dialog: no scrim, no focus trap, and the list it
- * was opened from stays live behind — which is the whole point, because working
- * through a library means moving down it. Escape and the arrows are wired at
- * the tab, the only level that knows the row order.
+ * It is an inspector, not a dialog: the source list remains live behind it.
+ * Escape and arrow navigation are wired at the tab, which owns row order.
  *
- * The two panels were duplicating this markup character for character, down to
- * the shadow. That is exactly the drift the shared SummaryTable exists to stop
- * one table over, so it is stopped the same way here.
+ * Both panels use this shell so their landmarks, spacing, and controls stay
+ * consistent.
  */
 function DetailPanel({
   label,
@@ -329,6 +307,7 @@ function PanelWindowRow({
   totalSeconds,
   category,
   selected,
+  actionsDisabled,
   onToggle,
   onOpen,
 }: {
@@ -339,6 +318,7 @@ function PanelWindowRow({
   /** Null when it matches the app's own, and so is not worth the words. */
   category: string | null;
   selected: boolean;
+  actionsDisabled: boolean;
   onToggle: (group: ActivityTitleGroup) => void;
   onOpen: (group: ActivityTitleGroup) => void;
 }) {
@@ -357,9 +337,9 @@ function PanelWindowRow({
           to the bar beneath the title as much as to the title itself. */}
       <Checkbox
         checked={selected}
-        onChange={() => onToggle(group)}
+        onChange={actionsDisabled ? () => undefined : () => onToggle(group)}
         label={`Select every visit to ${group.title || "this untitled window"}`}
-        className="mt-[3px] shrink-0"
+        className={`mt-[3px] shrink-0 ${actionsDisabled ? "pointer-events-none opacity-50" : ""}`}
       />
     <button
       type="button"
@@ -422,6 +402,7 @@ export function WindowPanel({
   onOpenParent,
   onBack,
   onClose,
+  actionsDisabled = false,
 }: {
   dock: CSSProperties | null;
   group: ActivityTitleGroup;
@@ -441,6 +422,8 @@ export function WindowPanel({
   onOpenParent: () => void;
   onBack?: () => void;
   onClose: () => void;
+  /** The result is stale while a replacement worker query is in flight. */
+  actionsDisabled?: boolean;
 }) {
   const classification = windowGroupClassification(group);
   const allSelected = group.sessionIds.every((id) => selectedSessionIds.has(id));
@@ -506,34 +489,22 @@ export function WindowPanel({
 
       <PanelSection
         title="Classification"
-        right={<span className="shrink-0"><Button onClick={() => onMakeRule(group)}>Create Window rule</Button></span>}
+        right={<span className="shrink-0"><Button disabled={actionsDisabled} onClick={() => onMakeRule(group)}>Create Window rule</Button></span>}
       >
-        {/* Both lines, always. The provenance used to appear only when it was
-            "exceptional", so a window decided by an ordinary App rule said its
-            category and nothing about where that came from — which is the one
-            question this section exists to answer. Nothing else in this panel
-            names the category, so unlike the entity panel it keeps its label. */}
+        {/* Keep both the category and its source visible in this panel. */}
         <p className="mt-2 text-xs text-ink-2">{classification.label}</p>
         <p className="mt-0.5 text-xs leading-snug text-ink-3">{classification.detail}</p>
       </PanelSection>
       <section className="mt-6">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-row font-semibold">Visits</h3>
-          {/* Order runs safest-last, against the app's usual reading order,
-              because this row rearranges itself under the pointer. The button
-              that selects everything is also the button that clears it, so it
-              is pinned to the right-hand end where it cannot move: the two new
-              controls appear to its left, and the hand that just pressed
-              "Select all" is still over "Clear selection" rather than over a
-              delete that materialized beneath it. Destructive lands furthest
-              from that spot for the same reason. */}
+          {/* Keep the reversible selection control at the right edge; batch
+              actions appear before it when a selection exists. */}
           {selectedSessionIds.size > 0 && (
             <>
-              <Button variant="danger" onClick={onDeleteSelected}>Delete selected</Button>
-              {/* Classifying here writes an override on each ticked visit, not
-                  a rule: a rule is a standing statement about everything that
-                  ever matches it, and the reason to reach for this control is
-                  that one afternoon went differently from the rest. */}
+              <Button variant="danger" disabled={actionsDisabled} onClick={onDeleteSelected}>Delete selected</Button>
+              {/* This action writes an override on each selected visit, not a
+                  standing rule. */}
               <MenuSelect
                 variant="action"
                 size="control"
@@ -541,13 +512,11 @@ export function WindowPanel({
                 value=""
                 placeholder={`Classify ${selectedSessionIds.size}…`}
                 label={`Classify the ${countNoun(selectedSessionIds.size, "selected visit")}`}
+                disabled={actionsDisabled}
                 onChange={(value) =>
                   onClassifySelected(value === AUTOMATIC_CLASSIFICATION ? null : Number(value))}
                 options={[
-                  // Also the way back: ticking everything and choosing this
-                  // clears overrides in bulk, which is otherwise one dialog
-                  // per visit. It leads for that reason as much as for parity
-                  // with the correction dialog's own first entry.
+                   // This option also clears the selected visit overrides.
                   { value: AUTOMATIC_CLASSIFICATION, label: "Use automatic classification" },
                   // The prepended entry is the menu's first line, so the
                   // categories that follow all need a divider offset of one:
@@ -559,7 +528,7 @@ export function WindowPanel({
               />
             </>
           )}
-          <Button onClick={() => onToggleAllSessions(group.sessionIds)}>
+          <Button disabled={actionsDisabled} onClick={() => onToggleAllSessions(group.sessionIds)}>
             {allSelected ? "Clear selection" : `Select all ${group.sessionCount} visits`}
           </Button>
         </div>
@@ -567,6 +536,7 @@ export function WindowPanel({
           <GroupSessions
             group={group}
             selected={selectedSessionIds}
+            actionsDisabled={actionsDisabled}
             onToggle={onToggleSession}
             onToggleMany={onToggleAllSessions}
             onEdit={onEditSession}
@@ -581,22 +551,13 @@ export function WindowPanel({
 /**
  * What decided this entity's classification, in one line.
  *
- * The Window panel has said this since it was built — a label and where it came
- * from — while the identity panel listed a category breakdown and a separate
- * box of rules and left the reader to work out which rule was actually doing
- * the deciding. That is the question the panel is opened to answer.
- *
- * Rule coverage is checked rather than assumed: a rule can decide most of an
- * entity's time while manual corrections carry the rest, and claiming the rule
- * explains all of it would send someone editing the wrong thing.
+ * Rule coverage is explicit: a rule can decide only part of an entity's time
+ * while manual corrections account for the rest.
  */
 /**
  * How an entity's time divides, drawn as well as listed.
  *
- * The list alone gave four durations and no sense of their proportions, in a
- * tab where every other list of times draws a bar. Colour here is the category's
- * own — unlike the table's single-accent bar, telling the slices apart *is* the
- * job, and category colour is what this app already means by it.
+ * Category colors distinguish the proportions represented by each slice.
  */
 function CategorySplit({ entity }: { entity: ActivityEntitySummary }) {
   const { theme } = useMeta();
@@ -734,6 +695,7 @@ export function EntityPanel({
   onAssign,
   onSaveAlias,
   onRemoveExactRule,
+  actionsDisabled = false,
 }: {
   dock: CSSProperties | null;
   entity: ActivityEntitySummary;
@@ -769,6 +731,8 @@ export function EntityPanel({
   onAssign: (categoryId: number) => Promise<void>;
   onSaveAlias: (alias: string) => Promise<void>;
   onRemoveExactRule: () => Promise<void>;
+  /** The result is stale while a replacement worker query is in flight. */
+  actionsDisabled?: boolean;
 }) {
   const kindLabel = entity.kind === "website" ? "website" : "app";
   const savedAlias = aliases[entity.key.toLowerCase()] ?? "";
@@ -788,7 +752,7 @@ export function EntityPanel({
     if (cancelAlias.current) {
       cancelAlias.current = false;
       setAliasDraft(savedAlias);
-    } else if (aliasDraft.trim() !== savedAlias) {
+    } else if (!actionsDisabled && aliasDraft.trim() !== savedAlias) {
       void onSaveAlias(aliasDraft);
     }
   };
@@ -811,9 +775,8 @@ export function EntityPanel({
   const order = WINDOW_ORDERS.find(
     (option) => option.sort === detailSort && option.direction === detailDirection,
   );
-  // Titles are off by default at capture, and can be turned on part way
-  // through a history — so an entity can have windows and still have nothing to
-  // name them with, whatever the database holds overall.
+  // Title capture can be enabled between visits, so a range may contain both
+  // titled and untitled windows.
   const untitled = groups.rows.length > 0 && groups.rows.every((group) => !group.title);
   const titlesReadable = hasStoredTitles && !untitled;
   // Only an entity that resolves to exactly one category has a baseline its
@@ -858,6 +821,7 @@ export function EntityPanel({
           autoFocus
           value={aliasDraft}
           placeholder={entity.displayName}
+          disabled={actionsDisabled}
           aria-label={`Rename ${entity.displayName}`}
           onChange={(event) => setAliasDraft(event.target.value)}
           onBlur={commitAlias}
@@ -874,14 +838,13 @@ export function EntityPanel({
           className="mt-0.5 w-full rounded-md border border-control-edge bg-control px-2 py-0.5 text-lg font-semibold outline-none focus:border-accent/60"
         />
       ) : (
-        // Edited where it is shown. The rename field used to be its own section
-        // a third of the way down the panel, away from the name it renamed and
-        // ahead of everything anyone actually opens this for.
+        // Keep rename beside the name it changes.
         <h2 className="group flex min-w-0 items-center gap-1">
           <span className="min-w-0 truncate text-lg font-semibold">{entity.displayName}</span>
           <button
             type="button"
             onClick={beginRename}
+            disabled={actionsDisabled}
             title="Rename"
             aria-label={`Rename ${entity.displayName}`}
             className="shrink-0 rounded p-1 text-ink-3 opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
@@ -892,15 +855,10 @@ export function EntityPanel({
           </button>
         </h2>
       )}
-      // Three lines and no more: kind, name, identity. Which browsers a site
-      // was seen in used to sit here, and it bought a fourth line and a broken
-      // symmetry for a fact that is the same one browser for almost everybody.
+      // Keep the subtitle to the entity kind and identity.
       subtitle={
         <>
-          {/* No title attribute: it repeated the very text it sat on. The
-              table row this panel was opened from still carries the key as its
-              own tooltip, where the visible text is the friendly name and the
-              two genuinely differ. */}
+          {/* The key is already available from the source row's tooltip. */}
           <p className="truncate font-mono text-xs text-ink-3">{entity.key}</p>
           {renaming && (
             <p className="mt-1 text-xs text-ink-3">Enter or click away to save. Leave blank to use the recorded name.</p>
@@ -922,10 +880,8 @@ export function EntityPanel({
             ? `${formatSharePercent(entity.seconds, rangeSeconds)} of everything recorded across the ${countNoun(rangeDays, "day")} shown.`
             : `Measured across the ${countNoun(rangeDays, "day")} shown.`}
         />
-        {/* A raw visit count had no scale to be read against — 359 tells you
-            nothing on its own. Dividing it into the time does: a minute means
-            something glanced at constantly, an hour something settled into.
-            The count it replaces is in the hint, where it is still checkable. */}
+        {/* Average visit gives the count a time scale; the denominator remains
+            in the hint. */}
         <DetailMetric
           label="Average visit"
           value={entity.sessionCount > 0
@@ -938,70 +894,50 @@ export function EntityPanel({
           value={String(entity.daysSeen)}
           hint={`Out of ${countNoun(rangeDays, "day")} in this range.`}
         />
-        {/* No hint. The tile is already the whole sentence, and the first-seen
-            date it used to carry answers a question nobody asked of it. */}
+        {/* Last seen is self-explanatory, so it needs no secondary hint. */}
         <DetailMetric label="Last seen" value={formatLastSeen(entity.lastSeen)} />
       </DetailMetricGrid>
 
       <UsageStrip buckets={usage} />
 
       <PanelSection title="Classification">
-        {/* The control sits under the heading rather than beside it, because
-            whenever a standing rule names the category the trigger *is* this
-            section's value — and a value floated up to heading level reads as a
-            section action instead. What decided it moves opposite, so the rule
-            and the ✕ that removes it read as the answer to "where did this come
-            from". Only an exact rule earns that slot: every other state's line
-            is a sentence, and a sentence right-aligned against a control wraps
-            badly at the panel's narrowest. */}
+        {/* An exact rule supplies the current value; its source stays beside the
+            control. Other states show the explanatory line below. */}
         <div className="mt-2 flex items-center justify-between gap-3">
           <span className="shrink-0">
             <MenuSelect
               align="start"
-              // A standing exact rule is a real current value, so the trigger
-              // names it; without one this stays an action menu whose trigger
-              // falls back to a prompt, because several categories can be in
-              // play at once and none of them is "the" answer.
+              // Show the exact rule's category as the current value; without
+              // one, keep the menu as an action prompt.
               value={exactRule ? String(exactRule.categoryId) : ""}
               placeholder={entity.kind === "website" ? "Set website category…" : "Set app default…"}
               label={entity.kind === "website" ? "Set website category" : "Set app default"}
-              // No explanatory header. The menu sizes itself to its widest
-              // line, so a sentence in here stretched a list of one-word
-              // categories to twice the width it needed — and the banner
-              // raised on assignment already states the scope, at the one
-              // moment it is about to matter.
+              // The assignment banner supplies scope at the moment it matters.
               onChange={(value) => void onAssign(Number(value))}
+              disabled={actionsDisabled}
               options={categoryDestinationOptions(categories)}
             />
           </span>
-          {/* What decided it, opposite what it is. The trigger already names the
-              category whenever a standing rule names it, so the old lead line
-              here only restated the control. */}
+          {/* With an exact rule, this line explains what decided the value. */}
           {exactRule && (
             <div className="flex min-w-0 items-center gap-1.5">
               <p className="min-w-0 truncate text-xs leading-snug text-ink-2">{summary.detail}</p>
-              {/* The app's own row-level delete, sized to the one line it
-                  removes. A full bordered button here was wider than the rule
-                  it offered to undo, and louder than anything else here. */}
+              {/* Keep rule removal compact beside the rule it removes. */}
               {!confirmingRuleRemoval && (
-                // The glyph sits high in its own em box, so centring the button
-                // box still leaves the ✕ a shade above the line it belongs to.
-                // One pixel is the whole correction — two overshot it.
+                // Align the compact glyph with the rule text.
                 <span className="flex translate-y-px">
                   <RemoveButton
                     compact
                     label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
-                    onClick={() => setConfirmingRuleRemoval(true)}
+                    onClick={actionsDisabled ? () => undefined : () => setConfirmingRuleRemoval(true)}
                   />
                 </span>
               )}
             </div>
           )}
         </div>
-        {/* With no rule to name it, the category leads and what decided it
-            follows. Both need more air under the control than they needed
-            beside it: the trigger is a bordered box, and at the heading's old
-            8px the category read as its caption rather than as the answer. */}
+        {/* Without an exact rule, show the category and its source below the
+            action control. */}
         {!exactRule && (
           <>
             <p className="mt-3.5 text-xs text-ink-2">{summary.label}</p>
@@ -1032,9 +968,7 @@ export function EntityPanel({
           </div>
         )}
         {exactRule && confirmingRuleRemoval && (
-          // Removing a standing rule used to be one click on a red word at the
-          // end of a dense section, with nothing to confirm and nothing saying
-          // what it would cost.
+          // Confirm removal because existing activity may become uncategorized.
           <div className="mt-3 rounded-lg border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-xs leading-snug text-ink-2">
             <p>
               Remove the {entity.kind === "website" ? "Website" : "App"} rule
@@ -1045,6 +979,7 @@ export function EntityPanel({
               <Button onClick={() => setConfirmingRuleRemoval(false)}>Cancel</Button>
               <Button
                 variant="danger"
+                disabled={actionsDisabled}
                 onClick={() => { setConfirmingRuleRemoval(false); void onRemoveExactRule(); }}
               >
                 Remove rule
@@ -1054,37 +989,26 @@ export function EntityPanel({
         )}
       </PanelSection>
 
-      {/* Windows rather than raw sessions, for the same reason search
-          results changed: this entity's list is one app's worth of the
-          same fragmentation, and "45 windows" is a thing to read where
-          "1269 sessions" is not. */}
+      {/* Group visits by window title so this entity's history is readable. */}
       <section className="mt-6">
-        {/* Stuck to the top of the panel's scroll, because this is the long
-            list: the filter and the order are useless once they have scrolled
-            away. The negative margins carry the background across the scroll
-            well's padding so rows pass underneath rather than beside. */}
+        {/* Keep filtering and ordering visible while the window list scrolls. */}
         <div className="sticky top-0 z-10 -mx-5 -mt-2 bg-surface px-5 pb-2.5 pt-2">
           <div className="flex flex-wrap items-center gap-2">
-            {/* A box at the head of the column its rows carry, rather than a
-                button spelling the same thing in a hundred and forty pixels of
-                the one row that has to stay readable. Only ever the loaded
-                rows: the list pages, and a control that swept up windows
-                nobody has seen would select from a list it cannot show. */}
+            {/* Selection covers the loaded rows; pagination keeps the scope
+                visible instead of selecting unseen windows. */}
             {titlesReadable && groups.rows.length > 0 && (
               <Checkbox
                 checked={allWindowsSelected}
                 indeterminate={selectedWindowCount > 0}
-                onChange={() => onToggleWindows(groups.rows)}
+                onChange={actionsDisabled ? () => undefined : () => onToggleWindows(groups.rows)}
                 label={allWindowsSelected
                   ? "Clear the window selection"
                   : `Select all ${countNoun(groups.rows.length, "window")}`}
+                className={actionsDisabled ? "pointer-events-none opacity-50" : ""}
               />
             )}
             <h3 className="text-row font-semibold">Windows</h3>
-            {/* Labelled counts, phrased so the heading is not repeated back at
-                the reader — "Windows · 2 windows · 309 visits" was three
-                sayings of two facts. The selected count joins it here rather
-                than riding beside the batch controls, for the same reason. */}
+            {/* Keep the total and selected counts adjacent to the heading. */}
             <span className="min-w-0 truncate text-xs tabular-nums text-ink-3">
               {selectedWindowCount > 0
                 ? `${countNoun(selectedVisitCount, "visit")} selected`
@@ -1093,20 +1017,18 @@ export function EntityPanel({
                   : countNoun(groups.total, "window")}
             </span>
           </div>
-          {/* One row, whichever state the list is in. Narrowing and ordering
-              are the same kind of act on the same list and sit together; the
-              batch verbs take their place rather than stacking under them,
-              because filtering clears the selection anyway — showing both at
-              once offers a control that destroys what the other row acts on. */}
+          {/* Show either list controls or batch actions; filtering clears the
+              current selection. */}
           {titlesReadable && (selectedWindowCount > 0 ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              <Button variant="danger" onClick={onDeleteWindows}>Delete selected</Button>
+              <Button variant="danger" disabled={actionsDisabled} onClick={onDeleteWindows}>Delete selected</Button>
               <MenuSelect
                 variant="action"
                 size="control"
                 value=""
                 placeholder={`Classify ${countNoun(selectedWindowCount, "window")}…`}
                 label={`Classify every visit in the ${countNoun(selectedWindowCount, "selected window")}`}
+                disabled={actionsDisabled}
                 onChange={(value) =>
                   onClassifyWindows(value === AUTOMATIC_CLASSIFICATION ? null : Number(value))}
                 options={[
@@ -1145,8 +1067,7 @@ export function EntityPanel({
           ))}
         </div>
         {!titlesReadable ? (
-          // A list of identical "—" rows, one per entity, is what this used to
-          // render when nothing had a title to group by.
+          // Without stored titles there is no meaningful window breakdown.
           <p className="rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-4 text-xs leading-snug text-ink-3">
             No window titles were recorded for this {kindLabel}, so its{" "}
             {countNoun(groups.sessionTotal, "visit")} cannot be broken down. Title capture is off by
@@ -1164,6 +1085,7 @@ export function EntityPanel({
                   totalSeconds={entity.seconds}
                   category={windowRowCategory(group, baselineCategoryId)}
                   selected={selectedWindowKeys.has(group.key)}
+                  actionsDisabled={actionsDisabled}
                   onToggle={onToggleWindow}
                   onOpen={onOpenWindow}
                 />
@@ -1179,28 +1101,23 @@ export function EntityPanel({
         )}
       </section>
 
-      {/* Curation last, and one clean row. Each action used to carry its own
-          paragraph, which is four lines of standing prose to explain two
-          buttons that both open a dialog stating the same thing in full. The
-          sentences moved onto the buttons, where they are read by whoever is
-          hesitating and by nobody else. */}
+      {/* Keep curation actions together at the end of the panel. */}
       <section className="mt-7 border-t border-edge/60 pt-5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-row font-semibold text-ink-2">Manage this {kindLabel}</h3>
-          {/* The pair is one flex item, so it wraps as a pair. Left loose they
-              broke apart one at a time, and a narrow panel got the heading and
-              a lone button on one line with the second strung below it. */}
+          {/* Keep the actions together when the panel narrows. */}
           <span className="flex items-center gap-2">
-            {/* First of the three, and the only harmless one: the row reads
-                left to right as rename, stop recording, delete. */}
+            {/* Actions read left to right as rename, stop recording, delete. */}
             <Button
               onClick={beginRename}
+              disabled={actionsDisabled}
               title={`Change how this ${kindLabel} is labeled throughout Time. Recorded activity is untouched.`}
             >
               Rename
             </Button>
             <Button
               onClick={onExclude}
+              disabled={actionsDisabled}
               title={`Never record this ${kindLabel} again. Existing history is kept.`}
             >
               Do not track
@@ -1208,6 +1125,7 @@ export function EntityPanel({
             <Button
               variant="quiet-danger"
               onClick={onDeleteEntity}
+              disabled={actionsDisabled}
               title="Removes recorded visits. Categories, rules, and aliases are kept."
             >
               Delete activity

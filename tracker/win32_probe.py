@@ -55,27 +55,47 @@ def get_idle_seconds() -> float:
     return max(0.0, diff_ms / 1000.0)
 
 
-_name_cache: dict[int, str] = {}
-_app_id_cache: dict[int, str | None] = {}
+_name_cache: dict[tuple[int, float], str] = {}
+_app_id_cache: dict[tuple[int, float], str | None] = {}
+
+
+def _process_cache_key(pid: int, process=None) -> tuple[int, float] | None:
+    """Identify one process lifetime, not just its reusable Windows PID."""
+    try:
+        if process is None:
+            process = psutil.Process(pid)
+        return pid, float(process.create_time())
+    except Exception:
+        # An exited process can still be the foreground PID for one snapshot.
+        # Keep the probe useful, but do not cache an identity without a
+        # lifetime token that would make PID reuse safe.
+        return None
 
 
 def _proc_name(pid: int) -> str | None:
-    if pid in _name_cache:
-        return _name_cache[pid]
     try:
-        name = psutil.Process(pid).name().lower()
+        process = psutil.Process(pid)
+    except Exception:
+        return None
+    cache_key = _process_cache_key(pid, process)
+    if cache_key is not None and cache_key in _name_cache:
+        return _name_cache[cache_key]
+    try:
+        name = process.name().lower()
     except Exception:
         return None
     if len(_name_cache) > 256:
         _name_cache.clear()
-    _name_cache[pid] = name
+    if cache_key is not None:
+        _name_cache[cache_key] = name
     return name
 
 
 def _proc_app_user_model_id(pid: int) -> str | None:
     """Return the packaged/explicit AUMID used by Windows media sessions."""
-    if pid in _app_id_cache:
-        return _app_id_cache[pid]
+    cache_key = _process_cache_key(pid)
+    if cache_key is not None and cache_key in _app_id_cache:
+        return _app_id_cache[cache_key]
     handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return None
@@ -96,7 +116,8 @@ def _proc_app_user_model_id(pid: int) -> str | None:
         _kernel32.CloseHandle(handle)
     if len(_app_id_cache) > 256:
         _app_id_cache.clear()
-    _app_id_cache[pid] = app_id
+    if cache_key is not None:
+        _app_id_cache[cache_key] = app_id
     return app_id
 
 

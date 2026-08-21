@@ -1,8 +1,5 @@
 import type { Session } from "./metrics";
 
-/** Mirrors the overlap bound used by the native session query. */
-export const MAX_SESSION_SPAN_SEC = 7 * 86_400;
-
 const LIVE_EDGE_GRACE_SEC = 120;
 const DEFAULT_FRESH_FOR_SEC = 5;
 const DEFAULT_MAX_ENTRIES = 2;
@@ -42,7 +39,7 @@ function sameSession(left: Session, right: Session): boolean {
   );
 }
 
-function lowerBoundByStart(sessions: Session[], value: number): number {
+function upperBoundByStart(sessions: Session[], value: number): number {
   let low = 0;
   let high = sessions.length;
   while (low < high) {
@@ -51,6 +48,25 @@ function lowerBoundByStart(sessions: Session[], value: number): number {
     else high = middle;
   }
   return low;
+}
+
+function sortSessions(sessions: Session[]): Session[] {
+  return [...sessions].sort((a, b) => a.start - b.start || a.id - b.id);
+}
+
+function overlappingSessions(sessions: Session[], startSec: number, endSec: number): Session[] {
+  // Sessions are validated as non-overlapping, so only the latest row that
+  // starts at or before the requested range can cross its left edge. Starting
+  // there preserves arbitrarily long sessions without a historical duration
+  // bound, then the normal forward scan handles the rest of the half-open range.
+  const first = Math.max(0, upperBoundByStart(sessions, startSec) - 1);
+  const out: Session[] = [];
+  for (let index = first; index < sessions.length; index++) {
+    const session = sessions[index];
+    if (session.start >= endSec) break;
+    if (session.end > startSec) out.push(session);
+  }
+  return out;
 }
 
 /**
@@ -65,6 +81,7 @@ export class SessionWindowCache {
   private readonly entries: CacheEntry[] = [];
   private readonly pending = new Map<string, Promise<Session[]>>();
   private useCounter = 0;
+  private generation = 0;
 
   constructor(
     private readonly nowSec: () => number = () => Date.now() / 1000,
@@ -73,6 +90,7 @@ export class SessionWindowCache {
   ) {}
 
   clear(): void {
+    this.generation += 1;
     this.entries.length = 0;
     this.pending.clear();
   }
@@ -97,8 +115,9 @@ export class SessionWindowCache {
     const key = `${startSec}:${endSec}:${forceRefresh ? 1 : 0}`;
     const active = this.pending.get(key);
     if (active) return active;
+    const generation = this.generation;
 
-    const promise = this.loadUnshared(startSec, endSec, fetcher, forceRefresh).finally(() => {
+    const promise = this.loadUnshared(startSec, endSec, fetcher, forceRefresh, generation).finally(() => {
       if (this.pending.get(key) === promise) this.pending.delete(key);
     });
     this.pending.set(key, promise);
@@ -110,9 +129,13 @@ export class SessionWindowCache {
     endSec: number,
     fetcher: SessionFetcher,
     forceRefresh: boolean,
+    generation: number,
   ): Promise<Session[]> {
     if (forceRefresh) {
-      const sessions = await fetcher(startSec, endSec);
+      const sessions = sortSessions(await fetcher(startSec, endSec));
+      if (generation !== this.generation) {
+        return overlappingSessions(sessions, startSec, endSec);
+      }
       for (let index = this.entries.length - 1; index >= 0; index--) {
         const existing = this.entries[index];
         if (Math.min(existing.endSec, endSec) > Math.max(existing.startSec, startSec)) {
@@ -122,7 +145,7 @@ export class SessionWindowCache {
       const replacement: CacheEntry = {
         startSec,
         endSec,
-        sessions: [...sessions].sort((a, b) => a.start - b.start || a.id - b.id),
+        sessions,
         refreshedAtSec: this.nowSec(),
         lastUsed: ++this.useCounter,
         version: 1,
@@ -141,11 +164,14 @@ export class SessionWindowCache {
 
     if (!entry) entry = this.bestOverlappingEntry(startSec, endSec);
     if (!entry) {
-      const sessions = await fetcher(startSec, endSec);
+      const sessions = sortSessions(await fetcher(startSec, endSec));
+      if (generation !== this.generation) {
+        return overlappingSessions(sessions, startSec, endSec);
+      }
       entry = {
         startSec,
         endSec,
-        sessions: [...sessions].sort((a, b) => a.start - b.start || a.id - b.id),
+        sessions,
         refreshedAtSec: this.nowSec(),
         lastUsed: ++this.useCounter,
         version: 1,
@@ -178,6 +204,9 @@ export class SessionWindowCache {
     }
 
     const fetched = await Promise.all(segments.map(([from, to]) => fetcher(from, to)));
+    if (generation !== this.generation) {
+      return overlappingSessions(sortSessions(fetched.flat()), startSec, endSec);
+    }
     const coverageChanged = startSec < oldStart || endSec > oldEnd;
     const rowsChanged = this.merge(entry, fetched.flat());
     entry.startSec = Math.min(entry.startSec, startSec);
@@ -213,13 +242,7 @@ export class SessionWindowCache {
     const cached = entry.slices.get(key);
     if (cached?.version === entry.version) return cached.sessions;
 
-    const out: Session[] = [];
-    const first = lowerBoundByStart(entry.sessions, startSec - MAX_SESSION_SPAN_SEC);
-    for (let index = first; index < entry.sessions.length; index++) {
-      const session = entry.sessions[index];
-      if (session.start >= endSec) break;
-      if (session.end > startSec) out.push(session);
-    }
+    const out = overlappingSessions(entry.sessions, startSec, endSec);
     entry.slices.set(key, { version: entry.version, sessions: out });
     return out;
   }

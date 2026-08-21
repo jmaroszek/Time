@@ -12,6 +12,7 @@ import {
   tooltipStyle,
   uncategorizedBar,
 } from "../lib/chartTheme";
+import { tooltipRow } from "../lib/chartTooltip";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
 import {
@@ -108,7 +109,7 @@ export default function HourlyActivityChart({
           const hour = hours[params[0].dataIndex].hour;
           const rows = params
             .filter((param) => stackNames.includes(param.seriesName))
-            .map((param) => `${param.marker}${param.seriesName}: <b>${fmtDuration(Number(param.value) * 60)}</b>`);
+            .map((param) => formatHourlyTooltipRow(param));
           return [`<b>${fmtHourRange(hour)}</b>`, ...rows].join("<br/>");
         },
       },
@@ -156,4 +157,10 @@ export default function HourlyActivityChart({
       />
     </div>
   );
+}
+
+export function formatHourlyTooltipRow(
+  param: { marker: string; seriesName: string; value: number },
+): string {
+  return tooltipRow(param.marker, param.seriesName, `<b>${fmtDuration(Number(param.value) * 60)}</b>`);
 }

@@ -46,6 +46,8 @@ _TRAILING_DOMAIN_RE = re.compile(
     r"[•·|\-–—]\s*([a-z0-9-]+(?:\.[a-z0-9-]+)+)\s*$", re.IGNORECASE
 )
 _HOST_LABEL_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+_PORT_RE = re.compile(r"^[0-9]+$")
 _URL_TRAILING_PUNCTUATION = ").,;!?]}>"
 
 # The version token trails the reduced URL so a truncated browser tab shows the
@@ -80,8 +82,59 @@ class BrowserPrivacyFields:
     domain: str | None
 
 
+def _contains_whitespace_or_control(value: str) -> bool:
+    return any(
+        character.isspace()
+        or ord(character) < 0x20
+        or 0x7F <= ord(character) <= 0x9F
+        for character in value
+    )
+
+
+def _is_field_whitespace(character: str) -> bool:
+    """Match JavaScript trim's boundary whitespace across the contract."""
+    code_point = ord(character)
+    return (
+        code_point in {0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0xA0, 0x1680}
+        or 0x2000 <= code_point <= 0x200A
+        or code_point in {0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF}
+    )
+
+
+def _trim_field(value: str) -> str:
+    start = 0
+    end = len(value)
+    while start < end and _is_field_whitespace(value[start]):
+        start += 1
+    while end > start and _is_field_whitespace(value[end - 1]):
+        end -= 1
+    return value[start:end]
+
+
+def _valid_port(port: str) -> bool:
+    """Return whether a decimal port is in the TCP/UDP port range."""
+    if _PORT_RE.fullmatch(port) is None:
+        return False
+    # Comparing the zero-trimmed decimal form avoids int's digit-limit and
+    # keeps ports with harmless leading zeroes equivalent across runtimes.
+    significant = port.lstrip("0") or "0"
+    return len(significant) < 5 or (
+        len(significant) == 5 and significant <= "65535"
+    )
+
+
 def _clean_host(host: str) -> str | None:
-    host = host.lower().strip().rstrip(".")
+    """Validate and canonicalize one already-isolated, unbracketed host."""
+    if _contains_whitespace_or_control(host):
+        return None
+    host = host.lower()
+    if not host or "[" in host or "]" in host or "%" in host:
+        return None
+    if host.endswith("."):
+        host = host[:-1]
+        # One root-label dot is valid; another dot leaves an empty DNS label.
+        if host.endswith("."):
+            return None
     host = host.removeprefix("www.")
     if not host or len(host) > 253:
         return None
@@ -109,16 +162,40 @@ def normalize_host(raw: str) -> str | None:
     that domains derived from a window title do, so a stored entry can only ever
     be a host a session could also carry.
     """
-    candidate = raw.strip()
-    if not candidate:
+    candidate = _trim_field(raw)
+    if not candidate or _contains_whitespace_or_control(candidate):
         return None
-    if "://" in candidate:
-        candidate = candidate.split("://", 1)[1]
+    scheme = _SCHEME_RE.match(candidate)
+    if scheme:
+        candidate = candidate[scheme.end() :]
     for separator in ("/", "?", "#"):
         candidate = candidate.split(separator, 1)[0]
     # Userinfo before the port: "user:pass@host" holds a colon of its own.
     candidate = candidate.rsplit("@", 1)[-1]
-    candidate = candidate.split(":", 1)[0]
+
+    if candidate.startswith("["):
+        closing = candidate.find("]")
+        if closing < 0:
+            return None
+        host = candidate[1:closing]
+        suffix = candidate[closing + 1 :]
+        if ":" not in host:
+            return None
+        if suffix and (
+            not suffix.startswith(":") or not _valid_port(suffix[1:])
+        ):
+            return None
+        return _clean_host(host)
+    if "[" in candidate or "]" in candidate:
+        return None
+
+    # A single colon can delimit a port. Multiple colons are left intact for
+    # bare IPv6, which is then validated and compressed by ipaddress.
+    if candidate.count(":") == 1:
+        host, port = candidate.rsplit(":", 1)
+        if not _valid_port(port):
+            return None
+        candidate = host
     return _clean_host(candidate)
 
 

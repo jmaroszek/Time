@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -82,14 +83,31 @@ export interface Meta {
 
 const MetaContext = createContext<Meta | null>(null);
 
+/** Identifies the refresh whose result is still allowed to commit. */
+export interface MetaRefreshGeneration {
+  begin: () => number;
+  isCurrent: (generation: number) => boolean;
+}
+
+export function createMetaRefreshGeneration(): MetaRefreshGeneration {
+  let newest = 0;
+  return {
+    begin: () => ++newest,
+    isCurrent: (generation) => generation === newest,
+  };
+}
+
 export function MetaProvider({ children }: { children: ReactNode }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const refreshGeneration = useRef<MetaRefreshGeneration | null>(null);
+  if (!refreshGeneration.current) refreshGeneration.current = createMetaRefreshGeneration();
 
   const refresh = useCallback(async () => {
+    const generation = refreshGeneration.current!.begin();
     try {
       // Called for its throw, not its value: an unsupported schema must fail
       // here, before any read, so the caller shows the upgrade screen instead
@@ -100,12 +118,14 @@ export function MetaProvider({ children }: { children: ReactNode }) {
         fetchRules(),
         fetchSettings(),
       ]);
+      if (!refreshGeneration.current!.isCurrent(generation)) return;
       setCategories(cats);
       setRules(rls);
       setSettings(stgs);
       setError(null);
       setLoaded(true);
     } catch (e) {
+      if (!refreshGeneration.current!.isCurrent(generation)) return;
       setError(String(e));
       setLoaded(true);
     }

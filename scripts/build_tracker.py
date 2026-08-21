@@ -9,6 +9,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -109,15 +110,29 @@ def _verify_sidecar_manifest(executable: Path) -> None:
 def _target_triple(explicit: str | None) -> str:
     if explicit:
         return explicit
-    arch = os.environ.get("TAURI_ENV_ARCH", platform.machine()).lower()
+    # Tauri supplies this variable during bundling, but isolated Windows build
+    # environments may expose neither it nor platform.machine(). Python's own
+    # build-platform tag is the final local source of the interpreter's target.
+    arch = (os.environ.get("TAURI_ENV_ARCH") or "").strip().lower()
+    if not arch:
+        arch = platform.machine().strip().lower()
+    if not arch:
+        arch = (os.environ.get("PROCESSOR_ARCHITEW6432") or "").strip().lower()
+    if not arch:
+        arch = (os.environ.get("PROCESSOR_ARCHITECTURE") or "").strip().lower()
+    if not arch:
+        arch = sysconfig.get_platform().strip().lower()
     triples = {
         "amd64": "x86_64-pc-windows-msvc",
         "x86_64": "x86_64-pc-windows-msvc",
         "x64": "x86_64-pc-windows-msvc",
+        "win-amd64": "x86_64-pc-windows-msvc",
         "arm64": "aarch64-pc-windows-msvc",
         "aarch64": "aarch64-pc-windows-msvc",
+        "win-arm64": "aarch64-pc-windows-msvc",
         "x86": "i686-pc-windows-msvc",
         "i686": "i686-pc-windows-msvc",
+        "win32": "i686-pc-windows-msvc",
     }
     try:
         return triples[arch]

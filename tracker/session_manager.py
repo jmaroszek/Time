@@ -191,8 +191,19 @@ class SessionManager:
     # ---------- AFK ----------
 
     def _tick_afk(self, snap: Snapshot, locked: bool) -> None:
+        snapshot_excluded = not locked and self._snapshot_is_excluded(snap)
         if self._current is not None and self._current.is_afk:
-            return  # already AFK; idle -> locked transitions stay one span
+            if locked:
+                # An awake AFK row is not the lock row: lock is an observed
+                # boundary and must replace its identity at that instant.
+                if self._is_locked_row(self._current):
+                    return
+            elif not snapshot_excluded:
+                return  # the existing awake AFK identity is still valid
+            elif self._is_generic_afk_row(self._current):
+                # An excluded foreground cannot be attributed, but it is
+                # already represented by the identity-free awake AFK row.
+                return
 
         reason = "locked" if locked else "idle"
         # Lock is detected the moment it happens; idle is detected late, so the
@@ -204,7 +215,7 @@ class SessionManager:
             if locked or self._media_protected_idle
             else snap.now - snap.idle_seconds
         )
-        if locked:
+        if locked or snapshot_excluded:
             retained_process, retained_domain = AFK_PROCESS, None
         else:
             retained_process, retained_domain = self._retained_afk_identity(snap)
@@ -219,6 +230,24 @@ class SessionManager:
             retained_domain,
         )
         self._reset_pending()
+
+    @staticmethod
+    def _is_locked_row(current: _Current) -> bool:
+        return (
+            current.is_afk
+            and current.process == AFK_PROCESS
+            and current.title == "locked"
+            and current.domain is None
+        )
+
+    @staticmethod
+    def _is_generic_afk_row(current: _Current) -> bool:
+        return (
+            current.is_afk
+            and current.process == AFK_PROCESS
+            and current.title == "idle"
+            and current.domain is None
+        )
 
     # ---------- active ----------
 
@@ -331,6 +360,12 @@ class SessionManager:
         )
 
     def _retained_afk_identity(self, snap: Snapshot) -> tuple[str, str | None]:
+        # The current snapshot is independent evidence. The open row may be a
+        # previously allowed foreground identity, while the foreground at the
+        # idle boundary has already moved to an excluded app or website.
+        if self._snapshot_is_excluded(snap):
+            return AFK_PROCESS, None
+
         if self._current is not None and not self._current.is_afk:
             process = self._current.process
             domain = self._current.domain
@@ -352,6 +387,14 @@ class SessionManager:
             return AFK_PROCESS, None
         return process, domain
 
+    def _snapshot_is_excluded(self, snap: Snapshot) -> bool:
+        if snap.process is None:
+            return False
+        return self._is_excluded(
+            snap.process,
+            self._exclusion_domain(snap.process, snap.title),
+        )
+
     def _is_excluded(self, process: str, domain: str | None) -> bool:
         normalized_process = process.lower()
         if normalized_process in self.settings.excluded_processes:
@@ -370,7 +413,7 @@ class SessionManager:
         stronger promise than "do not split browser time by site", so switching
         the second one off must not quietly retire the first.
         """
-        if process not in self.settings.browser_processes:
+        if process.lower() not in self.settings.browser_processes:
             return None
         return browser_privacy_fields(raw_title).domain
 

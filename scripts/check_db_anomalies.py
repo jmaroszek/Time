@@ -43,6 +43,26 @@ def _read_heartbeat(conn: sqlite3.Connection) -> float:
         return 15.0
 
 
+def _duplicate_rule_columns(conn: sqlite3.Connection) -> tuple[str, ...]:
+    """Use the uniqueness shape that this database actually exposes."""
+    columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(rules)")
+    }
+    current = (
+        "match_type",
+        "pattern",
+        "scope_kind",
+        "scope_value",
+        "title_match_mode",
+        "title_anchor",
+    )
+    if set(current).issubset(columns):
+        return current
+    if "scope" in columns:
+        return ("match_type", "pattern", "scope")
+    return ("match_type", "pattern")
+
+
 def check_database(db_path: str | Path, *, now: float | None = None) -> list[dict[str, Any]]:
     """Return named checks. Every check with ``ok=False`` is release-actionable."""
     path = Path(db_path).resolve()
@@ -99,6 +119,7 @@ def check_database(db_path: str | Path, *, now: float | None = None) -> list[dic
 
         now_ts = time.time() if now is None else now
         stale_cutoff = now_ts - max(300.0, 2 * _read_heartbeat(conn))
+        duplicate_columns = ",".join(_duplicate_rule_columns(conn))
         count_checks = [
             (
                 "negative_duration_sessions",
@@ -138,7 +159,8 @@ def check_database(db_path: str | Path, *, now: float | None = None) -> list[dic
             (
                 "duplicate_rules",
                 "SELECT COUNT(*) FROM ("
-                " SELECT 1 FROM rules GROUP BY match_type,pattern HAVING COUNT(*) > 1"
+                f" SELECT 1 FROM rules GROUP BY {duplicate_columns}"
+                " HAVING COUNT(*) > 1"
                 ")",
                 (),
             ),

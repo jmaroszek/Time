@@ -74,6 +74,25 @@ def test_target_triple_prefers_explicit_value():
     assert build_tracker._target_triple("custom-triple") == "custom-triple"
 
 
+def test_target_triple_uses_machine_when_tauri_architecture_is_empty(monkeypatch):
+    monkeypatch.setenv("TAURI_ENV_ARCH", "")
+    monkeypatch.setattr(build_tracker.platform, "machine", lambda: "AMD64")
+
+    assert build_tracker._target_triple(None) == "x86_64-pc-windows-msvc"
+
+
+def test_target_triple_uses_python_platform_when_shell_architecture_is_missing(
+    monkeypatch,
+):
+    monkeypatch.setenv("TAURI_ENV_ARCH", "")
+    monkeypatch.setattr(build_tracker.platform, "machine", lambda: "")
+    monkeypatch.delenv("PROCESSOR_ARCHITEW6432", raising=False)
+    monkeypatch.delenv("PROCESSOR_ARCHITECTURE", raising=False)
+    monkeypatch.setattr(build_tracker.sysconfig, "get_platform", lambda: "win-amd64")
+
+    assert build_tracker._target_triple(None) == "x86_64-pc-windows-msvc"
+
+
 def test_target_triple_refuses_unknown_architecture(monkeypatch):
     monkeypatch.setenv("TAURI_ENV_ARCH", "mips")
 

@@ -1,8 +1,10 @@
 """Print the GSMTC source id of every current media session.
 
-Run while media is actually playing. The source id is what
-media_playback.source_matches_foreground has to match against the foreground
-process name, and browser ids have never been observed -- only assumed.
+Run while media is actually playing. The source id is matched against the
+foreground process name or AUMID; live captures have observed both desktop
+player identifiers and browser identifiers (for example, ``MSEdge`` and
+``Chrome``). Browser playback still needs the foreground browser's known media
+domain before it can protect an idle interval.
 """
 
 import asyncio
@@ -27,4 +29,5 @@ async def main() -> None:
         print(f"source_app_user_model_id = {session.source_app_user_model_id!r}   playing={playing}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

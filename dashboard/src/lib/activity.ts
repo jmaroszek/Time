@@ -487,6 +487,9 @@ export interface ActivityQueryResult {
   /** The selected entity's windows, grouped the same way as a title search.
    *  One entity, so titles alone separate the groups. */
   detailGroups: ActivityTitleGroupPage;
+  /** The inspected Window itself, independent of the paged detail list. Null
+   *  when no selectedWindowKey exists or that key is absent from this query. */
+  selectedWindow: ActivityTitleGroup | null;
   detailTotal: number;
   /** When the selected entity was used across the range. Deliberately blind to
    *  the window filter: typing in it narrows which windows are listed, not
@@ -496,6 +499,43 @@ export interface ActivityQueryResult {
   selectedWindowUsage: ActivityDayBucket[];
   hasStoredTitles: boolean;
   ruleUsageSeconds: RuleUsageEntry[];
+}
+
+/**
+ * Keep a Window inspector readable while its replacement query is in flight,
+ * but let the current worker result decide what it can act on. A current result
+ * with no selected group means the Window left the query and must close.
+ */
+export function resolveSelectedWindow(
+  selected: ActivityTitleGroup | null,
+  result: ActivityQueryResult | null,
+  current: boolean,
+): ActivityTitleGroup | null {
+  if (!selected) return null;
+  return current ? (result?.selectedWindow ?? null) : selected;
+}
+
+/** Every session represented by the rows carried in the current Activity result. */
+export function currentActivitySessionIds(result: ActivityQueryResult | null): Set<number> {
+  if (!result) return new Set();
+  const groups = [
+    ...result.detailGroups.rows,
+    ...(result.windowMatches?.rows ?? []),
+    ...(result.selectedWindow ? [result.selectedWindow] : []),
+  ];
+  return new Set(groups.flatMap((group) => group.sessionIds));
+}
+
+/**
+ * Restrict a mutation payload to sessions carried by the current query. An
+ * empty result is intentional: a stale panel must not write its old IDs.
+ */
+export function restrictActivitySessionIds(
+  ids: Iterable<number>,
+  result: ActivityQueryResult | null,
+): Set<number> {
+  const allowed = currentActivitySessionIds(result);
+  return new Set([...ids].filter((id) => allowed.has(id)));
 }
 
 interface IndexedSession extends ActivitySessionRow {
@@ -1262,6 +1302,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
   // ticked, corrected, or deleted on its own — only as part of "all visits".
   // One group at a time is cheap, so the one being inspected pages properly.
   let selectedWindowUsage: ActivityDayBucket[] = [];
+  let selectedWindow: ActivityTitleGroup | null = null;
   let detailPage = page(detail.groups, query.detailOffset ?? 0, query.detailLimit ?? 50);
   if (query.selectedWindowKey) {
     const inspected = detail.groups.find((group) => group.key === query.selectedWindowKey);
@@ -1276,6 +1317,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
         ...inspected,
         sessions: visits.slice(0, query.selectedWindowSessionLimit ?? GROUP_SESSION_SAMPLE),
       };
+      selectedWindow = expanded;
       detailPage = detailPage.map((group) => (group.key === expanded.key ? expanded : group));
       // Every visit, not the page of them carried for the list: a strip drawn
       // from the first twenty-five would redraw itself on "load more".
@@ -1298,6 +1340,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
       () => triageSummary(index, policy),
     ),
     selectedEntity,
+    selectedWindow,
     detailGroups: {
       rows: detailPage,
       total: detail.groups.length,

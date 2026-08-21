@@ -38,11 +38,11 @@ export function NoResults({
   );
 }
 
-export function LoadMore({ shown, total, onClick }: { shown: number; total: number; onClick: () => void }) {
+export function LoadMore({ shown, total, onClick, disabled = false }: { shown: number; total: number; onClick: () => void; disabled?: boolean }) {
   return (
     <div className="mt-3 flex items-center justify-center gap-2 text-xs text-ink-3">
       <span>{shown} of {total}</span>
-      <button type="button" onClick={onClick} className="rounded-md px-2 py-1 text-accent hover:bg-accent/10">Load more</button>
+      <button type="button" onClick={onClick} disabled={disabled} className="rounded-md px-2 py-1 text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-40">Load more</button>
     </div>
   );
 }

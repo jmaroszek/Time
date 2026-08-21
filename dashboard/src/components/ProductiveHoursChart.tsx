@@ -34,6 +34,7 @@ import {
   uncategorizedMark,
   uncategorizedBar,
 } from "../lib/chartTheme";
+import { tooltipRow } from "../lib/chartTooltip";
 
 export interface CategorySeries {
   name: string;
@@ -440,7 +441,7 @@ export function formatHoursTooltipRow(
   // toFixed(1) display, so compare against the DISPLAYED zero ("0.0h") rather
   // than the raw number — a value like 0.03 must still show, not just >0.
   if (value === null || (p.seriesName !== averageName && value === "0.0h")) return [];
-  return [`${p.marker}${p.seriesName}: <b>${value}</b>`];
+  return [tooltipRow(p.marker, p.seriesName, `<b>${value}</b>`)];
 }
 
 export function formatHoursBucketRange(bucket: HoursBucket): string {

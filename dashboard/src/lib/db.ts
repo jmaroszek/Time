@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
-// The native backend owns the one allowed database connection. This module
-// exposes query ergonomics without granting the webview arbitrary file access.
+// The native dashboard backend owns its SQLite connection; the tracker runtime
+// uses the same database separately. This module exposes query ergonomics
+// without granting the webview arbitrary file access.
 let resolvedPath: string | null = null;
 export interface QueryResult {
   rowsAffected: number;

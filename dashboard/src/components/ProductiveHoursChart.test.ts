@@ -26,6 +26,14 @@ describe("formatHoursTooltipRow", () => {
   it("still omits the average line when it's missing", () => {
     expect(formatHoursTooltipRow({ marker: "●", seriesName: "7-day productive avg", value: "-" }, "7-day productive avg")).toEqual([]);
   });
+
+  it("escapes user-controlled category names while keeping the marker", () => {
+    expect(formatHoursTooltipRow({
+      marker: '<span class="marker">●</span>',
+      seriesName: 'R&D <script>alert("x")</script> & more',
+      value: 1,
+    }, "7-day productive avg")).toEqual(['<span class="marker">●</span>R&amp;D &lt;script&gt;alert("x")&lt;/script&gt; &amp; more: <b>1.0h</b>']);
+  });
 });
 
 describe("estimateLegendRows", () => {

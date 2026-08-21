@@ -40,6 +40,16 @@ def test_update_signature_is_regenerated_after_the_authenticode_gate():
     assert verify < sign < manifest
 
 
+def test_version_parity_runs_before_release_artifact_selection():
+    """A stale component version must stop publication before a build or
+    installer path can be selected."""
+    parity = SCRIPT.index('"check_version_parity.py"')
+    artifact_selection = SCRIPT.index('$bundleDir = Join-Path $srcTauri')
+    config_selection = SCRIPT.index('$configPath = Join-Path $srcTauri')
+    assert parity < config_selection < artifact_selection
+    assert "version parity check failed" in SCRIPT[parity:config_selection]
+
+
 def test_manifest_platform_key_matches_the_only_target_time_ships():
     """Tauri looks the running platform up by this exact key; a typo produces an
     empty manifest entry and a silent 'no update available' forever."""

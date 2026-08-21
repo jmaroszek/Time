@@ -17,6 +17,9 @@ import { ExtensionLinks } from "../components/ExtensionLinks";
 import { withAlias } from "../lib/aliases";
 import {
   GROUP_SESSION_SAMPLE,
+  currentActivitySessionIds,
+  resolveSelectedWindow,
+  restrictActivitySessionIds,
   type ActivityEntitySummary,
   type ActivityQuery,
   type ActivityTitleGroup,
@@ -281,14 +284,38 @@ export default function ActivityTab({
   ]);
   const analyzed = useActivityModel(source, query);
   const result = analyzed.result;
+  const currentResult = analyzed.current ? result : null;
   const currentWindow = useMemo(() => {
-    if (!selectedWindow || !result) return selectedWindow;
-    // Entity detail groups are complete; a global title-search group can be a
-    // subset when the query matches only one cosmetic spelling.
-    return result.detailGroups.rows.find((group) => group.key === selectedWindow.key)
-      ?? result.windowMatches?.rows.find((group) => group.key === selectedWindow.key)
-      ?? selectedWindow;
-  }, [result, selectedWindow]);
+    return resolveSelectedWindow(selectedWindow, result, analyzed.current);
+  }, [analyzed.current, result, selectedWindow]);
+
+  useEffect(() => {
+    if (!selectedWindow || !analyzed.current) return;
+    const fresh = result?.selectedWindow ?? null;
+    if (!fresh) {
+      // The selected window no longer belongs to the current query. Close the
+      // inspector instead of leaving controls aimed at an old range/filter.
+      setPanelSessionIds(new Set());
+      setWindowOrigin(null);
+      setSelectedWindow(null);
+      setSelectedEntityId(null);
+      return;
+    }
+    setSelectedWindow(fresh);
+    setPanelSessionIds((current) => {
+      const allowed = new Set(fresh.sessionIds);
+      const next = new Set([...current].filter((id) => allowed.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [analyzed.current, result, selectedWindow?.key]);
+
+  // Mutation payloads are filtered against the current worker result as a
+  // second line of defence. A stale panel is disabled, but this also protects
+  // an event already queued just as a query replacement began.
+  const currentSessionIds = useMemo(
+    () => currentActivitySessionIds(currentResult),
+    [currentResult],
+  );
 
   useEffect(() => {
     setEntityLimit(ENTITY_PAGE);
@@ -636,7 +663,7 @@ export default function ActivityTab({
    *  key left over from a window the current page no longer carries contributes
    *  nothing rather than acting on visits nobody can see. */
   const selectedWindowSessionIds = (): { ids: number[]; windows: number } => {
-    const rows = (result?.detailGroups.rows ?? []).filter(
+    const rows = (currentResult?.detailGroups.rows ?? []).filter(
       (group) => selectedWindowKeys.has(group.key),
     );
     return { ids: rows.flatMap((group) => group.sessionIds), windows: rows.length };
@@ -653,12 +680,13 @@ export default function ActivityTab({
    * obvious next act is picking a different category for the same visits.
    */
   const classifySelection = async (ids: Set<number>, categoryId: number | null) => {
-    if (ids.size === 0) return;
+    const safeIds = restrictActivitySessionIds(ids, currentResult);
+    if (safeIds.size === 0) return;
     const name = categoryId === null
       ? null
       : meta.categories.find((category) => category.id === categoryId)?.name;
     try {
-      const outcome = await classifySessions([...ids], categoryId);
+      const outcome = await classifySessions([...safeIds], categoryId);
       const moved = outcome.previous.length;
       const subject = countNoun(moved, "visit");
       const skipped = outcome.skippedCount > 0
@@ -713,10 +741,11 @@ export default function ActivityTab({
    *  window was never picked visit by visit, and a confirmation that reported
    *  "412 selected visits" would be describing an act nobody performed. */
   const requestSessionDeletion = (ids: Set<number>, label?: string) => {
-    if (ids.size === 0) return;
+    const safeIds = restrictActivitySessionIds(ids, currentResult);
+    if (safeIds.size === 0) return;
     setDeleteScope({
-      request: { mode: "sessions", sessionIds: [...ids] },
-      label: label ?? `${ids.size} selected visit${ids.size === 1 ? "" : "s"}`,
+      request: { mode: "sessions", sessionIds: [...safeIds] },
+      label: label ?? `${safeIds.size} selected visit${safeIds.size === 1 ? "" : "s"}`,
       span: null,
       // Already an explicit list of rows, so there is no range to widen.
       allHistory: null,
@@ -809,14 +838,17 @@ export default function ActivityTab({
       usage={result?.selectedWindowUsage ?? []}
       rangeDays={calendarDays(range)}
       onLoadMoreVisits={() => setWindowVisitLimit((limit) => limit + WINDOW_VISIT_MORE)}
+      actionsDisabled={!analyzed.current}
       selectedSessionIds={panelSessionIds}
       onToggleSession={togglePanelSession}
       onToggleAllSessions={toggleAllPanelSessions}
       onClassifySelected={(categoryId) => void classifySelection(panelSessionIds, categoryId)}
       onDeleteSelected={() => requestSessionDeletion(panelSessionIds)}
-      onEditSession={setEditingSessionId}
+      onEditSession={(id) => { if (currentSessionIds.has(id)) setEditingSessionId(id); }}
       categories={meta.categories}
-      onMakeRule={setRuleDraft}
+      onMakeRule={(group) => {
+        if (currentResult?.selectedWindow?.key === group.key) setRuleDraft(group);
+      }}
       onOpenParent={openWindowParent}
       onBack={windowOrigin === "entity-detail" ? openWindowParent : undefined}
       onClose={closeActivityDetail}
@@ -825,6 +857,7 @@ export default function ActivityTab({
     <EntityPanel
       dock={detailMode === "outboard" ? panelStyle : null}
       entity={result.selectedEntity}
+      actionsDisabled={!analyzed.current}
       groups={result.detailGroups}
       usage={result.selectedEntityUsage}
       rangeSeconds={result.totalSeconds}
@@ -843,21 +876,34 @@ export default function ActivityTab({
       categories={meta.categories}
       rules={meta.rules}
       aliases={meta.aliases}
-      onDeleteEntity={() => requestEntityDeletion(result.selectedEntity!)}
-      onExclude={() => setExcludeScope({
-        kind: result.selectedEntity!.kind === "app" ? "app" : "website",
-        pattern: result.selectedEntity!.key,
-        label: result.selectedEntity!.displayName,
-      })}
+      onDeleteEntity={() => {
+        if (currentResult?.selectedEntity?.id === result.selectedEntity!.id) {
+          requestEntityDeletion(result.selectedEntity!);
+        }
+      }}
+      onExclude={() => {
+        if (currentResult?.selectedEntity?.id !== result.selectedEntity!.id) return;
+        setExcludeScope({
+          kind: result.selectedEntity!.kind === "app" ? "app" : "website",
+          pattern: result.selectedEntity!.key,
+          label: result.selectedEntity!.displayName,
+        });
+      }}
       onOpenWindow={(group) => openWindow(group, "entity-detail")}
       selectedWindowKeys={selectedWindowKeys}
       onToggleWindow={toggleWindow}
       onToggleWindows={toggleWindows}
       onClassifyWindows={classifySelectedWindows}
       onDeleteWindows={deleteSelectedWindows}
-      onAssign={(categoryId) => assignEntity(result.selectedEntity!, categoryId)}
-      onSaveAlias={(alias) => saveAlias(result.selectedEntity!.key, alias)}
-      onRemoveExactRule={() => removeExactRules(result.selectedEntity!)}
+      onAssign={(categoryId) => currentResult?.selectedEntity?.id === result.selectedEntity!.id
+        ? assignEntity(result.selectedEntity!, categoryId)
+        : Promise.resolve()}
+      onSaveAlias={(alias) => currentResult?.selectedEntity?.id === result.selectedEntity!.id
+        ? saveAlias(result.selectedEntity!.key, alias)
+        : Promise.resolve()}
+      onRemoveExactRule={() => currentResult?.selectedEntity?.id === result.selectedEntity!.id
+        ? removeExactRules(result.selectedEntity!)
+        : Promise.resolve()}
     />
   ) : null;
   return (

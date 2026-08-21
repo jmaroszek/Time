@@ -29,6 +29,11 @@ describe("schema version declarations agree", () => {
     expect(constant?.[1]).toBe(String(SUPPORTED_SCHEMA_VERSION));
     expect(rustSource).toContain(`('schema_version','${SUPPORTED_SCHEMA_VERSION}')`);
   });
+
+  it("keeps the exact-overlap end-time index in both bootstrap schemas", () => {
+    expect(pythonSource).toContain("CREATE INDEX IF NOT EXISTS idx_sessions_end ON sessions(end_ts);");
+    expect(rustSource).toContain("CREATE INDEX IF NOT EXISTS idx_sessions_end ON sessions(end_ts);");
+  });
 });
 
 /**

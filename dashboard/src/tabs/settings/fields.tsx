@@ -36,10 +36,12 @@ export function ScheduleTimeInput({
   label,
   value,
   onChange,
+  disabled = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-1.5 text-xs font-semibold text-ink-2">
@@ -47,6 +49,7 @@ export function ScheduleTimeInput({
       <input
         type="time"
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         className="h-9 rounded-[8px] border border-edge-2 bg-surface-2 px-2.5 text-xs font-semibold tabular-nums text-ink outline-none focus:border-accent"
       />
@@ -403,6 +406,7 @@ export function NumberStepper({
   onBlur,
   onMinus,
   onPlus,
+  disabled = false,
 }: {
   label: string;
   value: string;
@@ -416,15 +420,17 @@ export function NumberStepper({
   onBlur: () => void;
   onMinus: () => void;
   onPlus: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="inline-flex items-center rounded-[10px] border border-control-edge bg-control p-[3px] transition-colors focus-within:border-accent/60">
-      <button type="button" aria-label={`Decrease ${label}`} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink" onClick={onMinus}>−</button>
+      <button type="button" aria-label={`Decrease ${label}`} disabled={disabled} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40" onClick={onMinus}>−</button>
       <div className={`flex items-baseline justify-center ${unit ? "min-w-[34px] gap-1" : "min-w-[34px]"}`}>
         <input
           type={readOnly ? "text" : "number"}
           inputMode={readOnly ? undefined : "decimal"}
           readOnly={readOnly}
+          disabled={disabled}
           min={readOnly ? undefined : min}
           max={readOnly ? undefined : max}
           step={readOnly ? undefined : step}
@@ -446,7 +452,7 @@ export function NumberStepper({
         />
         {unit && <span className="text-xs text-ink-3">{unit}</span>}
       </div>
-      <button type="button" aria-label={`Increase ${label}`} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink" onClick={onPlus}>+</button>
+      <button type="button" aria-label={`Increase ${label}`} disabled={disabled} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40" onClick={onPlus}>+</button>
     </div>
   );
 }

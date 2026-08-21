@@ -18,7 +18,7 @@ from tracker.tracking_schedule import (
 )
 
 T = TypeVar("T")
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class SchemaTooNewError(RuntimeError):
@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     source   TEXT NOT NULL DEFAULT 'live'
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(start_ts);
+CREATE INDEX IF NOT EXISTS idx_sessions_end ON sessions(end_ts);
 CREATE INDEX IF NOT EXISTS idx_sessions_proc  ON sessions(process);
 
 CREATE TABLE IF NOT EXISTS categories (
@@ -386,7 +387,7 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     releases behind has to walk every step, so each block upgrades by one
     version and falls through to the next.
     """
-    if from_version not in {0, 1, 2, 3, SCHEMA_VERSION}:
+    if from_version not in {0, 1, 2, 3, 4, SCHEMA_VERSION}:
         raise RuntimeError(f"unsupported database schema {from_version}")
     if from_version == 0:
         return  # _SCHEMA is the authoritative fresh-install shape
@@ -508,6 +509,11 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(title_rule_count),),
             )
+    if from_version <= 4:
+        # Exact overlap queries are driven by session end time. This additive
+        # index changes no recorded rows and remains safe to repeat after a
+        # partially completed migration.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_end ON sessions(end_ts)")
 
 
 def _seed(conn: sqlite3.Connection) -> None:
