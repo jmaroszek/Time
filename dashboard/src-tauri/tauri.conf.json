@@ -54,7 +54,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQzQTUzMDBBNkQyRkRGNTUKUldSVjN5OXRDakNsUTlKejRTN1R2c05pbmRPakhPbG5Pd0JXWnl6UlZlZkM5eE5qcXhqNUFFQmgK",
       "endpoints": ["https://trackwithtime.com/updates/latest.json"],
       "windows": {
         "installMode": "passive"

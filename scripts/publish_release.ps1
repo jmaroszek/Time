@@ -138,6 +138,14 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $manifestPath = Join-Path $OutputDirectory "latest.json"
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 
+# Regenerating the signature above removes the ordering hazard; this proves it.
+# The check is the client's own: the signature string as the manifest carries it,
+# over the installer's bytes, under the public key baked into the build. Cheap,
+# and the only alternative place to discover a mismatch is a user's machine.
+Write-Host "Verifying the manifest the way a client will ..."
+& node (Join-Path $PSScriptRoot "verify_update_signature.mjs") $installer --manifest $manifestPath
+if ($LASTEXITCODE -ne 0) { throw "Release blocked: the manifest does not verify against the installer." }
+
 Write-Host ""
 Write-Host "Release $version prepared."
 Write-Host "  Installer : $installer"

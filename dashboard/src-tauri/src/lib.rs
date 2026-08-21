@@ -462,6 +462,68 @@ struct UpdateProgress {
     total: Option<u64>,
 }
 
+/// Names a file the update check appends one line to. Unset — which is every
+/// real installation — and nothing is written anywhere.
+const UPDATE_LOG_ENV: &str = "TIME_UPDATE_LOG";
+
+/// The log file, or `None` when the variable is absent or blank.
+///
+/// Split out from the writing so the property that matters can be tested: no
+/// file is created unless somebody explicitly asked for one by name.
+fn update_log_path() -> Option<PathBuf> {
+    let value = std::env::var(UPDATE_LOG_ENV).ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
+}
+
+/// Opt-in diagnostic for the one code path with no other way to observe it.
+///
+/// `check_for_update` reports nothing on purpose (see below), which is right for
+/// users and expensive for testing: an unreachable host, a stale manifest, an
+/// installer built against the wrong endpoint, and an app that is genuinely
+/// up to date all present as the same silence. Telling them apart otherwise
+/// means reading strings out of the installed binary — which is exactly what
+/// the August 2026 update rehearsal had to do, twice.
+///
+/// Gated on an environment variable rather than `debug_assertions`, because what
+/// gets tested is a release installer; a debug-only line would never run where
+/// the question actually gets asked.
+///
+/// Nothing user-identifying can reach the file. The endpoint is a compile-time
+/// constant, the version is a build constant, and the outcome text comes from
+/// the updater. No path, hostname, or window title of the user's is involved.
+fn log_update_check(app: &tauri::AppHandle, outcome: &str) {
+    let Some(path) = update_log_path() else {
+        return;
+    };
+    // The endpoint is the field worth having: a build that checks the wrong URL
+    // is indistinguishable from a working one until this line names it.
+    let endpoints = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|updater| updater.get("endpoints"))
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "<none configured>".to_owned());
+    let line = format!(
+        "{} version={} endpoints={} {}\n",
+        chrono::Local::now().to_rfc3339(),
+        app.package_info().version,
+        endpoints,
+        outcome,
+    );
+    // A diagnostic that can fail the thing it observes would be worse than none.
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, line.as_bytes()));
+}
+
 /// Time's only outbound request: an unconditional GET of a static version file.
 /// The check runs in Rust rather than through the JavaScript plugin so the
 /// WebView never reaches the network and the content-security policy stays shut.
@@ -470,13 +532,45 @@ struct UpdateProgress {
 /// a non-event — offline, asleep, DNS, a hotel captive portal — and reporting it
 /// would turn the one network call Time makes into a recurring alarm about a
 /// machine that is working perfectly.
+///
+/// The arms are spelled out rather than collapsed into a `?` chain so that
+/// `log_update_check` can name which one was taken. The return value is
+/// unchanged: still `None` for every outcome that is not an available update.
 #[tauri::command]
 async fn check_for_update(app: tauri::AppHandle) -> Option<AvailableUpdate> {
-    let update = app.updater().ok()?.check().await.ok()??;
-    Some(AvailableUpdate {
-        version: update.version.clone(),
-        notes: update.body.clone(),
-    })
+    let updater = match app.updater() {
+        Ok(updater) => updater,
+        Err(error) => {
+            log_update_check(&app, &format!("outcome=unavailable error={error}"));
+            return None;
+        }
+    };
+    match updater.check().await {
+        Ok(Some(update)) => {
+            log_update_check(
+                &app,
+                &format!("outcome=available remote={}", update.version),
+            );
+            Some(AvailableUpdate {
+                version: update.version.clone(),
+                notes: update.body.clone(),
+            })
+        }
+        // The endpoint answered and offered nothing newer. Distinguishing this
+        // from `failed` is most of the diagnostic value: one means the manifest
+        // is stale or the build is older than it looks, the other means the
+        // request never landed. The plugin discards the release on this path, so
+        // the advertised version cannot be logged without a second request —
+        // and a second request would break the "exactly one" claim in README.
+        Ok(None) => {
+            log_update_check(&app, "outcome=current");
+            None
+        }
+        Err(error) => {
+            log_update_check(&app, &format!("outcome=failed error={error}"));
+            None
+        }
+    }
 }
 
 /// Downloads the new installer and runs it. Never called on a timer: installing
@@ -630,4 +724,49 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{update_log_path, UPDATE_LOG_ENV};
+
+    /// The suite is serialized by RUST_TEST_THREADS in the repository's
+    /// .cargo/config.toml, so mutating a process-wide variable here is safe.
+    fn with_env<T>(value: Option<&str>, body: impl FnOnce() -> T) -> T {
+        let previous = std::env::var(UPDATE_LOG_ENV).ok();
+        match value {
+            Some(value) => std::env::set_var(UPDATE_LOG_ENV, value),
+            None => std::env::remove_var(UPDATE_LOG_ENV),
+        }
+        let result = body();
+        match previous {
+            Some(previous) => std::env::set_var(UPDATE_LOG_ENV, previous),
+            None => std::env::remove_var(UPDATE_LOG_ENV),
+        }
+        result
+    }
+
+    #[test]
+    fn no_log_file_without_the_variable() {
+        // The property worth protecting: a normal installation writes nothing,
+        // so the diagnostic can never become a file nobody asked for.
+        assert!(with_env(None, update_log_path).is_none());
+    }
+
+    #[test]
+    fn blank_values_do_not_name_a_file() {
+        // PowerShell drops an environment variable set to "", but a value of
+        // spaces survives and would otherwise be treated as a relative path,
+        // creating a file named after nothing in the working directory.
+        assert!(with_env(Some(""), update_log_path).is_none());
+        assert!(with_env(Some("   "), update_log_path).is_none());
+    }
+
+    #[test]
+    fn a_named_path_is_used_verbatim_once_trimmed() {
+        // Trimmed because a path pasted into a shell picks up trailing spaces
+        // far more often than a real path ends in one.
+        let path = with_env(Some(r"  C:\Temp\time-update.log  "), update_log_path);
+        assert_eq!(path.unwrap().to_string_lossy(), r"C:\Temp\time-update.log");
+    }
 }

@@ -3,3 +3,8 @@
 # so keep them LF regardless of a contributor's core.autocrlf setting.
 *.sh text eol=lf
 .githooks/* text eol=lf
+
+# The update-signature fixture is signed over its exact bytes. Any line-ending
+# conversion changes those bytes, the signature stops verifying, and the failure
+# reads as a broken verifier rather than a mangled fixture.
+scripts/tests/fixtures/update_signature/** -text
