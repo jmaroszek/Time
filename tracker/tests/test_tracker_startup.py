@@ -172,6 +172,32 @@ def _record(throttle, exc: BaseException, now: float) -> None:
     throttle.record("tick failed", _raised(exc), now)
 
 
+def test_loop_continuity_reports_nothing_on_its_first_poll():
+    continuity = tracker.LoopContinuity(gap_seconds=60.0)
+    assert continuity.gap_before(1000.0) == 0.0
+
+
+def test_loop_continuity_stays_quiet_while_the_loop_keeps_up():
+    continuity = tracker.LoopContinuity(gap_seconds=60.0)
+    continuity.gap_before(1000.0)
+    assert continuity.gap_before(1001.0) == 0.0
+    assert continuity.gap_before(1030.0) == 0.0  # a slow tick is still watching
+
+
+def test_loop_continuity_reports_an_interval_the_loop_missed():
+    continuity = tracker.LoopContinuity(gap_seconds=60.0)
+    continuity.gap_before(1000.0)
+    assert continuity.gap_before(11000.0) == 10000.0
+    # The gap is reported once; the poll after it is continuous again.
+    assert continuity.gap_before(11001.0) == 0.0
+
+
+def test_loop_continuity_never_reports_a_clock_set_back_as_a_gap():
+    continuity = tracker.LoopContinuity(gap_seconds=60.0)
+    continuity.gap_before(10000.0)
+    assert continuity.gap_before(9400.0) == 0.0
+
+
 def test_first_failure_of_each_kind_logs_a_full_traceback(caplog):
     throttle = tracker.FailureThrottle(summary_seconds=60.0)
 

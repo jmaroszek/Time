@@ -42,6 +42,12 @@ FAILURE_SUMMARY_SECONDS = 60.0
 # absent in Settings.
 HEALTH_HEARTBEAT_SECONDS = 5.0
 HEALTH_HEARTBEAT_KEY = "tracker_health_heartbeat"
+# Sixty missed polls is not a slow tick; the loop was not running. The
+# suspend/resume callbacks are the fast, well-dated path for detecting sleep,
+# but they can go missing — registration failure, hibernation, a notification
+# lost as the machine freezes — and an interval no one watched must stay a gap
+# rather than become an AFK block the user never sat through.
+UNOBSERVED_GAP_SECONDS = 60.0
 
 
 def acquire_single_instance() -> bool:
@@ -169,6 +175,29 @@ class FailureThrottle:
             )
             self._suppressed[kind] = 0
             self._last_report[kind] = now
+
+
+class LoopContinuity:
+    """Reports intervals the poll loop did not run through.
+
+    Asks the wall clock rather than a monotonic counter on purpose: it is the
+    timeline sessions are written in, and it advances across every Windows
+    power state, including the ones where a monotonic counter's behavior is not
+    guaranteed. A clock stepped forward is reported too, which is correct — the
+    timestamps on either side of the step cannot describe one continuous span.
+    """
+
+    def __init__(self, gap_seconds: float = UNOBSERVED_GAP_SECONDS):
+        self._gap_seconds = gap_seconds
+        self._last_seen = 0.0
+
+    def gap_before(self, now: float) -> float:
+        """Seconds missed before `now`; 0.0 when the loop kept up (or is new)."""
+        previous = self._last_seen
+        self._last_seen = now
+        if not previous or now - previous < self._gap_seconds:
+            return 0.0
+        return now - previous
 
 
 def _cleanup_step(label: str, action) -> bool:
@@ -306,14 +335,17 @@ def run() -> None:
     )
     poll = config.POLL_SECONDS
     next_tick = time.monotonic()
+    continuity = LoopContinuity()
     last_settings_refresh = 0.0
     last_health_publish = 0.0
     failures = FailureThrottle()
 
     while not stop_event.is_set():
         try:
+            announced_boundary = False
             if power_monitor is not None:
                 for event in power_monitor.drain():
+                    announced_boundary = True
                     if event.kind == "suspend":
                         manager.system_suspended(event.at)
                         logging.info("System suspend detected; recording gap started.")
@@ -325,6 +357,18 @@ def run() -> None:
                             event.suspend_observed,
                         )
             now = time.time()
+            missed = continuity.gap_before(now)
+            if missed and not announced_boundary:
+                # Windows said nothing about a power boundary, so this is the
+                # only notice the session state will get. Reporting it matters
+                # as much as acting on it: a silent hole in an otherwise busy
+                # day is exactly what a later field report has to explain.
+                manager.unobserved_interval_ended(now)
+                logging.info(
+                    "Loop did not run for %.0fs with no power boundary"
+                    " announced; that interval stays a gap.",
+                    missed,
+                )
             # Consent, pause, schedule, and title-privacy switches take effect
             # within one poll instead of waiting for the database heartbeat.
             if now - last_settings_refresh >= poll:

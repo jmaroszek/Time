@@ -17,6 +17,9 @@ Behavior spec:
 - Unknown foreground (None process) never splits; the current session persists.
 - System suspend closes the current session; resume starts a fresh recording
   boundary so idle backdating can never cover the sleeping interval.
+- An interval nobody observed is a gap, not a session. Sleep Windows never
+  announced looks the same from here as a frozen loop, and both end the open
+  row where the last snapshot actually saw it.
 - An open session's end_ts is pushed forward by heartbeat so a crash loses at
   most `heartbeat_seconds`.
 """
@@ -183,6 +186,17 @@ class SessionManager:
         self._floor_ts = max(self._floor_ts, now)
         self._reset_pending()
         self._media_protected_idle = False
+
+    def unobserved_interval_ended(self, now: float) -> None:
+        """Resume recording after an interval the tracker did not tick through.
+
+        Sleep Windows never announced, hibernation, a loop frozen by something
+        else: the caller has established only that time passed unwatched. That
+        is the same standing as a resume without its suspend — the open row may
+        keep the time actually observed and nothing may claim the rest — so
+        this deliberately shares that path rather than adding a second one.
+        """
+        self.system_resumed(now)
 
     def shutdown(self, now: float) -> None:
         """Finalize the open session (process exit, ctrl-c, logoff)."""

@@ -366,6 +366,28 @@ def test_suspend_closes_existing_afk_before_sleep(manager, store):
     assert store.opened[2][1] == 4601.0
 
 
+def test_undetected_sleep_ends_the_afk_row_where_it_was_last_observed(manager, store):
+    # No suspend or resume notification arrives at all: registration failed, or
+    # Windows froze the process without delivering one. The idle row must still
+    # stop where the tracker last saw the machine instead of growing to cover
+    # hours of sleep the user was not sitting through.
+    manager.tick(active(1000.0))
+    manager.tick(active(1180.0, idle=IDLE_THRESHOLD))
+    afk_id = store.opened[1][0]
+    manager.unobserved_interval_ended(11000.0)
+    manager.tick(active(11001.0, idle=0.0))
+    assert store.closed[afk_id] == 1180.0
+    assert store.opened[2][1] == 11001.0
+
+
+def test_post_gap_idle_never_backdates_into_an_unobserved_interval(manager, store):
+    manager.tick(active(1000.0))
+    manager.unobserved_interval_ended(11000.0)
+    manager.tick(active(11001.0, idle=9000.0))
+    assert store.closed[1] == 1000.0
+    assert store.opened[1][1] == 11000.0
+
+
 def test_unpaired_resume_ends_at_last_observed_tick(manager, store):
     manager.tick(active(1000.0))
     manager.tick(active(1005.0))
