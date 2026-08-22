@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 /**
  * The safety net behind the transition, not the transition itself: the real
- * duration lives on `.collapsible` in index.css, and the end of a collapse is
- * detected from the transition rather than timed against it. This only bounds
- * how long a closing body can linger if no transitionend ever arrives —
- * reduced motion removes the transition outright, and a body unmounted before
- * it is ever painted has nothing to finish. Deliberately longer than the CSS
+ * duration lives on `.collapsible` in index.css, and both ends of the
+ * animation are taken from transitionend rather than timed against it. This
+ * only bounds how long a closing body lingers when no transition runs at all,
+ * which is what reduced motion asks for. Deliberately longer than the CSS
  * duration so it never races the animation it is insuring.
  */
 const COLLAPSE_FALLBACK_MS = 500;
@@ -19,10 +18,16 @@ const COLLAPSE_FALLBACK_MS = 500;
  * form swapped in — never has to be re-measured and never animates from a
  * stale height.
  *
- * The body is mounted only while it is open or still collapsing. Every closed
- * category would otherwise carry a full rule list and a rule form for as long
- * as the tab is on screen, which is the cost the plain conditional render was
- * already avoiding before there was an animation at all.
+ * The animating element is always in the tree, even with nothing inside it. A
+ * transition needs a previously painted value to start from, and an element
+ * created and opened in the same breath has none: it arrives already at its
+ * final height. Keeping an empty, zero-height row means the 0fr start state is
+ * always the one on screen, so opening is a plain change of one property on a
+ * settled element and cannot be beaten by the frame it happens to land in.
+ *
+ * The contents, which are the expensive part — a full rule list and a rule
+ * form for every category — mount only while the body is open or still
+ * closing.
  */
 export default function Collapsible({
   open,
@@ -35,57 +40,45 @@ export default function Collapsible({
   className?: string;
   children: ReactNode;
 }) {
+  // Outlives `open` by one transition, so a closing body has something to
+  // shrink rather than blinking out at full height.
   const [mounted, setMounted] = useState(open);
-  // Separate from `mounted` because the two have to land in different frames:
-  // the body must exist at 0fr for one frame before it is told to grow, or the
-  // browser has no start state to interpolate from and it simply appears.
-  const [shown, setShown] = useState(open);
   // Growing means clipping, and clipping cuts the focus outline off any
   // control sitting against an edge. So the clip is lifted once the body has
   // finished arriving and there is no longer anything to hide.
   const [settled, setSettled] = useState(open);
-  // A row that starts open — every row does while a rule search is active —
-  // has nothing to animate from, so the first commit is taken as it is.
-  const first = useRef(true);
+  const [prevOpen, setPrevOpen] = useState(open);
+
+  // Adjusted during the render that sees the change, not from an effect. The
+  // contents have to appear in the very same commit that flips the row open,
+  // or the row spends its animation growing around an empty body and the
+  // contents drop in fully formed once it is over.
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    setSettled(false);
+    if (open) setMounted(true);
+  }
 
   useEffect(() => {
-    const wasFirst = first.current;
-    first.current = false;
-    if (wasFirst && open === shown) return;
     if (open) {
-      setMounted(true);
-      let inner = 0;
-      const outer = requestAnimationFrame(() => {
-        inner = requestAnimationFrame(() => setShown(true));
-      });
       // Under reduced motion there is no transition and so no transitionend to
       // lift the clip; without this the body would stay clipped for good.
       const timer = window.setTimeout(() => setSettled(true), COLLAPSE_FALLBACK_MS);
-      return () => {
-        cancelAnimationFrame(outer);
-        cancelAnimationFrame(inner);
-        window.clearTimeout(timer);
-      };
+      return () => window.clearTimeout(timer);
     }
-    setSettled(false);
-    setShown(false);
     const timer = window.setTimeout(() => setMounted(false), COLLAPSE_FALLBACK_MS);
     return () => window.clearTimeout(timer);
-    // `shown` is read only on the first pass, to decide whether this mount is
-    // already in its final state; re-running when it changes would restart the
-    // transition it was just set by.
   }, [open]);
 
-  if (!mounted) return null;
   return (
     <div
       id={id}
       className="collapsible"
-      data-open={shown ? "true" : "false"}
+      data-open={open ? "true" : "false"}
       data-settled={settled ? "true" : "false"}
       onTransitionEnd={(event) => {
         // The row is what animates; a transition finishing on something inside
-        // the body says nothing about whether the body is done closing.
+        // the body says nothing about whether the body is done.
         if (event.target !== event.currentTarget) return;
         if (event.propertyName !== "grid-template-rows") return;
         if (open) setSettled(true);
@@ -99,7 +92,7 @@ export default function Collapsible({
           element inside the clip, which is free to keep its full height while
           the clip shrinks past it. */}
       <div className="collapsible-clip">
-        <div className={className}>{children}</div>
+        {mounted && <div className={className}>{children}</div>}
       </div>
     </div>
   );
