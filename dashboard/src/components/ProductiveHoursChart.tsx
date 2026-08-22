@@ -94,6 +94,20 @@ export function categorySeries(
     .map(({ name, color, hours }) => ({ name, color, hours }));
 }
 
+/**
+ * The stacks that actually draw something in the visible range.
+ *
+ * A productivity state (or category) with no time on screen contributes no bar
+ * segment, so its legend entry is a key to a colour the reader cannot find —
+ * "Unproductive" sitting in the legend of a week that had none reads as a
+ * measurement rather than an absence. The test is the DISPLAYED hours, already
+ * rounded to hundredths exactly as the bars are, so a handful of stray seconds
+ * that render nothing don't keep an entry alive either.
+ */
+export function representedStacks<T extends { hours: number[] }>(stacks: T[]): T[] {
+  return stacks.filter((stack) => stack.hours.some((hours) => hours > 0));
+}
+
 const PRODUCTIVE_AVERAGES = {
   daily: "7-day productive avg",
   weekly: "4-week productive avg",
@@ -299,21 +313,21 @@ export default function ProductiveHoursChart({
       uncategorizedBars,
       prodBars.map((hours, index) => hours + neutralBars[index] + unproductiveBars[index]),
     );
-    const stateStacks: CategorySeries[] = [
+    const stateStacks: CategorySeries[] = representedStacks([
       { name: "Productive", color: palette.productive, hours: prodBars },
       { name: "Neutral", color: palette.neutral, hours: neutralBars },
       { name: "Unproductive", color: palette.unproductive, hours: unproductiveBars },
       ...(hasUncategorized
         ? [{ name: "Uncategorized", color: uncategorizedBar(theme), hours: uncategorizedBars }]
         : []),
-    ];
+    ]);
     return { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks };
   }, [historyDays, range, labelMode, granularity, weekStart, palette, theme]);
 
   const option = useMemo<EChartsOption>(() => {
     const chrome = chartChrome(theme);
     const { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks } = agg;
-    const categoryStacks = categorySeries(visible, categories, theme);
+    const categoryStacks = representedStacks(categorySeries(visible, categories, theme));
     const stacks = stackBy === "category" ? categoryStacks : stateStacks;
     const stackNames = stacks.map((stack) => stack.name);
     const showProductiveAverage = stackBy === "state";

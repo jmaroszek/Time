@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { estimateLegendRows, formatHoursTooltipRow, legendContentWidth } from "./ProductiveHoursChart";
+import {
+  estimateLegendRows,
+  formatHoursTooltipRow,
+  legendContentWidth,
+  representedStacks,
+} from "./ProductiveHoursChart";
 
 describe("formatHoursTooltipRow", () => {
   it("omits a zero-hour stack segment", () => {
@@ -131,5 +136,40 @@ describe("the productivity legend at the app's minimum width", () => {
   it("settles back to a single row once the window has real room", () => {
     // 0.92 x 440 - 16 = 388.8, clear of the 386.04 the row needs.
     expect(estimateLegendRows(labels, legendContentWidth(440), measure)).toBe(1);
+  });
+});
+
+describe("representedStacks", () => {
+  const stack = (name: string, hours: number[]) => ({ name, color: "#000", hours });
+
+  it("drops a state with nothing in the visible range", () => {
+    const kept = representedStacks([
+      stack("Productive", [6, 0, 4]),
+      stack("Neutral", [0, 2, 0]),
+      stack("Unproductive", [0, 0, 0]),
+    ]);
+    expect(kept.map((s) => s.name)).toEqual(["Productive", "Neutral"]);
+  });
+
+  it("keeps a state that shows up in only one bucket", () => {
+    expect(representedStacks([stack("Unproductive", [0, 0, 0.25])])).toHaveLength(1);
+  });
+
+  it("drops a stack whose whole range rounds away to nothing drawable", () => {
+    // Hours arrive rounded to hundredths, so a few stray seconds are already 0.
+    expect(representedStacks([stack("Neutral", [0, 0, 0])])).toEqual([]);
+  });
+
+  it("keeps the smallest value the bars can still express", () => {
+    expect(representedStacks([stack("Neutral", [0, 0.01])])).toHaveLength(1);
+  });
+
+  it("preserves the order it was given", () => {
+    const kept = representedStacks([
+      stack("Work", [1]),
+      stack("Games", [0]),
+      stack("Reading", [2]),
+    ]);
+    expect(kept.map((s) => s.name)).toEqual(["Work", "Reading"]);
   });
 });
