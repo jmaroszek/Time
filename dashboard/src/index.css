@@ -249,12 +249,49 @@
 .shadow-control { box-shadow: var(--shadow-control); }
 .time-card-shadow { box-shadow: var(--shadow-card); }
 
+/* A section body that opens and closes instead of appearing all at once. The
+   height is a grid row travelling 0fr → 1fr, which interpolates, rather than a
+   measured pixel height that would go stale the moment the content inside
+   changed. The clip lives on a bare child of its own, which has to be told it
+   may be smaller than its content before it will shrink at all.
+
+   The clip is lifted once the body has arrived (data-settled), because an
+   overflow that is still hidden at rest would cut the focus outline off any
+   control sitting against an edge. */
+.collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  /* Both properties run the same length on the same curve. A fade that
+     finished early would leave an invisible box still collapsing, shunting
+     everything below it upward with nothing on screen to explain why. The
+     curve is eased at both ends rather than only the last one: a long slow
+     tail reads as the animation hanging just before it finishes. */
+  transition:
+    grid-template-rows 200ms cubic-bezier(.4, 0, .2, 1),
+    opacity 200ms cubic-bezier(.4, 0, .2, 1);
+}
+.collapsible-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+.collapsible[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.collapsible[data-open="true"][data-settled="true"] .collapsible-clip {
+  overflow: visible;
+}
+
 .menu-pop { animation: menu-pop 140ms ease-out; }
 .panel-in { animation: panel-in 150ms ease-out; }
 .live-pulse { animation: live-pulse 2s ease-out infinite; }
 .alert-pulse { animation: alert-pulse 1.35s ease-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
+  .collapsible {
+    transition: none;
+  }
   .panel-in,
   .live-pulse,
   .alert-pulse {
