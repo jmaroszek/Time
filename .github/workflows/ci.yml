@@ -82,7 +82,14 @@ jobs:
 
   renderer-compatibility:
     name: renderer compatibility
-    runs-on: ubuntu-latest
+    # windows-latest because this is the only job that renders the product.
+    # Time ships as WebView2 on Windows, so a layout contract verified on a
+    # Linux runner is verified against a platform-and-browser pair no user
+    # runs: scrollbar metrics, font rasterisation and focus-scroll behaviour
+    # all differ, and the minimum-width matrix is exactly where that shows.
+    # Actions minutes are free on a public repository, so the fidelity costs
+    # only wall-clock. Logic-only jobs stay on Linux where they belong.
+    runs-on: windows-latest
     timeout-minutes: 20
     defaults:
       run:
@@ -97,7 +104,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        # No --with-deps: that flag installs Linux system packages and is not
+        # applicable on a Windows runner.
+        run: npx playwright install chromium
       - name: Run device renderer suite
         run: npm run test:device
       - name: Upload renderer failure artifacts

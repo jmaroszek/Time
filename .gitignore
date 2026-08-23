@@ -30,12 +30,11 @@ docs/personal/
 /*.key
 /*.key.pub
 
-# Claude Code's per-machine state. The repository tracks .claude/launch.json, so
-# the directory is a committed one and a bare `git add .claude` would otherwise
-# publish local permissions and scheduler state. Anchored here rather than left
-# to a global ignore file, which protects only this machine.
-/.claude/settings.local.json
-/.claude/scheduled_tasks.lock
+# Claude Code's working directory: launch config, local permissions, scheduler
+# state. None of it is product source, and it describes the tooling rather than
+# the project. Ignored whole, so anything the tool drops here later is private
+# by default instead of needing a new rule each time.
+/.claude/
 
 # Wrangler scratch state from update-rehearsal runs. Empty today, which is the
 # only reason it has never been committed by accident.
