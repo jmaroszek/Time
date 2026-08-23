@@ -1,0 +1,44 @@
+#!/usr/bin/env sh
+# Strip coding-agent Co-Authored-By trailers from the commit message.
+#
+# Time is commercial software with one accountable owner. Work an agent
+# produces under direction is the owner's work and carries the owner's name:
+# if a commit does something wrong, the responsibility is his, and the history
+# should say so plainly rather than splitting it with a tool. Agents are
+# instructed to add these trailers by default, so the rule is enforced here
+# rather than left to whichever tool happens to write the next message.
+#
+# Only agent addresses are removed. A human co-author -- someone pairing on a
+# change, or a contributor whose work is folded into a commit -- is left alone,
+# because that attribution is real and the project accepts contributions.
+#
+# Match on the address, never on the name. "Claude", "Cursor" and "Copilot" are
+# all things a person can be called, and a hook that silently erased a real
+# contributor's credit would be worse than the trailer it removed. To cover a
+# new agent, add its address pattern below.
+#
+# Install once per clone (the same setting installs pre-commit):
+#   git config core.hooksPath .githooks
+# Bypass once with:  git commit --no-verify
+
+message="$1"
+[ -f "$message" ] || exit 0
+
+agents='@anthropic\.com|@openai\.com|@cursor\.(com|sh)|copilot@users\.noreply\.github\.com'
+trailer="^[[:space:]]*co-authored-by:.*<[^>]*($agents)"
+
+grep -qiE "$trailer" "$message" || exit 0
+
+stripped="$message.agent-trailers"
+grep -viE "$trailer" "$message" > "$stripped" || :
+
+# Removing a trailer usually leaves the message ending in the blank line that
+# separated it from the body. Hold blank lines back and emit them only once
+# more real content follows, which drops the trailing run without disturbing
+# the blank lines that separate paragraphs.
+awk '
+  /^[[:space:]]*$/ { pending++; next }
+  { while (pending > 0) { print ""; pending-- } print }
+' "$stripped" > "$message"
+
+rm -f "$stripped"

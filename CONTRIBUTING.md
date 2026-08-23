@@ -62,12 +62,17 @@ tracker sidecar under `src-tauri/binaries/`. Build it once first — see
 [README.md](README.md#building-from-source). `cargo fmt` does not compile and
 needs no sidecar.
 
-Install the formatting hook once per clone, so a commit cannot fail CI on
-whitespace alone:
+Install the repository hooks once per clone:
 
 ```powershell
 git config core.hooksPath .githooks
 ```
+
+That gets two. `pre-commit` runs rustfmt on staged Rust so a commit cannot fail
+CI on formatting alone. `commit-msg` strips `Co-Authored-By` trailers naming a
+coding agent — Time has one accountable owner, and a commit written under your
+direction is yours. Trailers naming a *person* are left alone; the hook matches
+addresses, never names, so a real co-author never loses credit.
 
 The Rust toolchain is pinned in [rust-toolchain.toml](rust-toolchain.toml)
 because rustfmt's output changes between releases. Do not replace it with
