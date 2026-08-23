@@ -16,7 +16,7 @@ const matches = (
   domain: string | null = null,
 ) => titleRuleMatches(
   {
-    pattern: "skill tree",
+    pattern: "project atlas",
     scopeKind: "any",
     scopeValue: "",
     titleMatchMode: "phrase",
@@ -62,9 +62,9 @@ describe("Windows title normalization", () => {
   });
 
   it("splits visible separators but not a hyphen inside a word", () => {
-    expect(splitWindowTitle("roadmap.md - Skill Tree — Obsidian | notes")).toEqual([
+    expect(splitWindowTitle("roadmap.md - Project Atlas — Obsidian | notes")).toEqual([
       "roadmap.md",
-      "skill tree",
+      "project atlas",
       "obsidian",
       "notes",
     ]);
@@ -80,22 +80,22 @@ describe("Windows title normalization", () => {
 
 describe("Window rule meanings", () => {
   it("matches a contiguous whole-word phrase without matching inside longer words", () => {
-    expect(matches("Skill Tree (Sandbox) — Obsidian")).toBe(true);
-    expect(matches("A skill-tree sandbox")).toBe(true);
-    expect(matches("skillful treehouse")).toBe(false);
+    expect(matches("Project Atlas (Sandbox) — Obsidian")).toBe(true);
+    expect(matches("A project-atlas sandbox")).toBe(true);
+    expect(matches("projector atlases")).toBe(false);
     expect(matches("Runtime", { pattern: "time" })).toBe(false);
   });
 
   it("matches exact normalized title parts and honors position", () => {
-    expect(matches("Seeds - Skill Tree - Obsidian", {
+    expect(matches("Seeds - Project Atlas - Obsidian", {
       titleMatchMode: "segment",
       titleAnchor: "interior",
     })).toBe(true);
-    expect(matches("Skill Tree - Seeds - Obsidian", {
+    expect(matches("Project Atlas - Seeds - Obsidian", {
       titleMatchMode: "segment",
       titleAnchor: "interior",
     })).toBe(false);
-    expect(matches("Skill Tree (Sandbox) - Obsidian", {
+    expect(matches("Project Atlas (Sandbox) - Obsidian", {
       titleMatchMode: "segment",
       titleAnchor: "first",
     })).toBe(false);
@@ -109,17 +109,17 @@ describe("Window rule meanings", () => {
   });
 
   it("supports any-app, browser, process, and website scopes", () => {
-    expect(matches("Skill Tree", { scopeKind: "browsers" }, "chrome.exe")).toBe(true);
-    expect(matches("Skill Tree", { scopeKind: "browsers" }, "obsidian.exe")).toBe(false);
-    expect(matches("Skill Tree", {
+    expect(matches("Project Atlas", { scopeKind: "browsers" }, "chrome.exe")).toBe(true);
+    expect(matches("Project Atlas", { scopeKind: "browsers" }, "obsidian.exe")).toBe(false);
+    expect(matches("Project Atlas", {
       scopeKind: "process",
       scopeValue: "Obsidian.EXE",
     })).toBe(true);
-    expect(matches("Skill Tree", {
+    expect(matches("Project Atlas", {
       scopeKind: "domain",
       scopeValue: "github.com",
     }, "chrome.exe", "gist.github.com")).toBe(true);
-    expect(matches("Skill Tree", {
+    expect(matches("Project Atlas", {
       scopeKind: "domain",
       scopeValue: "github.com",
     }, "chrome.exe", "notgithub.com")).toBe(false);

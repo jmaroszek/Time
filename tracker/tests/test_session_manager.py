@@ -99,10 +99,10 @@ def test_unknown_foreground_with_no_session_opens_nothing(manager, store):
 
 
 def test_one_tick_title_flicker_does_not_split(manager, store):
-    manager.tick(active(1000.0, title="Skill Tree"))
+    manager.tick(active(1000.0, title="Project Atlas"))
     manager.tick(active(1001.0, title="Updating..."))
-    manager.tick(active(1002.0, title="Skill Tree"))
-    drive(manager, 1003.0, 5, title="Skill Tree")
+    manager.tick(active(1002.0, title="Project Atlas"))
+    drive(manager, 1003.0, 5, title="Project Atlas")
     assert len(store.opened) == 1
 
 

@@ -20,8 +20,8 @@ time_log.db-wal
 /.coverage
 /coverage/
 /dashboard/coverage/
-# Owner-only working documents (audits, roadmaps, runbooks). One rule, not a
-# per-file list — see AGENTS.md.
+# Owner-only working documents (audits, roadmaps, runbooks). One directory
+# rule rather than a per-file list, so a new document is private by default.
 docs/personal/
 # The updater's Ed25519 private key belongs outside this repository entirely;
 # these are a backstop for a `tauri signer generate` run in the wrong directory.
@@ -29,3 +29,21 @@ docs/personal/
 # Time accepts, and rotating it strands every install that already exists.
 /*.key
 /*.key.pub
+
+# Claude Code's per-machine state. The repository tracks .claude/launch.json, so
+# the directory is a committed one and a bare `git add .claude` would otherwise
+# publish local permissions and scheduler state. Anchored here rather than left
+# to a global ignore file, which protects only this machine.
+/.claude/settings.local.json
+/.claude/scheduled_tasks.lock
+
+# Wrangler scratch state from update-rehearsal runs. Empty today, which is the
+# only reason it has never been committed by accident.
+/.wrangler/
+
+# Owner-only working notes. Agent tools read these from the working tree, so
+# they stay on disk and out of the published repository — the public equivalent
+# is CONTRIBUTING.md, which is written for contributors rather than for the
+# owner's own process.
+/AGENTS.md
+/CLAUDE.md

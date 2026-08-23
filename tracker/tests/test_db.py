@@ -215,7 +215,7 @@ def test_v3_database_migrates_to_v5_preserving_app_and_website_rules(tmp_path):
         "INSERT INTO categories (id,name,color) VALUES (1,'Dev','#abcdef');"
         "INSERT INTO rules VALUES (5,'process','code.exe',1,3,'');"
         "INSERT INTO rules VALUES (6,'domain','github.com',1,1,'');"
-        "INSERT INTO rules VALUES (7,'title','skill tree',1,2,'');"
+        "INSERT INTO rules VALUES (7,'title','project atlas',1,2,'');"
     )
     conn.close()
 
@@ -413,10 +413,10 @@ def test_empty_browser_processes_fall_back_to_the_shipped_list(conn):
 def test_media_domains_are_normalized_to_stored_host_names(conn):
     conn.execute(
         "UPDATE settings SET value=? WHERE key='media_domains'",
-        ("https://www.Cineby.at/watch/123 , nebula.tv:443 ,, /nonsense",),
+        ("https://www.Mubi.com/watch/123 , nebula.tv:443 ,, /nonsense",),
     )
     assert db.get_settings(conn).media_domains == frozenset(
-        {"cineby.at", "nebula.tv"}
+        {"mubi.com", "nebula.tv"}
     )
 
 

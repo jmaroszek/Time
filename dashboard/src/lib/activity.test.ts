@@ -387,10 +387,10 @@ describe("Activity index", () => {
     const index = buildActivityIndex({
       ...source,
       sessions: [
-        { id: 1, start: 0, end: 30, process: "obsidian.exe", title: "Skill Tree — roadmap", domain: null, isAfk: false },
-        { id: 2, start: 40, end: 50, process: "obsidian.exe", title: "Skill Tree — roadmap", domain: null, isAfk: false },
+        { id: 1, start: 0, end: 30, process: "obsidian.exe", title: "Project Atlas — roadmap", domain: null, isAfk: false },
+        { id: 2, start: 40, end: 50, process: "obsidian.exe", title: "Project Atlas — roadmap", domain: null, isAfk: false },
         { id: 3, start: 60, end: 65, process: "obsidian.exe", title: "Groceries", domain: null, isAfk: false },
-        { id: 4, start: 70, end: 100, process: "obsidian.exe", title: "Skill Tree — roadmap", domain: null, isAfk: false },
+        { id: 4, start: 70, end: 100, process: "obsidian.exe", title: "Project Atlas — roadmap", domain: null, isAfk: false },
       ],
     });
     const found = queryActivityIndex(index, { ...baseQuery, search: "e" });
@@ -399,7 +399,7 @@ describe("Activity index", () => {
     expect(groups.sessionTotal).toBe(4);
     const [first, second] = groups.rows;
     // Heaviest window first, not most recent.
-    expect(first.title).toBe("Skill Tree — roadmap");
+    expect(first.title).toBe("Project Atlas — roadmap");
     expect(first.sessionCount).toBe(3);
     expect(first.seconds).toBe(70);
     expect(first.sessionIds).toEqual([4, 2, 1]); // newest first, as listed

@@ -64,9 +64,13 @@ distributed build of Time.
 
 ## Contributions
 
-This project does not accept outside contributions. Please open an issue rather
-than a pull request. Code submitted without a signed contributor agreement
-cannot be merged, because the project must remain licensable by its owner.
+Pull requests are welcome. A contribution can be merged only if its author
+grants the copyright holder an irrevocable, worldwide, royalty-free right to
+use, modify, sublicense, and distribute it as part of Time under any license,
+including a commercial one. The project must remain licensable by its owner.
+Contributing grants the contributor no ownership interest in Time and no right
+to payment, royalties, revenue share, or other compensation, whether or not Time
+is sold. See CONTRIBUTING.md for what that means in practice.
 
 ## No warranty
 

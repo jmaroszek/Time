@@ -11,7 +11,7 @@
 
     From the repository root, launch the isolated dashboard first:
 
-        $env:TIME_DB_PATH = "$PWD\data\demo-full.db"
+        $env:TIME_DB_PATH = "$PWD\data\demo.db"
         $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
         Push-Location dashboard
         npm run tauri dev

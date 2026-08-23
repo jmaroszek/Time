@@ -4,17 +4,17 @@ version = "0.1.0"
 description = "Time tracking dashboard"
 authors = ["Jonah Maroszek"]
 edition = "2021"
+# Time is commercial software; the crate must never reach a public registry.
+publish = false
 
 [[bin]]
 name = "Time"
 path = "src/main.rs"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+# The `_lib` suffix keeps the library name distinct from the `Time` binary
+# above. On Windows a matching lib and bin name collide during linking; see
+# https://github.com/rust-lang/cargo/issues/8519.
 name = "dashboard_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 

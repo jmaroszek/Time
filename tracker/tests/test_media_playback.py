@@ -156,12 +156,12 @@ def test_manager_failure_falls_back_and_logs_once(caplog):
 
 
 def test_reader_added_domains_extend_the_built_in_list():
-    assert not is_media_domain("cineby.at")
-    assert is_media_domain("cineby.at", {"cineby.at"})
+    assert not is_media_domain("mubi.com")
+    assert is_media_domain("mubi.com", {"mubi.com"})
     # Additions match subdomains exactly as the built-ins do.
-    assert is_media_domain("watch.cineby.at", {"cineby.at"})
+    assert is_media_domain("watch.mubi.com", {"mubi.com"})
     # And they only widen: an addition cannot retire a built-in.
-    assert is_media_domain("youtube.com", {"cineby.at"})
+    assert is_media_domain("youtube.com", {"mubi.com"})
 
 
 def test_added_domain_protects_a_browser_the_built_in_list_misses():
@@ -171,9 +171,9 @@ def test_added_domain_protects_a_browser_the_built_in_list_misses():
         "app_user_model_id": None,
         "browser_processes": BROWSERS,
     }
-    assert not monitor.is_foreground_playing(domain="cineby.at", **base)
+    assert not monitor.is_foreground_playing(domain="mubi.com", **base)
     assert monitor.is_foreground_playing(
-        domain="cineby.at", media_domains={"cineby.at"}, **base
+        domain="mubi.com", media_domains={"mubi.com"}, **base
     )
 
 
@@ -184,7 +184,7 @@ def test_added_domain_cannot_protect_an_unrelated_foreground_tab():
     assert not monitor.is_foreground_playing(
         process="chrome.exe",
         app_user_model_id=None,
-        domain="cineby.at",
+        domain="mubi.com",
         browser_processes=BROWSERS,
-        media_domains={"cineby.at"},
+        media_domains={"mubi.com"},
     )

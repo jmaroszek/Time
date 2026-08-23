@@ -36,7 +36,7 @@ describe("normalizeMediaSite", () => {
     expect(normalizeMediaSite("https://user:pass@music.apple.com:443/us?x=1#y")).toBe(
       "music.apple.com",
     );
-    expect(normalizeMediaSite("cineby.at.")).toBe("cineby.at");
+    expect(normalizeMediaSite("mubi.com.")).toBe("mubi.com");
   });
 
   it("keeps the hosts a local media server is reached by", () => {
@@ -58,8 +58,8 @@ describe("normalizeMediaSite", () => {
 
 describe("normalizeMediaSites", () => {
   it("splits a paste and drops duplicates that differ only in shape", () => {
-    expect(normalizeMediaSites("cineby.at\nwww.CINEBY.at, nebula.tv")).toEqual([
-      "cineby.at",
+    expect(normalizeMediaSites("mubi.com\nwww.MUBI.com, nebula.tv")).toEqual([
+      "mubi.com",
       "nebula.tv",
     ]);
   });
@@ -77,12 +77,12 @@ describe("coveringMediaSite", () => {
   });
 
   it("names an existing addition, so a duplicate chip explains itself", () => {
-    expect(coveringMediaSite("watch.cineby.at", ["cineby.at"])).toBe("cineby.at");
+    expect(coveringMediaSite("watch.mubi.com", ["mubi.com"])).toBe("mubi.com");
   });
 
   it("reports nothing for a site Time does not yet know", () => {
-    expect(coveringMediaSite("cineby.at")).toBeNull();
-    expect(coveringMediaSite("nebula.tv", ["cineby.at"])).toBeNull();
+    expect(coveringMediaSite("mubi.com")).toBeNull();
+    expect(coveringMediaSite("nebula.tv", ["mubi.com"])).toBeNull();
   });
 
   it("does not treat a shared suffix fragment as coverage", () => {

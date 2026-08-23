@@ -3,7 +3,7 @@
 // The dashboard must be launched against synthetic data with WebView2's local
 // CDP port enabled. From the repository root:
 //
-//   $env:TIME_DB_PATH = "$PWD/data/demo-full.db"
+//   $env:TIME_DB_PATH = "$PWD/data/demo.db"
 //   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
 //   Push-Location dashboard
 //   npm run tauri dev

@@ -130,13 +130,13 @@ describe("titleMatchParts", () => {
 
 describe("defaultRulePattern", () => {
   it("uses one durable title part while history-backed ranking loads", () => {
-    expect(defaultRulePattern("roadmap.md - Skill Tree - Obsidian")).toBe("skill tree");
+    expect(defaultRulePattern("roadmap.md - Project Atlas - Obsidian")).toBe("project atlas");
     expect(defaultRulePattern("Inbox — Mail")).toBe("inbox");
     expect(defaultRulePattern("Pull request #12 | myrepo")).toBe("pull request #12");
   });
 
   it("never falls back to a version-bearing segment", () => {
-    expect(defaultRulePattern("v2.4 - Skill Tree - Obsidian")).toBe("skill tree");
+    expect(defaultRulePattern("v2.4 - Project Atlas - Obsidian")).toBe("project atlas");
   });
 
   it("leaves a title with no separators alone", () => {
@@ -162,17 +162,17 @@ describe("previewTitleRule", () => {
     browserProcesses: ["chrome.exe"],
     aliases: {},
     sessions: [
-      { id: 1, start: 0, end: 60, process: "obsidian.exe", title: "Skill Tree — roadmap", domain: null, isAfk: false },
+      { id: 1, start: 0, end: 60, process: "obsidian.exe", title: "Project Atlas — roadmap", domain: null, isAfk: false },
       { id: 2, start: 60, end: 120, process: "obsidian.exe", title: "Groceries", domain: null, isAfk: false },
-      { id: 3, start: 120, end: 180, process: "chrome.exe", title: "Skill Tree issue", domain: "github.com", isAfk: false },
-      { id: 4, start: 180, end: 240, process: "obsidian.exe", title: "Skill Tree — notes", domain: null, isAfk: true },
+      { id: 3, start: 120, end: 180, process: "chrome.exe", title: "Project Atlas issue", domain: "github.com", isAfk: false },
+      { id: 4, start: 180, end: 240, process: "obsidian.exe", title: "Project Atlas — notes", domain: null, isAfk: true },
     ],
   };
   const spec = (
     scopeKind: TitleRuleSpec["scopeKind"],
     scopeValue = "",
   ): TitleRuleSpec => ({
-    pattern: "skill tree",
+    pattern: "project atlas",
     scopeKind,
     scopeValue,
     titleMatchMode: "phrase",
@@ -449,9 +449,9 @@ describe("entityClassification", () => {
   it("prints a pattern the header does not already show", () => {
     const summary = entityClassification({
       ...base,
-      rules: [rule({ matchType: "title", pattern: "skill tree" })],
+      rules: [rule({ matchType: "title", pattern: "project atlas" })],
     });
-    expect(summary.detail).toBe("Window rule · skill tree");
+    expect(summary.detail).toBe("Window rule · project atlas");
   });
 
   it("says so when a rule explains only part of the time", () => {

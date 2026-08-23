@@ -48,7 +48,7 @@ def test_plain_chrome_title_has_no_domain():
 
 
 def test_plain_title_no_domain():
-    assert parse_domain("Skill Tree (Sandbox) - Google Chrome") is None
+    assert parse_domain("Project Atlas (Sandbox) - Google Chrome") is None
 
 
 def test_filename_like_title_not_mistaken_for_domain():
@@ -251,7 +251,7 @@ BROWSER_WINDOW_SUFFIXES = [
     " and 1 more page - Google Chrome",
     " - Personal - Microsoft​ Edge",
     " - Work - Brave",
-    " - Jonah - Google Chrome",
+    " - Alex - Google Chrome",
     " and 4 more pages - Personal - Microsoft  Edge",
 ]
 
@@ -396,7 +396,7 @@ def test_normalize_host_accepts_what_a_settings_field_receives():
     assert normalize_host("https://user:pass@music.apple.com:443/us?x=1#y") == (
         "music.apple.com"
     )
-    assert normalize_host("cineby.at.") == "cineby.at"
+    assert normalize_host("mubi.com.") == "mubi.com"
 
 
 def test_normalize_host_rejects_what_could_never_be_a_stored_domain():

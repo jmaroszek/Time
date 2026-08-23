@@ -1,115 +1,97 @@
 # Time
 
-A personal time tracker for Windows I built to answer one question:
-**how do I spend time on my computer?**
+A local-first time tracker for Windows that answers one question: **how do I
+spend time on my computer?**
 
-A lightweight Python tracker runs in the background after explicit consent and
-records foreground-app timing to SQLite. A Tauri 2 + React
-dashboard turns that into answers: how much I worked, on what, and
-how that is changing over time.
+A small Python tracker runs in the background after explicit consent and records
+foreground-app timing to SQLite. A Tauri 2 + React dashboard turns that into
+answers — how much you worked, on what, and how it is changing.
 
-![Insights tab](docs/images/overview.png)
+**[trackwithtime.com](https://trackwithtime.com)** is the place to see what Time
+does: features, screenshots, and the guides for using it. This repository is the
+place to check whether it does what the site says.
 
-> All screenshots use a synthetic demo dataset
-> ([scripts/make_demo_db.py](scripts/make_demo_db.py)) — plausible fake weeks,
-> nobody's real browsing history.
+## Why this repository is public
 
-## Features
+A time tracker asks for a lot of trust. It sees every application you open, and
+optionally every window title. Being able to read the code and confirm the
+privacy claims is worth more than any wording on a privacy page.
 
-- **A useful record of your day.** Every stretch of focus on an app becomes one
-  session — what it was, when it started, when it ended —
-  so any day can be replayed block by block. App switches register within a
-  second.
-- **Honest about breaks.** Step away and the time doesn't count: after the
-  idle threshold with no input you're marked away, and the period is back-dated
-  to your last keystroke so idle minutes never pad the stats. Supported
-  foreground media stays active while Windows reports it as playing; pausing
-  begins away time at that moment. Locking the screen counts as away
-  immediately, and sleep records no timeline block. Awake away rows retain the
-  foreground app/site identity for inspection, but replace the window title
-  with the away reason; locked rows retain no foreground identity.
-- **Optional site-level browser time.** The first-party Time Web Extension
-  ([Chrome Web Store](https://chromewebstore.google.com/detail/time-web-extension/gnlfnddpjedjehaeofdbpfmmjghieoke),
-  [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/time-web-extension/))
-  adds the current origin and path to the browser title
-  while excluding queries and fragments. Time derives only the normalized
-  domain and immediately discards the raw origin/path; credentials are never
-  exposed by the extension. No extension is required for app-level browser
-  tracking. The same domain signal lets Time distinguish foreground browser
-  playback from media in a background tab.
-- **Your own definition of productive.** Apps and websites are grouped into
-  custom categories and simple rules, all edited in the dashboard. New installs
-  contain no personal categories or classification rules. Changes apply to all history, and the tracker
-  picks them up within seconds — no config files, no restarts.
-- **Friendly activity names.** Cryptic app and website names can be renamed in
-  Activity's Apps & Websites, and the friendly name carries into Insights while
-  the recorded identity remains available in Activity.
-- **Tells you what actually changed.** Previous-period shifts in app or website
-  usage are highlighted only when the relative and absolute change is meaningful
-  and not driven by one unusual day. Color depends on direction: more time in a
-  productive destination is green, more in a distracting one is red.
-- **Limits loss when a process is interrupted.** The tracker rejects double launches and
-  flushes the open session to disk on its heartbeat, limiting an unexpected exit to roughly
-  the last 15 seconds. The tracker and dashboard share one SQLite file (WAL mode) safely.
+So the source is published for inspection. It is not licensed for use — see
+[LICENSE.md](LICENSE.md).
 
-## The dashboard
+## What you can check here
 
-| Tab | What it shows |
+These are the claims the website makes. Each one is verifiable in a few minutes:
+
+| Claim | Where to check it |
 | --- | --- |
-| **[Insights](docs/overview.md)** | KPI cards (total, productive %, longest focus chain, goal pace); an adaptive main view that shifts with the range — a per-day timeline, a weekday×hour rhythm heatmap, or a day/month calendar (shadeable by total, productive, unproductive, or neutral time); top apps or websites with category-aware deltas; and activity hours stacked by state or category. Ranges run from a single day to all time. |
-| **[Activity](docs/apps.md)** | Search and correct the apps, websites, windows, and sessions in the shared range; classify them with categories and rules; or delete exact recorded activity. |
-| **[Settings](docs/settings.md)** | Goals, AFK threshold, heartbeat, week start, browser processes, history retention, live tracker status, and one-click backup. |
+| The updater is the only feature that touches the network | `dashboard/src/` contains no `fetch`, `XMLHttpRequest`, `WebSocket`, or `sendBeacon`; `tracker/` imports no HTTP client; the only networking crate in [Cargo.toml](dashboard/src-tauri/Cargo.toml) is `tauri-plugin-updater` |
+| The update check carries no identifier or activity data | The endpoint is a fixed static manifest in [tauri.conf.json](dashboard/src-tauri/tauri.conf.json); no URL template means no per-user version in anyone's server logs |
+| Browser URLs are reduced to a domain before storage | [tracker/domains.py](tracker/domains.py) strips path, query, fragment, port, and credentials in memory |
+| Window titles are off until you turn them on | `DEFAULT_SETTINGS` in [tracker/db.py](tracker/db.py) |
+| Titles and domains never reach the log file | [tracker/tests/test_logging.py](tracker/tests/test_logging.py) asserts it against real writes |
+| The webview cannot reach your filesystem or pick a database | The capability set in [capabilities/default.json](dashboard/src-tauri/capabilities/default.json) and the CSP in [tauri.conf.json](dashboard/src-tauri/tauri.conf.json) |
+| The dashboard cannot run arbitrary SQL | The statement allowlist in [database.rs](dashboard/src-tauri/src/database.rs) |
+
+[SECURITY.md](SECURITY.md) has the full threat model, the limits of local
+storage, and how to report a vulnerability privately.
 
 ## Architecture
 
 ```
-tracker/      Python, always on: Win32 foreground/idle probe -> session rows
-dashboard/    Tauri 2 + React + ECharts, launched on demand: reads sessions,
-              owns categories/rules/settings
+tracker/    Python, always on. Win32 foreground/idle probe -> session rows.
+dashboard/  Tauri 2 + React + ECharts, launched on demand. Reads sessions;
+            owns categories, rules, and settings.
+scripts/    Build, demo-data, and database-health tooling.
 ```
 
-The two halves share a SQLite database (WAL) at
-`%LOCALAPPDATA%\Time\Data\database.db`. Both resolve that fixed per-user path
-independently. Settings written by the dashboard are re-read by the tracker
-every heartbeat. Both executables verify `schema_version` and refuse unsafe
-writes; new schemas are bootstrapped directly at the current public contract.
+The two halves never talk to each other. One SQLite database in WAL mode at
+`%LOCALAPPDATA%\Time\Data\database.db` is the entire contract between them, and
+both resolve that fixed per-user path independently. Settings the dashboard
+writes are re-read by the tracker on its next heartbeat. Both verify
+`schema_version` and refuse unsafe writes.
 
-## Installing it
+## Building from source
 
-The beta will be distributed as an approved signed installer for Windows from
-[trackwithtime.com](https://trackwithtime.com). It will bootstrap the local database
-but record nothing and create no startup entry until you opt in; uninstalling
-removes the app and its autostart entry while keeping your database.
+The license permits building Time to verify that a release matches this source.
+You need Windows, Python 3.13, Node 24, and the Rust toolchain pinned in
+[rust-toolchain.toml](rust-toolchain.toml).
 
-## Privacy and security
+Build the tracker sidecar from a dedicated environment. A broad Conda or
+development environment exposes unrelated PyInstaller hooks and native packages
+to the build, and the builder rejects runtime packages that do not match
+`tracker/requirements.txt`:
 
-Tracking is disabled until an explicit first-run choice. Window titles are a
-separate opt-in and are off by default; browser URLs are sanitized before a
-session is written. Time has no account, cloud sync, analytics, or telemetry.
+```powershell
+python -m venv data\tracker-build-env
+data\tracker-build-env\Scripts\python -m pip install -r tracker\requirements-build.txt
+data\tracker-build-env\Scripts\python scripts\build_tracker.py
+```
 
-The updater is Time's only network-enabled feature. Its only automatic request is a daily
-fetch of a static manifest from `trackwithtime.com`; it carries no identifier, version, or
-activity data. If you choose to install an update, Time performs a fresh manifest check and
-downloads the installer. Nothing is installed without that click, and update checks can be
-turned off under Settings → Privacy & recording.
+Then build the application and installer:
 
-The dashboard uses a restrictive content-security policy and a fixed-path,
-least-authority database bridge. See [SECURITY.md](SECURITY.md) for the threat
-model, at-rest limitations, vulnerability reporting, and the signed release
-requirements.
+```powershell
+cd dashboard
+npm install
+npm run tauri build
+```
 
-## About this source code
+The installer lands in `dashboard/src-tauri/target/release/bundle/nsis/`. It is
+unsigned; official releases are Authenticode-signed and timestamped, so a
+locally built installer will not match a published one byte for byte. Compare
+behavior and source, not hashes.
 
-This repository is public so anyone can read the code and see exactly what Time
-does with their data. A time tracker asks for a lot of trust, and being able to
-check the claims is worth more than any wording on a privacy page.
+## Contributing
 
-Readable is not the same as free. Time is commercial software: the source is
-published for inspection, not licensed for use. The [license](LICENSE.md)
-permits reading it, and compiling it to confirm that a release matches the
-source, but the right to install and run Time comes with a copy supplied by its
-author. Copies given directly to beta testers carry their own permission.
+Pull requests are welcome, with one condition: contributions need a copyright
+assignment or license grant, because Time is commercial software and has to stay
+licensable by its owner. [CONTRIBUTING.md](CONTRIBUTING.md) covers that, how to
+run the tests, and the few invariants that are easy to break by accident.
 
-Please open an issue rather than a pull request — outside contributions cannot
-be merged without a contributor agreement, because the project has to stay
-licensable by its owner.
+## License
+
+Time is commercial software. This source is published for inspection, not
+licensed for use. Reading it and compiling it to verify a release are permitted;
+installing and running Time comes with a copy supplied by its author. See
+[LICENSE.md](LICENSE.md).

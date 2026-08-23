@@ -288,7 +288,7 @@ export function TrackingExclusionDialog({
  * concrete window means the pattern and the scope both have obvious defaults.
  *
  * Scope defaults to the exact website when one is known, otherwise the exact
- * process. "Skill Tree" in an editor is a project; in a browser it might be
+ * process. "Project Atlas" in an editor is a project; in a browser it might be
  * anything. A broader reading must be a deliberate choice.
  */
 export function WindowRuleDialog({
