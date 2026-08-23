@@ -51,31 +51,22 @@ export function MetricCard({
   return (
     <div className="time-card-shadow rounded-xl border border-card-edge bg-surface px-4 py-3">
       <div className="flex items-center gap-1.5">
-        <p
-          tabIndex={hint ? 0 : undefined}
-          aria-label={hint ? `${label}. ${hint}` : undefined}
-          className={`group relative w-fit text-xs text-ink-2 outline-none ${hint ? "cursor-help" : ""}`}
-        >
-          {label}
-          {hint && <InfoHint text={hint} />}
-        </p>
+        {hint ? (
+          <FloatingTooltip
+            text={hint}
+            ariaLabel={`${label}. ${hint}`}
+            className="cursor-help text-xs text-ink-2 outline-none"
+          >
+            {label}
+          </FloatingTooltip>
+        ) : (
+          <p className="text-xs text-ink-2">{label}</p>
+        )}
         {mark}
       </div>
       <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
       {sub && <p className="mt-0.5 text-xs text-ink-2">{sub}</p>}
     </div>
-  );
-}
-
-/** Positioned tooltip shared by the card's hover and title focus states. */
-function InfoHint({ text }: { text: string }) {
-  return (
-    <span
-      role="tooltip"
-      className="pointer-events-none invisible absolute left-0 top-5 z-20 w-56 rounded-lg border border-raised-edge bg-raised px-2.5 py-1.5 text-meta font-normal leading-snug text-ink-2 opacity-0 shadow-menu transition-opacity delay-0 duration-100 group-hover:visible group-hover:opacity-100 group-hover:delay-500 group-focus:visible group-focus:opacity-100 group-focus:delay-0"
-    >
-      {text}
-    </span>
   );
 }
 

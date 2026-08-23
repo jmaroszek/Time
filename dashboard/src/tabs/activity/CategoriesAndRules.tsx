@@ -653,7 +653,7 @@ export default function CategoriesAndRules({
                     const rect = event.currentTarget.getBoundingClientRect();
                     setColorMenu({
                       id: category.id,
-                      left: Math.min(rect.left, window.innerWidth - SWATCH_MENU_WIDTH - 8),
+                      left: Math.max(8, Math.min(rect.left, window.innerWidth - SWATCH_MENU_WIDTH - 8)),
                       top: Math.min(rect.bottom + 6, window.innerHeight - 112),
                     });
                   }}

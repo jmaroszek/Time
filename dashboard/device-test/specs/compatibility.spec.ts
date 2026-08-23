@@ -252,8 +252,12 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   expect(newCategoryBox!.width).toBeLessThanOrEqual(225);
   expect(Math.abs(newCategoryBox!.y - addCategoryBox!.y)).toBeLessThanOrEqual(3);
   expect(addCategoryBox!.x).toBeGreaterThan(newCategoryBox!.x + newCategoryBox!.width);
-  await page.getByRole("button", { name: "Expand Focus rules" }).click();
+  const focusToggle = page.getByRole("button", { name: "Expand Focus rules" });
+  const focusRulesId = await focusToggle.getAttribute("aria-controls");
+  expect(focusRulesId).not.toBeNull();
+  await focusToggle.click();
   await expect(page.getByText("code.exe", { exact: true })).toBeVisible();
+  await expect(page.locator(`[id="${focusRulesId}"]`)).toHaveAttribute("data-settled", "true");
   if (width < 640) {
     const ruleType = page.getByRole("group", { name: "Rule type" }).first();
     await ruleType.getByRole("button", { name: "Window", exact: true }).click();

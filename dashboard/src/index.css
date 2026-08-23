@@ -272,6 +272,7 @@
     opacity 200ms cubic-bezier(.4, 0, .2, 1);
 }
 .collapsible-clip {
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
