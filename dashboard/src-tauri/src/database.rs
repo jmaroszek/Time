@@ -30,6 +30,20 @@ use std::{
 pub(crate) const SCHEMA_VERSION: i64 = 5;
 const MAX_CORRECTION_SPAN_SEC: i64 = 7 * 86_400;
 
+/// Marks the one open failure a launch can repair by itself, so the caller can
+/// recognize it without matching a formatted sentence.  Mirrors the
+/// `DatabaseSchemaTooNew:` prefix the renderer uses for the opposite direction
+/// in `dashboard/src/lib/schema.ts`; this one never reaches the renderer,
+/// because a database this release is too new for is migrated before the
+/// window exists.
+const OLDER_SCHEMA_PREFIX: &str = "DatabaseSchemaTooOld:";
+
+/// Whether an `open` error means the database predates this release and the
+/// tracker has not migrated it yet.
+pub(crate) fn is_older_schema_error(error: &str) -> bool {
+    error.starts_with(OLDER_SCHEMA_PREFIX)
+}
+
 /// Keys the renderer may persist directly.  Lifecycle-owned state is
 /// intentionally absent: consent, startup registration, scheduling and pause
 /// flags have cross-system invariants and must travel through the native
@@ -632,10 +646,16 @@ impl TimeDatabase {
                         schema_version: version,
                     });
                 }
+                // Prefixed so the launch path can tell this apart from every
+                // other reason an open fails and hand the database to the
+                // tracker, which owns migration.  Nothing else may act on it:
+                // this release cannot read the older shape, and the bootstrap
+                // SQL below must not run against it.
                 if version < SCHEMA_VERSION {
                     return Err(format!(
-                    "Database schema {version} requires an explicit migration to {SCHEMA_VERSION}"
-                ));
+                        "{OLDER_SCHEMA_PREFIX} database schema {version} requires an explicit \
+                         migration to {SCHEMA_VERSION}"
+                    ));
                 }
                 version
             }
@@ -910,6 +930,40 @@ impl TimeDatabase {
             }
         }
         Ok(state)
+    }
+
+    /// Whether the tracker's own health stamp is older than `stale_after_secs`.
+    ///
+    /// The stamp is epoch seconds, written by the tracker roughly every five
+    /// seconds and deliberately zeroed on a clean shutdown.  Missing,
+    /// unparsable, and zero all answer the same question the same way — no
+    /// tracker has claimed to be working recently — so none of them is treated
+    /// as a reason to leave a silent process alone.
+    ///
+    /// A stamp in the future is not stale.  It means the clock moved, which is
+    /// not evidence about the tracker, and reading it as staleness would make
+    /// a daylight-saving change look like a dead process.
+    pub(crate) async fn tracker_health_is_stale(
+        &self,
+        stale_after_secs: i64,
+    ) -> Result<bool, String> {
+        let raw = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM settings WHERE key='tracker_health_heartbeat'",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        let Some(stamp) = raw.and_then(|value| value.trim().parse::<i64>().ok()) else {
+            return Ok(true);
+        };
+        if stamp <= 0 {
+            return Ok(true);
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_secs() as i64;
+        Ok(now.saturating_sub(stamp) >= stale_after_secs)
     }
 
     pub(crate) async fn restore_default_settings(&self) -> Result<(), String> {
@@ -2611,9 +2665,9 @@ pub fn database_path(base: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_website_host, schedule_allows_local, ActivityDeleteRequest,
-        SessionClassificationRequest, SessionCorrectionRequest, SettingUpdate, TimeDatabase,
-        BOOTSTRAP_SQL, SCHEMA_VERSION,
+        is_older_schema_error, normalize_website_host, schedule_allows_local,
+        ActivityDeleteRequest, SessionClassificationRequest, SessionCorrectionRequest,
+        SettingUpdate, TimeDatabase, BOOTSTRAP_SQL, SCHEMA_VERSION,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2717,6 +2771,80 @@ mod tests {
         );
         assert!(TimeDatabase::validate_mutation_target("UPDATE settings SET value='1'").is_err());
         assert!(TimeDatabase::validate_mutation_target("DELETE FROM settings").is_err());
+    }
+
+    /// The launch path repairs exactly one open failure by handing the database
+    /// to the tracker, so it has to be able to recognize that one and no other.
+    /// A schema older than this release is the only self-repairable case; every
+    /// other failure ends the launch, and mistaking one for this would spawn a
+    /// tracker at a database it cannot help with.
+    #[test]
+    fn an_older_database_reports_a_recognizable_migration_error() {
+        tauri::async_runtime::block_on(async {
+            let path = scratch_database("older-schema");
+            let database = TimeDatabase::open(path.clone()).await.unwrap();
+            database
+                .update_lifecycle_settings(&[("schema_version", "4")])
+                .await
+                .unwrap();
+            database.close().await;
+
+            let error = TimeDatabase::open(path).await.err().unwrap();
+            assert!(is_older_schema_error(&error), "error was {error:?}");
+            // The version and the target both stay in the message: this is what
+            // the fatal-launch dialog shows if the migration itself fails.
+            assert!(error.contains('4') && error.contains('5'), "{error}");
+            assert!(!is_older_schema_error("disk I/O error"));
+        });
+    }
+
+    /// A live process is not evidence of a working tracker, so the health stamp
+    /// is what `ensure_recording_tracker` reads before it leaves one alone. The
+    /// three "no recent claim" spellings have to answer alike: the tracker
+    /// zeroes the stamp on a clean shutdown, and no stamp at all is what a
+    /// database that has never run one looks like.
+    #[test]
+    fn health_staleness_treats_missing_zero_and_old_stamps_alike() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch_database("health-stale"))
+                .await
+                .unwrap();
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            assert!(database.tracker_health_is_stale(120).await.unwrap());
+            for absent in ["0", "", "not-a-number"] {
+                database
+                    .update_lifecycle_settings(&[("tracker_health_heartbeat", absent)])
+                    .await
+                    .unwrap();
+                assert!(
+                    database.tracker_health_is_stale(120).await.unwrap(),
+                    "{absent:?} should read as no recent claim"
+                );
+            }
+            let fresh = now.to_string();
+            database
+                .update_lifecycle_settings(&[("tracker_health_heartbeat", &fresh)])
+                .await
+                .unwrap();
+            assert!(!database.tracker_health_is_stale(120).await.unwrap());
+            let old = (now - 121).to_string();
+            database
+                .update_lifecycle_settings(&[("tracker_health_heartbeat", &old)])
+                .await
+                .unwrap();
+            assert!(database.tracker_health_is_stale(120).await.unwrap());
+            // A clock that moved forward is not evidence about the tracker.
+            let future = (now + 3_600).to_string();
+            database
+                .update_lifecycle_settings(&[("tracker_health_heartbeat", &future)])
+                .await
+                .unwrap();
+            assert!(!database.tracker_health_is_stale(120).await.unwrap());
+            database.close().await;
+        });
     }
 
     #[test]

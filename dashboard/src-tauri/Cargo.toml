@@ -42,4 +42,10 @@ debug = "line-tables-only"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    # MessageBoxW, for the one failure that happens before there is a window or
+    # a console to report it in. See report_fatal_launch_failure in lib.rs.
+    "Win32_UI_WindowsAndMessaging",
+] }

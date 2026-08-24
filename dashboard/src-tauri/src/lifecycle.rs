@@ -153,6 +153,96 @@ async fn compensate_startup_registration(system: &dyn TrackingSystem) {
     let _ = system.set_startup(false);
 }
 
+/// Put back the lifecycle state a failed enable found, rather than a
+/// fail-closed state nobody chose.
+///
+/// `compensate_disabled` is right where the prior state really was "off" —
+/// onboarding, which runs once on a database that has never consented. Anywhere
+/// else it overshoots: it zeroes startup registration and the schedule too, so
+/// one failed process launch silently retired settings the reader had
+/// configured and would have to notice were gone before they could restore
+/// them. Failing to start records nothing either way, so nothing is gained by
+/// spending the rest of their configuration on it.
+async fn compensate_to_previous(
+    database: &TimeDatabase,
+    system: &dyn TrackingSystem,
+    previous: &LifecycleSettings,
+) {
+    // Best-effort, like every compensation here: the original failure is the
+    // useful one to return, and each step below moves toward the state that
+    // existed before the call rather than away from it.
+    let _ = restore_lifecycle_settings(database, previous).await;
+    // Asserted rather than undone, using the same formula
+    // `reconcile_startup_registration` applies at launch. Writing what the
+    // restored state implies is idempotent, needs no record of what this call
+    // changed, and repairs a registration that had already drifted.
+    let _ = system.set_startup(previous.recording_consent && previous.launch_at_login);
+    if !previous.recording_consent {
+        // A start can fail after the child process exists, and the state being
+        // restored is one where nothing should be recording. Skipped when
+        // consent survives: there the tracker is meant to be running, and
+        // stopping it would turn a failed launch into a stopped one.
+        let _ = system.stop();
+    }
+}
+
+/// How stale the tracker's health stamp must be before a live process counts as
+/// one that has stopped answering.
+///
+/// Mirrors `TRACKER_ALERT_STALE_SECONDS` in `dashboard/src/lib/trackerHealth.ts`,
+/// which is what decides to raise the banner whose button arrives here.
+/// `scripts/tests/test_tracker_health_parity.py` fails if the two drift, because
+/// a native threshold above the renderer's would put the banner's own button
+/// back to doing nothing in exactly the state the banner exists for.
+const TRACKER_UNRESPONSIVE_SECONDS: i64 = 120;
+
+/// Make a tracker that is actually recording exist, replacing one that is not.
+///
+/// A live process is not evidence of a working tracker. `tracker/tracker.py`
+/// wraps its whole tick in one `except Exception`, and the health stamp is
+/// written inside that guard and before the probe runs, so a persistent failure
+/// in the settings read or the power-event drain leaves the loop spinning
+/// forever: stamping nothing, recording nothing, and still listed under its own
+/// image name.
+///
+/// That is precisely the state the "Time has stopped recording" banner is
+/// raised for — it reads staleness, never the process list — and the banner's
+/// button lands here. Returning early on `is_running` alone made that button a
+/// no-op in the one case it exists for, leaving an undismissable alarm on every
+/// tab whose only escape was toggling recording off and on. That escape is not
+/// free either: turning recording off clears start at sign-in and the schedule,
+/// and turning it back on does not restore them, so the only available recovery
+/// silently charged the reader two settings to fix a third.
+///
+/// Replacing a tracker that is merely slow to boot costs a few seconds of
+/// recording, and only when somebody is holding the button down. Leaving a
+/// wedged one costs every day until they notice by hand.
+async fn ensure_recording_tracker(
+    database: &TimeDatabase,
+    system: &dyn TrackingSystem,
+) -> Result<bool, String> {
+    if !system.is_running()? {
+        system.start()?;
+        return Ok(true);
+    }
+    if !database
+        .tracker_health_is_stale(TRACKER_UNRESPONSIVE_SECONDS)
+        .await?
+    {
+        return Ok(false);
+    }
+    system.stop()?;
+    // Same confirmation `stop_and_unregister` makes, and for the same reason:
+    // Windows can keep the process alive briefly while its handles close, and
+    // starting a replacement before the old one is gone leaves two trackers
+    // writing to one database.
+    if system.is_running()? {
+        return Err("The tracker is still running after stop".into());
+    }
+    system.start()?;
+    Ok(true)
+}
+
 async fn stop_and_unregister(
     database: &TimeDatabase,
     system: &dyn TrackingSystem,
@@ -203,11 +293,12 @@ async fn set_recording(
     }
 
     let startup_required = before.schedule_enabled;
-    if startup_required && !before.launch_at_login {
+    let registered_startup = startup_required && !before.launch_at_login;
+    if registered_startup {
         // Startup is an external side effect, so compensate it if either the
         // database commit or process launch fails below.
         if let Err(error) = system.set_startup(true) {
-            compensate_disabled(database, system).await;
+            compensate_to_previous(database, system, &before).await;
             return Err(error);
         }
     }
@@ -217,20 +308,13 @@ async fn set_recording(
         updates.push(("launch_at_login", "1"));
     }
     if let Err(error) = database.update_lifecycle_settings(&updates).await {
-        compensate_disabled(database, system).await;
+        compensate_to_previous(database, system, &before).await;
         return Err(error);
     }
-    let tracker_started = match system.is_running() {
-        Ok(true) => false,
-        Ok(false) => {
-            if let Err(error) = system.start() {
-                compensate_disabled(database, system).await;
-                return Err(error);
-            }
-            true
-        }
+    let tracker_started = match ensure_recording_tracker(database, system).await {
+        Ok(started) => started,
         Err(error) => {
-            compensate_disabled(database, system).await;
+            compensate_to_previous(database, system, &before).await;
             return Err(error);
         }
     };
@@ -459,15 +543,11 @@ async fn complete_onboarding(
         compensate_disabled(database, system).await;
         return Err(error);
     }
-    let tracker_started = match system.is_running() {
-        Ok(true) => false,
-        Ok(false) => {
-            if let Err(error) = system.start() {
-                compensate_disabled(database, system).await;
-                return Err(error);
-            }
-            true
-        }
+    // The one caller where `compensate_disabled` is not an overshoot: this runs
+    // on a database that has never consented, so the state it forces is the
+    // state that was already there.
+    let tracker_started = match ensure_recording_tracker(database, system).await {
+        Ok(started) => started,
         Err(error) => {
             compensate_disabled(database, system).await;
             return Err(error);
@@ -727,17 +807,15 @@ pub(crate) async fn execute_tracking_lifecycle(
                     ("tracking_paused_until", "0"),
                 ])
                 .await?;
-            let tracker_started = match system.is_running() {
-                Ok(true) => false,
-                Ok(false) => {
-                    if let Err(error) = system.start() {
-                        compensate_disabled(database, system).await;
-                        return Err(error);
-                    }
-                    true
-                }
+            let tracker_started = match ensure_recording_tracker(database, system).await {
+                Ok(started) => started,
                 Err(error) => {
-                    compensate_disabled(database, system).await;
+                    // Put the pause back rather than fail closed. Consent was
+                    // already given and is not in question; what failed is the
+                    // launch. Leaving the pause cleared would report the state
+                    // as a dead tracker when nothing about the machine changed,
+                    // and the reader's own pause is the more truthful answer.
+                    compensate_to_previous(database, system, &settings).await;
                     return Err(error);
                 }
             };
@@ -748,20 +826,13 @@ pub(crate) async fn execute_tracking_lifecycle(
             if !settings.recording_consent {
                 return Err("Recording consent is required to start tracking".into());
             }
-            let tracker_started = match system.is_running() {
-                Ok(true) => false,
-                Ok(false) => {
-                    if let Err(error) = system.start() {
-                        compensate_disabled(database, system).await;
-                        return Err(error);
-                    }
-                    true
-                }
-                Err(error) => {
-                    compensate_disabled(database, system).await;
-                    return Err(error);
-                }
-            };
+            // Nothing to compensate. This action changes no stored state, and a
+            // launch that failed has recorded nothing, so the fail-closed
+            // outcome is already the actual one. Revoking consent here turned a
+            // retryable error into a configuration the reader had to rebuild --
+            // and this is the action the "Time has stopped recording" banner
+            // calls, so the failure and the punishment arrived together.
+            let tracker_started = ensure_recording_tracker(database, system).await?;
             current_result(database, tracker_started, 0).await
         }
         TrackingLifecycleAction::RestoreDefaults => {
@@ -874,6 +945,25 @@ mod tests {
                 .map(|state| *state.lock().unwrap())
                 .unwrap_or(self.running))
         }
+    }
+
+    fn unix_now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    /// Write the tracker's own health stamp, which is the only thing that
+    /// distinguishes a working tracker from a process with the same name.
+    /// Lifecycle writes skip the renderer allowlist, which is what lets a test
+    /// stand in for the tracker here.
+    async fn stamp_health(database: &TimeDatabase, stamp: i64) {
+        let value = stamp.to_string();
+        database
+            .update_lifecycle_settings(&[("tracker_health_heartbeat", &value)])
+            .await
+            .unwrap();
     }
 
     fn scratch(name: &str) -> std::path::PathBuf {
@@ -1045,39 +1135,184 @@ mod tests {
         });
     }
 
+    /// A launch that failed is not a reason to retire the reader's settings.
+    ///
+    /// Both of these actions run on a database that has already consented, so
+    /// there is nothing to fail closed *to*: no tracker started, which means
+    /// nothing is being recorded either way. Revoking consent, startup and the
+    /// schedule turned one retryable error into a configuration the reader had
+    /// to rebuild — and `EnsureStarted` is what the "Time has stopped
+    /// recording" banner calls, so the failure and the punishment arrived in
+    /// the same click.
     #[test]
-    fn resume_and_missing_tracker_failures_also_compensate() {
+    fn resume_and_ensure_failures_keep_the_configuration_they_found() {
         tauri::async_runtime::block_on(async {
-            for (name, action) in [
-                ("resume-failure", TrackingLifecycleAction::Resume),
-                ("ensure-failure", TrackingLifecycleAction::EnsureStarted),
+            // Both actions, against both ways the launch can fail. The status
+            // query is worth its own case because it shells out to `tasklist`,
+            // so it fails for reasons that say nothing about the tracker.
+            for action in [
+                TrackingLifecycleAction::Resume,
+                TrackingLifecycleAction::EnsureStarted,
             ] {
-                let database = TimeDatabase::open(scratch(name)).await.unwrap();
-                database
-                    .update_lifecycle_settings(&[("recording_consent", "1")])
-                    .await
-                    .unwrap();
-                let system = FakeSystem {
-                    fail_start: true,
-                    ..FakeSystem::default()
-                };
-                assert!(
-                    execute_tracking_lifecycle(&database, action.clone(), &system)
+                for failing_status in [false, true] {
+                    let name = &format!(
+                        "{}-{}-failure",
+                        if matches!(action, TrackingLifecycleAction::Resume) {
+                            "resume"
+                        } else {
+                            "ensure"
+                        },
+                        if failing_status { "status" } else { "start" }
+                    );
+                    let action = action.clone();
+                    let database = TimeDatabase::open(scratch(name)).await.unwrap();
+                    database
+                        .update_lifecycle_settings(&[
+                            ("recording_consent", "1"),
+                            ("launch_at_login", "1"),
+                            ("tracking_schedule_enabled", "1"),
+                            ("tracking_paused", "1"),
+                        ])
                         .await
-                        .is_err()
-                );
-                let settings = database.lifecycle_settings().await.unwrap();
-                assert!(!settings.recording_consent);
-                assert!(!settings.launch_at_login);
-                assert!(!settings.schedule_enabled);
-                assert!(system
-                    .calls
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .any(|call| call == "startup:false"));
-                database.close().await;
+                        .unwrap();
+                    let system = FakeSystem {
+                        fail_start: !failing_status,
+                        fail_is_running: failing_status,
+                        ..FakeSystem::default()
+                    };
+                    assert!(
+                        execute_tracking_lifecycle(&database, action, &system)
+                            .await
+                            .is_err(),
+                        "{name} should report the launch failure"
+                    );
+                    let settings = database.lifecycle_settings().await.unwrap();
+                    assert!(settings.recording_consent, "{name} kept consent");
+                    assert!(settings.launch_at_login, "{name} kept startup");
+                    assert!(settings.schedule_enabled, "{name} kept the schedule");
+                    // Resume clears the pause before launching, so the failure
+                    // has to put it back: the reader's own pause describes a
+                    // machine nothing changed on better than a dead tracker.
+                    assert!(settings.tracking_paused, "{name} kept the pause");
+                    let calls = system.calls.lock().unwrap().clone();
+                    assert!(
+                        !calls.iter().any(|call| call == "startup:false"),
+                        "{name} must not unregister a startup it did not register: {calls:?}"
+                    );
+                    assert!(
+                        !calls.iter().any(|call| call == "stop"),
+                        "{name} must not stop a tracker whose consent survived: {calls:?}"
+                    );
+                    database.close().await;
+                }
             }
+        });
+    }
+
+    /// The defect the "Time has stopped recording" banner was built to fix, and
+    /// then could not.
+    ///
+    /// tracker.py wraps its whole tick in one `except Exception` with the health
+    /// stamp inside it, so a persistent failure leaves a process that is listed,
+    /// silent, and recording nothing. The banner reads staleness and fires; the
+    /// button used to read the process list and return.
+    #[test]
+    fn starting_replaces_a_tracker_that_is_listed_but_no_longer_answering() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch("ensure-wedged")).await.unwrap();
+            database
+                .update_lifecycle_settings(&[("recording_consent", "1")])
+                .await
+                .unwrap();
+            stamp_health(&database, unix_now() - TRACKER_UNRESPONSIVE_SECONDS - 1).await;
+            let system = FakeSystem {
+                running_state: Some(Arc::new(StdMutex::new(true))),
+                ..FakeSystem::default()
+            };
+            let result = execute_tracking_lifecycle(
+                &database,
+                TrackingLifecycleAction::EnsureStarted,
+                &system,
+            )
+            .await
+            .unwrap();
+            assert!(result.tracker_started);
+            let calls = system.calls.lock().unwrap().clone();
+            let stop = calls.iter().position(|call| call == "stop");
+            let start = calls.iter().position(|call| call == "start");
+            assert!(stop.is_some() && start.is_some(), "calls: {calls:?}");
+            assert!(stop < start, "the wedged process must go first: {calls:?}");
+            database.close().await;
+        });
+    }
+
+    /// The other half of the contract: a tracker that is answering is left
+    /// alone. Without this, every press of the button — and every "turn on
+    /// recording" — would cost a healthy tracker its open session.
+    #[test]
+    fn starting_leaves_a_tracker_that_is_still_answering_untouched() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch("ensure-healthy")).await.unwrap();
+            database
+                .update_lifecycle_settings(&[("recording_consent", "1")])
+                .await
+                .unwrap();
+            stamp_health(&database, unix_now()).await;
+            let system = FakeSystem {
+                running_state: Some(Arc::new(StdMutex::new(true))),
+                ..FakeSystem::default()
+            };
+            let result = execute_tracking_lifecycle(
+                &database,
+                TrackingLifecycleAction::EnsureStarted,
+                &system,
+            )
+            .await
+            .unwrap();
+            assert!(!result.tracker_started);
+            let calls = system.calls.lock().unwrap().clone();
+            assert!(
+                !calls.iter().any(|call| call == "stop" || call == "start"),
+                "calls: {calls:?}"
+            );
+            database.close().await;
+        });
+    }
+
+    /// Enabling recording is an enable, so its compensation is the state it
+    /// found — not zero. A schedule the reader had configured must survive a
+    /// tracker that would not launch.
+    #[test]
+    fn a_failed_enable_restores_the_schedule_it_found() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch("enable-failure")).await.unwrap();
+            database
+                .update_lifecycle_settings(&[
+                    ("recording_consent", "0"),
+                    ("launch_at_login", "1"),
+                    ("tracking_schedule_enabled", "1"),
+                ])
+                .await
+                .unwrap();
+            let system = FakeSystem {
+                fail_start: true,
+                ..FakeSystem::default()
+            };
+            assert!(execute_tracking_lifecycle(
+                &database,
+                TrackingLifecycleAction::SetRecording { enabled: true },
+                &system,
+            )
+            .await
+            .is_err());
+            let settings = database.lifecycle_settings().await.unwrap();
+            // Consent goes back off: that is what this call was trying to
+            // change and it did not succeed.
+            assert!(!settings.recording_consent);
+            // These it never asked about.
+            assert!(settings.launch_at_login);
+            assert!(settings.schedule_enabled);
+            database.close().await;
         });
     }
 
@@ -1327,24 +1562,25 @@ mod tests {
         });
     }
 
+    /// Onboarding is the one enable whose compensation is genuinely "all off".
+    ///
+    /// It runs once, on a database that has never consented, so the fail-closed
+    /// state it forces is the state that was already there. The same
+    /// compensation applied to `SetRecording` or `Resume` retired settings the
+    /// reader had configured; those two are covered by
+    /// `resume_and_ensure_failures_keep_the_configuration_they_found` and
+    /// `a_failed_enable_restores_the_schedule_it_found` instead.
     #[test]
-    fn status_query_failure_after_enable_write_compensates() {
+    fn status_query_failure_during_onboarding_compensates() {
         tauri::async_runtime::block_on(async {
-            let cases = [
-                (
-                    "recording-status-failure",
-                    TrackingLifecycleAction::SetRecording { enabled: true },
-                ),
-                (
-                    "onboarding-status-failure",
-                    TrackingLifecycleAction::CompleteOnboarding {
-                        enable: true,
-                        record_window_titles: false,
-                        start_at_login: false,
-                    },
-                ),
-                ("resume-status-failure", TrackingLifecycleAction::Resume),
-            ];
+            let cases = [(
+                "onboarding-status-failure",
+                TrackingLifecycleAction::CompleteOnboarding {
+                    enable: true,
+                    record_window_titles: false,
+                    start_at_login: false,
+                },
+            )];
             for (name, action) in cases {
                 let database = TimeDatabase::open(scratch(name)).await.unwrap();
                 database

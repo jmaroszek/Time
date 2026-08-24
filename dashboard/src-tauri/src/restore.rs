@@ -1,7 +1,40 @@
 use std::path::PathBuf;
 
-use crate::database::{RestoreNotice, TimeDatabase, SCHEMA_VERSION};
+use crate::database::{is_older_schema_error, RestoreNotice, TimeDatabase, SCHEMA_VERSION};
 use crate::{system_run_tracker_migration, system_set_launch_at_login, system_start_tracker};
+
+/// Open the live database, letting the tracker migrate it first if it predates
+/// this release.
+///
+/// The tracker is the sole migration owner, and the restore path below already
+/// runs it before reopening an older snapshot. The ordinary launch did not,
+/// which left the upgrade it is far more likely to meet unhandled. An in-place
+/// upgrade migrates through the new installer's POSTINSTALL hook, and that hook
+/// starts the tracker with NSIS `Exec` — fire and forget. Both the finish
+/// page's "run now" box and the updater's passive relaunch race it, and the
+/// dashboard wins that race easily: it is a webview with the database already
+/// on disk, while the tracker is a PyInstaller bundle that has to unpack itself
+/// before it opens anything.
+///
+/// Losing that race used to end the launch. The error propagates out of
+/// `setup()`, Tauri refuses to start, and the release binary is built
+/// windows-subsystem, so the panic has nowhere to print: Time simply does not
+/// open, with no way to tell that from a broken install. Migrating here makes
+/// the launch self-sufficient whatever the installer's timing did, rather than
+/// correct only when the hook happens to win.
+fn open_current_database(path: PathBuf) -> Result<TimeDatabase, String> {
+    match tauri::async_runtime::block_on(TimeDatabase::open(path.clone())) {
+        Err(error) if is_older_schema_error(&error) => {
+            // Both halves of the failure are worth keeping: the migration's own
+            // error says why it could not run, and the original says what the
+            // database needed, which is the pair somebody debugging a machine
+            // that will not start has to see together.
+            system_run_tracker_migration().map_err(|cause| format!("{error}; {cause}"))?;
+            tauri::async_runtime::block_on(TimeDatabase::open(path))
+        }
+        result => result,
+    }
+}
 
 /// Restore bookkeeping that must never cost the reader their application.
 ///
@@ -21,7 +54,7 @@ pub(crate) fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDa
     let pending = tauri::async_runtime::block_on(TimeDatabase::begin_pending_restore(&path));
     let swap = match pending {
         Ok(Some(swap)) => swap,
-        Ok(None) => return tauri::async_runtime::block_on(TimeDatabase::open(path)),
+        Ok(None) => return open_current_database(path),
         Err(error) => {
             // Keep the marker if the database vanished partway through the
             // swap: the next launch needs it to put the rollback copy back.
@@ -40,7 +73,7 @@ pub(crate) fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDa
             // retries a swap that is already known to fail, which lands right
             // back here rather than anywhere dangerous.
             best_effort(TimeDatabase::discard_pending_restore(&path, message));
-            return tauri::async_runtime::block_on(TimeDatabase::open(path));
+            return open_current_database(path);
         }
     };
     let restored = swap.pending.clone();
@@ -64,7 +97,7 @@ pub(crate) fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDa
                 &path,
                 RestoreNotice { ok: false, message },
             ));
-            return tauri::async_runtime::block_on(TimeDatabase::open(path));
+            return open_current_database(path);
         }
     };
 

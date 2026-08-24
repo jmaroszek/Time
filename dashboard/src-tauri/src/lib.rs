@@ -675,6 +675,41 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Say why Time is not opening, on the one path where nothing else can.
+///
+/// A failure out of `setup()` ends the launch before there is a window for the
+/// frontend to draw an error in, and the release binary is built
+/// `windows_subsystem = "windows"`, so the panic that follows has no console to
+/// print to either. What the reader gets is a shortcut that does nothing —
+/// indistinguishable from a broken install, a bad shortcut, or a machine that
+/// needs restarting, and impossible to report usefully. A launch failure that
+/// cannot name itself gets attributed to whatever the reader was already
+/// suspicious of, which is how a real one goes unfixed.
+///
+/// Win32 directly rather than the dialog plugin: `blocking_show` must not be
+/// called from the main thread, which is where `setup` runs, and the
+/// non-blocking form would be torn down with the process before it painted.
+/// `MessageBoxW` owns its own message loop and needs no application.
+#[cfg(windows)]
+fn report_fatal_launch_failure(error: &str) {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    let text = HSTRING::from(format!(
+        "Time could not open its database and has to close.\n\n{error}\n\n\
+         Your recorded history has not been changed."
+    ));
+    let caption = HSTRING::from("Time could not start");
+    // SAFETY: both strings outlive the call, and a null owner window is what
+    // this needs — there is no application window at this point.
+    unsafe {
+        MessageBoxW(None, &text, &caption, MB_OK | MB_ICONERROR);
+    }
+}
+
+#[cfg(not(windows))]
+fn report_fatal_launch_failure(_error: &str) {}
+
 /// How long the window may stay hidden while the frontend loads. Generous:
 /// this is a last resort, not a race with a cold start.
 const FRONTEND_SHOW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(12);
@@ -759,8 +794,13 @@ pub fn run() {
             let base = app.path().local_data_dir()?;
             let path = database_path(&base);
             fs::create_dir_all(path.parent().expect("database path parent"))?;
-            let database =
-                restore::open_database_with_pending_restore(path).map_err(std::io::Error::other)?;
+            let database = match restore::open_database_with_pending_restore(path) {
+                Ok(database) => database,
+                Err(error) => {
+                    report_fatal_launch_failure(&error);
+                    return Err(std::io::Error::other(error).into());
+                }
+            };
             // Startup registration is removed by things the application never
             // sees -- the uninstaller an in-place upgrade runs first, a rebuilt
             // Windows profile -- while the database goes on reporting the
