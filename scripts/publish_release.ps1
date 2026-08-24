@@ -72,6 +72,31 @@ if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
     throw "Release blocked: TAURI_SIGNING_PRIVATE_KEY is not set. Without it the update manifest cannot be signed."
 }
 
+# The Authenticode side needs five variables, and tauri.conf.json names none of
+# them: the signCommand carries only the regional endpoint, so the account and
+# certificate profile arrive through the environment and stay out of a public
+# repository. That is a deliberate trade, and this is the cost of it -- without
+# a check here the first sign attempt happens deep inside `tauri build`, after
+# the frontend, the sidecar, and the Rust release build have already run.
+$signingVariables = @(
+    "AZURE_TENANT_ID",
+    "AZURE_CLIENT_ID",
+    "AZURE_CLIENT_SECRET",
+    "AZURE_ARTIFACT_SIGNING_ACCOUNT",
+    "AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE"
+)
+$missing = $signingVariables | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+if ($missing) {
+    throw @"
+Release blocked: the Authenticode signing environment is incomplete.
+Missing: $($missing -join ', ')
+
+These are read by artifact-signing-cli, which tauri.conf.json invokes as its
+signCommand. Set them in this shell -- the same one holding the updater key --
+and never in a committed file. See docs/personal/signing.md.
+"@
+}
+
 if (-not $SkipBuild) {
     Write-Host "Building $version ..."
     # Runs the tracker sidecar build through beforeBundleCommand, then bundles.

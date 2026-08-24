@@ -39,6 +39,7 @@
       "binaries/_internal/": "_internal/"
     },
     "windows": {
+      "signCommand": "artifact-signing-cli -e https://eus.codesigning.azure.net -d Time %1",
       "nsis": {
         "installMode": "currentUser",
         "installerHooks": "windows/installer-hooks.nsh"
