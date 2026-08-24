@@ -137,7 +137,19 @@ if (-not $SkipBuild) {
     # A file rather than an inline JSON string: --config takes either, and a
     # path cannot be mangled by a quoting rule between PowerShell, npm, and the
     # Tauri CLI. Merged over tauri.conf.json, so a partial document is correct.
-    $override = [ordered]@{ version = $Version }
+    $override = [ordered]@{
+        version = $Version
+        # The "unsigned" in this script's own banner. tauri.conf.json carries a
+        # signCommand, so without this override a rehearsal Authenticode-signs
+        # like a release -- spending a certificate operation on an artifact
+        # whose first printed line says it did not. That is not hypothetical:
+        # the signCommand landed after this script did, and nothing tied the
+        # two together until scripts/tests/test_unsigned_builds.py.
+        #
+        # Only the Authenticode half. createUpdaterArtifacts stays on, because
+        # the .sig this produces is the whole point of a rehearsal.
+        bundle  = [ordered]@{ windows = [ordered]@{ signCommand = $null } }
+    }
     if ($Endpoint) {
         $override.plugins = @{ updater = @{ endpoints = @($Endpoint) } }
     }
