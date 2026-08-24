@@ -117,6 +117,23 @@ async fn run_tracking_lifecycle(
     execute_tracking_lifecycle(&database, action, &RealTrackingSystem).await
 }
 
+/// Whether Windows actually holds the startup registration, rather than what
+/// the database says about it.
+///
+/// The stored setting is a wish; the Run value is the fact. Settings has always
+/// rendered the wish, and that is what let a registration removed from outside
+/// the application — the uninstaller an in-place upgrade runs first, a rebuilt
+/// Windows profile — go on being reported as "on" over nothing at all.
+///
+/// `reconcile_startup_registration` repairs that at every launch and covers the
+/// ordinary case. It is deliberately allowed to fail without stopping the
+/// launch, though, so the two can still disagree — and the moment somebody is
+/// looking at this switch is exactly when they should be told.
+#[tauri::command]
+fn startup_is_registered() -> Result<bool, String> {
+    system_startup_is_registered()
+}
+
 #[tauri::command]
 async fn fetch_sessions(
     database: tauri::State<'_, TimeDatabase>,
@@ -822,6 +839,7 @@ pub fn run() {
             db_execute,
             update_user_settings,
             run_tracking_lifecycle,
+            startup_is_registered,
             fetch_sessions,
             backup_database,
             list_database_backups,

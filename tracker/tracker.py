@@ -42,6 +42,9 @@ FAILURE_SUMMARY_SECONDS = 60.0
 # absent in Settings.
 HEALTH_HEARTBEAT_SECONDS = 5.0
 HEALTH_HEARTBEAT_KEY = "tracker_health_heartbeat"
+# Whether a tray icon is genuinely up, as opposed to whether one was asked for.
+# Read by the dashboard; see _publish_tray_state.
+TRAY_ACTIVE_KEY = "tracker_tray_active"
 # Sixty missed polls is not a slow tick; the loop was not running. The
 # suspend/resume callbacks are the fast, well-dated path for detecting sleep,
 # but they can go missing — registration failure, hibernation, a notification
@@ -122,6 +125,32 @@ def log_database_state(raw_settings: dict[str, str]) -> None:
 def stamp_tracker_health(conn, now: float) -> None:
     """Publish process health without exposing or depending on recorded activity."""
     db.set_setting(conn, HEALTH_HEARTBEAT_KEY, str(int(now)))
+
+
+def _publish_tray_state(conn, active: bool, published: bool | None) -> bool | None:
+    """Record whether a tray icon is actually up, for the dashboard to read.
+
+    `show_tray_icon` is what the reader asked for; this is what happened. The
+    two diverge when the icon cannot be created at all — a bundle without
+    pystray or Pillow, a shell that refuses the icon — and the switch alone
+    would go on reporting a tray that is not there. That matters more than it
+    sounds: the tray is the only place to pause recording without opening the
+    dashboard, so its silent absence removes a control rather than a decoration.
+
+    Written only on change. This runs on every settings poll, and a settings
+    write per second would be a real cost for a value that moves approximately
+    never.
+    """
+    if published is active:
+        return published
+    try:
+        db.set_setting(conn, TRAY_ACTIVE_KEY, "1" if active else "0")
+    except Exception:
+        # Best effort, and deliberately unchanged on failure so the next poll
+        # tries again. This is a report about a convenience; failing to write it
+        # must not disturb recording.
+        return published
+    return active
 
 
 def _sync_tray(
@@ -308,6 +337,7 @@ def run() -> None:
     stop_event = threading.Event()
     tray_controller = tray.create_tray_controller(config.DB_PATH, stop_event)
     tray_visible = _sync_tray(tray_controller, raw_settings)
+    published_tray = _publish_tray_state(conn, tray_visible, None)
     shutdown = _ShutdownCoordinator(
         stop_event,
         tray_controller,
@@ -375,7 +405,13 @@ def run() -> None:
                 manager.settings = db.get_settings(conn, now)
                 if tray_controller is not None:
                     raw_settings = db.read_settings_raw(conn)
-                    _sync_tray(tray_controller, raw_settings, now)
+                    tray_active = _sync_tray(tray_controller, raw_settings, now)
+                else:
+                    # No controller at all — the optional UI packages are
+                    # missing. Publish it rather than leaving the last value, or
+                    # the dashboard reports a tray from a previous run.
+                    tray_active = False
+                published_tray = _publish_tray_state(conn, tray_active, published_tray)
                 last_settings_refresh = now
             monotonic_now = time.monotonic()
             if monotonic_now - last_health_publish >= HEALTH_HEARTBEAT_SECONDS:

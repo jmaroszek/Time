@@ -19,6 +19,7 @@ import {
   deleteHistoryBefore,
   eraseAllHistory,
   fetchSessions,
+  fetchTrackerStatus,
   inspectDatabaseBackup,
   listDatabaseBackups,
   restoreDatabase,
@@ -173,5 +174,46 @@ describe("backup and restore commands", () => {
       ["restore_database", { backupPath: "C:\\Backups\\one.db" }],
       ["take_restore_notice"],
     ]);
+  });
+});
+
+/**
+ * `show_tray_icon` says what was asked for; this says what the tracker managed.
+ * The distinction only pays off if "no tracker has answered yet" stays distinct
+ * from "there is no tray" — reading a missing key as `false` would accuse every
+ * fresh install of a broken tray for the seconds before the tracker first
+ * publishes, which is precisely the false alarm this is meant to avoid.
+ */
+describe("tracker tray reporting", () => {
+  const withTrayValue = (tray: string | null) => {
+    const select = vi.fn().mockResolvedValue([
+      { last_hb: 1_000, live_n: 1, total_n: 2, tray },
+    ]);
+    getDb.mockResolvedValue({ select });
+    return select;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads a published tray state in both directions", async () => {
+    withTrayValue("1");
+    expect((await fetchTrackerStatus()).trayActive).toBe(true);
+    withTrayValue("0");
+    expect((await fetchTrackerStatus()).trayActive).toBe(false);
+  });
+
+  it("keeps an unpublished tray state unknown rather than absent", async () => {
+    withTrayValue(null);
+    expect((await fetchTrackerStatus()).trayActive).toBeNull();
+  });
+
+  it("still reports the rest of the status", async () => {
+    withTrayValue("1");
+    const status = await fetchTrackerStatus();
+    expect(status.lastHeartbeat).toBe(1_000);
+    expect(status.liveSessionCount).toBe(1);
+    expect(status.totalSessionCount).toBe(2);
   });
 });

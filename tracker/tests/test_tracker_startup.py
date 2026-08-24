@@ -256,3 +256,62 @@ def test_failure_kinds_are_throttled_independently(caplog):
         "tick failed (OSError)",
         "tick failed (ValueError)",
     ]
+
+
+class RecordingConn:
+    """Captures settings writes, and can be made to fail them."""
+
+    def __init__(self, fail=False):
+        self.writes = []
+        self.fail = fail
+
+
+def _publish(conn, active, published, monkeypatch):
+    def set_setting(target, key, value):
+        if target.fail:
+            raise RuntimeError("database is locked")
+        target.writes.append((key, value))
+
+    monkeypatch.setattr(tracker.db, "set_setting", set_setting)
+    return tracker._publish_tray_state(conn, active, published)
+
+
+def test_tray_state_is_published_once_and_only_when_it_changes(monkeypatch):
+    """`show_tray_icon` is what was asked for; this is what happened. Without it
+    a tracker that cannot create an icon leaves the switch promising a tray that
+    is not there, and the reader loses the only way to pause without opening the
+    dashboard.
+
+    Write-on-change matters as much as the value: this runs on every settings
+    poll, and a write per second for a value that never moves is a real cost."""
+    conn = RecordingConn()
+
+    published = _publish(conn, True, None, monkeypatch)
+    assert published is True
+    assert conn.writes == [(tracker.TRAY_ACTIVE_KEY, "1")]
+
+    # Unchanged: no second write.
+    published = _publish(conn, True, published, monkeypatch)
+    assert published is True
+    assert conn.writes == [(tracker.TRAY_ACTIVE_KEY, "1")]
+
+    published = _publish(conn, False, published, monkeypatch)
+    assert published is False
+    assert conn.writes == [
+        (tracker.TRAY_ACTIVE_KEY, "1"),
+        (tracker.TRAY_ACTIVE_KEY, "0"),
+    ]
+
+
+def test_a_failed_tray_publish_retries_rather_than_recording_a_lie(monkeypatch):
+    """The write is best-effort, but "best effort" must not mean pretending it
+    landed. Returning the attempted value would leave the dashboard reading a
+    stale answer forever, because the next poll would see no change to write."""
+    conn = RecordingConn(fail=True)
+
+    assert _publish(conn, True, None, monkeypatch) is None
+    assert conn.writes == []
+
+    conn.fail = False
+    assert _publish(conn, True, None, monkeypatch) is True
+    assert conn.writes == [(tracker.TRAY_ACTIVE_KEY, "1")]

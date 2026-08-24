@@ -633,3 +633,51 @@ test("@workflow installing an update reports progress and cannot be started twic
   );
   expect(calls).toBe(1);
 });
+
+/**
+ * The switch reports what was asked for; Windows holds what is true. They are
+ * reconciled at every launch, so the only way they still disagree is a repair
+ * that could not be made — and that is the state in which the switch alone says
+ * something false: on, over no registration, with nothing starting at the next
+ * sign-in and no symptom until days of recording are missing.
+ */
+test("@workflow a startup registration Windows no longer holds is reported and repairable", async ({
+  page,
+}) => {
+  await page.goto("/?startup=lost");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  const warning = page.getByText("Windows has no startup entry for Time");
+  await expect(warning).toBeVisible();
+
+  // The switch still reads on, because the setting is on. That is not a bug to
+  // fix by flipping it: the reader asked for this and the registration is what
+  // failed, so the honest report is both facts rather than a silent correction.
+  const toggle = page.getByRole("switch", { name: "Start at Windows sign-in" });
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+  await page.getByRole("button", { name: "Try again" }).click();
+
+  // Repair goes through the same action the switch does, which is only capable
+  // of fixing this because it no longer returns early on a database that
+  // already says on.
+  await expect(warning).toBeHidden();
+  expect(await lifecycleActions(page)).toContain("set_startup");
+});
+
+test("@workflow a tray icon the tracker could not create is reported", async ({ page }) => {
+  await page.goto("/?tray=off");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  await expect(
+    page.getByText("The tracker could not create a tray icon on this system"),
+  ).toBeVisible();
+
+  // Turning the setting off retires the warning immediately rather than waiting
+  // for the tracker's next poll to agree: nothing is wrong once nothing is asked
+  // for, and a warning that lingers past its cause teaches people to ignore it.
+  await page.getByRole("switch", { name: "Show tray icon" }).click();
+  await expect(
+    page.getByText("The tracker could not create a tray icon on this system"),
+  ).toBeHidden();
+});

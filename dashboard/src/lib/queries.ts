@@ -189,6 +189,18 @@ export async function runTrackingLifecycle(
   );
 }
 
+/** Whether Windows holds the startup registration, as opposed to what the
+ *  database says about it.
+ *
+ *  The stored setting is what was asked for and this is what is true. They are
+ *  reconciled at every launch, so they agree unless that repair itself failed —
+ *  a registry the process cannot write, most plausibly. Settings asks because
+ *  rendering the stored value alone is what let a missing registration report
+ *  itself as present. */
+export async function fetchStartupIsRegistered(): Promise<boolean> {
+  return invoke<boolean>("startup_is_registered");
+}
+
 // Mirrors fresh-install values in tracker/db.py DEFAULT_SETTINGS and the Rust
 // BOOTSTRAP_SQL. This intentionally selects only settings the global restore
 // action owns; runtime and onboarding metadata must survive it.
@@ -639,17 +651,33 @@ export interface TrackerStatus {
   lastHeartbeat: number | null; // unix seconds from the tracker's health signal
   liveSessionCount: number;
   totalSessionCount: number;
+  /** Whether a tray icon is actually up, as reported by the tracker — not what
+   *  `show_tray_icon` asked for. `null` before any tracker has published it.
+   *  Only meaningful while the heartbeat is live; a stopped tracker leaves its
+   *  last answer behind. */
+  trayActive: boolean | null;
 }
 
 export async function fetchTrackerStatus(): Promise<TrackerStatus> {
   const db = await getDb();
-  const rows = await db.select<{ last_hb: number | null; live_n: number; total_n: number }[]>(
+  const rows = await db.select<{
+    last_hb: number | null;
+    live_n: number;
+    total_n: number;
+    tray: string | null;
+  }[]>(
     "SELECT CAST((SELECT value FROM settings WHERE key='tracker_health_heartbeat') AS REAL) AS last_hb," +
       " (SELECT COUNT(*) FROM sessions WHERE source='live') AS live_n," +
-      " (SELECT COUNT(*) FROM sessions) AS total_n",
+      " (SELECT COUNT(*) FROM sessions) AS total_n," +
+      " (SELECT value FROM settings WHERE key='tracker_tray_active') AS tray",
   );
   const r = rows[0];
-  return { lastHeartbeat: r.last_hb, liveSessionCount: r.live_n, totalSessionCount: r.total_n };
+  return {
+    lastHeartbeat: r.last_hb,
+    liveSessionCount: r.live_n,
+    totalSessionCount: r.total_n,
+    trayActive: r.tray === null || r.tray === undefined ? null : r.tray === "1",
+  };
 }
 
 /** Unix seconds of the earliest session start, or null when the DB is empty.

@@ -226,6 +226,10 @@ const settings: Record<string, string> = {
   record_window_titles: "1",
   launch_at_login: firstRun ? "0" : "1",
   show_tray_icon: "1",
+  // What the tracker managed, as opposed to what show_tray_icon asked for.
+  // `?tray=off` is a tracker that could not create an icon at all — the state
+  // where the switch alone promises a tray that is not there.
+  tracker_tray_active: fixtureParams.get("tray") === "off" ? "0" : "1",
   tracker_health_heartbeat:
     fixtureParams.get("tracker") === "missing" ? "0" : String(now - 5),
   // Fresh installs ship no goal (DEFAULT_USER_SETTINGS), which is the only
@@ -264,6 +268,16 @@ const settings: Record<string, string> = {
   }),
   tracker_version: "0.1.0-device-fixture",
 };
+
+/** Windows' Run value, modelled apart from the database setting because they
+ *  are two facts and the only interesting state is the one where they disagree.
+ *  Everything that registers or unregisters writes both, exactly as the native
+ *  lifecycle does. `?startup=lost` produces the divergence instead — the
+ *  setting on and the registration gone, which is what an outside removal the
+ *  launch reconciliation could not repair leaves behind, and the state in which
+ *  the switch alone reports something untrue. */
+let startupRegistered =
+  fixtureParams.get("startup") !== "lost" && settings.launch_at_login === "1";
 
 const trackingExclusions: Array<{
   kind: "app" | "website";
@@ -310,6 +324,7 @@ function selectFixture(args: InvokeArgs): unknown {
       last_hb: Number.isFinite(heartbeat) ? heartbeat : null,
       live_n: sessions.length,
       total_n: sessions.length,
+      tray: settings.tracker_tray_active ?? null,
     }];
   }
   if (query.includes("select min(coalesce(c.corrected_start_ts,s.start_ts)) as first_ts")) {
@@ -414,6 +429,12 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
       result = undefined;
       break;
     }
+    case "startup_is_registered":
+      // Deliberately the registry model rather than settings.launch_at_login.
+      // Answering from the setting would make the two agree by construction and
+      // the divergence this exists to report unreachable from a test.
+      result = startupRegistered;
+      break;
     case "run_tracking_lifecycle": {
       if (lifecycleDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, lifecycleDelayMs));
@@ -436,6 +457,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
           settings.record_window_titles = action.enable && action.recordWindowTitles ? "1" : "0";
           settings.recording_consent = action.enable ? "1" : "0";
           settings.launch_at_login = action.enable && action.startAtLogin ? "1" : "0";
+          startupRegistered = settings.launch_at_login === "1";
           settings.tracking_schedule_enabled = "0";
           if (action.enable) settings.tracker_health_heartbeat = String(Date.now() / 1000);
           break;
@@ -443,6 +465,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
           settings.recording_consent = action.enabled ? "1" : "0";
           if (!action.enabled) {
             settings.launch_at_login = "0";
+            startupRegistered = settings.launch_at_login === "1";
             settings.tracking_schedule_enabled = "0";
             settings.tracking_paused = "0";
             settings.tracking_paused_until = "0";
@@ -455,6 +478,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
             throw new Error("Start at sign-in requires recording consent");
           }
           settings.launch_at_login = action.enabled ? "1" : "0";
+          startupRegistered = settings.launch_at_login === "1";
           break;
         case "set_schedule":
           if (action.enabled && settings.recording_consent !== "1") {
@@ -481,6 +505,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
           settings.tracking_schedule_enabled = action.enabled ? "1" : "0";
           if (action.enabled) {
             settings.launch_at_login = "1";
+            startupRegistered = settings.launch_at_login === "1";
           }
           if (action.days !== undefined) settings.tracking_schedule_days = action.days;
           if (action.startMinute !== undefined) settings.tracking_schedule_start_minute = String(action.startMinute);
@@ -531,6 +556,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
         case "secure_erase": {
           settings.recording_consent = "0";
           settings.launch_at_login = "0";
+          startupRegistered = settings.launch_at_login === "1";
           settings.tracking_schedule_enabled = "0";
           settings.tracking_paused = "0";
           settings.tracking_paused_until = "0";
@@ -557,6 +583,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
         ) {
           settings.recording_consent = "0";
           settings.launch_at_login = "0";
+          startupRegistered = settings.launch_at_login === "1";
           settings.tracking_schedule_enabled = "0";
           if (action.action === "complete_onboarding") {
             settings.privacy_onboarding_complete = "0";
@@ -564,6 +591,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
         } else if (action.action === "set_startup" || action.action === "set_schedule") {
           settings.recording_consent = settingsBeforeLifecycle.recording_consent;
           settings.launch_at_login = settingsBeforeLifecycle.launch_at_login;
+          startupRegistered = settings.launch_at_login === "1";
           settings.tracking_schedule_enabled = settingsBeforeLifecycle.tracking_schedule_enabled;
           settings.tracking_schedule_days = settingsBeforeLifecycle.tracking_schedule_days;
           settings.tracking_schedule_start_minute = settingsBeforeLifecycle.tracking_schedule_start_minute;

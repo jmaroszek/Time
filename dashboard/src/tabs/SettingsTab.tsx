@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { Button, ConfirmDialog, Spinner } from "../components/ui";
@@ -38,6 +38,7 @@ import {
 import { recordingState, TRACKER_LIVE_STALE_SECONDS } from "../lib/trackerHealth";
 import {
   fetchSettings,
+  fetchStartupIsRegistered,
   fetchTrackerStatus,
   listTrackingExclusions,
   restoreDefaultSettings,
@@ -243,6 +244,30 @@ export default function SettingsTab({
     if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
   }, []);
 
+  // Whether Windows actually holds the startup registration. `null` means the
+  // question could not be asked, which is not the same as "no" and must not be
+  // reported as one — the switch below stays quiet unless the answer is a
+  // definite no.
+  //
+  // Read on the settings that decide what the registration should be, rather
+  // than on a timer. Nothing changes it while this tab is open except the
+  // actions on this tab, and each of those refreshes `meta` on the way out.
+  const [startupRegistered, setStartupRegistered] = useState<boolean | null>(null);
+  const refreshStartupRegistration = useCallback(() => {
+    void fetchStartupIsRegistered()
+      .then(setStartupRegistered)
+      .catch(() => setStartupRegistered(null));
+  }, []);
+  // Settings changing is not enough on its own. Repairing a lost registration
+  // writes the registry without changing `launch_at_login`, which already said
+  // on — so the actions below call this directly. Keyed on the settings too, for
+  // the paths that reach registration by changing one of them.
+  useEffect(refreshStartupRegistration, [
+    refreshStartupRegistration,
+    meta.settings.launch_at_login,
+    meta.settings.recording_consent,
+  ]);
+
   const [pause, setPause] = useState<{ paused: boolean; until: number }>({ paused: false, until: 0 });
   useEffect(() => {
     const loadStatus = () => {
@@ -409,6 +434,10 @@ export default function SettingsTab({
     : Date.now() / 1000 - status.lastHeartbeat;
   const trackerLive = heartbeatAge !== null && heartbeatAge < TRACKER_LIVE_STALE_SECONDS;
   const trackingEnabled = meta.settings.recording_consent === "1";
+  // The draft wins so the warning clears the moment the switch is turned off,
+  // rather than waiting for the tracker's next poll to agree.
+  const trayIconRequested =
+    (drafts.show_tray_icon ?? meta.settings.show_tray_icon ?? "1") !== "0";
   const scheduleSettings = { ...meta.settings, ...drafts };
   const schedule = trackingScheduleState(scheduleSettings);
   const selectedScheduleDays = parseTrackingScheduleDays(
@@ -478,12 +507,19 @@ export default function SettingsTab({
     await runImmediateSettingAction("recording_consent", async () => {
       await runTrackingLifecycle({ action: "set_recording", enabled });
     }, "tracking preference");
+    // Turning recording on can register startup when a schedule is on, and
+    // turning it off always unregisters.
+    refreshStartupRegistration();
   };
 
   const setStartAtLogin = async (enabled: boolean) => {
     await runImmediateSettingAction("launch_at_login", async () => {
       await runTrackingLifecycle({ action: "set_startup", enabled });
     }, "startup preference");
+    // Re-ask Windows rather than assuming. Enabling on a database that already
+    // said on changes no setting, so nothing else here would notice that the
+    // registration is now present — which is exactly the repair case.
+    refreshStartupRegistration();
   };
 
   const scheduleValues = (overrides: Partial<{
@@ -521,7 +557,9 @@ export default function SettingsTab({
   ) => {
     void runImmediateSettingAction(key, async () => {
       await runTrackingLifecycle({ action: "set_schedule", enabled, ...values });
-    }, "tracking schedule");
+    }, "tracking schedule").then(refreshStartupRegistration);
+    // Enabling a schedule registers startup as a side effect, so the report
+    // below it has to be re-asked rather than inferred from the schedule key.
   };
 
   const setScheduleEnabled = async (enabled: boolean) => {
@@ -817,6 +855,29 @@ export default function SettingsTab({
                   Required while scheduling is on
                 </span>
               )}
+              {/* The switch above reports the stored setting, which is what was
+                  asked for. This reports what Windows actually holds. They are
+                  reconciled at every launch, so this appears only when that
+                  repair could not be made — and it is the one state where the
+                  switch alone is untrue: on, over nothing, with the tracker
+                  simply not appearing at the next sign-in and no other symptom
+                  until days of recording are missing. */}
+              {trackingEnabled
+                && meta.settings.launch_at_login === "1"
+                && startupRegistered === false && (
+                <span className="text-xs text-bad text-right max-sm:text-left">
+                  Windows has no startup entry for Time, and it could not be
+                  added automatically.{" "}
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 disabled:opacity-50"
+                    disabled={lifecycleBusy || savingKeys.has("launch_at_login")}
+                    onClick={() => void setStartAtLogin(true)}
+                  >
+                    Try again
+                  </button>
+                </span>
+              )}
             </span>
           }
         />
@@ -824,12 +885,25 @@ export default function SettingsTab({
           label="Show tray icon"
           help="Show tracker icon, status, and controls in the Windows system tray."
           control={
-            <PrivacyToggle
-              label="Show tray icon"
-              enabled={(drafts.show_tray_icon ?? meta.settings.show_tray_icon ?? "1") !== "0"}
-              disabled={savingKeys.has("show_tray_icon")}
-              onChange={(enabled) => selectSetting("show_tray_icon", enabled ? "1" : "0")}
-            />
+            <span className="inline-flex flex-col items-end gap-1 max-sm:items-start">
+              <PrivacyToggle
+                label="Show tray icon"
+                enabled={(drafts.show_tray_icon ?? meta.settings.show_tray_icon ?? "1") !== "0"}
+                disabled={savingKeys.has("show_tray_icon")}
+                onChange={(enabled) => selectSetting("show_tray_icon", enabled ? "1" : "0")}
+              />
+              {/* Asked for versus happened, the same split as start at sign-in
+                  above. The tracker publishes whether an icon is genuinely up;
+                  it cannot be created on a machine whose bundle is missing the
+                  optional UI packages, and the switch alone would go on
+                  promising a tray that is not there. Gated on a live heartbeat
+                  because a stopped tracker leaves its last answer behind. */}
+              {trayIconRequested && trackerLive && status?.trayActive === false && (
+                <span className="text-xs text-bad text-right max-sm:text-left">
+                  The tracker could not create a tray icon on this system.
+                </span>
+              )}
+            </span>
           }
         />
         <Row
