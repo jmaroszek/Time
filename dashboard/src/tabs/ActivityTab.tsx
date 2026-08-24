@@ -592,7 +592,10 @@ export default function ActivityTab({
     }
   };
   const { applySuggestions, assignEntity, assignFromTriage, removeExactRules } =
-    useEntityRuleWrites(result?.triage.total ?? 0);
+    useEntityRuleWrites({
+      triageCount: result?.triage.total ?? 0,
+      residualSeconds: result?.triage.residual.seconds ?? 0,
+    });
   // Apps the reader has already turned down. Persisted for the reason the
   // consolidation notice persists its own: a suggestion that comes back after
   // being dismissed is what makes the next one not worth reading.

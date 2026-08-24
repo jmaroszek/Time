@@ -204,7 +204,78 @@ describe("Activity index", () => {
       pendingApps: [],
       total: 0,
       seconds: 0,
+      // example.com keeps 30s the title rule never claimed. The list is empty
+      // and the backlog is not, which is the whole reason this field exists.
+      residual: { entities: 1, seconds: 30 },
     });
+  });
+
+  // The section excludes partly-classified rows, so the residue they carry is
+  // the one way for uncategorized time to be invisible to every count the tab
+  // keeps. Reported rather than listed — see triageSummary for why.
+  it("reports uncategorized time on partly-classified rows the list omits", () => {
+    const { triage } = queryActivityIndex(buildActivityIndex(source), baseQuery);
+    // Uncategorized in full: listed, and therefore not residue.
+    expect(triage.items.map((item) => item.id)).toContain("app:unknown.exe");
+    expect(triage.residual).toEqual({ entities: 1, seconds: 30 });
+  });
+
+  // One exact rule clears a partly-classified row either way, but what it
+  // costs to do so is not the same on both kinds — which is the asymmetry the
+  // Unclassified section's omission of these rows is really protecting.
+  //
+  // An App rule is priority 3, below every other claim, so it takes the residue
+  // and leaves the Window rule holding exactly what it held.
+  it("clears a partly-classified app with an App rule, leaving the Window rule intact", () => {
+    const partial: ActivitySource = {
+      ...source,
+      rules: [{ id: 1, matchType: "title", pattern: "spec", categoryId: 1, priority: 2 }],
+      sessions: [
+        { id: 1, start: 10, end: 40, process: "notes.exe", title: "spec draft", domain: null, isAfk: false },
+        { id: 2, start: 40, end: 100, process: "notes.exe", title: "grocery list", domain: null, isAfk: false },
+      ],
+    };
+    const before = queryActivityIndex(buildActivityIndex(partial), baseQuery);
+    expect(before.catalog.rows.find((row) => row.id === "app:notes.exe")?.status).toBe("partial");
+    expect(before.triage.residual).toEqual({ entities: 1, seconds: 60 });
+
+    const after = queryActivityIndex(
+      buildActivityIndex({
+        ...partial,
+        rules: [...partial.rules, { id: 2, matchType: "process", pattern: "notes.exe", categoryId: 2, priority: 3 }],
+      }),
+      baseQuery,
+    );
+    const notes = after.catalog.rows.find((row) => row.id === "app:notes.exe");
+    expect(notes?.uncategorizedSeconds).toBe(0);
+    // Mixed, not single: the Window rule kept the 30s it was already winning.
+    expect(notes?.status).toBe("mixed");
+    expect(after.triage.residual).toEqual({ entities: 0, seconds: 0 });
+  });
+
+  // A Website rule is priority 1 and outranks an unscoped Window rule, so the
+  // same one-click assignment does not merely fill the gap — it takes the
+  // sessions the Window rule was classifying. Offering that from a five-row
+  // list, on the row a browser always tops, is what the section declines to do.
+  it("lets a Website rule take time an unscoped Window rule was already winning", () => {
+    const before = queryActivityIndex(buildActivityIndex(source), baseQuery);
+    const wasExample = before.catalog.rows.find((row) => row.id === "website:example.com");
+    expect(wasExample?.status).toBe("partial");
+    // 30s classified by the title rule, 30s not.
+    expect(wasExample?.categories.map((category) => category.categoryId)).toEqual([2]);
+
+    const after = queryActivityIndex(
+      buildActivityIndex({
+        ...source,
+        rules: [...rules, { id: 9, matchType: "domain", pattern: "example.com", categoryId: 1, priority: 1 }],
+      }),
+      baseQuery,
+    );
+    const example = after.catalog.rows.find((row) => row.id === "website:example.com");
+    expect(example?.uncategorizedSeconds).toBe(0);
+    // Single, not mixed: the Website rule swallowed the Window rule's share too.
+    expect(example?.status).toBe("single");
+    expect(example?.categories.map((category) => category.categoryId)).toEqual([1]);
   });
 
   // What the starter list is offered against. It has to reach past the five

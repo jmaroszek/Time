@@ -449,6 +449,12 @@ export interface ActivityTriage {
   /** Every pending item, not only the listed ones. */
   total: number;
   seconds: number;
+  /** Uncategorized time on rows this section does not list, because they are
+   *  only partly unclassified. Same all-history scope as the rest of the
+   *  summary, so the two numbers add up to what Insights leaves out of every
+   *  category total. Never noise-filtered: `classifyNoise` returns null for
+   *  anything already partly decided, so there is nothing here to fold. */
+  residual: ActivityUncategorizedSummary;
 }
 
 export interface ActivityQueryResult {
@@ -1019,9 +1025,24 @@ function compareEntities(
  * data rather than about a week of it.
  *
  * *Partly-classified rows.* Narrower than the "Uncategorized" filter, which
- * also admits `partial` entities. Those carry stray uncategorized sessions that
- * one assignment cannot clear, so they would stay put after being acted on —
- * worse in a list whose whole promise is that acting on a row removes it.
+ * also admits `partial` entities. Not because one assignment could not clear
+ * them — it always can — but because of what clearing them costs, which is not
+ * the same on both kinds of row.
+ *
+ * An App rule is priority 3, below every other claim, so on an app the exact
+ * rule this section writes takes the residue and nothing else. A Website rule
+ * is priority 1 and outranks an unscoped Window rule, so on a website the same
+ * one click also takes back whatever a Window rule was already classifying.
+ * That is a reassignment wearing the clothes of a gap-fill, and this list —
+ * five rows, ranked by time, one control each — is the wrong place to offer it.
+ *
+ * Ranked by time the top partial row is a browser besides, whose residue is the
+ * sessions carrying no domain because no URL extension is installed. A Website
+ * or App rule there swallows every site no rule has reached, which is the one
+ * classification Time must never make on the user's behalf — see the seed
+ * taxonomy in tracker/db.py for why. So the residue is reported by `residual`
+ * below and linked to the catalog, where the reader can see which rows they are
+ * before deciding, rather than offered here behind a one-click control.
  *
  * *The search and type filters.* They scope the catalog below, which answers a
  * different question. This section sits above them for that reason.
@@ -1053,11 +1074,18 @@ function triageSummary(index: ActivityIndex, policy: NoisePolicy | undefined): A
       displayName: entity.displayName,
       seconds: entity.seconds,
     }));
+  const partial = [...index.lifetimeEntities.values()].filter(
+    (entity) => entity.status === "partial",
+  );
   return {
     items: ranked.slice(0, TRIAGE_VISIBLE),
     pendingApps: ranked.filter((entity) => entity.kind === "app"),
     total: pending.length,
     seconds: pending.reduce((total, entity) => total + entity.seconds, 0),
+    residual: {
+      entities: partial.length,
+      seconds: partial.reduce((total, entity) => total + entity.uncategorizedSeconds, 0),
+    },
   };
 }
 

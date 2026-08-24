@@ -156,7 +156,12 @@ export function UnclassifiedSection({
   onAssign: (item: ActivityTriageItem, categoryId: number) => void;
   onShowAll: () => void;
 }) {
-  if (triage.total === 0) return null;
+  // The residue keeps the card alive on its own. A section that vanished the
+  // moment its last row cleared, while time on partly-classified rows was still
+  // left out of every category total, would make the sentence below false at
+  // exactly the moment the reader was told they had finished.
+  const residual = triage.residual;
+  if (triage.total === 0 && residual.seconds === 0) return null;
   const listed = triage.items.length;
   // No floor beyond having something to review. The hour this used to require
   // was the tab badge's, borrowed, and the badge is the other kind of
@@ -193,28 +198,31 @@ export function UnclassifiedSection({
               be a to-do list nobody could finish. */}
           <span className="ml-2 text-meta font-normal text-ink-3">all history</span>
         </h3>
-        <span className="text-xs tabular-nums text-ink-3">
-          {`${triage.total} ${triage.total === 1 ? "item" : "items"} · ${fmtDuration(triage.seconds)}`}
-          {triage.total > listed && (
-            <>
-              {" · "}
-              <button
-                type="button"
-                onClick={onShowAll}
-                className="tabular-nums underline-offset-2 hover:text-ink-2 hover:underline"
-              >
-                Show all
-              </button>
-            </>
-          )}
-        </span>
+        {triage.total > 0 && (
+          <span className="text-xs tabular-nums text-ink-3">
+            {`${triage.total} ${triage.total === 1 ? "item" : "items"} · ${fmtDuration(triage.seconds)}`}
+            {triage.total > listed && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  onClick={onShowAll}
+                  className="tabular-nums underline-offset-2 hover:text-ink-2 hover:underline"
+                >
+                  Show all
+                </button>
+              </>
+            )}
+          </span>
+        )}
       </div>
       {/* Why this is worth a minute, in the one place someone is looking at the
           consequence. The Insights timeline draws this time in a near-surface
           gray that reads as "nothing here" rather than "not yet decided". */}
       <p className="mt-1 text-meta leading-snug text-ink-3">
-        Time in these apps and sites is left out of every category total in Insights until you
-        classify it.
+        {triage.total > 0
+          ? "Time in these apps and sites is left out of every category total in Insights until you classify it."
+          : "Everything below is classified. The time left is on rows that are only partly classified, and it is still left out of every category total in Insights."}
       </p>
       {/* An offer, and nothing around it. The label carries the count and the
           verb, which is everything the sentence that used to sit beside it was
@@ -237,17 +245,38 @@ export function UnclassifiedSection({
           <span aria-hidden="true">→</span>
         </button>
       )}
-      <div className="mt-2">
-        {triage.items.map((item) => (
-          <TriageRow
-            key={item.id}
-            item={item}
-            categories={categories}
-            suggestion={suggestionByItemId.get(item.id) ?? null}
-            onAssign={onAssign}
-          />
-        ))}
-      </div>
+      {triage.total > 0 && (
+        <div className="mt-2">
+          {triage.items.map((item) => (
+            <TriageRow
+              key={item.id}
+              item={item}
+              categories={categories}
+              suggestion={suggestionByItemId.get(item.id) ?? null}
+              onAssign={onAssign}
+            />
+          ))}
+        </div>
+      )}
+      {/* Disclosure, not a sixth decision. These rows already carry a category
+          on some of their time, and the exact rule that would clear them can
+          take more than the gap: on a website it outranks an unscoped Window
+          rule and claims that time too. Worth knowing about; not worth a
+          one-click control here. The link lands on the catalog's Uncategorized
+          filter, which admits these rows where this section does not, so the
+          reader sees which ones they are before deciding anything. */}
+      {residual.seconds > 0 && (
+        <p className={`text-meta text-ink-3 ${triage.total > 0 ? "mt-2.5 border-t border-edge pt-2" : "mt-2"}`}>
+          <button
+            type="button"
+            onClick={onShowAll}
+            className="underline-offset-2 hover:text-ink-2 hover:underline"
+          >
+            {`${residual.entities} ${residual.entities === 1 ? "row is" : "rows are"} only partly classified`}
+          </button>
+          <span className="tabular-nums">{` · ${fmtDuration(residual.seconds)} unclassified`}</span>
+        </p>
+      )}
     </section>
   );
 }

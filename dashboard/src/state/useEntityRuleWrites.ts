@@ -11,14 +11,36 @@ import { useMeta } from "./meta";
 
 type RuleEntity = Pick<ActivityEntitySummary, "kind" | "key" | "displayName">;
 
+/** What is still unclassified before the write, in the two shapes this hook
+ *  reports on: the rows the Unclassified section lists, and the uncategorized
+ *  time on partly-classified rows it does not. Both are read from the same
+ *  all-history triage summary the section renders.
+ *
+ *  Taken before the write on purpose — "this was the last one" is a statement
+ *  about the backlog the reader just acted on. `residualSeconds` survives the
+ *  write unchanged: a listed row is uncategorized in full, so classifying it
+ *  moves it to `single` and never adds to the partial residue. */
+export interface PendingClassification {
+  triageCount: number;
+  residualSeconds: number;
+}
+
 /** Owns the exact-rule transaction shared by Activity's entity surfaces. */
-export function useEntityRuleWrites(pendingTriageCount: number) {
+export function useEntityRuleWrites(pending: PendingClassification) {
+  const { triageCount: pendingTriageCount, residualSeconds } = pending;
   const meta = useMeta();
   const banner = useBanner();
   // Undo runs after the write and therefore must not close over the rules from
   // the render that offered it.
   const rulesRef = useRef(meta.rules);
   rulesRef.current = meta.rules;
+
+  /** Everything the section tracks is classified. Deliberately not
+   *  `remainingTriage === 0` alone: emptying the list while partly-classified
+   *  rows still hold uncategorized time is not the same statement, and the card
+   *  one click away says that time is left out of every category total.
+   *  Claiming otherwise here contradicts it. */
+  const nothingLeft = (remainingTriage: number) => remainingTriage === 0 && residualSeconds === 0;
 
   const exactRulesFor = (entity: RuleEntity) => {
     const matchType = entity.kind === "website" ? "domain" : "process";
@@ -64,9 +86,8 @@ export function useEntityRuleWrites(pendingTriageCount: number) {
       await writeEntityRule(item, categoryId);
       const category = meta.categories.find((option) => option.id === categoryId);
       if (category) {
-        const clearedTheLast = pendingTriageCount === 1;
         banner.show(
-          clearedTheLast
+          nothingLeft(pendingTriageCount - 1)
             ? `${item.displayName} is now ${category.name}. Everything is classified.`
             : `${item.displayName} is now ${category.name}.`,
           { label: "Undo", run: () => void undoTriageAssign(item) },
@@ -99,7 +120,9 @@ export function useEntityRuleWrites(pendingTriageCount: number) {
         `Classified ${accepted.length} app${accepted.length === 1 ? "" : "s"}.`
         + (remaining > 0
           ? ` ${remaining} item${remaining === 1 ? "" : "s"} still unclassified.`
-          : " Everything is classified."),
+          : nothingLeft(remaining)
+            ? " Everything is classified."
+            : " Some time on partly-classified rows is still unclassified."),
         { label: "Undo", run: () => void undoSuggestions(accepted) },
       );
     } catch (error) {
