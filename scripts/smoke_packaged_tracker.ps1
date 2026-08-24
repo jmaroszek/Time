@@ -113,13 +113,14 @@ try {
     }
 }
 
-python (Join-Path $repository "scripts\verify_packaged_smoke.py") `
+$python = & (Join-Path $PSScriptRoot "find_python.ps1")
+& $python (Join-Path $repository "scripts\verify_packaged_smoke.py") `
     $database --local-app-data $localAppData |
     Tee-Object -FilePath (Join-Path $results "packaged-smoke.json")
 if ($LASTEXITCODE -ne 0) {
     throw "Packaged smoke database verification failed."
 }
-python (Join-Path $repository "scripts\check_db_anomalies.py") $database --json |
+& $python (Join-Path $repository "scripts\check_db_anomalies.py") $database --json |
     Tee-Object -FilePath (Join-Path $results "anomaly-checks.json")
 if ($LASTEXITCODE -ne 0) {
     throw "Packaged smoke anomaly checks failed."

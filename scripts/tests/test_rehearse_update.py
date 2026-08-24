@@ -17,6 +17,9 @@ RELEASE = (REPOSITORY / "scripts" / "publish_release.ps1").read_text(encoding="u
 CONFIG = json.loads(
     (REPOSITORY / "dashboard" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
 )
+PACKAGE = json.loads(
+    (REPOSITORY / "dashboard" / "package.json").read_text(encoding="utf-8")
+)
 
 
 def test_rehearsal_never_runs_the_authenticode_gate():
@@ -76,13 +79,27 @@ def test_placeholder_guard_matches_the_shipped_placeholder():
     assert placeholder in SCRIPT
 
 
-def test_pinned_build_environment_leads_path():
-    """The documented trap: the beforeBundleCommand invokes a bare `python`, and
+def test_sidecar_build_does_not_depend_on_path_ordering():
+    """The documented trap: the beforeBundleCommand invoked a bare `python`, and
     the first one on the release machine lacks winrt. A sidecar built by it drops
-    media detection silently, which reads as a code regression."""
-    assert "tracker-build-env" in SCRIPT
-    prepend = re.search(r'\$env:PATH = "\$buildEnv;\$env:PATH"', SCRIPT)
-    assert prepend, "the pinned environment must lead PATH, not trail it"
+    media detection silently, which reads as a code regression.
+
+    This used to be guarded by the rehearsal script prepending the pinned
+    environment to PATH — which protected the rehearsal and nothing else, because
+    publish_release.ps1 never did the same. The guard now lives in the entry
+    point both paths share, so assert it there instead."""
+    build_tracker = PACKAGE["scripts"]["build:tracker"]
+    assert "run_python.mjs" in build_tracker, (
+        "build:tracker must resolve its interpreter rather than inherit whichever "
+        f"`python` leads PATH; found: {build_tracker!r}"
+    )
+    assert not re.match(r"^\s*python", build_tracker), (
+        "a bare `python` here is the trap this test exists for"
+    )
+    resolver = (REPOSITORY / "scripts" / "run_python.mjs").read_text(encoding="utf-8")
+    assert "tracker-build-env" in resolver, (
+        "the resolver must prefer the pinned build environment"
+    )
 
 
 def test_packaged_sidecar_is_checked_rather_than_the_build_log():

@@ -125,17 +125,14 @@ $bundleDir = Join-Path $srcTauri "target\release\bundle\nsis"
 $installer = Join-Path $bundleDir "Time_${Version}_x64-setup.exe"
 
 if (-not $SkipBuild) {
-    # PATH decides which interpreter packages the tracker sidecar, because the
-    # beforeBundleCommand invokes a bare `python`. The first one on this machine
-    # is Anaconda base, which carries most of the pinned packages but no winrt —
-    # so the build either fails the pin guard or, worse for a rehearsal, differs
-    # from a real release build in what it can detect.
-    $buildEnv = Join-Path $repository "data\tracker-build-env\Scripts"
-    if (Test-Path -LiteralPath $buildEnv -PathType Container) {
-        $env:PATH = "$buildEnv;$env:PATH"
-    } else {
-        Write-Host "No pinned build environment at '$buildEnv'; the sidecar will be built by whatever python is first on PATH." -ForegroundColor Yellow
-    }
+    # PATH used to decide which interpreter packaged the sidecar, because
+    # beforeBundleCommand invoked a bare `python` — and the first one on this
+    # machine is Anaconda base, which carries most of the pinned packages but no
+    # winrt. That workaround lived here and nowhere else, which meant the real
+    # release path did not have it. `build:tracker` now resolves the interpreter
+    # itself through run_python.mjs, so both paths pick the pinned environment
+    # for the same reason. The bundle check below still runs: it verifies the
+    # artifact rather than the interpreter, and those can fail independently.
 
     # A file rather than an inline JSON string: --config takes either, and a
     # path cannot be mangled by a quoting rule between PowerShell, npm, and the

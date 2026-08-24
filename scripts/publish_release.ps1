@@ -40,7 +40,8 @@ $repository = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 # Fail before selecting a versioned artifact: the installer name, manifest, and
 # tracker embedded in a release must all describe the same build.
 Write-Host "Checking version parity ..."
-& python (Join-Path $PSScriptRoot "check_version_parity.py") --root $repository
+$python = & (Join-Path $PSScriptRoot "find_python.ps1")
+& $python (Join-Path $PSScriptRoot "check_version_parity.py") --root $repository
 if ($LASTEXITCODE -ne 0) { throw "Release blocked: version parity check failed." }
 
 $dashboard = Join-Path $repository "dashboard"
