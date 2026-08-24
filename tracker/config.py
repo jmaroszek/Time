@@ -33,7 +33,7 @@ LOG_PATH = DATA_DIR / "Logs" / "tracker.log"
 
 # Written to the settings table at startup so the dashboard can report it; bump
 # with releases.
-TRACKER_VERSION = "0.1.0"
+TRACKER_VERSION = "1.0.0"
 
 # The production mutex name is stable. The override exists so release packaging
 # can be smoke-tested against a scratch DB while the live tracker keeps running,
