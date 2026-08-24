@@ -73,6 +73,7 @@ pub(crate) trait TrackingSystem: Send + Sync {
     fn start(&self) -> Result<(), String>;
     fn stop(&self) -> Result<(), String>;
     fn set_startup(&self, enabled: bool) -> Result<(), String>;
+    fn startup_is_registered(&self) -> Result<bool, String>;
     fn is_running(&self) -> Result<bool, String>;
 }
 
@@ -89,6 +90,10 @@ impl TrackingSystem for RealTrackingSystem {
 
     fn set_startup(&self, enabled: bool) -> Result<(), String> {
         crate::system_set_launch_at_login(enabled)
+    }
+
+    fn startup_is_registered(&self) -> Result<bool, String> {
+        crate::system_startup_is_registered()
     }
 
     fn is_running(&self) -> Result<bool, String> {
@@ -242,9 +247,11 @@ async fn set_startup(
         if !before.recording_consent {
             return Err("Start at sign-in requires recording consent".into());
         }
-        if before.launch_at_login {
-            return current_result(database, false, 0).await;
-        }
+        // Deliberately no early return when the database already says on.
+        // That is exactly the state a lost Run value leaves behind, and it is
+        // the state in which someone reaches for this switch: returning here
+        // reported success and touched nothing, so the one obvious repair did
+        // nothing at all.  Writing the registration again is idempotent.
         if let Err(error) = system.set_startup(true) {
             compensate_startup_registration(system).await;
             return Err(error);
@@ -266,6 +273,37 @@ async fn set_startup(
         system.set_startup(false)?;
     }
     current_result(database, false, 0).await
+}
+
+/// Bring Windows startup registration back in line with the database.
+///
+/// Every path through this module writes the registry and the database together
+/// and compensates in both directions, so the two cannot diverge through the
+/// application.  They diverge from outside it: an in-place upgrade runs the
+/// previous version's uninstaller, and a rebuilt or swapped Windows profile
+/// carries none of the old one's Run values.  Afterwards the database still says
+/// on, which is what Settings shows, while nothing will start at the next
+/// sign-in -- and for a background recorder that failure has no symptom beyond
+/// a day that looks like a day nobody used the computer.
+///
+/// Reconciling at launch makes the registration self-correcting whatever removed
+/// it, rather than correct for the one cause that was found first.
+/// `recording_consent` is part of the comparison for the same reason restore
+/// applies it: registration is only ever authorized by consent, so a database
+/// carrying one without the other must not be read as permission to register.
+///
+/// Returns whether anything had to be written.
+pub(crate) async fn reconcile_startup_registration(
+    database: &TimeDatabase,
+    system: &dyn TrackingSystem,
+) -> Result<bool, String> {
+    let settings = database.lifecycle_settings().await?;
+    let wanted = settings.recording_consent && settings.launch_at_login;
+    if system.startup_is_registered()? == wanted {
+        return Ok(false);
+    }
+    system.set_startup(wanted)?;
+    Ok(true)
 }
 
 fn validate_schedule(
@@ -764,9 +802,11 @@ mod tests {
         fail_startup: bool,
         fail_is_running: bool,
         fail_is_running_after_first: bool,
+        fail_startup_query: bool,
         running: bool,
         is_running_calls: Arc<StdMutex<u32>>,
         running_state: Option<Arc<StdMutex<bool>>>,
+        startup_state: Option<Arc<StdMutex<bool>>>,
     }
 
     impl TrackingSystem for FakeSystem {
@@ -802,8 +842,24 @@ mod tests {
             if self.fail_startup {
                 Err("startup failed".into())
             } else {
+                if let Some(state) = &self.startup_state {
+                    *state.lock().unwrap() = enabled;
+                }
                 Ok(())
             }
+        }
+
+        fn startup_is_registered(&self) -> Result<bool, String> {
+            self.calls.lock().unwrap().push("startup?".into());
+            if self.fail_startup_query {
+                return Err("startup query failed".into());
+            }
+            // Unregistered unless a test opts into tracking the state, which
+            // is what a machine that has never registered startup looks like.
+            Ok(self
+                .startup_state
+                .as_ref()
+                .is_some_and(|state| *state.lock().unwrap()))
         }
 
         fn is_running(&self) -> Result<bool, String> {
@@ -1141,6 +1197,132 @@ mod tests {
             assert!(calls.iter().any(|call| call == "startup:true"));
             assert!(calls.iter().any(|call| call == "startup:false"));
             assert!(!calls.iter().any(|call| call == "stop"));
+            database.close().await;
+        });
+    }
+
+    #[test]
+    fn enabling_startup_rewrites_a_registration_windows_no_longer_has() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch("startup-reassert"))
+                .await
+                .unwrap();
+            database
+                .update_lifecycle_settings(&[("recording_consent", "1"), ("launch_at_login", "1")])
+                .await
+                .unwrap();
+            let system = FakeSystem::default();
+            let result = execute_tracking_lifecycle(
+                &database,
+                TrackingLifecycleAction::SetStartup { enabled: true },
+                &system,
+            )
+            .await
+            .unwrap();
+            assert!(result.launch_at_login);
+            // A database that already says on is exactly the state a lost Run
+            // value leaves behind, and the state somebody is in when they reach
+            // for this switch. Reporting success without writing the
+            // registration is what made that state unrepairable from the UI.
+            let calls = system.calls.lock().unwrap();
+            assert!(calls.iter().any(|call| call == "startup:true"));
+            drop(calls);
+            database.close().await;
+        });
+    }
+
+    #[test]
+    fn reconciliation_restores_a_registration_removed_outside_the_application() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch("reconcile-restores"))
+                .await
+                .unwrap();
+            database
+                .update_lifecycle_settings(&[("recording_consent", "1"), ("launch_at_login", "1")])
+                .await
+                .unwrap();
+            let startup_state = Arc::new(StdMutex::new(false));
+            let system = FakeSystem {
+                startup_state: Some(startup_state.clone()),
+                ..FakeSystem::default()
+            };
+            assert!(reconcile_startup_registration(&database, &system)
+                .await
+                .unwrap());
+            assert!(*startup_state.lock().unwrap());
+            // The launch after the repair has nothing to do. A reconciler that
+            // rewrites regardless cannot tell a healthy install from a broken
+            // one, which is how a repair turns into a thing that hides the
+            // problem it was added to find.
+            assert!(!reconcile_startup_registration(&database, &system)
+                .await
+                .unwrap());
+            let calls = system.calls.lock().unwrap();
+            assert_eq!(
+                calls.iter().filter(|call| *call == "startup:true").count(),
+                1
+            );
+            drop(calls);
+            database.close().await;
+        });
+    }
+
+    #[test]
+    fn reconciliation_removes_a_registration_the_database_does_not_authorize() {
+        tauri::async_runtime::block_on(async {
+            // Withdrawn consent counts the same as startup switched off, for the
+            // reason restore applies the same pair: registration is authorized
+            // by consent, never by the startup flag on its own.
+            let cases = [
+                (
+                    "reconcile-without-consent",
+                    [("recording_consent", "0"), ("launch_at_login", "1")],
+                ),
+                (
+                    "reconcile-startup-off",
+                    [("recording_consent", "1"), ("launch_at_login", "0")],
+                ),
+            ];
+            for (name, settings) in cases {
+                let database = TimeDatabase::open(scratch(name)).await.unwrap();
+                database.update_lifecycle_settings(&settings).await.unwrap();
+                let startup_state = Arc::new(StdMutex::new(true));
+                let system = FakeSystem {
+                    startup_state: Some(startup_state.clone()),
+                    ..FakeSystem::default()
+                };
+                assert!(reconcile_startup_registration(&database, &system)
+                    .await
+                    .unwrap());
+                assert!(!*startup_state.lock().unwrap());
+                database.close().await;
+            }
+        });
+    }
+
+    #[test]
+    fn reconciliation_that_cannot_read_windows_writes_nothing() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch("reconcile-query-failure"))
+                .await
+                .unwrap();
+            database
+                .update_lifecycle_settings(&[("recording_consent", "1"), ("launch_at_login", "1")])
+                .await
+                .unwrap();
+            let system = FakeSystem {
+                fail_startup_query: true,
+                ..FakeSystem::default()
+            };
+            // Guessing here would mean writing a registration on every launch
+            // that could not read one back, which is the same silent write loop
+            // whether the value is already correct or the registry is unusable.
+            assert!(reconcile_startup_registration(&database, &system)
+                .await
+                .is_err());
+            let calls = system.calls.lock().unwrap();
+            assert!(!calls.iter().any(|call| call.starts_with("startup:")));
+            drop(calls);
             database.close().await;
         });
     }

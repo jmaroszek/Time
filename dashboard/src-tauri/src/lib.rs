@@ -29,8 +29,8 @@ use database::{
     TrackingExclusionResult,
 };
 use lifecycle::{
-    execute_tracking_lifecycle, prepare_restore_for_restart, LifecycleCoordinator, LifecycleResult,
-    RealTrackingSystem, TrackingLifecycleAction,
+    execute_tracking_lifecycle, prepare_restore_for_restart, reconcile_startup_registration,
+    LifecycleCoordinator, LifecycleResult, RealTrackingSystem, TrackingLifecycleAction,
 };
 
 #[cfg(windows)]
@@ -371,25 +371,41 @@ pub(crate) fn system_stop_tracker() -> Result<(), String> {
     Err("Stopping the tracker is supported only on Windows".into())
 }
 
+/// Where Windows startup registration lives, and under what name.
+///
+/// `dashboard/src-tauri/windows/installer-hooks.nsh` names the same key and the
+/// same value, so that the uninstaller can remove the registration Time made.
+/// Neither side can observe the other's spelling, so a change to one is only
+/// ever correct alongside the same change to the other.
+pub(crate) const STARTUP_RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+pub(crate) const STARTUP_RUN_VALUE: &str = "Time Tracker";
+
+/// The Run value this installation writes: the packaged tracker's path, quoted
+/// the way Windows expects a command that may contain spaces.
+#[cfg(windows)]
+fn startup_command() -> Result<String, String> {
+    let path = tracker_path()?;
+    if !path.is_file() {
+        return Err(format!(
+            "Packaged tracker was not found at {}",
+            path.display()
+        ));
+    }
+    Ok(format!("\"{}\"", path.display()))
+}
+
 pub(crate) fn system_set_launch_at_login(enabled: bool) -> Result<(), String> {
     #[cfg(windows)]
     {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let (run, _) = hkcu
-            .create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+            .create_subkey(STARTUP_RUN_KEY)
             .map_err(|e| e.to_string())?;
         if enabled {
-            let path = tracker_path()?;
-            if !path.is_file() {
-                return Err(format!(
-                    "Packaged tracker was not found at {}",
-                    path.display()
-                ));
-            }
-            run.set_value("Time Tracker", &format!("\"{}\"", path.display()))
+            run.set_value(STARTUP_RUN_VALUE, &startup_command()?)
                 .map_err(|e| e.to_string())?;
         } else {
-            match run.delete_value("Time Tracker") {
+            match run.delete_value(STARTUP_RUN_VALUE) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.to_string()),
@@ -402,6 +418,33 @@ pub(crate) fn system_set_launch_at_login(enabled: bool) -> Result<(), String> {
         let _ = enabled;
         Err("Start at login is supported only on Windows".into())
     }
+}
+
+/// Whether Windows would start *this* installation's tracker at sign-in.
+///
+/// A value naming a different path counts as not registered rather than as
+/// registered. That is what an install into another directory leaves behind,
+/// and Windows would launch nothing from it, so rewriting is the only repair.
+pub(crate) fn system_startup_is_registered() -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        // Opened read-only, and absence is an answer rather than a failure: the
+        // Run key itself does not exist on a profile that has never held one.
+        let run = match hkcu.open_subkey(STARTUP_RUN_KEY) {
+            Ok(run) => run,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.to_string()),
+        };
+        let registered: String = match run.get_value(STARTUP_RUN_VALUE) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.to_string()),
+        };
+        return Ok(registered == startup_command()?);
+    }
+    #[cfg(not(windows))]
+    Err("Start at login is supported only on Windows".into())
 }
 
 fn system_run_tracker_migration() -> Result<(), String> {
@@ -718,6 +761,17 @@ pub fn run() {
             fs::create_dir_all(path.parent().expect("database path parent"))?;
             let database =
                 restore::open_database_with_pending_restore(path).map_err(std::io::Error::other)?;
+            // Startup registration is removed by things the application never
+            // sees -- the uninstaller an in-place upgrade runs first, a rebuilt
+            // Windows profile -- while the database goes on reporting the
+            // setting as on.  Repairing it here is deliberately not worth
+            // refusing to start over: a failure leaves the state exactly as it
+            // was found, which is the state every launch before this one
+            // already ran in.
+            let _ = tauri::async_runtime::block_on(reconcile_startup_registration(
+                &database,
+                &RealTrackingSystem,
+            ));
             app.manage(database);
             app.manage(LifecycleCoordinator::default());
             Ok(())
