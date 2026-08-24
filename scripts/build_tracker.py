@@ -114,6 +114,13 @@ _PE_SUBSYSTEM_OFFSET = 68
 _PE32_MAGIC = 0x10B
 _PE32_PLUS_MAGIC = 0x20B
 _WINDOWS_GUI_SUBSYSTEM = 2
+# Offsets of the data-directory array within the optional header, which differ
+# between PE32 and PE32+ because only the latter widens four base fields.
+_PE_DATA_DIRECTORY_OFFSET = {_PE32_MAGIC: 96, _PE32_PLUS_MAGIC: 112}
+# IMAGE_DIRECTORY_ENTRY_SECURITY. Unlike every other directory entry this one
+# holds a file offset rather than an RVA, which is why an attached Authenticode
+# signature can be detected without mapping the image.
+_PE_SECURITY_DIRECTORY_INDEX = 4
 
 
 def _read_pe_subsystem(executable: Path) -> int:
@@ -164,6 +171,91 @@ def _verify_sidecar_subsystem(executable: Path) -> None:
         raise SystemExit(
             "Packaged tracker is not a Windows GUI executable "
             f"(PE subsystem={subsystem}); PyInstaller must use console=False"
+        )
+
+
+def _has_attached_signature(executable: Path) -> bool:
+    """Report whether the PE carries a certificate table.
+
+    This says a signature blob is attached, not that it is valid or trusted —
+    ``verify_release.ps1`` is what decides that, because only Windows can chain
+    a certificate and check a timestamp. The distinction matters: the failure
+    this guards against is a sign command that exits 0 without doing anything,
+    which no amount of trust checking later can attribute back to this build.
+    """
+    try:
+        with executable.open("rb") as stream:
+            dos_header = stream.read(64)
+            if len(dos_header) < 64 or dos_header[:2] != b"MZ":
+                raise ValueError("missing DOS header")
+            pe_offset = int.from_bytes(dos_header[0x3C:0x40], "little")
+            stream.seek(pe_offset)
+            if stream.read(4) != _PE_SIGNATURE:
+                raise ValueError("missing PE signature")
+            coff_header = stream.read(20)
+            if len(coff_header) < 20:
+                raise ValueError("truncated COFF header")
+            optional_header_size = int.from_bytes(coff_header[16:18], "little")
+            optional_header = stream.read(optional_header_size)
+            if len(optional_header) < optional_header_size:
+                raise ValueError("truncated optional header")
+            magic = int.from_bytes(optional_header[:2], "little")
+            try:
+                directory_offset = _PE_DATA_DIRECTORY_OFFSET[magic]
+            except KeyError:
+                raise ValueError(
+                    f"unsupported optional-header magic 0x{magic:X}"
+                ) from None
+            entry = directory_offset + _PE_SECURITY_DIRECTORY_INDEX * 8
+            if len(optional_header) < entry + 8:
+                # No certificate table in an optional header that stops short of
+                # the entry describing one.
+                return False
+            size = int.from_bytes(optional_header[entry + 4 : entry + 8], "little")
+            return size > 0
+    except OSError as error:
+        raise ValueError(f"could not read executable: {error}") from error
+
+
+def _sign_sidecar(executable: Path) -> None:
+    """Authenticode-sign the sidecar, if the release shell asked for it.
+
+    Tauri runs this script through ``beforeBundleCommand`` and then copies the
+    sidecar into the bundle, so this is the last moment at which the tracker can
+    be signed and still reach users signed. Signing it any later means signing a
+    staging copy nobody ships.
+
+    Off unless ``TIME_SIGN_COMMAND`` is set, because every development and
+    update-rehearsal build runs this same path and none of them should spend a
+    signature. ``%1`` is substituted with the executable path, matching the
+    convention Tauri's own ``signCommand`` uses so one string can serve both.
+    """
+    template = os.environ.get("TIME_SIGN_COMMAND")
+    if not template:
+        return
+    if "%1" not in template:
+        raise SystemExit(
+            "TIME_SIGN_COMMAND must contain %1, the placeholder for the file to "
+            "sign; without it the command would sign nothing and still succeed."
+        )
+    command = template.replace("%1", f'"{executable}"')
+    # Not echoed: a sign command is where a password or token would appear if
+    # one were ever passed as an argument rather than through the environment.
+    print("Signing tracker sidecar ...")
+    completed = subprocess.run(command, shell=True, capture_output=True, text=True)
+    if completed.returncode != 0:
+        details = (completed.stderr or completed.stdout or "").strip()
+        raise SystemExit(f"Signing the tracker sidecar failed:\n{details}")
+    try:
+        signed = _has_attached_signature(executable)
+    except ValueError as error:
+        raise SystemExit(
+            f"Could not confirm the tracker sidecar was signed: {error}"
+        ) from error
+    if not signed:
+        raise SystemExit(
+            "TIME_SIGN_COMMAND reported success but left no signature on "
+            f"{executable}. The release would ship an unsigned tracker."
         )
 
 
@@ -242,7 +334,12 @@ def build(target_triple: str) -> Path:
     if TAURI_BINARIES.exists():
         shutil.rmtree(TAURI_BINARIES)
     shutil.copytree(built_dir, TAURI_BINARIES)
-    return TAURI_BINARIES / built_exe.name
+
+    # Sign the copy under binaries/, not the one under dist/: Tauri bundles from
+    # here, so this is the file whose bytes reach the installer.
+    sidecar = TAURI_BINARIES / built_exe.name
+    _sign_sidecar(sidecar)
+    return sidecar
 
 
 def main() -> None:
