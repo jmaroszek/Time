@@ -28,10 +28,24 @@
     pwsh -File scripts/build_test_installer.ps1
 
 .EXAMPLE
-    # An older version number, to install first and then upgrade over. Note this
-    # only changes what the build calls itself -- to test a migration you need a
-    # build from a commit that actually had the older schema.
-    pwsh -File scripts/build_test_installer.ps1 -Version 0.9.0
+    # A higher version number, to install over the first one. NSIS only offers
+    # "Uninstall before installing" when it detects an upgrade; same version
+    # over same version takes the Add/Reinstall path, which skips the
+    # uninstaller and would pass an upgrade test without testing anything.
+    pwsh -File scripts/build_test_installer.ps1 -Version 1.0.1
+
+.NOTES
+    -Version moves the dashboard half only. It is applied as a config override
+    that tauri-build merges before codegen, so it is genuinely the version
+    package_info() reports -- but the tracker's version is compiled into the
+    sidecar from tracker/config.py, which no override reaches. A build made this
+    way therefore shows "Dashboard 1.0.1 - Tracker 1.0.0" in Settings, and that
+    is the flag working rather than a packaging fault. A real release bumps all
+    four declarations in one commit and never sees it.
+
+    To test a schema migration you do not need a second build at all. Roll the
+    installed database back instead; see the re-opened install section of
+    docs/personal/vm-testing-checklist.md.
 #>
 param(
     # Applied as a config override so no tracked file has to be edited and then
