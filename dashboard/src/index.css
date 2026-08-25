@@ -249,15 +249,11 @@
 .shadow-control { box-shadow: var(--shadow-control); }
 .time-card-shadow { box-shadow: var(--shadow-card); }
 
-/* A section body that opens and closes instead of appearing all at once. The
-   height is a grid row travelling 0fr → 1fr, which interpolates, rather than a
-   measured pixel height that would go stale the moment the content inside
-   changed. The clip lives on a bare child of its own, which has to be told it
-   may be smaller than its content before it will shrink at all.
-
-   The clip is lifted once the body has arrived (data-settled), because an
-   overflow that is still hidden at rest would cut the focus outline off any
-   control sitting against an edge. */
+/* The populated row exists at 0fr before its first open, so WebView2 always
+   has a nonzero intrinsic target for the 1fr end of the transition. Padding
+   and borders stay inside the bare clip because they survive a zero-height
+   track. The inner body has enough padding for its focus outlines, so the clip
+   can remain hidden without a transition-end state machine. */
 .collapsible {
   display: grid;
   grid-template-rows: 0fr;
@@ -275,13 +271,18 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  visibility: hidden;
+  /* Keep the body painted until the close finishes. Opening overrides the
+     delay so its contents appear as the row begins to grow. */
+  transition: visibility 0s linear 200ms;
 }
 .collapsible[data-open="true"] {
   grid-template-rows: 1fr;
   opacity: 1;
 }
-.collapsible[data-open="true"][data-settled="true"] .collapsible-clip {
-  overflow: visible;
+.collapsible[data-open="true"] .collapsible-clip {
+  visibility: visible;
+  transition-delay: 0s;
 }
 
 .menu-pop { animation: menu-pop 140ms ease-out; }

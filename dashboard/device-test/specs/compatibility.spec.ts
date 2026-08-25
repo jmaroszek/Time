@@ -255,9 +255,12 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   const focusToggle = page.getByRole("button", { name: "Expand Focus rules" });
   const focusRulesId = await focusToggle.getAttribute("aria-controls");
   expect(focusRulesId).not.toBeNull();
+  const focusRules = page.locator(`[id="${focusRulesId}"]`);
   await focusToggle.click();
   await expect(page.getByText("code.exe", { exact: true })).toBeVisible();
-  await expect(page.locator(`[id="${focusRulesId}"]`)).toHaveAttribute("data-settled", "true");
+  await expect(focusRules).toHaveAttribute("data-open", "true");
+  await expect.poll(() => focusRules.evaluate((node) => node.getBoundingClientRect().height))
+    .toBeGreaterThan(40);
   if (width < 640) {
     const ruleType = page.getByRole("group", { name: "Rule type" }).first();
     await ruleType.getByRole("button", { name: "Window", exact: true }).click();
@@ -268,7 +271,7 @@ test("@matrix primary screens remain usable at the effective viewport contract",
       exact: true,
     });
     await websiteScope.click();
-    const scopeInput = page.getByPlaceholder("example.com");
+    const scopeInput = focusRules.getByPlaceholder("example.com");
     const [websiteBox, scopeBox] = await Promise.all([
       websiteScope.boundingBox(),
       scopeInput.boundingBox(),
@@ -291,6 +294,53 @@ test("@matrix primary screens remain usable at the effective viewport contract",
     page.locator("#settings-tracker-status").getByText("Tracker status", { exact: true }),
   ).toBeVisible();
   await assertNoHorizontalOverflow(page);
+});
+
+test("@settle a cold category disclosure always acquires its body height", async ({
+  page,
+}) => {
+  await waitForDashboard(page);
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+
+  // Switching faces unmounts CategoriesAndRules. Repeating that cycle makes
+  // every open the first open of a fresh Collapsible, which is the native
+  // WebView failure the ordinary one-pass compatibility check did not cover.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await page.getByRole("button", { name: "Categories & Rules", exact: true }).click();
+    const toggle = page.getByRole("button", { name: "Expand Focus rules" });
+    const bodyId = await toggle.getAttribute("aria-controls");
+    expect(bodyId).not.toBeNull();
+    const body = page.locator(`[id="${bodyId}"]`);
+
+    await expect(body).toHaveAttribute("data-open", "false");
+    await expect(body).toHaveAttribute("aria-hidden", "true");
+    await expect.poll(() => body.evaluate((node) => node.getBoundingClientRect().height))
+      .toBeLessThanOrEqual(1);
+    if (attempt === 0) {
+      await body.evaluate((node) => {
+        node.addEventListener("transitionrun", (event) => {
+          if (event.propertyName === "grid-template-rows") {
+            node.setAttribute("data-test-grid-transition", "started");
+          }
+        });
+      });
+    }
+
+    await toggle.click();
+    await expect(body).toHaveAttribute("data-open", "true");
+    if (attempt === 0) {
+      await expect(body).toHaveAttribute("data-test-grid-transition", "started");
+    }
+    await expect(body).not.toHaveAttribute("aria-hidden", "true");
+    await expect(page.getByText("code.exe", { exact: true })).toBeVisible();
+    await expect.poll(() => body.evaluate((node) => node.getBoundingClientRect().height))
+      .toBeGreaterThan(40);
+
+    await page.getByRole("button", { name: "Collapse Focus rules" }).click();
+    await expect.poll(() => body.evaluate((node) => node.getBoundingClientRect().height))
+      .toBeLessThanOrEqual(1);
+    await page.getByRole("button", { name: "Apps & Websites", exact: true }).click();
+  }
 });
 
 test("@minimum onboarding and restore dialog fit the minimum viewport", async ({
