@@ -39,7 +39,18 @@
       "binaries/_internal/": "_internal/"
     },
     "windows": {
-      "signCommand": "artifact-signing-cli -e https://eus.codesigning.azure.net -d Time %1",
+      "signCommand": {
+        "cmd": "pwsh",
+        "args": [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-File",
+          "../scripts/sign_release_artifact.ps1",
+          "-Artifact",
+          "%1"
+        ]
+      },
       "nsis": {
         "installMode": "currentUser",
         "installerHooks": "windows/installer-hooks.nsh"

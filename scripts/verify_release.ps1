@@ -4,91 +4,204 @@
     Authenticode signature.
 
 .DESCRIPTION
-    The gate covers the three files that actually reach a machine: the NSIS
-    installer, `Time.exe`, and the tracker sidecar as Tauri stages it for
-    bundling.
+    The gate covers the final NSIS installer and the signed app and tracker
+    bytes Tauri gave to NSIS. Tauri deliberately restores the unsigned,
+    unpatched target/release/Time.exe after bundling, so that post-build path is
+    not evidence of what the installer contains.
 
-    That last one is easy to get wrong. `build_tracker.py` writes the sidecar to
-    `src-tauri/binaries/time-tracker-<target-triple>.exe`, but Tauri copies it to
-    `target/release/time-tracker.exe` — dropping the target triple — and bundles
-    that copy. Checking only the file under `binaries/` therefore says nothing
-    about what ships; it describes an input to the build, not an output of it.
-    The bundled copy is the required one here, and the staging copy is reported
-    alongside it because a difference between the two is worth seeing.
+    sign_release_artifact.ps1 captures the transient signed app and the signed
+    tracker while Tauri is bundling. This verifier requires all three evidence
+    records to share one build id, checks their hashes and signatures, and
+    proves the generated NSIS script used the recorded app and tracker sources.
 #>
 param(
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
     [string]$Installer,
-    [string]$AppExecutable,
-    # The sidecar as bundled: target/release/time-tracker.exe.
-    [string]$TrackerExecutable,
-    # The sidecar as built, before Tauri copies it. Reported, not required.
-    [string]$StagedTrackerExecutable
+    [string]$EvidenceDirectory,
+    [string]$NsisScript,
+    [string]$ExpectedBuildId,
+    [string]$ExpectedPublisherName = "Jonah Maroszek"
 )
 
 $ErrorActionPreference = "Stop"
 $artifact = (Resolve-Path -LiteralPath $Installer).Path
 $releaseDir = Split-Path (Split-Path (Split-Path $artifact -Parent) -Parent) -Parent
-$srcTauriDir = Split-Path (Split-Path $releaseDir -Parent) -Parent
-if (-not $AppExecutable) { $AppExecutable = Join-Path $releaseDir "Time.exe" }
-if (-not $TrackerExecutable) {
-    $TrackerExecutable = Join-Path $releaseDir "time-tracker.exe"
+if (-not $EvidenceDirectory) {
+    $EvidenceDirectory = Join-Path $releaseDir "signing-evidence"
 }
-if (-not $StagedTrackerExecutable) {
-    $StagedTrackerExecutable = Join-Path $srcTauriDir "binaries\time-tracker-x86_64-pc-windows-msvc.exe"
+if (-not $NsisScript) {
+    $NsisScript = Join-Path $releaseDir "nsis\x64\installer.nsi"
+}
+
+function Get-NormalizedPath {
+    param([string]$Path)
+    [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+}
+
+function Assert-SamePath {
+    param(
+        [string]$Actual,
+        [string]$Expected,
+        [string]$Description
+    )
+    $actualPath = Get-NormalizedPath -Path $Actual
+    $expectedPath = Get-NormalizedPath -Path $Expected
+    if (-not $actualPath.Equals($expectedPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Release blocked: $Description is '$actualPath'; expected '$expectedPath'."
+    }
+}
+
+function Read-EvidenceRecord {
+    param([string]$Kind)
+
+    $path = Join-Path $EvidenceDirectory "$Kind.json"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Release blocked: missing $Kind signing record at '$path'. Build through publish_release.ps1."
+    }
+    try {
+        $record = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    } catch {
+        throw "Release blocked: could not read $Kind signing record '$path': $($_.Exception.Message)"
+    }
+    if ($record.schemaVersion -ne 1 -or $record.kind -ne $Kind -or
+        -not $record.buildId -or -not $record.sourcePath -or
+        -not $record.sha256 -or $null -eq $record.sizeBytes -or
+        -not $record.publisher -or -not $record.publisherName -or
+        -not $record.timestampAuthority) {
+        throw "Release blocked: $Kind signing record '$path' is incomplete or unsupported."
+    }
+    $record
 }
 
 function Get-SignatureFacts {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [string]$Role
+    )
 
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Release blocked: expected $Role not found: '$Path'."
+    }
     $resolved = (Resolve-Path -LiteralPath $Path).Path
     $signature = Get-AuthenticodeSignature -LiteralPath $resolved
-    [pscustomobject]@{
+    if ($signature.Status -ne "Valid") {
+        throw "Release blocked: Authenticode status for '$resolved' is $($signature.Status)."
+    }
+    if (-not $signature.SignerCertificate -or -not $signature.TimeStamperCertificate) {
+        throw "Release blocked: '$resolved' must have both a signer and a trusted timestamp."
+    }
+    $facts = [pscustomobject]@{
+        Role = $Role
         Artifact = $resolved
         Status = $signature.Status
         Publisher = $signature.SignerCertificate.Subject
+        PublisherName = $signature.SignerCertificate.GetNameInfo(
+            [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+            $false
+        )
         TimestampAuthority = $signature.TimeStamperCertificate.Subject
         HasTimestamp = [bool]$signature.TimeStamperCertificate
         SHA256 = (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash
         SizeBytes = (Get-Item -LiteralPath $resolved).Length
     }
-}
-
-$required = @($artifact, $AppExecutable, $TrackerExecutable)
-$results = foreach ($candidate in $required) {
-    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-        throw "Release blocked: expected artifact not found: '$candidate'."
-    }
-    $facts = Get-SignatureFacts -Path $candidate
-    if ($facts.Status -ne "Valid") {
-        throw "Release blocked: Authenticode status for '$($facts.Artifact)' is $($facts.Status)."
-    }
-    if (-not $facts.Publisher -or -not $facts.HasTimestamp) {
-        throw "Release blocked: '$($facts.Artifact)' must have both a signer and a trusted timestamp."
-    }
     $facts
 }
 
-$results | Format-List Artifact, Publisher, TimestampAuthority, SHA256, SizeBytes
-
-# Informational. The staging copy is not shipped, so an unsigned one is not by
-# itself a defect — but if it is signed and the bundled copy's hash differs,
-# something rewrote the sidecar between build and bundle, and that is worth
-# knowing before the artifact goes to a host.
-if (Test-Path -LiteralPath $StagedTrackerExecutable -PathType Leaf) {
-    $staged = Get-SignatureFacts -Path $StagedTrackerExecutable
-    $bundled = $results | Where-Object { $_.Artifact -eq (Resolve-Path -LiteralPath $TrackerExecutable).Path }
-    Write-Host "Staged sidecar (not shipped; for comparison only):"
-    Write-Host "  Path   : $($staged.Artifact)"
-    Write-Host "  Status : $($staged.Status)"
-    Write-Host "  SHA256 : $($staged.SHA256)"
-    if ($bundled -and $staged.SHA256 -ne $bundled.SHA256) {
-        Write-Warning ("The staged and bundled sidecars differ. Expected if Tauri " +
-            "signed the bundled copy itself; unexpected otherwise.")
+function Assert-RecordMatchesFile {
+    param(
+        $Record,
+        $Facts,
+        [string]$Description
+    )
+    if ($Record.sha256 -ne $Facts.SHA256 -or
+        [int64]$Record.sizeBytes -ne $Facts.SizeBytes -or
+        $Record.publisher -ne $Facts.Publisher -or
+        $Record.publisherName -ne $Facts.PublisherName -or
+        $Record.timestampAuthority -ne $Facts.TimestampAuthority) {
+        throw "Release blocked: $Description does not match its signing record."
     }
-} else {
-    Write-Host "Staged sidecar not present at '$StagedTrackerExecutable' (not required)."
 }
 
-Write-Host "Release signature gate passed."
+$appRecord = Read-EvidenceRecord -Kind "app"
+$trackerRecord = Read-EvidenceRecord -Kind "tracker"
+$installerRecord = Read-EvidenceRecord -Kind "installer"
+$buildIds = @(
+    @($appRecord.buildId, $trackerRecord.buildId, $installerRecord.buildId) |
+        Select-Object -Unique
+)
+if ($buildIds.Count -ne 1) {
+    throw "Release blocked: signing records came from different builds: $($buildIds -join ', ')."
+}
+$buildId = [string]$buildIds[0]
+if ($ExpectedBuildId -and $buildId -ne $ExpectedBuildId) {
+    throw "Release blocked: signing evidence build id is '$buildId'; expected '$ExpectedBuildId'."
+}
+
+if (-not (Test-Path -LiteralPath $EvidenceDirectory -PathType Container)) {
+    throw "Release blocked: signing evidence directory not found: '$EvidenceDirectory'."
+}
+$appEvidence = Join-Path $EvidenceDirectory "Time.exe"
+$trackerEvidence = Join-Path $EvidenceDirectory "time-tracker.exe"
+if ($appRecord.evidenceFile -ne "Time.exe" -or $trackerRecord.evidenceFile -ne "time-tracker.exe") {
+    throw "Release blocked: app or tracker signing record names an unexpected evidence file."
+}
+
+$installerFacts = Get-SignatureFacts -Path $artifact -Role "NSIS installer"
+$appFacts = Get-SignatureFacts -Path $appEvidence -Role "Packaged Time.exe evidence"
+$trackerFacts = Get-SignatureFacts -Path $trackerEvidence -Role "Packaged tracker evidence"
+Assert-RecordMatchesFile -Record $installerRecord -Facts $installerFacts -Description "installer"
+Assert-RecordMatchesFile -Record $appRecord -Facts $appFacts -Description "app evidence"
+Assert-RecordMatchesFile -Record $trackerRecord -Facts $trackerFacts -Description "tracker evidence"
+Assert-SamePath -Actual $installerRecord.sourcePath -Expected $artifact -Description "installer record source"
+
+$publishers = @(
+    @($installerFacts.Publisher, $appFacts.Publisher, $trackerFacts.Publisher) |
+        Select-Object -Unique
+)
+if ($publishers.Count -ne 1) {
+    throw "Release blocked: installer, app, and tracker were signed by different publishers."
+}
+foreach ($facts in @($installerFacts, $appFacts, $trackerFacts)) {
+    if ($facts.PublisherName -ne $ExpectedPublisherName) {
+        throw "Release blocked: $($facts.Role) was signed by '$($facts.PublisherName)'; expected '$ExpectedPublisherName'."
+    }
+}
+
+if (-not (Test-Path -LiteralPath $NsisScript -PathType Leaf)) {
+    throw "Release blocked: generated NSIS script not found: '$NsisScript'."
+}
+$nsisText = Get-Content -LiteralPath $NsisScript -Raw
+$mainMatch = [regex]::Match(
+    $nsisText,
+    '(?m)^!define\s+MAINBINARYSRCPATH\s+"(?<path>[^"]+)"\s*$'
+)
+$trackerMatch = [regex]::Match(
+    $nsisText,
+    '(?m)^\s*File\b[^\r\n]*"/oname=time-tracker\.exe"\s+"(?<path>[^"]+)"\s*$'
+)
+if (-not $mainMatch.Success -or -not $trackerMatch.Success) {
+    throw "Release blocked: generated NSIS script does not identify both packaged executable sources."
+}
+Assert-SamePath -Actual $appRecord.sourcePath -Expected $mainMatch.Groups['path'].Value -Description "packaged app source"
+Assert-SamePath -Actual $trackerRecord.sourcePath -Expected $trackerMatch.Groups['path'].Value -Description "packaged tracker source"
+
+# Unlike the main executable, Tauri does not restore the tracker source after
+# bundling. Its current bytes must still match the evidence captured when it was
+# signed and named in the NSIS script.
+if (-not (Test-Path -LiteralPath $trackerRecord.sourcePath -PathType Leaf)) {
+    throw "Release blocked: tracker source named by NSIS no longer exists: '$($trackerRecord.sourcePath)'."
+}
+$trackerSourceHash = (Get-FileHash -LiteralPath $trackerRecord.sourcePath -Algorithm SHA256).Hash
+if ($trackerSourceHash -ne $trackerFacts.SHA256) {
+    throw "Release blocked: tracker source changed after its signing evidence was captured."
+}
+
+@($installerFacts, $appFacts, $trackerFacts) |
+    Format-List Role, Artifact, Publisher, TimestampAuthority, SHA256, SizeBytes
+
+if (Test-Path -LiteralPath $appRecord.sourcePath -PathType Leaf) {
+    $postBuildStatus = (Get-AuthenticodeSignature -LiteralPath $appRecord.sourcePath).Status
+    Write-Host "Post-build target/release/Time.exe (not a shipping gate): $postBuildStatus"
+}
+Write-Host "Release signature gate passed for build $buildId."

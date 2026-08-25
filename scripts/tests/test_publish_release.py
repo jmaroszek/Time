@@ -44,7 +44,7 @@ def test_version_parity_runs_before_release_artifact_selection():
     """A stale component version must stop publication before a build or
     installer path can be selected."""
     parity = SCRIPT.index('"check_version_parity.py"')
-    artifact_selection = SCRIPT.index('$bundleDir = Join-Path $srcTauri')
+    artifact_selection = SCRIPT.index('$bundleDir = Join-Path $releaseDir')
     config_selection = SCRIPT.index('$configPath = Join-Path $srcTauri')
     assert parity < config_selection < artifact_selection
     assert "version parity check failed" in SCRIPT[parity:config_selection]

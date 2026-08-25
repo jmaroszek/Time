@@ -54,6 +54,10 @@ if (-not $version) {
     throw "Release blocked: tauri.conf.json declares no version."
 }
 
+$releaseDir = Join-Path $srcTauri "target\release"
+$bundleDir = Join-Path $releaseDir "bundle\nsis"
+$evidenceDirectory = Join-Path $releaseDir "signing-evidence"
+
 # The placeholder ships in the repository on purpose — the real public key is
 # half of a keypair whose private half only the owner holds. A build that
 # reaches users with the placeholder still in it would advertise updates that
@@ -72,12 +76,12 @@ if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
     throw "Release blocked: TAURI_SIGNING_PRIVATE_KEY is not set. Without it the update manifest cannot be signed."
 }
 
-# The Authenticode side needs five variables, and tauri.conf.json names none of
-# them: the signCommand carries only the regional endpoint, so the account and
-# certificate profile arrive through the environment and stay out of a public
-# repository. That is a deliberate trade, and this is the cost of it -- without
-# a check here the first sign attempt happens deep inside `tauri build`, after
-# the frontend, the sidecar, and the Rust release build have already run.
+# The Authenticode side needs five variables, and tracked configuration names
+# none of them: the signing wrapper carries only the regional endpoint, so the
+# account and certificate profile arrive through the environment and stay out
+# of a public repository. That is a deliberate trade, and this is the cost of
+# it -- without a check here the first sign attempt happens deep inside the
+# Tauri build, after the frontend, the sidecar, and the Rust release build.
 $signingVariables = @(
     "AZURE_TENANT_ID",
     "AZURE_CLIENT_ID",
@@ -91,13 +95,35 @@ if ($missing) {
 Release blocked: the Authenticode signing environment is incomplete.
 Missing: $($missing -join ', ')
 
-These are read by artifact-signing-cli, which tauri.conf.json invokes as its
-signCommand. Set them in this shell -- the same one holding the updater key --
-and never in a committed file. See docs/personal/signing.md.
+These are read by artifact-signing-cli through tauri.conf.json's signing
+wrapper. Set them in this shell -- the same one holding the updater key -- and
+never in a committed file. See docs/personal/signing.md.
 "@
 }
 
+$buildId = $null
 if (-not $SkipBuild) {
+    # A fresh build must not inherit an installer from a rehearsal or signing
+    # evidence from an earlier run. -SkipBuild intentionally preserves both so
+    # the manifest half can be retried against the exact completed build.
+    if (Test-Path -LiteralPath $bundleDir) {
+        Remove-Item -LiteralPath $bundleDir -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $evidenceDirectory) {
+        Remove-Item -LiteralPath $evidenceDirectory -Recurse -Force
+    }
+
+    $buildId = [Guid]::NewGuid().ToString("N")
+    $previousEvidenceDirectory = $env:TIME_RELEASE_SIGNING_EVIDENCE_DIR
+    $previousBuildId = $env:TIME_RELEASE_BUILD_ID
+    $previousTrackerSignCommand = $env:TIME_SIGN_COMMAND
+    $env:TIME_RELEASE_SIGNING_EVIDENCE_DIR = $evidenceDirectory
+    $env:TIME_RELEASE_BUILD_ID = $buildId
+    # Tauri's signCommand signs the actual external-binary source and captures
+    # it. A pre-signed sidecar can make Tauri skip that command, leaving no
+    # trustworthy evidence of which tracker NSIS received.
+    Remove-Item Env:TIME_SIGN_COMMAND -ErrorAction SilentlyContinue
+
     Write-Host "Building $version ..."
     # Runs the tracker sidecar build through beforeBundleCommand, then bundles.
     # Authenticode must be configured inside tauri.conf.json (certificateThumbprint
@@ -109,20 +135,34 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ne 0) { throw "Release blocked: tauri build failed." }
     } finally {
         Pop-Location
+        if ($null -eq $previousEvidenceDirectory) {
+            Remove-Item Env:TIME_RELEASE_SIGNING_EVIDENCE_DIR -ErrorAction SilentlyContinue
+        } else {
+            $env:TIME_RELEASE_SIGNING_EVIDENCE_DIR = $previousEvidenceDirectory
+        }
+        if ($null -eq $previousBuildId) {
+            Remove-Item Env:TIME_RELEASE_BUILD_ID -ErrorAction SilentlyContinue
+        } else {
+            $env:TIME_RELEASE_BUILD_ID = $previousBuildId
+        }
+        if ($null -eq $previousTrackerSignCommand) {
+            Remove-Item Env:TIME_SIGN_COMMAND -ErrorAction SilentlyContinue
+        } else {
+            $env:TIME_SIGN_COMMAND = $previousTrackerSignCommand
+        }
     }
 }
 
-$bundleDir = Join-Path $srcTauri "target\release\bundle\nsis"
 $installer = Join-Path $bundleDir "Time_${version}_x64-setup.exe"
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
     throw "Release blocked: no installer at '$installer'. Build first, or correct the version."
 }
 $installer = (Resolve-Path -LiteralPath $installer).Path
 
-# The existing gate: valid, timestamped Authenticode on the installer, the
-# dashboard executable, and the tracker sidecar. Re-implementing those checks
-# here would give the release two definitions of "signed".
-& (Join-Path $PSScriptRoot "verify_release.ps1") -Installer $installer
+# The existing gate: valid, timestamped Authenticode on the installer and the
+# app and tracker bytes Tauri gave to NSIS. Re-implementing those checks here
+# would give the release two definitions of "signed".
+& (Join-Path $PSScriptRoot "verify_release.ps1") -Installer $installer -ExpectedBuildId $buildId
 if ($LASTEXITCODE -ne 0) { throw "Release blocked: signature gate failed." }
 
 # The step the ordering hazard makes necessary. Anything that rewrote the
