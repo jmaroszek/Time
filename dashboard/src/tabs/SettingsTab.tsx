@@ -828,6 +828,8 @@ export default function SettingsTab({
           and the row says so. Separating them would put a dependency and the
           hint that explains it in different cards. */}
       <Section title="Startup & schedule">
+        {/* The switch reports the stored preference; this full-width footer
+            reports the exceptional case where Windows holds no startup entry. */}
         <Row
           label="Start at Windows sign-in"
           help="Start the tracker when you sign into this Windows account."
@@ -855,31 +857,24 @@ export default function SettingsTab({
                   Required while scheduling is on
                 </span>
               )}
-              {/* The switch above reports the stored setting, which is what was
-                  asked for. This reports what Windows actually holds. They are
-                  reconciled at every launch, so this appears only when that
-                  repair could not be made — and it is the one state where the
-                  switch alone is untrue: on, over nothing, with the tracker
-                  simply not appearing at the next sign-in and no other symptom
-                  until days of recording are missing. */}
-              {trackingEnabled
-                && meta.settings.launch_at_login === "1"
-                && startupRegistered === false && (
-                <span className="text-xs text-bad text-right max-sm:text-left">
-                  Windows has no startup entry for Time, and it could not be
-                  added automatically.{" "}
-                  <button
-                    type="button"
-                    className="underline underline-offset-2 disabled:opacity-50"
-                    disabled={lifecycleBusy || savingKeys.has("launch_at_login")}
-                    onClick={() => void setStartAtLogin(true)}
-                  >
-                    Try again
-                  </button>
-                </span>
-              )}
             </span>
           }
+          footer={trackingEnabled
+            && meta.settings.launch_at_login === "1"
+            && startupRegistered === false ? (
+            <span className="block text-xs text-bad">
+              Windows has no startup entry for Time, and it could not be added
+              automatically.{" "}
+              <button
+                type="button"
+                className="underline underline-offset-2 disabled:opacity-50"
+                disabled={lifecycleBusy || savingKeys.has("launch_at_login")}
+                onClick={() => void setStartAtLogin(true)}
+              >
+                Try again
+              </button>
+            </span>
+          ) : undefined}
         />
         <Row
           label="Show tray icon"

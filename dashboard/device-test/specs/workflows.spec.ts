@@ -655,6 +655,17 @@ test("@workflow a startup registration Windows no longer holds is reported and r
   // failed, so the honest report is both facts rather than a silent correction.
   const toggle = page.getByRole("switch", { name: "Start at Windows sign-in" });
   await expect(toggle).toHaveAttribute("aria-checked", "true");
+  const label = page.getByText("Start at Windows sign-in", { exact: true });
+  const [warningBox, labelBox, toggleBox] = await Promise.all([
+    warning.boundingBox(),
+    label.boundingBox(),
+    toggle.boundingBox(),
+  ]);
+  expect(warningBox).not.toBeNull();
+  expect(labelBox).not.toBeNull();
+  expect(toggleBox).not.toBeNull();
+  expect(Math.abs(warningBox!.x - labelBox!.x)).toBeLessThanOrEqual(1);
+  expect(warningBox!.y).toBeGreaterThan(toggleBox!.y + toggleBox!.height);
 
   await page.getByRole("button", { name: "Try again" }).click();
 
