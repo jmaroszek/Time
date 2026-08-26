@@ -23,6 +23,7 @@ export type StarterRole =
   | "plumbing"
   | "browsing"
   | "messaging"
+  | "productivity"
   | "development"
   | "writing"
   | "creative"
@@ -45,6 +46,7 @@ const ROLE_CATEGORY: Record<StarterRole, string> = {
   plumbing: "ignored",
   browsing: "browsing",
   messaging: "communication",
+  productivity: "work",
   development: "work",
   writing: "work",
   creative: "work",
@@ -155,6 +157,11 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
   "telegram.exe": "messaging",
   "whatsapp.exe": "messaging",
   "signal.exe": "messaging",
+  // Time is a productivity tool rather than Windows plumbing. Both executable
+  // boundaries are listed because Activity keeps rules tied to the real process
+  // even when the default alias presents them together as one product.
+  "time.exe": "productivity",
+  "time-tracker.exe": "productivity",
   // Development.
   "code.exe": "development",
   "devenv.exe": "development",

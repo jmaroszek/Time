@@ -98,6 +98,7 @@ describe("resolving roles to categories", () => {
   it("points every role somewhere in the seeded taxonomy", () => {
     const resolved = resolveRoleCategories(SEEDED);
     expect(resolved.get("development")).toBe(1);
+    expect(resolved.get("productivity")).toBe(1);
     expect(resolved.get("writing")).toBe(1);
     expect(resolved.get("creative")).toBe(1);
     expect(resolved.get("study")).toBe(1);
@@ -158,6 +159,15 @@ describe("suggesting", () => {
   it("suggests a catalogued app", () => {
     expect(suggest([app("slack.exe")])).toEqual([
       { entity: app("slack.exe"), categoryId: 2 },
+    ]);
+  });
+
+  it("offers both Time executables as optional Work suggestions", () => {
+    expect(STARTER_APPS["time.exe"]).toBe("productivity");
+    expect(STARTER_APPS["time-tracker.exe"]).toBe("productivity");
+    expect(suggest([app("time.exe"), app("time-tracker.exe")])).toEqual([
+      { entity: app("time.exe"), categoryId: 1 },
+      { entity: app("time-tracker.exe"), categoryId: 1 },
     ]);
   });
 
