@@ -6969,7 +6969,6 @@ ltd.ua
 a2hosted.com
 cpserver.com
 activetrail.biz
-adaptable.app
 myaddr.dev
 myaddr.io
 dyn.addr.tools
@@ -6989,7 +6988,7 @@ africa.com
 *.auiusercontent.com
 beep.pl
 aiven.app
-aivencloud.com
+*.aivencloud.com
 akadns.net
 akamai.net
 akamai-staging.net
@@ -7864,6 +7863,9 @@ eero-stage.online
 opentunnel.xyz
 antagonist.cloud
 claude.app
+claudeusercontent.com
+frame.claudeusercontent.com
+*.cursorusercontent.com
 apigee.io
 panel.dev
 siiites.com
@@ -8076,6 +8078,8 @@ sch.ac
 dev.cv
 store.cv
 codeberg.page
+codepen.app
+codepen.dev
 csb.app
 preview.csb.app
 co.nl
@@ -8955,6 +8959,7 @@ hepforge.org
 onhercules.app
 hercules-app.com
 hercules-dev.com
+here.now
 herokuapp.com
 heyflow.page
 heyflow.site
@@ -9050,6 +9055,7 @@ botdash.gg
 botdash.net
 botda.sh
 botdash.xyz
+online-server.cloud
 apps-1and1.com
 live-website.com
 webspace-host.com
@@ -9889,6 +9895,9 @@ scbl.pl-waw.scw.cloud
 scalebook.scw.cloud
 smartlabeling.scw.cloud
 dedibox.fr
+scw.site
+ams.scw.site
+waw.scw.site
 schokokeks.net
 gov.scot
 service.gov.scot
@@ -10182,9 +10191,9 @@ toolforge.org
 wmcloud.org
 beta.wmcloud.org
 wmflabs.org
-vps.hrsn.au
 hrsn.dev
 is-a.dev
+vps.hrsn.net
 localcert.net
 windsurf.app
 windsurf.build
