@@ -26,9 +26,16 @@ param(
     [switch]$SkipBuild,
     # Where latest.json is written. Defaults beside the installer.
     [string]$OutputDirectory,
-    # Base address the installer will be downloaded from. The manifest needs an
-    # absolute URL; this is the only part of it that is not derivable.
-    [string]$DownloadBaseUrl = "https://trackwithtime.com/updates",
+    # Base address the INSTALLER will be downloaded from -- not where the
+    # manifest is served. Production splits them: the installer lives under
+    # /downloads and latest.json under /updates. This is the only part of the
+    # manifest that is not derivable, and it is deliberately mandatory: the
+    # value is signed along with the rest of the manifest, so a wrong one cannot
+    # be corrected without re-signing, and a default would let the wrong value
+    # ship silently. The manifest's own address is read from tauri.conf.json
+    # below, because that is what installed copies actually poll.
+    [Parameter(Mandatory = $true)]
+    [string]$DownloadBaseUrl,
     # Release notes shown in the update control. Keep it to a sentence.
     [string]$Notes
 )
@@ -194,6 +201,17 @@ $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
 $installerName = Split-Path $installer -Leaf
 $downloadUrl = "$($DownloadBaseUrl.TrimEnd('/'))/$installerName"
 
+# Where the manifest has to be served is not a matter of opinion: it is the
+# endpoint compiled into every installed copy, and an installed copy polls that
+# address and nothing else. Read it rather than deriving it from
+# -DownloadBaseUrl, which addresses the installer and is frequently a different
+# path. Getting these two confused publishes a correct manifest to an address
+# no client ever reads, and the release looks successful from here.
+$manifestEndpoint = $config.plugins.updater.endpoints | Select-Object -First 1
+if (-not $manifestEndpoint) {
+    throw "Release blocked: tauri.conf.json declares no plugins.updater.endpoints, so there is nowhere for installed copies to look for this manifest."
+}
+
 $manifest = [ordered]@{
     version   = $version
     notes     = if ($Notes) { $Notes } else { "" }
@@ -227,10 +245,10 @@ Write-Host "  Manifest  : $manifestPath"
 Write-Host ""
 Write-Host "Upload, in this order:"
 Write-Host "  1. $installerName  ->  $downloadUrl"
-Write-Host "  2. latest.json     ->  $($DownloadBaseUrl.TrimEnd('/'))/latest.json"
+Write-Host "  2. latest.json     ->  $manifestEndpoint"
 Write-Host ""
 Write-Host "The installer must be in place before the manifest names it, or the"
 Write-Host "first client to check will fetch a URL that is not there yet."
 Write-Host "Purge the CDN cache for latest.json afterwards; it is served with a"
 Write-Host "short TTL, but a purge is what makes the release immediate."
-Write-Host "Put the SHA-256 above into the beta invite note."
+Write-Host "Record the SHA-256 above in docs/personal/release-record-<version>.md."

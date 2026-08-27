@@ -55,3 +55,36 @@ def test_manifest_platform_key_matches_the_only_target_time_ships():
     empty manifest entry and a silent 'no update available' forever."""
     assert "windows-x86_64" in SCRIPT
     assert re.search(r'"nsis"', json.dumps(CONFIG["bundle"]["targets"]))
+
+
+def test_download_base_url_is_mandatory():
+    """The installer URL is signed along with the rest of the manifest, so a
+    wrong one cannot be corrected without re-signing. A default would let the
+    wrong value ship silently -- which is exactly what the old default
+    (/updates, the manifest's path rather than the installer's) would have
+    done."""
+    params = SCRIPT[SCRIPT.index("param("):SCRIPT.index("$ErrorActionPreference")]
+    base_url = params.index("$DownloadBaseUrl")
+    assert "[Parameter(Mandatory = $true)]" in params[:base_url], (
+        "DownloadBaseUrl must stay mandatory"
+    )
+    assert not re.search(r"\$DownloadBaseUrl\s*=", params), (
+        "DownloadBaseUrl must not have a default value"
+    )
+
+
+def test_manifest_destination_comes_from_the_compiled_endpoint():
+    """Installed copies poll plugins.updater.endpoints and nothing else, so the
+    upload destination the script prints has to be read from there rather than
+    derived from -DownloadBaseUrl, which addresses the installer and is a
+    different path in production. Conflating them publishes a correct manifest
+    to an address no client reads, and the release looks successful."""
+    assert "$config.plugins.updater.endpoints" in SCRIPT
+    upload = SCRIPT.index('Write-Host "Upload, in this order:"')
+    tail = SCRIPT[upload:]
+    assert "$manifestEndpoint" in tail, (
+        "the printed manifest destination must be the compiled endpoint"
+    )
+    assert "DownloadBaseUrl" not in tail, (
+        "the manifest destination must not be derived from -DownloadBaseUrl"
+    )
