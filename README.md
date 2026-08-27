@@ -9,7 +9,7 @@ answers — how much you worked, on what, and how it is changing.
 
 **[trackwithtime.com](https://trackwithtime.com)** is the place to see what Time
 does: features, screenshots, and the guides for using it. This repository is the
-place to check whether it does what the site says.
+place to verify the website's claims.
 
 ## Why this repository is public
 
@@ -17,7 +17,7 @@ A time tracker asks for a lot of trust. It sees every application you open, and
 optionally every window title. Being able to read the code and confirm the
 privacy claims is worth more than any wording on a privacy page.
 
-So the source is published for inspection. It is not licensed for use — see
+This is why the source is published for *inspection.* It is not licensed for use — see
 [LICENSE.md](LICENSE.md).
 
 ## What you can check here
