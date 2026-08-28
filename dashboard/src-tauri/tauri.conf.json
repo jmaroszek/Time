@@ -46,7 +46,7 @@
           "-NoProfile",
           "-NonInteractive",
           "-File",
-          "../scripts/sign_release_artifact.ps1",
+          "../../scripts/sign_release_artifact.ps1",
           "-Artifact",
           "%1"
         ]

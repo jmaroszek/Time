@@ -23,7 +23,10 @@ VERIFY = (SCRIPTS / "verify_release.ps1").read_text(encoding="utf-8")
 def test_tauri_signing_runs_through_the_evidence_wrapper():
     command = CONFIG["bundle"]["windows"]["signCommand"]
     assert command["cmd"] == "pwsh"
-    assert "../scripts/sign_release_artifact.ps1" in command["args"]
+    file_argument = command["args"][command["args"].index("-File") + 1]
+    configured_signer = REPOSITORY / "dashboard" / "src-tauri" / file_argument
+    assert configured_signer.resolve() == (SCRIPTS / "sign_release_artifact.ps1").resolve()
+    assert configured_signer.is_file()
     assert command["args"].count("%1") == 1
 
 
