@@ -13,6 +13,13 @@
     and tracker into that directory, and records the final installer's hash.
     verify_release.ps1 binds those records to the generated NSIS script and the
     finished installer.
+
+    Tauri routes more than those three through this command. Unsigned resource
+    executables and DLLs bundled with the app, the NSIS plugin DLLs it copies
+    into the build, and the generated uninstaller all arrive here before the
+    installer does. They are signed and validated to the same standard, but they
+    are not shipping boundaries and leave no evidence record: they are reached
+    only through an installer this gate already binds.
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -22,6 +29,31 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Anything Tauri hands over that is not a Portable Executable is outside the
+# contract this wrapper was written against. Read the DOS stub's pointer to the
+# PE header rather than trusting the extension, so the fallback branch cannot be
+# talked into spending a signature on an arbitrary file.
+function Test-PortableExecutable {
+    param([string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        if ($stream.Length -lt 64) { return $false }
+        $dosHeader = [byte[]]::new(64)
+        if ($stream.Read($dosHeader, 0, 64) -ne 64) { return $false }
+        if ($dosHeader[0] -ne 0x4D -or $dosHeader[1] -ne 0x5A) { return $false }  # "MZ"
+        $peOffset = [System.BitConverter]::ToInt32($dosHeader, 0x3C)
+        if ($peOffset -lt 64 -or $peOffset -gt ($stream.Length - 4)) { return $false }
+        $stream.Position = $peOffset
+        $peSignature = [byte[]]::new(4)
+        if ($stream.Read($peSignature, 0, 4) -ne 4) { return $false }
+        return $peSignature[0] -eq 0x50 -and $peSignature[1] -eq 0x45 -and
+               $peSignature[2] -eq 0x00 -and $peSignature[3] -eq 0x00            # "PE\0\0"
+    } finally {
+        $stream.Dispose()
+    }
+}
 
 $evidenceDirectory = $env:TIME_RELEASE_SIGNING_EVIDENCE_DIR
 $buildId = $env:TIME_RELEASE_BUILD_ID
@@ -43,8 +75,15 @@ if ($leaf -eq "Time.exe") {
 } elseif ($leaf -match '^Time_.+_x64-setup\.exe$') {
     $kind = "installer"
     $evidenceLeaf = $null
+} elseif (Test-PortableExecutable -Path $artifact) {
+    # A bundled resource binary, a copied NSIS plugin DLL, or the generated
+    # uninstaller. Signed and checked like the rest; no evidence copy, and no
+    # "$kind.json" record — every one of these would collide on one filename,
+    # and verify_release.ps1 must keep binding exactly three boundaries.
+    $kind = "auxiliary"
+    $evidenceLeaf = $null
 } else {
-    throw "Release signing blocked: unrecognized Tauri artifact '$artifact'. Update the evidence contract before signing a new artifact type."
+    throw "Release signing blocked: '$artifact' is not a Portable Executable. Update the evidence contract before signing a new artifact type."
 }
 
 if (-not (Get-Command artifact-signing-cli -ErrorAction SilentlyContinue)) {
@@ -100,7 +139,19 @@ $record = [ordered]@{
     timestampAuthority = $signature.TimeStamperCertificate.Subject
     capturedAtUtc      = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 }
-$recordPath = Join-Path $evidenceDirectory "$kind.json"
-$record | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $recordPath -Encoding utf8
 
-Write-Host "Recorded signed $kind evidence for build $buildId."
+if ($kind -eq "auxiliary") {
+    # Appended, never overwritten, and deliberately not "auxiliary.json": the
+    # verifier reads records as "<kind>.json", so a name it cannot form is a
+    # structural guarantee that a helper file can never stand in for a boundary.
+    # This log is an audit trail of what a release spent signatures on, nothing
+    # the gate depends on.
+    $auxiliaryLogPath = Join-Path $evidenceDirectory "auxiliary.jsonl"
+    $record | ConvertTo-Json -Depth 3 -Compress |
+        Add-Content -LiteralPath $auxiliaryLogPath -Encoding utf8
+    Write-Host "Signed bundle helper '$leaf' for build $buildId (not a shipping boundary)."
+} else {
+    $recordPath = Join-Path $evidenceDirectory "$kind.json"
+    $record | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $recordPath -Encoding utf8
+    Write-Host "Recorded signed $kind evidence for build $buildId."
+}

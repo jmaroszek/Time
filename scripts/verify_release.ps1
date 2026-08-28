@@ -13,6 +13,11 @@
     tracker while Tauri is bundling. This verifier requires all three evidence
     records to share one build id, checks their hashes and signatures, and
     proves the generated NSIS script used the recorded app and tracker sources.
+
+    The bundler also routes resource binaries, copied NSIS plugin DLLs, and the
+    generated uninstaller through the signing wrapper. Those are signed to the
+    same standard but are not boundaries here: each is reachable only through an
+    installer this gate already binds, so they are reported, never required.
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -199,6 +204,17 @@ if ($trackerSourceHash -ne $trackerFacts.SHA256) {
 
 @($installerFacts, $appFacts, $trackerFacts) |
     Format-List Role, Artifact, Publisher, TimestampAuthority, SHA256, SizeBytes
+
+# Informational only, for the release record: what else this build spent
+# signatures on. Never a gate -- an absent or unreadable log cannot block a
+# release, because nothing users run depends on it.
+$auxiliaryLog = Join-Path $EvidenceDirectory "auxiliary.jsonl"
+if (Test-Path -LiteralPath $auxiliaryLog -PathType Leaf) {
+    $auxiliaryCount = @(
+        Get-Content -LiteralPath $auxiliaryLog | Where-Object { $_.Trim() }
+    ).Count
+    Write-Host "Signed bundle helpers (not shipping gates): $auxiliaryCount"
+}
 
 if (Test-Path -LiteralPath $appRecord.sourcePath -PathType Leaf) {
     $postBuildStatus = (Get-AuthenticodeSignature -LiteralPath $appRecord.sourcePath).Status
