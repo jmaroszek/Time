@@ -256,9 +256,10 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   const focusRulesId = await focusToggle.getAttribute("aria-controls");
   expect(focusRulesId).not.toBeNull();
   const focusRules = page.locator(`[id="${focusRulesId}"]`);
+  await expect(focusRules).toHaveCount(0);
   await focusToggle.click();
   await expect(page.getByText("code.exe", { exact: true })).toBeVisible();
-  await expect(focusRules).toHaveAttribute("data-open", "true");
+  await expect(focusRules).toHaveCSS("transition-duration", "0s");
   await expect.poll(() => focusRules.evaluate((node) => node.getBoundingClientRect().height))
     .toBeGreaterThan(40);
   if (width < 640) {
@@ -296,49 +297,48 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   await assertNoHorizontalOverflow(page);
 });
 
-test("@settle a cold category disclosure always acquires its body height", async ({
+test("@settle category disclosures remain immediate after Library changes", async ({
   page,
 }) => {
   await waitForDashboard(page);
   await page.getByRole("button", { name: "Activity", exact: true }).click();
 
-  // Switching faces unmounts CategoriesAndRules. Repeating that cycle makes
-  // every open the first open of a fresh Collapsible, which is the native
-  // WebView failure the ordinary one-pass compatibility check did not cover.
+  // Exercise the filter, sort, and classification path that used to leave the
+  // chevron open over a zero-height animated body in the native WebView.
+  const activityType = page.getByRole("combobox", { name: "Activity type" });
+  await activityType.click();
+  await page.getByRole("option", { name: /^Apps/ }).click();
+  const classification = page.getByRole("combobox", { name: "Classification filter" });
+  await classification.click();
+  await page.getByRole("option", { name: /^Uncategorized/ }).click();
+  await page.getByRole("button", { name: "Name", exact: true }).click();
+  await page.getByRole("button", { name: "Last seen", exact: true }).click();
+  const classifyExplorer = page.getByRole("combobox", { name: "Classify Explorer" });
+  await classifyExplorer.click();
+  await page.getByRole("option", { name: /^System/ }).click();
+  await expect(page.getByText("Explorer is now System.", { exact: true })).toBeVisible();
+
+  // Switching faces still remounts CategoriesAndRules. Repeating that cycle
+  // proves the body appears immediately from a fresh disclosure each time.
   for (let attempt = 0; attempt < 10; attempt += 1) {
     await page.getByRole("button", { name: "Categories & Rules", exact: true }).click();
-    const toggle = page.getByRole("button", { name: "Expand Focus rules" });
+    const toggle = page.getByRole("button", { name: "Expand System rules" });
     const bodyId = await toggle.getAttribute("aria-controls");
     expect(bodyId).not.toBeNull();
+    const chevron = page.locator(`button[aria-controls="${bodyId}"] > span`);
     const body = page.locator(`[id="${bodyId}"]`);
 
-    await expect(body).toHaveAttribute("data-open", "false");
-    await expect(body).toHaveAttribute("aria-hidden", "true");
-    await expect.poll(() => body.evaluate((node) => node.getBoundingClientRect().height))
-      .toBeLessThanOrEqual(1);
-    if (attempt === 0) {
-      await body.evaluate((node) => {
-        node.addEventListener("transitionrun", (event) => {
-          if (event.propertyName === "grid-template-rows") {
-            node.setAttribute("data-test-grid-transition", "started");
-          }
-        });
-      });
-    }
+    await expect(body).toHaveCount(0);
+    await expect(chevron).toHaveClass(/transition-transform/);
 
     await toggle.click();
-    await expect(body).toHaveAttribute("data-open", "true");
-    if (attempt === 0) {
-      await expect(body).toHaveAttribute("data-test-grid-transition", "started");
-    }
-    await expect(body).not.toHaveAttribute("aria-hidden", "true");
-    await expect(page.getByText("code.exe", { exact: true })).toBeVisible();
-    await expect.poll(() => body.evaluate((node) => node.getBoundingClientRect().height))
-      .toBeGreaterThan(40);
+    await expect(chevron).toHaveClass(/rotate-90/);
+    await expect(body).toBeVisible();
+    await expect(body).toHaveCSS("transition-duration", "0s");
+    await expect(body.getByText("explorer.exe", { exact: true })).toBeVisible();
 
-    await page.getByRole("button", { name: "Collapse Focus rules" }).click();
-    await expect.poll(() => body.evaluate((node) => node.getBoundingClientRect().height))
-      .toBeLessThanOrEqual(1);
+    await page.getByRole("button", { name: "Collapse System rules" }).click();
+    await expect(body).toHaveCount(0);
     await page.getByRole("button", { name: "Apps & Websites", exact: true }).click();
   }
 });

@@ -249,51 +249,12 @@
 .shadow-control { box-shadow: var(--shadow-control); }
 .time-card-shadow { box-shadow: var(--shadow-card); }
 
-/* The populated row exists at 0fr before its first open, so WebView2 always
-   has a nonzero intrinsic target for the 1fr end of the transition. Padding
-   and borders stay inside the bare clip because they survive a zero-height
-   track. The inner body has enough padding for its focus outlines, so the clip
-   can remain hidden without a transition-end state machine. */
-.collapsible {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  /* Both properties run the same length on the same curve. A fade that
-     finished early would leave an invisible box still collapsing, shunting
-     everything below it upward with nothing on screen to explain why. The
-     curve is eased at both ends rather than only the last one: a long slow
-     tail reads as the animation hanging just before it finishes. */
-  transition:
-    grid-template-rows 200ms cubic-bezier(.4, 0, .2, 1),
-    opacity 200ms cubic-bezier(.4, 0, .2, 1);
-}
-.collapsible-clip {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  visibility: hidden;
-  /* Keep the body painted until the close finishes. Opening overrides the
-     delay so its contents appear as the row begins to grow. */
-  transition: visibility 0s linear 200ms;
-}
-.collapsible[data-open="true"] {
-  grid-template-rows: 1fr;
-  opacity: 1;
-}
-.collapsible[data-open="true"] .collapsible-clip {
-  visibility: visible;
-  transition-delay: 0s;
-}
-
 .menu-pop { animation: menu-pop 140ms ease-out; }
 .panel-in { animation: panel-in 150ms ease-out; }
 .live-pulse { animation: live-pulse 2s ease-out infinite; }
 .alert-pulse { animation: alert-pulse 1.35s ease-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .collapsible {
-    transition: none;
-  }
   .panel-in,
   .live-pulse,
   .alert-pulse {
