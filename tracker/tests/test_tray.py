@@ -106,6 +106,7 @@ def test_tray_menu_uses_default_dashboard_and_one_state_action(tmp_path, monkeyp
         "Pause tracking",
         "Resume tracking",
         "- - - -",
+        "Send feedback",
         "Quit tracker",
     ]
     assert items[0].default is True
@@ -275,3 +276,31 @@ def test_tray_controller_hides_and_recreates_without_stopping_tracker(
     assert len(pystray_fake.icons) == 2
     controller.close()
     assert pystray_fake.icons[1].stopped.is_set()
+
+
+def test_tray_send_feedback_opens_a_support_draft(tmp_path, monkeypatch):
+    opened = []
+    monkeypatch.setattr(tray.os, "startfile", opened.append, raising=False)
+    actions = tray._TrayActions(tmp_path / "unused.db", threading.Event())
+
+    actions.send_feedback(None, None)
+
+    assert len(opened) == 1
+    url = opened[0]
+    assert url.startswith("mailto:support@trackwithtime.com?subject=")
+    # Pinned against the dashboard's own subject: the two runtimes build this
+    # draft independently, and a drift would split one reader's conversation
+    # across two inbox threads. See dashboard/src/lib/support.ts.
+    assert "subject=Time%20support%20or%20feedback" in url
+    assert "&body=" in url
+
+
+def test_tray_send_feedback_survives_a_machine_with_no_mail_client(tmp_path, monkeypatch):
+    def explode(_url):
+        raise OSError("no handler registered")
+
+    monkeypatch.setattr(tray.os, "startfile", explode, raising=False)
+    actions = tray._TrayActions(tmp_path / "unused.db", threading.Event())
+
+    # No handler is a dead menu item, not a dead tracker.
+    actions.send_feedback(None, None)

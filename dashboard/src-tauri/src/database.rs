@@ -80,6 +80,10 @@ const RENDERER_SETTING_KEYS: &[&str] = &[
     "welcome_dismissed",
     "recording_off_notice_dismissed",
     "off_schedule_notice_dismissed",
+    "feedback_prompts_enabled",
+    "app_feedback_prompt_state",
+    "extension_review_prompt_state",
+    "feedback_prompt_last_shown",
 ];
 
 /// Values reset by the native Restore defaults action.  Keep this list in
@@ -118,6 +122,7 @@ const RESTORE_DEFAULT_SETTINGS: &[(&str, &str)] = &[
     ("launch_at_login", "0"),
     ("show_tray_icon", "1"),
     ("check_updates_automatically", "1"),
+    ("feedback_prompts_enabled", "1"),
 ];
 
 fn schedule_minute(raw: &str, fallback: u32) -> u32 {
@@ -311,7 +316,8 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('privacy_onboarding_complete','0'),
     ('launch_at_login','0'),
     ('show_tray_icon','1'),
-    ('check_updates_automatically','1');
+    ('check_updates_automatically','1'),
+    ('feedback_prompts_enabled','1');
 COMMIT;
 "#;
 

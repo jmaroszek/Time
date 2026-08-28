@@ -109,6 +109,10 @@ const consolidationSessions = consolidationDomains.flatMap((domain, domainIndex)
  *  `tracker=missing` for the variant that offers to start tracking. */
 const firstRun = fixtureParams.get("fixture") === "firstrun";
 
+/** "?feedback=app" is a reader who has earned the first ask; "?feedback=extension"
+ *  one who has already answered it and whose websites are reaching Time. */
+const feedbackFixture = fixtureParams.get("feedback");
+
 let sessions = firstRun
   ? []
   : newUser
@@ -267,6 +271,13 @@ const settings: Record<string, string> = {
     ...(mergedApps ? { "time.exe": "Time", "time-tracker.exe": "Time" } : {}),
   }),
   tracker_version: "0.1.0-device-fixture",
+  feedback_prompts_enabled: "1",
+  // Answered already for the extension fixture, so the arbiter moves past the
+  // app question to the one that fixture is about.
+  app_feedback_prompt_state: feedbackFixture === "extension" ? "done" : "",
+  extension_review_prompt_state: "",
+  // Never asked, so the gap between asks has nothing to hold back.
+  feedback_prompt_last_shown: "0",
 };
 
 /** Windows' Run value, modelled apart from the database setting because they
@@ -331,6 +342,14 @@ function selectFixture(args: InvokeArgs): unknown {
     return [{ first_ts: sessions[0]?.start ?? null }];
   }
   if (query.includes("select count(*) as n from sessions")) return [{ n: 0 }];
+  // The feedback floor's active-day count. Zero unless a fixture asks for the
+  // prompt: the default fixture already clears every other gate — 500 days of
+  // history, live tracker, rules of its own — so answering this honestly here
+  // would put the panel on top of every other workflow in this file.
+  if (query.includes("as n from (select distinct date(")) {
+    const cap = Number((args?.values as unknown[] | undefined)?.[0] ?? 0);
+    return [{ n: feedbackFixture === null ? 0 : cap }];
+  }
   throw new Error(`Device fixture has no db_select response for: ${query}`);
 }
 

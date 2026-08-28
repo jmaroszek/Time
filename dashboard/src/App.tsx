@@ -14,7 +14,9 @@ import {
   WaitingForTracker,
   WelcomePanel,
 } from "./components/AppStates";
+import { FeedbackPanel } from "./components/FeedbackPanel";
 import { isMissingSchemaError } from "./lib/dbErrors";
+import { browserDomainCoverage, websiteSignalConfirmed } from "./lib/domainCoverage";
 import {
   currentHistoryRevision,
   invalidateHistory,
@@ -55,6 +57,7 @@ import {
 import { downloadPercent, updateButtonLabel, type AvailableUpdate, type UpdateProgress } from "./lib/appUpdate";
 import { BannerProvider, useBanner } from "./state/banner";
 import { useAppUpdate } from "./state/useAppUpdate";
+import { useFeedbackPrompt } from "./state/useFeedbackPrompt";
 import { MetaProvider, useMeta } from "./state/meta";
 import { useActivityModel } from "./state/useActivityModel";
 import { useInsightsView } from "./state/useInsightsView";
@@ -404,6 +407,39 @@ function Shell() {
   const backlog = useActivityModel(backlogSource, backlogQuery);
   const showBacklogBadge = (backlog.result?.triage.seconds ?? 0) >= BACKLOG_BADGE_SECONDS;
 
+  // Everything the feedback arbiter needs that only this component can see.
+  // All of it rides on the all-time sessions the backlog already loaded, so
+  // asking these questions costs nothing beyond the arithmetic.
+  //
+  // The milestone is an empty backlog: the reader has classified everything
+  // Time recorded, which is the moment the work they put in turns into the
+  // numbers they came for. It is the one point in a normal week where Time has
+  // visibly just paid off, and it is a far better moment to ask than a date.
+  const atMilestone = backlog.result !== null && backlog.result.triage.seconds === 0;
+  // Domains arriving is the only available proof the extension is installed
+  // and working — Windows cannot be asked directly. Computed over the same
+  // all-time window, so a reader who stopped browsing this week is not read as
+  // having uninstalled it.
+  const extensionWorking = useMemo(() => {
+    if (!backlogSessions.ready) return false;
+    return websiteSignalConfirmed(
+      browserDomainCoverage(backlogSessions.sessions, meta.browserSet),
+    );
+  }, [backlogSessions.ready, backlogSessions.sessions, meta.browserSet]);
+  const feedback = useFeedbackPrompt({
+    // Strictly subordinate to the tracker banners: at most one interruption is
+    // on screen, and a reader whose tracker has stopped is never asked to go
+    // and praise it. Settings is excluded for the same reason banners are —
+    // it reports Time's own state in its own panels.
+    enabled: ready && bannerPlan === null && tab !== "settings",
+    settings: trackerSettings,
+    firstSessionSec,
+    recording: trackerState?.kind === "recording",
+    hasOwnRules: meta.rules.length > 0,
+    atMilestone,
+    extensionWorking,
+  });
+
   if (!meta.loaded) return <Spinner label="Connecting to database..." />;
   if (waitingForTracker) return <WaitingForTracker />;
   if (meta.error && isNewerSchemaError(meta.error)) return <NewerDatabaseScreen />;
@@ -568,6 +604,17 @@ function Shell() {
           tab, because a reader who is not on Insights is no less affected, and
           they leave the table its room. */}
       {renderTrackerBanner()}
+
+      {/* Never beside a tracker banner: `enabled` above already resolved to
+          false whenever one is up, so this cannot be a second interruption. */}
+      {feedback.plan && (
+        <FeedbackPanel
+          plan={feedback.plan}
+          daysOfUse={feedback.daysOfUse}
+          appVersion={feedback.appVersion}
+          trackerVersion={meta.settings.tracker_version}
+        />
+      )}
 
       {/* A flex column so a tab can opt into filling the leftover viewport
           height — Activity does, to bound its own scroll wells. Tabs that do

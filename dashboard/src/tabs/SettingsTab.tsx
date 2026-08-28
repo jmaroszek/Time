@@ -46,6 +46,7 @@ import {
   updateSetting,
   type TrackerStatus,
 } from "../lib/queries";
+import { FEEDBACK_PROMPTS_ENABLED_KEY } from "../lib/feedbackPrompt";
 import { SUPPORT_EMAIL, supportEmailUrl } from "../lib/support";
 import { useBanner } from "../state/banner";
 import { useLifecycleBusy } from "../state/lifecycleBusy";
@@ -1221,7 +1222,19 @@ export default function SettingsTab({
           they end the page together rather than with support wedged between
           them. Data goes last: it is the only section that can destroy
           something no setting can put back. */}
-      <HelpAndFeedbackSection appVersion={appVersion} trackerVersion={meta.settings.tracker_version} />
+      <HelpAndFeedbackSection
+        appVersion={appVersion}
+        trackerVersion={meta.settings.tracker_version}
+        promptsEnabled={
+          (drafts[FEEDBACK_PROMPTS_ENABLED_KEY]
+            ?? meta.settings[FEEDBACK_PROMPTS_ENABLED_KEY]
+            ?? "1") !== "0"
+        }
+        promptsSaving={savingKeys.has(FEEDBACK_PROMPTS_ENABLED_KEY)}
+        onPromptsChange={(enabled) =>
+          selectSetting(FEEDBACK_PROMPTS_ENABLED_KEY, enabled ? "1" : "0")
+        }
+      />
       <RestoreDefaultsSection
         disabled={savingKeys.size > 0 || lifecycleBusy}
         onRestored={() => setPause({ paused: false, until: 0 })}
@@ -1284,9 +1297,15 @@ function ExclusionSummary({ onManage }: { onManage: () => void }) {
 function HelpAndFeedbackSection({
   appVersion,
   trackerVersion,
+  promptsEnabled,
+  promptsSaving,
+  onPromptsChange,
 }: {
   appVersion: string | null;
   trackerVersion: string | undefined;
+  promptsEnabled: boolean;
+  promptsSaving: boolean;
+  onPromptsChange: (enabled: boolean) => void;
 }) {
   const banner = useBanner();
   const [copied, setCopied] = useState(false);
@@ -1328,6 +1347,22 @@ function HelpAndFeedbackSection({
           </Button>
         </div>
       </div>
+      {/* The same switch "Don't ask again" clears from the prompt itself. A
+          reader who silences one in the moment should be able to find what they
+          turned off and turn it back on, and this is the section they will look
+          in. */}
+      <Row
+        label="Ask for feedback occasionally"
+        help="After you have used Time for a while, ask once how it is going. Never more than one question, and never while recording is off."
+        control={
+          <PrivacyToggle
+            label="Ask for feedback occasionally"
+            enabled={promptsEnabled}
+            disabled={promptsSaving}
+            onChange={onPromptsChange}
+          />
+        }
+      />
     </Section>
   );
 }

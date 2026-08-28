@@ -19,11 +19,37 @@ import sys
 import threading
 import time as _time
 from pathlib import Path
+from urllib.parse import quote
 
 from tracker.db import is_paused, pause_until, set_settings
 from tracker.tracking_schedule import ScheduleState, schedule_state
 
+# Mirrors SUPPORT_EMAIL and the "general" subject in
+# dashboard/src/lib/support.ts. The tray reaches the mail client through the
+# shell rather than the webview, so Tauri's opener allowlist does not gate this
+# one -- but a subject that drifts from the dashboard's would split a single
+# reader's conversation across two threads in the same inbox.
+_SUPPORT_EMAIL = "support@trackwithtime.com"
+_SUPPORT_SUBJECT = "Time support or feedback"
+_SUPPORT_BODY = "\n".join(
+    [
+        "What would you like to share?",
+        "",
+        "If you are reporting a problem, please include your Windows version,"
+        " what you expected, what happened, and the steps that reproduce it.",
+    ]
+)
+
 _DEV_ICON_PATH = Path(__file__).resolve().parent.parent / "dashboard/src-tauri/icons/icon.ico"
+
+
+def _support_mailto() -> str:
+    """The support draft, as a URL the shell can hand to a mail client."""
+    return (
+        f"mailto:{_SUPPORT_EMAIL}"
+        f"?subject={quote(_SUPPORT_SUBJECT)}"
+        f"&body={quote(_SUPPORT_BODY)}"
+    )
 
 
 def _icon_path() -> Path:
@@ -160,6 +186,22 @@ class _TrayActions:
         except OSError:
             logging.exception("Could not open the Time dashboard")
 
+    def send_feedback(self, _icon, _item) -> None:
+        """Open a support draft in whatever handles mail on this machine.
+
+        Here as well as in the dashboard because the tray is reachable when the
+        dashboard is not open, which is most of the time -- and a reader who
+        wants to report something is often reacting to the tracker rather than
+        to a screen they are already looking at. Nothing is sent: the shell
+        opens a draft the reader edits and sends themselves.
+        """
+        try:
+            # The shell's own handler for the scheme; no command line is built
+            # here and nothing from the database reaches the URL.
+            os.startfile(_support_mailto())
+        except OSError:
+            logging.exception("Could not open an email to Time support")
+
     def quit_tracker(self, icon, _item) -> None:
         self.stop_event.set()
         icon.stop()
@@ -223,6 +265,7 @@ def _build_menu(pystray, actions: _TrayActions):
             visible=actions.is_paused,
         ),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Send feedback", actions.send_feedback),
         pystray.MenuItem("Quit tracker", actions.quit_tracker),
     )
 

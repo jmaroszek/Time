@@ -691,6 +691,32 @@ export async function fetchEarliestSessionStart(): Promise<number | null> {
   return rows[0]?.first_ts ?? null;
 }
 
+/**
+ * Distinct local days carrying a recorded session, counted no further than
+ * `cap`. Backs the engagement floor behind the feedback prompts, which asks
+ * whether Time has actually been used rather than how long it has been
+ * installed.
+ *
+ * Capped because the answer is only ever compared against a threshold, and an
+ * uncapped `COUNT(DISTINCT ...)` is a full scan of the largest table in the
+ * database. With the limit, SQLite stops as soon as it has seen `cap` distinct
+ * days — the first few weeks of rows — however many years sit behind them.
+ *
+ * Raw `start_ts`, not the corrected start the sibling query above uses. A
+ * correction can only move a session across a midnight boundary, which cannot
+ * change whether someone has used Time on ten separate days, and the join
+ * would cost the early exit that makes this cheap.
+ */
+export async function fetchActiveDayCount(cap: number): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<{ n: number }[]>(
+    "SELECT COUNT(*) AS n FROM (SELECT DISTINCT date(start_ts,'unixepoch','localtime')" +
+      " FROM sessions LIMIT ?)",
+    [cap],
+  );
+  return rows[0]?.n ?? 0;
+}
+
 /** Snapshot the DB under a user-chosen name and return the full path. */
 export async function backupDatabase(backupName: string): Promise<string> {
   return invoke<string>("backup_database", { backupName });

@@ -19,7 +19,10 @@
         { "url": "https://chromewebstore.google.com/*" },
         { "url": "https://microsoftedge.microsoft.com/addons/*" },
         { "url": "https://addons.mozilla.org/*" },
-        { "url": "mailto:support@trackwithtime.com?subject=Time%20support%20or%20feedback&body=*" }
+        { "url": "mailto:support@trackwithtime.com?subject=Time%20support%20or%20feedback&body=*" },
+        { "url": "mailto:support@trackwithtime.com?subject=Time%20feedback%3A%20what%20is%20working&body=*" },
+        { "url": "mailto:support@trackwithtime.com?subject=Time%20feedback%3A%20what%20is%20not%20working&body=*" },
+        { "url": "mailto:support@trackwithtime.com?subject=Time%20Web%20Extension%3A%20what%20is%20not%20working&body=*" }
       ]
     }
   ]

@@ -240,6 +240,11 @@ DEFAULT_SETTINGS = {
     # default because an unpatchable bug on a local-history app is the worse
     # risk; the tracker never checks, and installing is always a user action.
     "check_updates_automatically": "1",
+    # Dashboard-only. Governs whether Time ever asks the reader for feedback or
+    # a review. The per-ask state lives outside this map on purpose: restoring
+    # defaults resets the preference, not a reader's answer to a question they
+    # have already been asked.
+    "feedback_prompts_enabled": "1",
 }
 
 
