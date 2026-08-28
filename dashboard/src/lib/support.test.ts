@@ -40,10 +40,23 @@ describe("support email", () => {
     const praise = new URL(supportEmailUrl({}, "praise")).searchParams.get("body");
     const problem = new URL(supportEmailUrl({}, "problem")).searchParams.get("body");
 
-    expect(praise).toContain("What is Time doing best for you?");
-    expect(praise).toContain("May I quote you on trackwithtime.com?");
+    expect(praise).toContain("What do you like about Time?");
     expect(problem).toContain("What went wrong?");
     expect(problem).toContain("Your Windows version");
+  });
+
+  it("asks to quote and to name separately, defaulting both to no", () => {
+    // Two different things to agree to. Asked as one question, the cautious
+    // answer is no to both, which loses a usable quote over a name.
+    const body = new URL(supportEmailUrl({}, "praise")).searchParams.get("body") ?? "";
+
+    expect(body).toContain("May I quote this on trackwithtime.com?");
+    expect(body).toContain("may I use your first and last name with it?");
+    expect(body.indexOf("May I quote this")).toBeLessThan(
+      body.indexOf("first and last name"),
+    );
+    // Silence is never consent.
+    expect(body).toContain("Leaving these blank means no to both");
   });
 
   it("asks the extension reader about their browser", () => {

@@ -127,50 +127,63 @@ export function FeedbackPanel({
   if (step === "ask") {
     return (
       <Panel
-        title={extension ? "Is the Time Web Extension working for you?" : "How is Time working for you?"}
+        title={
+          extension
+            ? "Are you satisfied with the Time Web Extension?"
+            : "Are you satisfied with Time?"
+        }
         detail={
           extension
-            ? "Websites are reaching Time, so the extension is doing its job. One question while it is."
-            : "You have been using Time for a while now. One question, and then this goes away."
+            ? "Websites are reaching Time, so the extension appears to be working. Can you confirm that it is?"
+            : "You have been using Time for a while. Has it met your expectations?"
         }
         busy={busy}
         onSnooze={() => void snooze()}
         onSilence={() => void silence()}
       >
         <Button variant="primary" disabled={busy} onClick={() => setStep("positive")}>
-          {extension ? "Yes, it works" : "Going well"}
+          {extension ? "Yes, it works" : "Yes"}
         </Button>
         <Button disabled={busy} onClick={() => setStep("negative")}>
-          {extension ? "Not really" : "Not great"}
+          {extension ? "No, it doesn't" : "No"}
         </Button>
       </Panel>
     );
   }
 
+  // Both second steps say the same three things in the same order: what the
+  // channel is, what pressing Yes does, and what it will cost the reader. The
+  // question differs; the shape does not, so neither answer feels like the
+  // lesser one to have given.
+  //
+  // Their buttons are labelled "Yes" and "No" for the same reason the first
+  // step's are, and the plainer label is the point rather than the tone. A
+  // wider word here -- "No thanks" -- moves both controls, so a reader
+  // answering the second question finds different things under the cursor that
+  // just answered the first. That mis-click is not free on this step: it opens
+  // a draft or a store page and retires the question.
   if (step === "positive") {
     return (
       <Panel
-        title={extension ? "Would you leave it a review?" : "Would you tell me what is working?"}
+        title="Would you like to leave a review?"
         detail={
           extension
-            ? `A short review on the ${plan.listing?.store} is the single most useful thing for an extension nobody has heard of yet.`
-            : "Time has no reviews to collect, so a sentence by email is what there is — and I would like to quote it on the site, with your permission."
+            ? `Reviews live on the ${plan.listing?.store} page. Click Yes and it opens in your browser — two minutes or less.`
+            : "Time collects reviews by email. Click Yes and your email opens with a template to fill out — two minutes or less."
         }
         busy={busy}
         onSnooze={() => void snooze()}
         onSilence={() => void silence()}
       >
-        {extension ? (
-          <Button variant="primary" disabled={busy} onClick={() => void review()}>
-            Open {plan.listing?.store}
-          </Button>
-        ) : (
-          <Button variant="primary" disabled={busy} onClick={() => void email("praise")}>
-            Write a sentence
-          </Button>
-        )}
+        <Button
+          variant="primary"
+          disabled={busy}
+          onClick={() => (extension ? void review() : void email("praise"))}
+        >
+          Yes
+        </Button>
         <Button disabled={busy} onClick={() => void finish()}>
-          No thanks
+          No
         </Button>
       </Panel>
     );
@@ -178,11 +191,11 @@ export function FeedbackPanel({
 
   return (
     <Panel
-      title={extension ? "What is it getting wrong?" : "What would you change?"}
+      title="Would you like to tell me what is wrong?"
       detail={
         extension
-          ? "Tell me which browser and which sites, and I will try to fix it."
-          : "I would rather hear it than not. Your email opens with the questions already in it — nothing is sent until you send it."
+          ? "Time collects extension reports by email. Click Yes and your email opens with a template to fill out — two minutes or less."
+          : "Time collects feedback by email. Click Yes and your email opens with a template to fill out — two minutes or less."
       }
       busy={busy}
       onSnooze={() => void snooze()}
@@ -193,10 +206,10 @@ export function FeedbackPanel({
         disabled={busy}
         onClick={() => void email(extension ? "extension" : "problem")}
       >
-        Tell me what is wrong
+        Yes
       </Button>
       <Button disabled={busy} onClick={() => void finish()}>
-        No thanks
+        No
       </Button>
     </Panel>
   );
@@ -243,7 +256,7 @@ function Panel({
             onClick={onSnooze}
             className="rounded-md px-2 py-1 text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink disabled:opacity-50"
           >
-            Not now
+            Ask later
           </button>
           <button
             type="button"
