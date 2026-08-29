@@ -233,6 +233,7 @@ export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
   launch_at_login: "0",
   show_tray_icon: "1",
   check_updates_automatically: "1",
+  feedback_prompts_enabled: "1",
 };
 
 /** Ask native lifecycle orchestration to restore only settings represented on
