@@ -66,6 +66,58 @@ def test_wrapper_detaches_the_build_from_the_launching_console():
     assert '"-NoProfile"' in spawn_block
 
 
+def test_wrapper_quotes_every_argument_it_forwards():
+    """`Start-Process -ArgumentList` joins its array with spaces and quotes
+    nothing, so any value containing one arrives as several positional
+    arguments. A release note is a sentence, so this was certain to fire on the
+    first real use -- and did, during the rehearsal: `-Notes "Rehearsal of the
+    new release wrapper."` failed with "a positional parameter cannot be found
+    that accepts argument 'new'". Every forwarded value must be quoted."""
+    assert "function ConvertTo-ProcessArgument" in RELEASE
+    assert "function ConvertTo-PowerShellLiteral" in RELEASE
+
+    block = RELEASE[RELEASE.index("$publishScript = ") : RELEASE.index("Start-Process pwsh")]
+    region = block[block.index("$inner =") : block.index("$publishArgs = @(")]
+
+    # Two parsers, so two layers of quoting. Each value is interpolated into the
+    # -Command string and must go through the PowerShell-literal quoter; the
+    # finished string is then one process argument and must go through the
+    # process-argument quoter.
+    #
+    # An earlier version of this guard looked at the 60 characters preceding each
+    # value, which spilled onto the neighbouring line and let an unquoted value
+    # pass. A test that cannot fail is worse than no test, so this one checks
+    # every `$( ... )` interpolation individually.
+    for value in ("$publishScript", "$DownloadBaseUrl", "$Notes"):
+        assert f"ConvertTo-PowerShellLiteral {value}" in region, f"{value} is not quoted"
+        for expression in re.findall(r"\$\(([^)]*)\)", region):
+            if value in expression:
+                assert "ConvertTo-PowerShellLiteral" in expression, \
+                    f"interpolated unquoted: $({expression})"
+
+    command_line = next(line for line in block.splitlines() if '"-Command"' in line)
+    assert "ConvertTo-ProcessArgument" in command_line, "the -Command string is not quoted as one argument"
+
+
+def test_wrapper_keeps_one_log_with_both_streams_interleaved():
+    """cargo and the Tauri bundler write "Compiling", "Finished release",
+    "Built application at" and "Finished 1 bundle at" to stderr. Capturing the
+    streams separately -- which is all Start-Process allows, since it refuses to
+    point both redirects at one file -- drops the entire Rust and NSIS phase out
+    of the log and destroys the interleaving. The child has to merge its own."""
+    # Anchored to the command string being built, not just "2>&1 appears
+    # somewhere": the key pre-flight uses that operator too, so a loose check is
+    # satisfied by an unrelated line and never fails.
+    assert '$inner += " 2>&1"' in RELEASE
+    assert "-RedirectStandardError" not in RELEASE
+    assert RELEASE.count("-RedirectStandardOutput $log") == 1
+    # -Command, not -File: only PowerShell's parser applies 2>&1 to a native
+    # child's stderr.
+    spawn = RELEASE[RELEASE.index("$publishArgs = @(") : RELEASE.index("Start-Process pwsh")]
+    assert '"-Command"' in spawn
+    assert '"-File"' not in spawn
+
+
 def test_wrapper_stays_on_the_signed_path():
     """Three scripts build this installer and only one may sign it. The wrapper
     delegates to publish_release.ps1 rather than building, so it must never

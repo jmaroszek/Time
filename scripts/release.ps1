@@ -82,6 +82,30 @@ function Read-LogLines {
     return ((Read-LogText -Path $Path) -split "`r?`n")
 }
 
+# Start-Process -ArgumentList joins its array with spaces and quotes nothing, so
+# any value containing a space arrives as several positional arguments. A release
+# note is a sentence, which made this certain to bite on first real use:
+# `-Notes "Rehearsal of the new wrapper."` reached the child as -Notes, then
+# "Rehearsal", then "of", then "the" -- and it failed with "a positional
+# parameter cannot be found that accepts argument 'new'".
+#
+# Quote every value ourselves, following CommandLineToArgvW's rules: backslashes
+# are only special immediately before a quote, where they must be doubled.
+function ConvertTo-ProcessArgument {
+    param([string]$Value)
+
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $escaped = [regex]::Replace($Value, '(\\*)"', '$1$1\"')
+    $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+    return '"' + $escaped + '"'
+}
+
+# A PowerShell single-quoted literal, for building the -Command string below.
+function ConvertTo-PowerShellLiteral {
+    param([string]$Value)
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
 # --- 1. environment ------------------------------------------------------
 
 # Populated here rather than requiring a dot-source, which keeps this to one
@@ -130,14 +154,28 @@ $logDir = Join-Path $repository "dashboard\src-tauri\target\release\build-logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
 $log = Join-Path $logDir "release-$stamp.log"
-$errLog = Join-Path $logDir "release-$stamp.err.log"
+
+# The child merges its own streams with 2>&1, rather than this script capturing
+# them separately. Start-Process refuses to point both redirects at one file, and
+# splitting them loses most of the build: cargo and the Tauri bundler write
+# "Compiling", "Finished release", "Built application at" and "Finished 1 bundle
+# at" to stderr, so a stdout-only log skips the entire Rust and NSIS phase and
+# the interleaving with stdout is gone. One file, in the real order, is what a
+# post-mortem needs -- particularly for the phantom Ctrl+C, where knowing exactly
+# what was happening when it landed is the whole question.
+#
+# -Command rather than -File because only PowerShell's own parser can apply the
+# 2>&1 merge to a native child's stderr.
+$publishScript = Join-Path $PSScriptRoot "publish_release.ps1"
+$inner = "& $(ConvertTo-PowerShellLiteral $publishScript)" +
+         " -DownloadBaseUrl $(ConvertTo-PowerShellLiteral $DownloadBaseUrl)"
+if ($Notes) { $inner += " -Notes $(ConvertTo-PowerShellLiteral $Notes)" }
+$inner += " 2>&1"
 
 $publishArgs = @(
     "-NoProfile", "-NoLogo", "-NonInteractive",
-    "-File", (Join-Path $PSScriptRoot "publish_release.ps1"),
-    "-DownloadBaseUrl", $DownloadBaseUrl
+    "-Command", (ConvertTo-ProcessArgument $inner)
 )
-if ($Notes) { $publishArgs += @("-Notes", $Notes) }
 
 Say "Building. Full log: $log" "White"
 Write-Host ""
@@ -149,7 +187,7 @@ Write-Host ""
 # -NoProfile keeps the interactive profile -- starship, zoxide, the conda hook --
 # out of the build entirely.
 $build = Start-Process pwsh -ArgumentList $publishArgs -WindowStyle Hidden -PassThru `
-    -RedirectStandardOutput $log -RedirectStandardError $errLog
+    -RedirectStandardOutput $log
 
 # --- 4. compact progress -------------------------------------------------
 
@@ -240,12 +278,6 @@ if ($build.ExitCode -ne 0) {
     Write-Host ""
     Write-Host "Last 25 lines of $log" -ForegroundColor DarkGray
     Read-LogLines -Path $log | Where-Object { $_ } | Select-Object -Last 25 | ForEach-Object { "    $_" }
-    $errors = Read-LogLines -Path $errLog | Where-Object { $_ }
-    if ($errors) {
-        Write-Host ""
-        Write-Host "Standard error:" -ForegroundColor DarkGray
-        $errors | Select-Object -Last 25 | ForEach-Object { "    $_" }
-    }
     exit $build.ExitCode
 }
 
