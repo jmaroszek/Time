@@ -102,20 +102,20 @@ def test_tray_menu_uses_default_dashboard_and_one_state_action(tmp_path, monkeyp
     items = menu.items
     assert [str(item.text) for item in items] == [
         "Open dashboard",
-        "- - - -",
         "Pause tracking",
         "Resume tracking",
         "- - - -",
         "Send feedback",
+        "- - - -",
         "Quit tracker",
     ]
     assert items[0].default is True
-    assert items[2].visible is True
-    assert items[3].visible is False
+    assert items[1].visible is True
+    assert items[2].visible is False
 
     tray._write_pause(path, "1", 0)
-    assert items[2].visible is False
-    assert items[3].visible is True
+    assert items[1].visible is False
+    assert items[2].visible is True
 
 
 def test_pause_menu_matches_caffeine_durations_plus_until_resumed(tmp_path):
@@ -124,7 +124,7 @@ def test_pause_menu_matches_caffeine_durations_plus_until_resumed(tmp_path):
     actions.pause_for = lambda duration: seconds.append(duration) or (lambda *_: None)
 
     menu = tray._build_menu(pystray, actions)
-    pause_items = menu.items[2].submenu.items
+    pause_items = menu.items[1].submenu.items
 
     assert [str(item.text) for item in pause_items] == [
         "15 minutes",

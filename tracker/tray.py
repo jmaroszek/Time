@@ -230,7 +230,14 @@ def _tooltip_text(
 
 
 def _build_menu(pystray, actions: _TrayActions):
-    """Create the native menu in task order, with one state-relevant control."""
+    """Create the native menu in task order, with one state-relevant control.
+
+    Three groups: what you do with a live tracker, then feedback about the app,
+    then the one item that ends the process. Quit sits alone at the bottom
+    because that is where every tray menu puts it, and because the menu opens
+    upward from the taskbar -- the bottom rows are the ones nearest the cursor,
+    so the irreversible item should not neighbour one worth clicking often.
+    """
     pause_menu = pystray.Menu(
         pystray.MenuItem("15 minutes", actions.pause_for(15 * 60)),
         pystray.MenuItem("30 minutes", actions.pause_for(30 * 60)),
@@ -253,7 +260,6 @@ def _build_menu(pystray, actions: _TrayActions):
             default=True,
             visible=lambda _item: _dashboard_path() is not None,
         ),
-        pystray.Menu.SEPARATOR,
         pystray.MenuItem(
             "Pause tracking",
             pause_menu,
@@ -266,6 +272,7 @@ def _build_menu(pystray, actions: _TrayActions):
         ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Send feedback", actions.send_feedback),
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit tracker", actions.quit_tracker),
     )
 
