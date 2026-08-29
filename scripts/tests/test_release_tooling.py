@@ -46,7 +46,7 @@ def test_wrapper_proves_the_updater_key_before_spending_anything():
     and no later fix reaches them. It has to happen before the build, not after."""
     key_check = RELEASE.index("EXPECTED_KEY_ID = ")
     comparison = RELEASE.index("$keyId -ne $EXPECTED_KEY_ID")
-    spawn = RELEASE.index("Start-Process pwsh")
+    spawn = RELEASE.index("Start-Process cmd")
     assert key_check < comparison < spawn
 
 
@@ -55,15 +55,16 @@ def test_wrapper_detaches_the_build_from_the_launching_console():
     receives that console's Ctrl+C, and a phantom one killed two release builds.
     A hidden-window child is not attached to ours; -NoNewWindow would be."""
     spawn_line = next(
-        line for line in RELEASE.splitlines() if "Start-Process pwsh" in line
+        line for line in RELEASE.splitlines() if "Start-Process cmd" in line
     )
     assert "-WindowStyle Hidden" in spawn_line
     assert "-NoNewWindow" not in RELEASE
 
     # The interactive profile is also kept out of the build: it is where the
-    # duplicate starship/zoxide init and the conda hook live.
-    spawn_block = RELEASE[RELEASE.index("$publishArgs = @(") : RELEASE.index("Start-Process pwsh")]
-    assert '"-NoProfile"' in spawn_block
+    # duplicate starship/zoxide init and the conda hook live. It appears inside
+    # the cmd string now rather than as its own array element.
+    spawn_block = RELEASE[RELEASE.index("$publishArgs = @(") : RELEASE.index("Start-Process cmd")]
+    assert "pwsh -NoProfile" in spawn_block
 
 
 def test_wrapper_quotes_every_argument_it_forwards():
@@ -76,8 +77,8 @@ def test_wrapper_quotes_every_argument_it_forwards():
     assert "function ConvertTo-ProcessArgument" in RELEASE
     assert "function ConvertTo-PowerShellLiteral" in RELEASE
 
-    block = RELEASE[RELEASE.index("$publishScript = ") : RELEASE.index("Start-Process pwsh")]
-    region = block[block.index("$inner =") : block.index("$publishArgs = @(")]
+    block = RELEASE[RELEASE.index("$publishScript = ") : RELEASE.index("Start-Process cmd")]
+    region = block[block.index("$runnerBody = @(") : block.index("$publishArgs = @(")]
 
     # Two parsers, so two layers of quoting. Each value is interpolated into the
     # -Command string and must go through the PowerShell-literal quoter; the
@@ -95,27 +96,47 @@ def test_wrapper_quotes_every_argument_it_forwards():
                 assert "ConvertTo-PowerShellLiteral" in expression, \
                     f"interpolated unquoted: $({expression})"
 
-    command_line = next(line for line in block.splitlines() if '"-Command"' in line)
-    assert "ConvertTo-ProcessArgument" in command_line, "the -Command string is not quoted as one argument"
+    # The two paths cmd's own parser sees must be process-quoted.
+    cmd_line = RELEASE[RELEASE.index("$publishArgs = @(") : RELEASE.index("Start-Process cmd")]
+    for value in ("$runner", "$log"):
+        assert f"ConvertTo-ProcessArgument {value}" in cmd_line, f"{value} reaches cmd unquoted"
 
 
 def test_wrapper_keeps_one_log_with_both_streams_interleaved():
     """cargo and the Tauri bundler write "Compiling", "Finished release",
-    "Built application at" and "Finished 1 bundle at" to stderr. Capturing the
-    streams separately -- which is all Start-Process allows, since it refuses to
-    point both redirects at one file -- drops the entire Rust and NSIS phase out
-    of the log and destroys the interleaving. The child has to merge its own."""
-    # Anchored to the command string being built, not just "2>&1 appears
-    # somewhere": the key pre-flight uses that operator too, so a loose check is
-    # satisfied by an unrelated line and never fails.
-    assert '$inner += " 2>&1"' in RELEASE
+    "Built application at" and "Finished 1 bundle at" to stderr -- the whole Rust
+    and NSIS phase.
+
+    Two approaches fail here, and both were tried. Start-Process refuses to aim
+    both redirects at one file. PowerShell's own `2>&1` merges only its error
+    stream and the natives it invokes directly, so `npm run tauri build`'s stderr
+    -- written by a grandchild to the inherited OS handle -- escapes it entirely
+    and is *discarded*, which is worse than being misfiled.
+
+    cmd's `> file 2>&1` duplicates the handles for the whole subtree. That is the
+    mechanism, so the guard is on cmd."""
+    spawn_line = next(line for line in RELEASE.splitlines() if "Start-Process" in line)
+    assert "Start-Process cmd" in spawn_line, "the build must be launched through cmd for the merge"
+    assert "-WindowStyle Hidden" in spawn_line, "hidden window is what keeps the console isolated"
+
+    # No PowerShell-level redirection: cmd owns it now, and a leftover
+    # -RedirectStandardOutput would silently split the streams again.
     assert "-RedirectStandardError" not in RELEASE
-    assert RELEASE.count("-RedirectStandardOutput $log") == 1
-    # -Command, not -File: only PowerShell's parser applies 2>&1 to a native
-    # child's stderr.
-    spawn = RELEASE[RELEASE.index("$publishArgs = @(") : RELEASE.index("Start-Process pwsh")]
-    assert '"-Command"' in spawn
-    assert '"-File"' not in spawn
+    assert "-RedirectStandardOutput" not in RELEASE
+
+    cmd_line = RELEASE[RELEASE.index("$publishArgs = @(") : RELEASE.index("Start-Process cmd")]
+    assert '"/c"' in cmd_line
+    assert "2>&1" in cmd_line, "cmd is not merging stderr into the log"
+    assert ">" in cmd_line
+
+
+def test_wrapper_records_the_exact_command_it_ran():
+    """The runner is written next to the log. It is what cmd executes, so it is
+    also an exact record of the invocation -- worth having when a build fails and
+    the question is what it was actually asked to do."""
+    assert "$runner = Join-Path $logDir" in RELEASE
+    assert "Set-Content -LiteralPath $runner" in RELEASE
+    assert "exit `$LASTEXITCODE" in RELEASE, "the runner must propagate the build's exit code"
 
 
 def test_wrapper_stays_on_the_signed_path():
