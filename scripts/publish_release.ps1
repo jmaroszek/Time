@@ -36,7 +36,15 @@ param(
     # below, because that is what installed copies actually poll.
     [Parameter(Mandatory = $true)]
     [string]$DownloadBaseUrl,
-    # Release notes shown in the update control. Keep it to a sentence.
+    # Recorded in latest.json as `notes`. NOT shown anywhere in the app, and
+    # deliberately so -- the field is carried all the way through (parsed in
+    # check_for_update, typed as AvailableUpdate.notes) and then read by nothing.
+    # The update control is icon-only; its whole visible text is "Update to
+    # <version>". That absence is the intended behaviour, not an unfinished
+    # feature, so do not wire it into the UI.
+    #
+    # It still earns a good sentence: latest.json is served publicly, making this
+    # the only machine-readable record of what a version contained.
     [string]$Notes
 )
 

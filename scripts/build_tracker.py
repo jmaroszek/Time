@@ -304,6 +304,16 @@ def build(target_triple: str) -> Path:
     library_bin = Path(sys.base_prefix) / "Library" / "bin"
     if library_bin.is_dir():
         env["PATH"] = f"{library_bin}{os.pathsep}{env.get('PATH', '')}"
+    # PyInstaller's INFO level narrates every hook, module and dependency it
+    # considers -- upwards of a thousand lines for this bundle, none of which
+    # anyone reads when the build works. It was the overwhelming majority of the
+    # noise a release produced. WARN keeps the lines that mean something.
+    #
+    # Nothing is lost by this: release.ps1 captures the full output to a log file
+    # regardless, which is more than the old behaviour, where the only copy was
+    # terminal scrollback. Set TIME_PYINSTALLER_LOG_LEVEL=INFO (or DEBUG, TRACE)
+    # when a bundling problem needs the detail back.
+    log_level = os.environ.get("TIME_PYINSTALLER_LOG_LEVEL", "WARN")
     subprocess.run(
         [
             sys.executable,
@@ -311,6 +321,8 @@ def build(target_triple: str) -> Path:
             "PyInstaller",
             "--noconfirm",
             "--clean",
+            "--log-level",
+            log_level,
             "--distpath",
             str(DIST_DIR),
             "--workpath",
