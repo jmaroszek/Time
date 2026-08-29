@@ -25,7 +25,7 @@ DESKTOP_FIXTURE = (
 EXTENSION_FIXTURE_RELATIVE = Path("tests") / "fixtures" / "protocol.json"
 
 # Set TIME_EXTENSION_REPO to check a checkout that is not beside this one.
-_DEFAULT_SIBLINGS = ("Time Web Extension", "time-browser-extension")
+_DEFAULT_SIBLINGS = ("Extension", "Time Web Extension", "time-browser-extension")
 
 
 def _find_extension_fixture() -> Path | None:

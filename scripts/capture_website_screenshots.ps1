@@ -71,7 +71,7 @@ $extensionName = "extension-title-marker-1280x800.png"
 $extensionSource = if ($ExtensionImage) {
     (Resolve-Path -LiteralPath $ExtensionImage).Path
 } else {
-    [IO.Path]::GetFullPath((Join-Path $repository "..\Time Web Extension\images\store-screenshot-1-title-marker-1280x800.png"))
+    [IO.Path]::GetFullPath((Join-Path $repository "..\Extension\images\store-screenshot-1-title-marker-1280x800.png"))
 }
 if (-not (Test-Path -LiteralPath $extensionSource -PathType Leaf)) {
     throw "Approved extension screenshot not found: $extensionSource"
