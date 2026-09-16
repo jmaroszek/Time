@@ -193,26 +193,17 @@ jobs:
     # check inside one repository can only prove self-consistency, so the two
     # copies must be compared against each other.
     #
-    # Protected contexts fail when the shared repository is not configured.
-    # Fork PRs may skip this job because their untrusted workflow cannot receive
-    # a private extension-repository token. Same-repository contexts with the
-    # repository configured always run the strict comparison below.
+    # This job checks out a private repository, so it runs only after code has
+    # reached protected main or when an owner starts it manually. Pull-request
+    # code must never share a workspace with the private checkout or its token.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (
-        vars.EXTENSION_REPOSITORY != '' &&
-        (github.event_name != 'pull_request' ||
-         github.event.pull_request.head.repo.full_name == github.repository)
-      )
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - name: Require the extension repository on protected contexts
-        if: >-
-          github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      - name: Require the extension repository
         env:
           EXTENSION_REPOSITORY: ${{ vars.EXTENSION_REPOSITORY }}
         run: |
@@ -226,6 +217,7 @@ jobs:
           repository: ${{ vars.EXTENSION_REPOSITORY }}
           token: ${{ secrets.EXTENSION_REPO_TOKEN || github.token }}
           path: extension-checkout
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -258,7 +250,7 @@ jobs:
           RENDERER_RESULT: ${{ needs.renderer-compatibility.result }}
           WINDOWS_RESULT: ${{ needs.windows-backend.result }}
           PARITY_RESULT: ${{ needs.protocol-parity.result }}
-          PARITY_REQUIRED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (vars.EXTENSION_REPOSITORY != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
+          PARITY_REQUIRED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
         run: |
           test "$TRACKER_RESULT" = success
           test "$DASHBOARD_RESULT" = success
@@ -267,8 +259,8 @@ jobs:
           case "$PARITY_RESULT" in
             success) ;;
             skipped)
-              # A skipped parity job is acceptable only outside protected and
-              # configured same-repository contexts (for example, a fork PR).
+              # A skipped parity job is acceptable only outside protected
+              # contexts, including every pull request.
               test "$PARITY_REQUIRED" = false ;;
             *) exit 1 ;;
           esac
