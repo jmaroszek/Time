@@ -34,6 +34,11 @@ def _forbid_background_components(monkeypatch) -> None:
         "start_power_event_monitor",
         unexpected,
     )
+    monkeypatch.setattr(
+        tracker.human_input,
+        "start_human_input_monitor",
+        unexpected,
+    )
     monkeypatch.setattr(tracker.tray, "create_tray_controller", unexpected)
 
 

@@ -40,7 +40,7 @@ storage, and how to report a vulnerability privately.
 ## Architecture
 
 ```
-tracker/    Python, always on. Win32 foreground/idle probe -> session rows.
+tracker/    Python, always on. Win32 foreground/human-input probe -> session rows.
 dashboard/  Tauri 2 + React + ECharts, launched on demand. Reads sessions;
             owns categories, rules, and settings.
 scripts/    Build, demo-data, and database-health tooling.

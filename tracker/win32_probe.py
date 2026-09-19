@@ -139,8 +139,8 @@ def _resolve_uwp_pid(hwnd: int, host_pid: int) -> int | None:
     return found[0] if found else None
 
 
-def snapshot(now: float) -> Snapshot:
-    idle = get_idle_seconds()
+def snapshot(now: float, *, idle_seconds: float | None = None) -> Snapshot:
+    idle = get_idle_seconds() if idle_seconds is None else max(0.0, idle_seconds)
     hwnd = win32gui.GetForegroundWindow()
     if not hwnd:
         return Snapshot(now=now, idle_seconds=idle, process=None, title="")

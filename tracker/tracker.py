@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tracker import config, db, media_playback, power_events, tray, win32_probe
+from tracker import config, db, human_input, media_playback, power_events, tray, win32_probe
 from tracker.domains import parse_domain
 from tracker.session_manager import LOCK_PROCESS, SessionManager, is_idle
 from tracker.tracking_schedule import schedule_state
@@ -246,10 +246,19 @@ def _cleanup_step(label: str, action) -> bool:
 class _ShutdownCoordinator:
     """Run tracker cleanup once, keeping later safety steps independent."""
 
-    def __init__(self, stop_event, tray_controller, power_monitor, manager, conn):
+    def __init__(
+        self,
+        stop_event,
+        tray_controller,
+        power_monitor,
+        manager,
+        conn,
+        human_input_monitor=None,
+    ):
         self._stop_event = stop_event
         self._tray_controller = tray_controller
         self._power_monitor = power_monitor
+        self._human_input_monitor = human_input_monitor
         self._manager = manager
         self._conn = conn
         self._lock = threading.Lock()
@@ -290,6 +299,10 @@ class _ShutdownCoordinator:
                 "power", self._power_monitor.close
             ):
                 failed.append("power")
+            if self._human_input_monitor is not None and not _cleanup_step(
+                "human_input", self._human_input_monitor.close
+            ):
+                failed.append("human_input")
             if not _cleanup_step("sessions", lambda: self._manager.shutdown(time.time())):
                 failed.append("sessions")
             if not _cleanup_step("health", lambda: stamp_tracker_health(self._conn, 0)):
@@ -332,6 +345,7 @@ def run() -> None:
         logging.info("Database initialized; waiting for first-run privacy choice.")
         return
     manager = SessionManager(store=db.SqliteStore(conn), settings=db.get_settings(conn))
+    human_input_monitor = human_input.start_human_input_monitor()
     media_monitor = media_playback.start_media_playback_monitor()
     power_monitor = power_events.start_power_event_monitor()
     stop_event = threading.Event()
@@ -344,6 +358,7 @@ def run() -> None:
         power_monitor,
         manager,
         conn,
+        human_input_monitor=human_input_monitor,
     )
 
     atexit.register(shutdown)
@@ -356,10 +371,11 @@ def run() -> None:
 
     logging.info(
         "Tracker started | tray_available=%s | tray_visible=%s |"
-        " power_events=%s | media_playback=%s | poll=%ss",
+        " power_events=%s | human_input=%s | media_playback=%s | poll=%ss",
         tray_controller is not None,
         tray_visible,
         power_monitor is not None,
+        human_input_monitor is not None,
         media_monitor is not None,
         config.POLL_SECONDS,
     )
@@ -417,7 +433,12 @@ def run() -> None:
             if monotonic_now - last_health_publish >= HEALTH_HEARTBEAT_SECONDS:
                 stamp_tracker_health(conn, now)
                 last_health_publish = monotonic_now
-            snap = win32_probe.snapshot(now)
+            idle_seconds = (
+                human_input_monitor.idle_seconds()
+                if human_input_monitor is not None
+                else None
+            )
+            snap = win32_probe.snapshot(now, idle_seconds=idle_seconds)
             if (
                 media_monitor is not None
                 and snap.process != LOCK_PROCESS

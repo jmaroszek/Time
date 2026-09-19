@@ -157,6 +157,7 @@ def test_shutdown_coordinator_continues_after_failures_and_is_idempotent(
 
     tray_controller = FailingCleanup(gate=True)
     power_monitor = FailingCleanup()
+    human_input_monitor = FailingCleanup()
     manager = Manager()
     conn = Connection()
     health_calls = []
@@ -166,7 +167,12 @@ def test_shutdown_coordinator_continues_after_failures_and_is_idempotent(
         lambda target, now: health_calls.append((target, now)),
     )
     coordinator = tracker._ShutdownCoordinator(
-        threading.Event(), tray_controller, power_monitor, manager, conn
+        threading.Event(),
+        tray_controller,
+        power_monitor,
+        manager,
+        conn,
+        human_input_monitor=human_input_monitor,
     )
 
     first = threading.Thread(target=coordinator)
@@ -194,6 +200,7 @@ def test_shutdown_coordinator_continues_after_failures_and_is_idempotent(
     assert coordinator() is True
     assert tray_controller.calls == 1
     assert power_monitor.calls == 1
+    assert human_input_monitor.calls == 1
     assert len(manager.calls) == 1
     assert health_calls == [(conn, 0)]
     assert conn.close_calls == 1

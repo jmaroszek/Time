@@ -1003,7 +1003,7 @@ export default function SettingsTab({
           <Row
             bare
             label="AFK idle threshold"
-            help="No input for this long marks you Away From Keyboard (AFK). AFK time is not classified and does not count towards computer use."
+            help="No human keyboard or mouse input for this long marks you Away From Keyboard (AFK). Software-generated input, including Caffeine, does not keep you active. AFK time is not classified and does not count towards computer use."
             control={numberControl(SPECS.idle, "AFK idle threshold", "min")}
           />
         </SettingGroup>

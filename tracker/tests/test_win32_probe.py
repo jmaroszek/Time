@@ -141,3 +141,16 @@ def test_snapshot_returns_no_identity_without_foreground_window(monkeypatch):
     assert result.process is None
     assert result.title == ""
     assert result.app_user_model_id is None
+
+
+def test_snapshot_accepts_human_input_idle_override(monkeypatch):
+    monkeypatch.setattr(
+        win32_probe,
+        "get_idle_seconds",
+        lambda: (_ for _ in ()).throw(AssertionError("fallback should not run")),
+    )
+    monkeypatch.setattr(win32_probe.win32gui, "GetForegroundWindow", lambda: 0)
+
+    result = win32_probe.snapshot(10.0, idle_seconds=42.5)
+
+    assert result.idle_seconds == 42.5
