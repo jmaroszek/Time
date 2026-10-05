@@ -244,7 +244,11 @@ function DeltaBadge({
       : !forceNeutral && item.direction === "bad"
         ? "text-bad"
         : "text-ink-2";
-  const tooltip = `${text} vs ${period(comparisonDays)}${asMultiple ? ` (${span})` : ""}${item.direction === "neutral" ? ", driven mostly by a single day" : ""}`;
+  // Only the robustness gate is about one day. Gray for being small, uncategorized
+  // or in a neutral category must not borrow its explanation. Browser rows are
+  // forced gray whatever the verdict, so the reason does not apply to them either.
+  const singleDay = item.singleDayDriven && !forceNeutral;
+  const tooltip = `${text} vs ${period(comparisonDays)}${asMultiple ? ` (${span})` : ""}${singleDay ? ", driven mostly by a single day" : ""}`;
   return (
     <FloatingTooltip
       text={tooltip}

@@ -457,6 +457,12 @@ export interface UsageDelta {
    */
   robustFraction: number | null;
   direction: DeltaDirection;
+  /**
+   * True when the change cleared every size gate and would have been colored,
+   * but collapsed once its most-influential day was left out. The one neutral
+   * verdict that is about a single day; the others are about size or category.
+   */
+  singleDayDriven: boolean;
 }
 
 export type AppDelta = AppUsage & UsageDelta;
@@ -576,23 +582,41 @@ export function withDeltas<T extends RankedUsage>(
     const days = cur?.length ?? prv?.length ?? 1;
     const baselineNegligible = prev > 0 && prev < MIN_BASELINE_SECONDS_PER_DAY * days;
     let direction: DeltaDirection = "neutral";
-    if (deltaFraction !== null && app.category !== null && deltaFraction !== 0) {
+    let singleDayDriven = false;
+    // Neutral categories (e.g. games) are never judged good or bad, so no gate
+    // below is what kept them gray.
+    if (
+      deltaFraction !== null &&
+      app.category !== null &&
+      !app.category.isNeutral &&
+      deltaFraction !== 0
+    ) {
       const deltaSeconds = app.seconds - prev;
-      const meaningful =
+      const large =
         Math.abs(deltaFraction) >= MIN_DELTA_FRACTION &&
-        Math.abs(deltaSeconds) >= MIN_DELTA_SECONDS_PER_DAY * days &&
-        // Without a usable daily series the range is too short to leave a day
-        // out, and the size gates above stand on their own.
-        (robustFraction === null ||
-          (Math.sign(robustFraction) === Math.sign(deltaFraction) &&
-            Math.abs(robustFraction) >= MIN_ROBUST_FRACTION));
-      if (meaningful && !app.category.isNeutral) {
-        // Neutral categories (e.g. games) are never judged good or bad.
+        Math.abs(deltaSeconds) >= MIN_DELTA_SECONDS_PER_DAY * days;
+      // Without a usable daily series the range is too short to leave a day
+      // out, and the size gates above stand on their own.
+      const robust =
+        robustFraction === null ||
+        (Math.sign(robustFraction) === Math.sign(deltaFraction) &&
+          Math.abs(robustFraction) >= MIN_ROBUST_FRACTION);
+      if (large && robust) {
         const increased = deltaFraction > 0;
         direction = increased === app.category.isProductive ? "good" : "bad";
+      } else if (large) {
+        singleDayDriven = true;
       }
     }
-    return { ...app, deltaFraction, previousSeconds: prev, baselineNegligible, robustFraction, direction };
+    return {
+      ...app,
+      deltaFraction,
+      previousSeconds: prev,
+      baselineNegligible,
+      robustFraction,
+      direction,
+      singleDayDriven,
+    };
   });
 }
 

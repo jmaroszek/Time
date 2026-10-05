@@ -389,6 +389,50 @@ describe("topApps / withDeltas", () => {
     expect(deltas[0].deltaFraction).toBeGreaterThan(3);
     expect(deltas[0].robustFraction).toBeCloseTo(0);
     expect(deltas[0].direction).toBe("neutral");
+    expect(deltas[0].singleDayDriven).toBe(true);
+  });
+
+  it("only the one-day gate reports a gray badge as single-day driven", () => {
+    // Each of these is gray for a reason that has nothing to do with one day,
+    // and the tooltip must not say otherwise.
+    const steady = (key: string, cur: number, prv: number) => ({
+      currentDaily: dailySeries(key, Array(7).fill(cur)),
+      previousDaily: dailySeries(key, Array(7).fill(prv)),
+    });
+    const smallPct = withDeltas(
+      [app("code.exe", 7 * 3780, CATS[0])],
+      [app("code.exe", 7 * 3600, CATS[0])],
+      steady("code.exe", 3780, 3600),
+    );
+    const smallTime = withDeltas(
+      [app("code.exe", 7 * 180, CATS[0])],
+      [app("code.exe", 7 * 60, CATS[0])],
+      steady("code.exe", 180, 60),
+    );
+    const uncategorized = withDeltas(
+      [app("code.exe", 7 * 1800, null)],
+      [app("code.exe", 7 * 900, null)],
+      steady("code.exe", 1800, 900),
+    );
+    const neutral = { ...CATS[1], isProductive: false, isNeutral: true };
+    // Neutral category plus a one-day spike: the category is the reason.
+    const neutralSpike = withDeltas(
+      [app("apex.exe", 3600 + 5 * 3600, neutral)],
+      [app("apex.exe", 7 * 600, neutral)],
+      {
+        currentDaily: dailySeries("apex.exe", [600, 600, 600, 5 * 3600, 600, 600, 600]),
+        previousDaily: dailySeries("apex.exe", Array(7).fill(600)),
+      },
+    );
+    const unchanged = withDeltas(
+      [app("code.exe", 7 * 3600, CATS[0])],
+      [app("code.exe", 7 * 3600, CATS[0])],
+      steady("code.exe", 3600, 3600),
+    );
+    for (const deltas of [smallPct, smallTime, uncategorized, neutralSpike, unchanged]) {
+      expect(deltas[0].direction).toBe("neutral");
+      expect(deltas[0].singleDayDriven).toBe(false);
+    }
   });
 
   it("large percentages on trivial amounts of time stay neutral", () => {
