@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildClassifier, type Category, type Rule } from "./classify";
 import {
+  activityComposition,
   bucketActivityHours,
   dailyActivitySummaries,
   hourlyActivitySummaries,
@@ -341,6 +342,54 @@ describe("activity metrics", () => {
   it("starts every ramp at the same empty-cell fill", () => {
     const zeros = new Set(ACTIVITY_METRICS.map((m) => ACTIVITY_METRIC_RAMPS[m][0]));
     expect(zeros.size).toBe(1);
+  });
+});
+
+describe("activityComposition", () => {
+  const bucket = (
+    states: { productive?: number; neutral?: number; unproductive?: number; uncategorized?: number },
+    categories: Array<[string, number]>,
+  ) => {
+    const productiveSeconds = states.productive ?? 0;
+    const neutralSeconds = states.neutral ?? 0;
+    const unproductiveSeconds = states.unproductive ?? 0;
+    const uncategorizedSeconds = states.uncategorized ?? 0;
+    return {
+      trackedSeconds: productiveSeconds + neutralSeconds + unproductiveSeconds + uncategorizedSeconds,
+      productiveSeconds,
+      neutralSeconds,
+      unproductiveSeconds,
+      uncategorizedSeconds,
+      categorySeconds: new Map(categories),
+    };
+  };
+
+  it("names the one state of a subject that lives in one category", () => {
+    expect(activityComposition([
+      bucket({ neutral: 600 }, [["System", 600]]),
+      bucket({ neutral: 300 }, [["System", 300]]),
+    ])).toEqual({ categories: 1, states: 1, soleState: "neutral" });
+  });
+
+  it("counts two categories that share a state as one state", () => {
+    expect(activityComposition([
+      bucket({ productive: 900 }, [["Dev", 600], ["Writing", 300]]),
+    ])).toEqual({ categories: 2, states: 1, soleState: "productive" });
+  });
+
+  it("has no sole state when the time is mixed or unclassified", () => {
+    expect(activityComposition([
+      bucket({ productive: 600, unproductive: 60 }, [["Dev", 600], ["Games", 60]]),
+    ]).soleState).toBeNull();
+    expect(activityComposition([
+      bucket({ uncategorized: 600 }, [["Uncategorized", 600]]),
+    ])).toEqual({ categories: 1, states: 1, soleState: null });
+  });
+
+  it("ignores empty buckets and zero entries", () => {
+    expect(activityComposition([
+      bucket({}, [["Dev", 0]]),
+    ])).toEqual({ categories: 0, states: 0, soleState: null });
   });
 });
 

@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import { buildClassifier, type Category, type Rule } from "./classify";
 import { windowGroupKey } from "./entityIdentity";
 import {
-  BREAK_NEIGHBOR_NAME,
+  matchedIdentity,
   parentScope,
+  scopeDescriptor,
   scopeCandidates,
   scopeKey,
   scopeMatcher,
   scopeRuns,
-  scopeTransitions,
   searchScopeCandidates,
   summarizeScope,
   topScopeWindows,
@@ -322,44 +322,48 @@ describe("topScopeWindows", () => {
   });
 });
 
-describe("scopeTransitions", () => {
-  const code = inScopeOf("app", "code");
+describe("matchedIdentity", () => {
+  const time = scopeCandidates(
+    [make(at(2, 9), at(2, 10), "time.exe"), make(at(2, 10), at(2, 11), "time-dev.exe")],
+    context,
+    { startSec: at(1, 0), endSec: at(8, 0) },
+  ).apps[0];
 
-  it("tallies what came right before and after each run", () => {
-    const sessions = [
-      make(at(2, 8, 50), at(2, 9), "slack.exe"),
-      make(at(2, 9), at(2, 9, 30), "code.exe"),
-      make(at(2, 9, 30), at(2, 9, 40), "chrome.exe", { domain: "youtube.com" }),
-      make(at(2, 9, 40), at(2, 10), "code.exe"),
-      make(at(2, 10), at(2, 10, 10), "afk", { isAfk: true }),
-      make(at(2, 13), at(2, 13, 30), "code.exe"),
-      make(at(2, 13, 30), at(2, 13, 45), "slack.exe"),
-    ];
-    const transitions = scopeTransitions(sessions, code, context, everything);
-    const tally = (side: typeof transitions.before) =>
-      side.map(({ name, kind, runs, category }) => ({ name, kind, runs, category: category?.name ?? null }));
-    expect(tally(transitions.before)).toEqual([
-      { name: BREAK_NEIGHBOR_NAME, kind: "break", runs: 1, category: null },
-      { name: "Slack", kind: "app", runs: 1, category: null },
-      { name: "YouTube", kind: "website", runs: 1, category: "Media" },
-    ]);
-    expect(tally(transitions.after)).toEqual([
-      { name: BREAK_NEIGHBOR_NAME, kind: "break", runs: 1, category: null },
-      { name: "Slack", kind: "app", runs: 1, category: null },
-      { name: "YouTube", kind: "website", runs: 1, category: "Media" },
-    ]);
-    expect(transitions.beforeRuns).toBe(3);
-    expect(transitions.afterRuns).toBe(3);
+  it("says which recorded name a search found, when the shown name did not match", () => {
+    expect(time.identities).toEqual(["time-dev.exe", "time.exe"]);
+    expect(matchedIdentity(time, "dev")).toBe("time-dev.exe");
+    expect(matchedIdentity(time, "tim")).toBeNull();
+    expect(matchedIdentity(time, "  ")).toBeNull();
+  });
+});
+
+describe("scopeDescriptor", () => {
+  const [focus, media] = categories;
+  const named = (name: string): Category => ({ ...media, name });
+
+  it("finishes the name as a phrase, in sentence case", () => {
+    expect(scopeDescriptor({ kind: "app", key: "obsidian", name: "Obsidian" }, named("Notes")))
+      .toBe("notes app");
+    expect(scopeDescriptor({ kind: "website", key: "docs.google.com", name: "Google Docs" }, named("Social Media")))
+      .toBe("social media website");
+    expect(scopeDescriptor({ kind: "category", categoryId: 1, name: "Focus" }, focus))
+      .toBe("productive category");
   });
 
-  it("leaves out a side nothing was recorded on", () => {
-    const transitions = scopeTransitions(
-      [make(at(2, 9), at(2, 10), "code.exe")],
-      code,
-      context,
-      everything,
-    );
-    expect(transitions).toEqual({ before: [], after: [], beforeRuns: 0, afterRuns: 0 });
+  it("keeps acronyms and mixed-case words as written", () => {
+    expect(scopeDescriptor({ kind: "app", key: "claude", name: "Claude" }, named("AI")))
+      .toBe("AI app");
+    expect(scopeDescriptor({ kind: "website", key: "youtube.com", name: "YouTube" }, named("YouTube Shorts")))
+      .toBe("YouTube shorts website");
+  });
+
+  it("names no category for an app held inside one, and says when there is none", () => {
+    expect(scopeDescriptor(
+      { kind: "app", key: "chrome", name: "Chrome", within: { categoryId: 1, name: "Focus" } },
+      focus,
+    )).toBe("app");
+    expect(scopeDescriptor({ kind: "app", key: "slack", name: "Slack" }, null))
+      .toBe("uncategorized app");
   });
 });
 
@@ -398,6 +402,8 @@ describe("scopeCandidates", () => {
     const limits = { categories: 5, apps: 5, websites: 5 };
     expect(searchScopeCandidates(candidates, "TIME", limits).apps.map((c) => c.scope.name)).toEqual(["Time"]);
     expect(searchScopeCandidates(candidates, "youtube.com", limits).websites).toHaveLength(1);
+    // An alias is found by any executable it gathers, as well as by its name.
+    expect(searchScopeCandidates(candidates, "DEV.EXE", limits).apps.map((c) => c.scope.name)).toEqual(["Time"]);
     expect(searchScopeCandidates(candidates, "nothing like this", limits)).toEqual({
       categories: [],
       apps: [],

@@ -1,75 +1,12 @@
-import { CategoryDot, FloatingTooltip, MetricCard } from "../../components/ui";
-import { uncategorizedMark } from "../../lib/chartTheme";
-import { categoryState, type Category } from "../../lib/classify";
+import { MetricCard } from "../../components/ui";
 import { fmtDuration, fmtPct } from "../../lib/format";
 import {
-  parentScope,
   type InsightsScope,
-  type ScopeNeighbor,
   type ScopeSummary,
-  type ScopeTransitions,
   type ScopeWindow,
   type ScopeWindowList,
 } from "../../lib/insightsScope";
 import { RUN_DEFINITION } from "../../lib/runs";
-import { useMeta } from "../../state/meta";
-
-const KIND_LABELS = { app: "App", website: "Website", category: "Category" } as const;
-
-/**
- * What the page is narrowed to, and the way back out.
- *
- * Every figure below means something different while a scope is set, so the
- * subject is stated once, at the top, as large as a card title's subject and
- * no larger — this is the page's heading, not a banner about it.
- *
- * An app or website held inside a category goes back to that category, one
- * step, rather than all the way out: it was reached from the category's list,
- * and that list is where the next comparison is.
- */
-export function ScopeHeader({
-  scope,
-  category,
-  onNavigate,
-}: {
-  scope: InsightsScope;
-  /** The scope's own category, or the one most of an app's time resolved to. */
-  category: Category | null;
-  onNavigate: (scope: InsightsScope | null) => void;
-}) {
-  const meta = useMeta();
-  const parent = parentScope(scope);
-  const detail = scope.kind === "category"
-    ? category
-      ? capitalize(categoryState(category))
-      : null
-    : scope.within
-      ? `${scope.within.name} only`
-      : category?.name ?? "Uncategorized";
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-      <button
-        type="button"
-        onClick={() => onNavigate(parent)}
-        className="-ml-1.5 flex min-w-0 shrink items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-          <path d="M19 12H5m7-7-7 7 7 7" />
-        </svg>
-        <span className="truncate">{parent ? parent.name : "All activity"}</span>
-      </button>
-      <span aria-hidden="true" className="h-4 w-px shrink-0 bg-edge" />
-      <span className="flex min-w-0 items-center gap-2">
-        <CategoryDot color={category?.color ?? uncategorizedMark(meta.theme)} />
-        <h1 className="min-w-0 truncate text-lg font-semibold">{scope.name}</h1>
-      </span>
-      <span className="shrink-0 text-xs text-ink-3">
-        {KIND_LABELS[scope.kind]}
-        {detail && <> · {detail}</>}
-      </span>
-    </div>
-  );
-}
 
 /**
  * The four tiles, for one subject instead of everything.
@@ -156,20 +93,43 @@ export function ScopeTiles({
 export function TopWindowList({
   list,
   noun,
+  titlesStored,
+  onStoreTitles,
   onOpen,
 }: {
   list: ScopeWindowList;
   noun: "app" | "website";
+  /** Whether "Store window titles" is on now, which decides whether an empty
+   *  list is a setting to change or just this subject having no titles. */
+  titlesStored: boolean;
+  onStoreTitles: () => void;
   onOpen?: (window: ScopeWindow) => void;
 }) {
   if (list.rows.length === 0) {
     return list.untitledSeconds > 0 ? (
       <div className="flex h-[250px] flex-col items-center justify-center px-6 text-center">
-        <p className="text-sm font-medium text-ink-2">No window titles recorded</p>
-        <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-ink-3">
-          Time in this {noun} cannot be broken down by window. Title capture is off by
-          default; Settings can turn it on for what is recorded from now on.
-        </p>
+        <p className="text-sm font-medium text-ink-2">No window titles in this range</p>
+        {titlesStored ? (
+          <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-ink-3">
+            This {noun}&apos;s time was recorded without titles, so it cannot be broken
+            down by window. Titles are stored for what is recorded from now on.
+          </p>
+        ) : (
+          <>
+            <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-ink-3">
+              With window titles stored, this card lists what the time in this {noun} was
+              spent on: documents, pages, conversations. Titles stay on this computer, and
+              only what is recorded after turning them on is broken down.
+            </p>
+            <button
+              type="button"
+              onClick={onStoreTitles}
+              className="mt-3 text-xs text-accent transition-colors hover:underline hover:decoration-accent/50 hover:underline-offset-4"
+            >
+              Store window titles
+            </button>
+          </>
+        )}
       </div>
     ) : (
       <p className="py-8 text-center text-xs text-ink-3">No activity in range</p>
@@ -203,7 +163,7 @@ export function TopWindowList({
                     event.stopPropagation();
                     onOpen(row);
                   }}
-                  className="min-w-0 flex-1 truncate rounded-sm text-left text-ink-2 underline-offset-2 outline-none group-hover:text-ink group-hover:underline focus-visible:underline"
+                  className="min-w-0 flex-1 cursor-pointer truncate rounded-sm text-left text-ink-2 outline-none group-hover:text-ink focus-visible:text-ink focus-visible:ring-1 focus-visible:ring-accent/60"
                 >
                   {row.title}
                 </button>
@@ -232,113 +192,6 @@ export function TopWindowList({
       )}
     </div>
   );
-}
-
-/** Rows each side of the Before & After card lists. */
-const TRANSITION_ROWS = 5;
-
-/**
- * What the reader was doing right before a run of this subject began, and what
- * they went to when it ended.
- *
- * Shares are of runs, not of time: the question is what tends to lead here,
- * and a single long run would otherwise speak for every short one.
- */
-export function TransitionsPanel({
-  scope,
-  transitions,
-}: {
-  scope: InsightsScope;
-  transitions: ScopeTransitions;
-}) {
-  if (transitions.beforeRuns === 0 && transitions.afterRuns === 0) {
-    return <p className="py-6 text-center text-xs text-ink-3">No runs in range</p>;
-  }
-  return (
-    <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
-      <TransitionColumn
-        heading="Before"
-        description={`What came right before each run of ${scope.name}`}
-        neighbors={transitions.before}
-        runs={transitions.beforeRuns}
-      />
-      <TransitionColumn
-        heading="After"
-        description={`What each run of ${scope.name} gave way to`}
-        neighbors={transitions.after}
-        runs={transitions.afterRuns}
-      />
-    </div>
-  );
-}
-
-function TransitionColumn({
-  heading,
-  description,
-  neighbors,
-  runs,
-}: {
-  heading: string;
-  description: string;
-  neighbors: ScopeNeighbor[];
-  runs: number;
-}) {
-  const meta = useMeta();
-  const shown = neighbors.slice(0, TRANSITION_ROWS);
-  const most = shown[0]?.runs ?? 1;
-  return (
-    <section aria-label={heading}>
-      <h3 className="text-xs font-medium text-ink-2">{heading}</h3>
-      <p className="mt-0.5 text-xs text-ink-3">{description}</p>
-      {runs === 0 ? (
-        <p className="mt-3 text-xs text-ink-3">Nothing recorded on this side of any run.</p>
-      ) : (
-        <div className="mt-3 flex flex-col gap-2">
-          {shown.map((neighbor) => {
-            const share = neighbor.runs / runs;
-            const percent = share > 0 && share < 0.01 ? "<1%" : fmtPct(share);
-            const count = `${neighbor.runs} of ${runs} ${runs === 1 ? "run" : "runs"}`;
-            return (
-              <div key={neighbor.key} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_2.75rem] items-center gap-3 text-xs">
-                <span className="flex min-w-0 items-center gap-2">
-                  {neighbor.kind === "break" ? (
-                    // A break is not a category, so it gets an outline rather
-                    // than a colour some category could also be wearing.
-                    <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full border border-ink-3" />
-                  ) : (
-                    <CategoryDot
-                      color={neighbor.category?.color ?? uncategorizedMark(meta.theme)}
-                      label={neighbor.category?.name ?? "Uncategorized"}
-                    />
-                  )}
-                  <span className={`truncate ${neighbor.kind === "break" ? "text-ink-3" : "text-ink-2"}`} title={neighbor.name}>
-                    {neighbor.name}
-                  </span>
-                </span>
-                <span className="h-1.5 min-w-0 overflow-hidden rounded-full bg-surface-2">
-                  <span
-                    className="block h-full rounded-full bg-accent-data"
-                    style={{ width: `${Math.max((neighbor.runs / most) * 100, 1.5)}%` }}
-                  />
-                </span>
-                <FloatingTooltip
-                  text={count}
-                  ariaLabel={`${percent}, ${count}`}
-                  className="text-right tabular-nums text-ink-2 outline-none"
-                >
-                  <span aria-hidden="true">{percent}</span>
-                </FloatingTooltip>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 /** Below a minute the previous period is not a base worth dividing by — the

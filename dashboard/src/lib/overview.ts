@@ -85,8 +85,40 @@ export const ACTIVITY_METRIC_WORDS: Record<ActivityMetric, string> = {
 
 /** Stack decomposition for the activity-hours bars: the productive/neutral/
  *  unproductive taxonomy, the user's own categories, or — for a narrowed view,
- *  whose time is all one category — the apps and websites it was spent in. */
-export type ActivityStack = "state" | "category" | "member";
+ *  whose time is all one category — the apps and websites it was spent in.
+ *  "total" is no decomposition at all: one plain bar, for a narrowed subject
+ *  whose time is all one category and so has nothing to split. */
+export type ActivityStack = "state" | "category" | "member" | "total";
+
+/**
+ * How many categories and productivity states a run of buckets' time falls in,
+ * and the state when it is only one. Most apps and sites live entirely in one
+ * category, and a narrowed view uses this to leave out a split that would have
+ * nothing to split.
+ */
+export function activityComposition(
+  buckets: Array<ActivityTotals & { uncategorizedSeconds: number; categorySeconds: Map<string, number> }>,
+): { categories: number; states: number; soleState: Exclude<ActivityMetric, "tracked"> | null } {
+  const categories = new Set<string>();
+  const totals = { productive: 0, neutral: 0, unproductive: 0, uncategorized: 0 };
+  for (const bucket of buckets) {
+    for (const [name, seconds] of bucket.categorySeconds) {
+      if (seconds > 0) categories.add(name);
+    }
+    totals.productive += bucket.productiveSeconds;
+    totals.neutral += bucket.neutralSeconds;
+    totals.unproductive += bucket.unproductiveSeconds;
+    totals.uncategorized += bucket.uncategorizedSeconds;
+  }
+  const present = (Object.keys(totals) as Array<keyof typeof totals>)
+    .filter((state) => totals[state] > 0);
+  const sole = present.length === 1 ? present[0] : null;
+  return {
+    categories: categories.size,
+    states: present.length,
+    soleState: sole === "uncategorized" ? null : sole,
+  };
+}
 
 /** Bucket key for sessions no rule matched. Categories cannot be named this
  *  without colliding, which is acceptable — it is already the label the charts

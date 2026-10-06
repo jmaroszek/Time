@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-
 import { Checkbox, MenuSelect, TextInput, type MenuOption } from "./ui";
 import {
   addDays,
@@ -39,7 +37,6 @@ export default function DateRangePicker({
   onRollingChange,
   onCustomRange,
   firstSessionSec,
-  leading,
 }: {
   preset: PresetOrCustom;
   range: Range;
@@ -48,9 +45,6 @@ export default function DateRangePicker({
   onRollingChange: (rolling: boolean) => void;
   onCustomRange: (r: Range) => void;
   firstSessionSec: number | null;
-  /** Another control that decides what the page shows, kept on the same row
-   *  as the range rather than somewhere a reader would have to look for it. */
-  leading?: ReactNode;
 }) {
   // range.end is exclusive; the UI shows the inclusive last day.
   const lastDay = addDays(range.end, -1);
@@ -69,7 +63,6 @@ export default function DateRangePicker({
 
   return (
     <div className="ml-auto flex w-full items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
-      {leading}
       <div className="flex shrink-0 justify-end sm:w-16">
         {supportsRolling && (
           <Checkbox checked={rolling} onChange={onRollingChange} className="text-xs text-ink-3">

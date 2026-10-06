@@ -16,7 +16,6 @@ import {
   parentScope,
   scopeCandidates,
   scopeMatcher,
-  scopeTransitions,
   summarizeScope,
   topScopeWindows,
   type ScopeContext,
@@ -27,6 +26,7 @@ import { calendarDays, matchedPreviousRange, type Range } from "../lib/time";
 import {
   MONTH_CALENDAR_MIN_DAYS,
   ACTIVITY_METRICS,
+  activityComposition,
   ACTIVITY_METRIC_LABELS,
   ACTIVITY_METRIC_WORDS,
   type ActivityMetric,
@@ -44,18 +44,17 @@ import {
 import { useSessions } from "../state/useSessions";
 import ScopePicker from "./insights/ScopePicker";
 import {
-  ScopeHeader,
   ScopeTiles,
   TopWindowList,
-  TransitionsPanel,
 } from "./insights/ScopedInsights";
 
-/** Where the header lends this tab room for its scope picker: beside the date
- *  range when the header is wide enough, and on the tab row when it is not. */
-export interface ScopePickerSlots {
-  wide: HTMLElement | null;
-  narrow: HTMLElement | null;
-}
+/** The Hours card's label when its split is the only one there is. */
+const STACK_STATEMENTS: Record<ActivityStack, string> = {
+  state: "By productivity",
+  category: "By category",
+  member: "By app and website",
+  total: "",
+};
 
 const HOURS_CARD_TITLES = {
   daily: "Daily Hours",
@@ -102,7 +101,7 @@ export default function OverviewTab({
   liveTick,
   onOpenSettings,
   onOpenWindow,
-  scopePickerSlots,
+  scopePickerSlot,
 }: {
   range: Range;
   preset: PresetOrCustom;
@@ -118,10 +117,12 @@ export default function OverviewTab({
    *  up sessions recorded while the reader was elsewhere. Unlike historyRevision
    *  this keeps the cached rows and refetches only the live edge. */
   liveTick: number;
-  onOpenSettings: () => void;
+  /** Opens Settings with the named section flashed. */
+  onOpenSettings: (section: string) => void;
   /** Opens one of a narrowed app's top windows in Activity. */
   onOpenWindow: (target: ActivityWindowTarget) => void;
-  scopePickerSlots: ScopePickerSlots;
+  /** Where the header lends this tab room for its scope picker, beside the tabs. */
+  scopePickerSlot: HTMLElement | null;
 }) {
   const meta = useMeta();
   // The view controls (ranked identity/count, timeline resolution, aggregate view,
@@ -242,12 +243,6 @@ export default function OverviewTab({
       : null),
     [inScope, scope, sessionData.ready, sessionData.sessions, scopeContext, scopeSpans, topN],
   );
-  const transitions = useMemo(
-    () => (inScope && sessionData.ready
-      ? scopeTransitions(sessionData.sessions, inScope, scopeContext, scopeSpans.range)
-      : null),
-    [inScope, sessionData.ready, sessionData.sessions, scopeContext, scopeSpans],
-  );
 
   // Pin the aggregate view the first time the range is long enough to show one.
   // The calendar default is a starting point, not a rule: without this, any
@@ -277,22 +272,30 @@ export default function OverviewTab({
   const granularity = model.granularity;
   const rangeDays = model.rangeDays;
   const isSingleDay = rangeDays === 1;
+  const currentDays = model.historyDays.filter(
+    (day) => day.date >= displayRange.start && day.date < displayRange.end,
+  );
   // The timeline stops being readable past ~two weeks of rows. Beyond that the
   // rhythm grid (collapsed into a typical week) and the calendar (every date
   // laid out) are both useful; the calendar is the pinned default (set above)
   // and the card header lets you override it from then on.
   const middleView =
     rangeDays <= 14 ? "timeline" : (aggregateView ?? "calendar");
-  // One subject's productivity is its category, already named in the header,
-  // so a scoped grid always measures time. Filtering to "productive" would
-  // otherwise draw an empty grid for anything that is not.
-  const shownMetric: ActivityMetric = scope ? "tracked" : metric;
+  // What the narrowed subject's time is made of in this range. Most apps and
+  // sites sit wholly in one category, and a split of one part is no split.
+  const composition = scope
+    ? activityComposition(isSingleDay ? model.hourly ?? [] : currentDays)
+    : null;
+  // A scoped grid always measures the subject's time — filtering to
+  // "productive" would draw an empty grid for anything that is not — but it
+  // wears the colour of that time's one state when it has one, as the
+  // unscoped page's state metrics do: System reads gray, not blue.
+  const shownMetric: ActivityMetric = composition
+    ? composition.soleState ?? "tracked"
+    : metric;
   // Past ~14 months, day cells slice too thin; the calendar shows month cells
   // (years as rows) instead. Rhythm needs no such switch — it is always 7×24.
   const calendarByMonth = rangeDays >= MONTH_CALENDAR_MIN_DAYS;
-  const currentDays = model.historyDays.filter(
-    (day) => day.date >= displayRange.start && day.date < displayRange.end,
-  );
 
   const rankedItems = (rankedEntityKind === "apps" ? model.apps : model.websites).slice(0, topN);
   const updateError = sessionData.error ?? analyzed.error;
@@ -332,7 +335,22 @@ export default function OverviewTab({
       : scopeSummary?.category ?? null;
   const pickerCandidates = () => scopeCandidates(sessionData.sessions, scopeContext, scopeSpans.range);
   const hoursTitle = isSingleDay ? "Hourly Activity" : HOURS_CARD_TITLES[granularity];
-  const shownStack = memberBreakdown ? "member" : stackBy;
+  // Narrowed, the Hours menu offers only the splits this subject's time has:
+  // both, one (stated, not offered), or neither — plain gray bars. A category
+  // splits by its apps and websites instead, unless it only has the one.
+  const stackChoices: ActivityStack[] = composition && !memberBreakdown
+    ? [
+        ...(composition.states > 1 ? ["state" as const] : []),
+        ...(composition.categories > 1 ? ["category" as const] : []),
+      ]
+    : ["state", "category"];
+  const splitsByMember = memberBreakdown
+    && (model.members ?? []).filter((member) => member.seconds > 0).length > 1;
+  const shownStack: ActivityStack = splitsByMember
+    ? "member"
+    : memberBreakdown || stackChoices.length === 0
+      ? "total"
+      : stackChoices.includes(stackBy) ? stackBy : stackChoices[0];
 
   return (
     <div ref={rootRef} className="relative flex flex-col gap-4" aria-busy={refreshing}>
@@ -344,16 +362,14 @@ export default function OverviewTab({
           Update failed
         </span>
       )}
-      {scopePickerSlots.wide && createPortal(
-        <ScopePicker scope={scope} getCandidates={pickerCandidates} onSelect={setScope} />,
-        scopePickerSlots.wide,
-      )}
-      {scopePickerSlots.narrow && createPortal(
-        <ScopePicker compact scope={scope} getCandidates={pickerCandidates} onSelect={setScope} />,
-        scopePickerSlots.narrow,
-      )}
-      {scope && (
-        <ScopeHeader scope={scope} category={scopeCategory} onNavigate={setScope} />
+      {scopePickerSlot && createPortal(
+        <ScopePicker
+          scope={scope}
+          category={scopeCategory}
+          getCandidates={pickerCandidates}
+          onSelect={setScope}
+        />,
+        scopePickerSlot,
       )}
       {/* Four across at every width the window can actually take. The break to
           two rows used to sit at 1024px, twenty-four pixels above the 1000px
@@ -410,7 +426,7 @@ export default function OverviewTab({
                  where the way out belongs. */
               <button
                 type="button"
-                onClick={onOpenSettings}
+                onClick={() => onOpenSettings("Goals & time")}
                 className="text-accent transition-colors hover:underline hover:decoration-accent/50 hover:underline-offset-4"
               >
                 Set a goal
@@ -542,6 +558,8 @@ export default function OverviewTab({
               <TopWindowList
                 list={scopeWindows}
                 noun={scope.kind}
+                titlesStored={meta.settings.record_window_titles === "1"}
+                onStoreTitles={() => onOpenSettings("Privacy & recording")}
                 onOpen={(window) => onOpenWindow({
                   entityId: window.entityId,
                   windowKey: window.activityKey,
@@ -599,15 +617,19 @@ export default function OverviewTab({
         <Card
           title={hoursTitle}
           className="h-[345px]"
-          right={memberBreakdown ? (
-            // Fixed, so stated rather than offered: neither of the menu's
-            // views would split this subject at all.
-            <span className="py-1.5 text-xs text-ink-3">By app and website</span>
+          right={shownStack === "member" || shownStack === "total" || stackChoices.length === 1 ? (
+            // Fixed, so stated rather than offered: the menu's other view
+            // would not split this subject at all. Sized as the menu is, so
+            // the title stays level with the neighbouring card's, and held
+            // open even when there is nothing to state.
+            <span className="flex min-h-[calc(1rem+0.75rem+2px)] items-center border border-transparent text-xs text-ink-3">
+              {STACK_STATEMENTS[shownStack]}
+            </span>
           ) : (
             <MenuSelect
               variant="quiet"
               label="Stack bars by"
-              value={stackBy}
+              value={shownStack}
               onChange={(v) => setStackBy(v as ActivityStack)}
               options={[
                 { value: "state", label: "Productivity" },
@@ -640,12 +662,6 @@ export default function OverviewTab({
           </div>
         </Card>
       </div>
-
-      {scope && transitions && (
-        <Card title="Before & After">
-          <TransitionsPanel scope={scope} transitions={transitions} />
-        </Card>
-      )}
     </div>
   );
 }

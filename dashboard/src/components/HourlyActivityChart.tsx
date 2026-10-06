@@ -24,6 +24,7 @@ import {
   representedStacks,
   shouldShowUncategorized,
   STACK_WORDS,
+  TOTAL_STACK_NAME,
   type CategorySeries,
 } from "./ProductiveHoursChart";
 
@@ -95,11 +96,18 @@ export default function HourlyActivityChart({
           uncategorizedBar(theme),
         )).map(toStackMinutes)
       : [];
+    const totalStacks: CategorySeries[] = [{
+      name: TOTAL_STACK_NAME,
+      color: palette.neutral,
+      hours: hours.map((hour) => toMinutes(hour.trackedSeconds)),
+    }];
     const stacks = stackBy === "category"
       ? categoryStacks
       : stackBy === "member"
         ? memberStacks
-        : stateStacks;
+        : stackBy === "total"
+          ? totalStacks
+          : stateStacks;
     const stackNames = stacks.map((stack) => stack.name);
     const maxMinutes = Math.max(60, ...hours.map((hour) => Math.ceil(hour.trackedSeconds / 900) * 15));
 
@@ -111,7 +119,7 @@ export default function HourlyActivityChart({
     const stateLabels = stateStacks.map((stack) => stack.name);
     const categoryLabels = categoryStacks.map((stack) => stack.name);
     const thisRows = estimateLegendRows(stackNames, legendWidth);
-    const maxRows = stackBy === "member" ? thisRows : Math.max(
+    const maxRows = stackBy === "member" || stackBy === "total" ? thisRows : Math.max(
       estimateLegendRows(stateLabels, legendWidth),
       estimateLegendRows(categoryLabels, legendWidth),
     );

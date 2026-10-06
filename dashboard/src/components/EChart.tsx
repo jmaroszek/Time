@@ -50,6 +50,29 @@ use([
   CanvasRenderer,
 ]);
 
+type DrawnElement = { parent?: DrawnElement | null; __ecComponentInfo?: { mainType?: string } };
+
+/**
+ * ECharts shows the hand cursor over every bar, cell, block, and calendar
+ * label by default, which promises a click that does nothing. A chart without
+ * a click handler puts the arrow back over anything it draws except a legend,
+ * where clicking does toggle a series.
+ *
+ * Done on zrender's move rather than with the series' `cursor` option, which
+ * a custom series' shapes, a heatmap's cells, and a calendar's labels all
+ * ignore. zrender sets the cursor before it dispatches the move, so this runs
+ * after it. `__ecComponentInfo` is ECharts' own record of which component drew
+ * a group; it is internal, so a legend that loses the hand after an upgrade
+ * means it has moved.
+ */
+function keepArrowOffLegends(zr: ReturnType<ECharts["getZr"]>, target: DrawnElement | undefined) {
+  if (!target) return;
+  for (let node: DrawnElement | null | undefined = target; node; node = node.parent) {
+    if (node.__ecComponentInfo?.mainType === "legend") return;
+  }
+  zr.setCursorStyle("default");
+}
+
 export default function EChart({
   option,
   height,
@@ -133,7 +156,17 @@ export default function EChart({
     const chart = chartRef.current;
     if (!chart) return;
     chart.off("click");
-    if (onClick) chart.on("click", onClick);
+    if (onClick) {
+      chart.on("click", onClick);
+      return;
+    }
+    const zr = chart.getZr();
+    const keepArrow = (event: { target?: unknown }) =>
+      keepArrowOffLegends(zr, event.target as DrawnElement | undefined);
+    zr.on("mousemove", keepArrow);
+    return () => {
+      zr.off("mousemove", keepArrow);
+    };
   }, [onClick, option]);
 
   return (

@@ -43,10 +43,12 @@ export default function TopUsageList({
     kind === "websites" && items.length > 0
       ? insightsWebsiteCoverageFooter(websiteCoverage)
       : null;
-  const footers: { text: string; title?: string }[] = [];
+  const footers: { text: string; title?: string; hint?: string }[] = [];
   if (hiddenCount > 0) {
     footers.push({
       text: `${hiddenCount} ${hiddenCount === 1 ? noun : `${noun}s`} under ${fmtDuration(minAppSecondsPerDay)}/day hidden`,
+      // A reminder that the reader set this, and where to change it.
+      hint: "Set by “Minimum daily time” in Settings › Hidden items.",
     });
   }
   if (coverage) {
@@ -96,12 +98,12 @@ export default function TopUsageList({
                 {onSelect ? (
                   <button
                     type="button"
-                    title={`${rawIdentity} · Show only ${item.name}`}
+                    title={`Show ${item.name} in Insights · ${rawIdentity}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       onSelect(item);
                     }}
-                    className="truncate rounded-sm text-left underline-offset-2 outline-none group-hover:text-ink group-hover:underline focus-visible:underline"
+                    className="cursor-pointer truncate rounded-sm text-left outline-none group-hover:text-ink focus-visible:text-ink focus-visible:ring-1 focus-visible:ring-accent/60"
                   >
                     {item.name}
                   </button>
@@ -134,9 +136,19 @@ export default function TopUsageList({
       </div>
       {footers.map((footer) => (
         <div key={footer.text} className="mt-2 flex h-[15px] items-center">
-          <p className="translate-y-px truncate text-xs text-ink-3" title={footer.title}>
-            {footer.text}
-          </p>
+          {footer.hint ? (
+            <FloatingTooltip
+              text={footer.hint}
+              ariaLabel={`${footer.text}. ${footer.hint}`}
+              className="block min-w-0 translate-y-px cursor-help truncate text-xs text-ink-3 outline-none focus-visible:text-ink-2"
+            >
+              {footer.text}
+            </FloatingTooltip>
+          ) : (
+            <p className="translate-y-px truncate text-xs text-ink-3" title={footer.title}>
+              {footer.text}
+            </p>
+          )}
         </div>
       ))}
     </div>

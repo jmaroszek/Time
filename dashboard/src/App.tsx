@@ -111,10 +111,10 @@ function Shell() {
   const [highlightSection, setHighlightSection] = useState<string | null>(null);
   // And again for a window Insights lists, which Activity opens on arrival.
   const [activityWindow, setActivityWindow] = useState<ActivityWindowTarget | null>(null);
-  // Where the header lends Insights room for its scope picker. State rather
-  // than refs, so the tab re-renders into a slot the moment it exists.
-  const [scopeSlotWide, setScopeSlotWide] = useState<HTMLDivElement | null>(null);
-  const [scopeSlotNarrow, setScopeSlotNarrow] = useState<HTMLDivElement | null>(null);
+  // Where the header lends Insights room for its scope picker, beside the
+  // tabs. State rather than a ref, so the tab re-renders into the slot the
+  // moment it exists.
+  const [scopeSlot, setScopeSlot] = useState<HTMLDivElement | null>(null);
   const [preset, setPreset] = useState<PresetOrCustom>("last7");
   const [rolling, setRolling] = useState(true);
   const [customRange, setCustomRange] = useState<Range | null>(null);
@@ -575,6 +575,7 @@ function Shell() {
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           <TabBar tab={tab} onTab={setTab} backlog={showBacklogBadge} />
+          {tab === "insights" && <div ref={setScopeSlot} className="flex min-w-0" />}
           {update.available && (
             <UpdateButton
               update={update.available}
@@ -584,13 +585,6 @@ function Shell() {
             />
           )}
         </div>
-        {/* Two homes for the Insights scope picker. Beside the range wherever
-            both fit on one row with it; below md the range takes a row of its
-            own that has no width to spare, so the picker moves up to the
-            tabs' row, as an icon. The two are never shown together. */}
-        {tab === "insights" && (
-          <div ref={setScopeSlotNarrow} className="ml-auto flex self-center md:hidden" />
-        )}
         {showRange && (
           <DateRangePicker
             preset={preset}
@@ -603,9 +597,6 @@ function Shell() {
               setPreset("custom");
             }}
             firstSessionSec={firstSessionSec}
-            leading={tab === "insights"
-              ? <div ref={setScopeSlotWide} className="hidden min-w-0 md:flex" />
-              : null}
           />
         )}
       </header>
@@ -645,8 +636,8 @@ function Shell() {
             view={insightsView}
             historyRevision={historyRevision}
             liveTick={liveTick}
-            onOpenSettings={() => {
-              setHighlightSection("Goals & time");
+            onOpenSettings={(section) => {
+              setHighlightSection(section);
               setTab("settings");
             }}
             onOpenWindow={(target) => {
@@ -655,7 +646,7 @@ function Shell() {
               setActivityWindow(target);
               setTab("activity");
             }}
-            scopePickerSlots={{ wide: scopeSlotWide, narrow: scopeSlotNarrow }}
+            scopePickerSlot={scopeSlot}
           />
         )}
         {tab === "activity" && (

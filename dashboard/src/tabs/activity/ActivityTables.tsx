@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 
-import { MenuSelect, type MenuOption } from "../../components/ui";
+import { FloatingTooltip, MenuSelect, type MenuOption } from "../../components/ui";
 import {
   type ActivityEntityPage,
   type ActivityEntitySummary,
@@ -419,16 +419,27 @@ export function LibraryControls({
           controls that decides what the table lists. It is pushed to the far
           right (ml-auto) rather than following the dropdowns directly, so it
           reads as a status note beside the toolbar instead of one more control
-          crowded into it. */}
+          crowded into it. The count explains itself on hover — the reader set
+          this, and should be able to find where — and only the verb acts. */}
       {noiseHidden > 0 && (
-        <button
-          type="button"
-          onClick={onIncludeNoise}
-          className="shrink-0 text-xs text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline sm:ml-auto"
-          title="Rare-item and utility rows are hidden from this list. They still count in every total."
-        >
-          {includeNoise ? `Hide ${noiseHidden} filtered` : `${noiseHidden} filtered · Show`}
-        </button>
+        <span className="flex shrink-0 items-center gap-1 text-xs text-ink-3 sm:ml-auto">
+          <FloatingTooltip
+            text="Rare items and system utilities, set in Settings › Hidden items."
+            ariaLabel={`${noiseHidden} filtered. Rare items and system utilities, set in Settings, under Hidden items.`}
+            className="cursor-help outline-none focus-visible:text-ink-2"
+          >
+            {noiseHidden} filtered
+          </FloatingTooltip>
+          <span aria-hidden="true">·</span>
+          <button
+            type="button"
+            onClick={onIncludeNoise}
+            aria-label={`${includeNoise ? "Hide" : "Show"} ${noiseHidden} filtered`}
+            className="cursor-pointer underline-offset-2 hover:text-ink-2 hover:underline focus-visible:text-ink-2 focus-visible:underline outline-none"
+          >
+            {includeNoise ? "Hide" : "Show"}
+          </button>
+        </span>
       )}
     </div>
   );

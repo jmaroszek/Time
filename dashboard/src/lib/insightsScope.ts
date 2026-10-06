@@ -1,11 +1,10 @@
-import type { Category, Classifier } from "./classify";
-import { entityIdentity, insightsMember, windowGroupKey } from "./entityIdentity";
+import { categoryState, type Category, type Classifier } from "./classify";
+import { entityIdentity, windowGroupKey } from "./entityIdentity";
 import { appGroupKey, cleanDomainName, cleanProcessName } from "./format";
 import { forEachDayChunk, type Session } from "./metrics";
 import {
   collectRuns,
   orderedByStart,
-  runNeighbors,
   runStats,
   type RunRowKind,
   type RunSpan,
@@ -283,100 +282,30 @@ export function topScopeWindows(
   return { rows, total: windows.size, untitledSeconds };
 }
 
-/** One place a run came from or went to, and how many runs did. */
-export interface ScopeNeighbor {
-  /** An `insightsMember` key, or "break". */
-  key: string;
-  name: string;
-  kind: "app" | "website" | "break";
-  /** What most of the neighbor's transition time was classified as. */
-  category: Category | null;
-  runs: number;
-}
-
-export interface ScopeTransitions {
-  /** Most common first. The break — idle, or nothing recorded — is a row like
-   *  any other, because "after a break" is a real and common answer. */
-  before: ScopeNeighbor[];
-  after: ScopeNeighbor[];
-  /** Runs whose side was known: the share denominators. Runs cut off by the
-   *  start of history or still going at the live edge are left out. */
-  beforeRuns: number;
-  afterRuns: number;
-}
-
-export const BREAK_NEIGHBOR_NAME = "Idle or away";
+const KIND_WORDS = { app: "app", website: "website", category: "category" } as const;
 
 /**
- * What the reader was doing right before each run of the scope, and what they
- * went to right after.
+ * The words after a subject's name in the header, written to finish the name
+ * as a phrase: "Obsidian notes app", "AI productive category".
  *
- * Neighbors are named the way the breakdown in the Hours card names members —
- * the website for browser time that recorded one, otherwise the app — so
- * "YouTube" leads to a run, not "Google Chrome".
+ * A category name is lowered only where it is an ordinary capitalized word, so
+ * the phrase reads in sentence case without turning "AI" into "ai" or
+ * "YouTube" into "youtube". An app held inside a category has that category
+ * named ahead of it already, so it is just an app.
  */
-export function scopeTransitions(
-  sessions: readonly Session[],
-  inScope: (session: Session) => boolean,
-  context: ScopeContext,
-  range: ScopeWindowSpan,
-): ScopeTransitions {
-  const rows = orderedByStart(sessions);
-  const kindOf = scopeRowKind(inScope, context.classifier);
-  const runs = collectRuns(rows, kindOf, range.startSec, range.endSec);
-  type Tally = Omit<ScopeNeighbor, "category"> & { categories: Map<Category | null, number> };
-  const tally = (into: Map<string, Tally>, neighbor: Session | "break" | null): boolean => {
-    if (neighbor === null) return false;
-    if (neighbor === "break") {
-      const entry = into.get("break") ?? {
-        key: "break",
-        name: BREAK_NEIGHBOR_NAME,
-        kind: "break" as const,
-        runs: 0,
-        categories: new Map(),
-      };
-      entry.runs += 1;
-      into.set("break", entry);
-      return true;
-    }
-    const member = insightsMember(neighbor, context.aliases, context.browserProcesses);
-    const entry = into.get(member.key) ?? {
-      key: member.key,
-      name: member.name,
-      kind: member.kind,
-      runs: 0,
-      categories: new Map(),
-    };
-    entry.runs += 1;
-    const category = context.classifier(neighbor);
-    entry.categories.set(category, (entry.categories.get(category) ?? 0) + 1);
-    into.set(member.key, entry);
-    return true;
-  };
-  const before = new Map<string, Tally>();
-  const after = new Map<string, Tally>();
-  let beforeRuns = 0;
-  let afterRuns = 0;
-  for (const run of runs) {
-    const neighbors = runNeighbors(rows, kindOf, run);
-    if (tally(before, neighbors.before)) beforeRuns += 1;
-    if (tally(after, neighbors.after)) afterRuns += 1;
+export function scopeDescriptor(scope: InsightsScope, category: Category | null): string {
+  if (scope.kind === "category") {
+    return category ? `${categoryState(category)} category` : "category";
   }
-  const ranked = (from: Map<string, Tally>): ScopeNeighbor[] =>
-    [...from.values()]
-      .map(({ categories, ...entry }) => {
-        let category: Category | null = null;
-        let most = 0;
-        for (const [candidate, count] of categories) {
-          if (count > most) {
-            most = count;
-            category = candidate;
-          }
-        }
-        return { ...entry, category };
-      })
-      .sort((left, right) => right.runs - left.runs || left.name.localeCompare(right.name));
-  return { before: ranked(before), after: ranked(after), beforeRuns, afterRuns };
+  if (scope.within) return KIND_WORDS[scope.kind];
+  return `${inSentence(category?.name ?? "Uncategorized")} ${KIND_WORDS[scope.kind]}`;
+}
+
+function inSentence(name: string): string {
+  return name
+    .split(" ")
+    .map((word) => (/^[A-Z][a-z]*$/.test(word) ? word.toLowerCase() : word))
+    .join(" ");
 }
 
 /** Something the scope picker can offer, with the time it holds in range. */
@@ -386,6 +315,10 @@ export interface ScopeCandidate {
   /** The category the candidate's time mostly resolved to — itself, for a
    *  category. Null when that was uncategorized time. */
   category: Category | null;
+  /** What was actually recorded under the name, for search: every process an
+   *  app's alias gathers, lowercased, or a website's host. Empty for a
+   *  category. */
+  identities: string[];
 }
 
 export interface ScopeCandidates {
@@ -405,7 +338,12 @@ export function scopeCandidates(
   context: ScopeContext,
   range: ScopeWindowSpan,
 ): ScopeCandidates {
-  type Entry = { scope: InsightsScope; seconds: number; categories: Map<Category | null, number> };
+  type Entry = {
+    scope: InsightsScope;
+    seconds: number;
+    categories: Map<Category | null, number>;
+    identities: Set<string>;
+  };
   const categories = new Map<string, Entry>();
   const apps = new Map<string, Entry>();
   const websites = new Map<string, Entry>();
@@ -415,12 +353,14 @@ export function scopeCandidates(
     make: () => InsightsScope,
     category: Category | null,
     seconds: number,
+    identity?: string,
   ) => {
     let entry = into.get(key);
     if (!entry) {
-      entry = { scope: make(), seconds: 0, categories: new Map() };
+      entry = { scope: make(), seconds: 0, categories: new Map(), identities: new Set() };
       into.set(key, entry);
     }
+    if (identity) entry.identities.add(identity);
     entry.seconds += seconds;
     entry.categories.set(category, (entry.categories.get(category) ?? 0) + seconds);
   };
@@ -444,19 +384,19 @@ export function scopeCandidates(
       kind: "app",
       key: app,
       name: cleanProcessName(session.process, context.aliases),
-    }), category, seconds);
+    }), category, seconds, session.process.toLowerCase());
     if (session.domain && context.browserProcesses.has(session.process.toLowerCase())) {
       const domain = session.domain.toLowerCase();
       add(websites, domain, () => ({
         kind: "website",
         key: domain,
         name: cleanDomainName(domain, context.aliases),
-      }), category, seconds);
+      }), category, seconds, domain);
     }
   }
   const ranked = (from: Map<string, Entry>): ScopeCandidate[] =>
     [...from.values()]
-      .map(({ scope, seconds, categories: split }) => {
+      .map(({ scope, seconds, categories: split, identities }) => {
         let category: Category | null = null;
         let most = 0;
         for (const [candidate, candidateSeconds] of split) {
@@ -465,7 +405,7 @@ export function scopeCandidates(
             category = candidate;
           }
         }
-        return { scope, seconds, category };
+        return { scope, seconds, category, identities: [...identities].sort() };
       })
       .sort((left, right) => right.seconds - left.seconds || left.scope.name.localeCompare(right.scope.name));
   return {
@@ -476,9 +416,10 @@ export function scopeCandidates(
 }
 
 /**
- * The candidates whose name — or, for a website, whose host — contains the
- * query, each section still heaviest first and cut to `limits`. An empty query
- * browses: the same cut, applied to everything.
+ * The candidates whose name, or anything recorded under it, contains the
+ * query, each section still heaviest first and cut to `limits`. So an aliased
+ * app is found by its alias or by its executable, and a website by its name or
+ * its host. An empty query browses: the same cut, applied to everything.
  */
 export function searchScopeCandidates(
   candidates: ScopeCandidates,
@@ -488,7 +429,7 @@ export function searchScopeCandidates(
   const needle = query.trim().toLowerCase();
   const matches = (candidate: ScopeCandidate) =>
     candidate.scope.name.toLowerCase().includes(needle)
-    || (candidate.scope.kind === "website" && candidate.scope.key.includes(needle));
+    || candidate.identities.some((identity) => identity.includes(needle));
   const pick = (list: ScopeCandidate[], limit: number) =>
     (needle ? list.filter(matches) : list).slice(0, limit);
   return {
@@ -496,4 +437,15 @@ export function searchScopeCandidates(
     apps: pick(candidates.apps, limits.apps),
     websites: pick(candidates.websites, limits.websites),
   };
+}
+
+/**
+ * What a search found a candidate by, when it was not the name the list shows:
+ * typing "r5apex" finds Apex Legends, and the row should say why. Null when
+ * the name itself matches, or nothing is being searched for.
+ */
+export function matchedIdentity(candidate: ScopeCandidate, query: string): string | null {
+  const needle = query.trim().toLowerCase();
+  if (!needle || candidate.scope.name.toLowerCase().includes(needle)) return null;
+  return candidate.identities.find((identity) => identity.includes(needle)) ?? null;
 }

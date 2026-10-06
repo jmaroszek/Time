@@ -614,9 +614,14 @@ function CategorySplit({ entity }: { entity: ActivityEntitySummary }) {
  * week. Columns are the range's calendar days — empty ones included, because a
  * gap is most of what there is to see.
  */
-function UsageStrip({ buckets }: { buckets: ActivityDayBucket[] }) {
+function usageStripPeak(buckets: ActivityDayBucket[]): number | null {
   const peak = buckets.reduce((most, bucket) => Math.max(most, bucket.seconds), 0);
-  if (buckets.length < 2 || peak <= 0) return null;
+  return buckets.length < 2 || peak <= 0 ? null : peak;
+}
+
+function UsageStrip({ buckets, right }: { buckets: ActivityDayBucket[]; right?: ReactNode }) {
+  const peak = usageStripPeak(buckets);
+  if (peak === null) return null;
   const spanLabel = (bucket: ActivityDayBucket) => (bucket.days === 1
     ? formatShortDate(bucket.startSec)
     : `${formatShortDate(bucket.startSec)} – ${formatShortDate(bucket.endSec - 1)}`);
@@ -624,7 +629,10 @@ function UsageStrip({ buckets }: { buckets: ActivityDayBucket[] }) {
     <section className="mt-6">
       {/* The same word Insights gives the same idea. A section heading naming
           its own chart beats one phrased as the question the chart answers. */}
-      <h3 className="text-row font-semibold">Timeline</h3>
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-row font-semibold">Timeline</h3>
+        {right}
+      </div>
       <div className="mt-2.5 flex h-10 items-end gap-px border-b border-edge/70">
         {buckets.map((bucket) => (
           <span
@@ -774,6 +782,18 @@ export function EntityPanel({
     ? rules.find((rule) => rule.id === entity.exactRuleId) ?? null
     : null;
   const summary = entityClassification(entity);
+  const insightsLink = onViewInInsights && (
+    <button
+      type="button"
+      onClick={onViewInInsights}
+      className="flex shrink-0 cursor-pointer items-center gap-1 self-center rounded-sm text-xs text-accent underline-offset-2 outline-none hover:underline focus-visible:underline"
+    >
+      View insights
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M5 12h14m-7-7 7 7-7 7" />
+      </svg>
+    </button>
+  );
   const order = WINDOW_ORDERS.find(
     (option) => option.sort === detailSort && option.direction === detailDirection,
   );
@@ -892,24 +912,14 @@ export function EntityPanel({
         <DetailMetric label="Last seen" value={formatLastSeen(entity.lastSeen)} />
       </DetailMetricGrid>
 
-      {/* The tiles are a summary of one subject; Insights is where the same
-          subject is analyzed in full, so the way there sits right under them. */}
-      {onViewInInsights && (
-        <div className="mt-2.5 flex justify-end">
-          <button
-            type="button"
-            onClick={onViewInInsights}
-            className="flex items-center gap-1 rounded-sm text-xs text-accent underline-offset-2 outline-none hover:underline focus-visible:underline"
-          >
-            View in Insights
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M5 12h14m-7-7 7 7-7 7" />
-            </svg>
-          </button>
-        </div>
+      {/* The strip is a glance at what Insights draws in full, so the way
+          there reads as its "more". A single day draws no strip, and the link
+          keeps the strip's place on its own. */}
+      {usageStripPeak(usage) !== null ? (
+        <UsageStrip buckets={usage} right={insightsLink} />
+      ) : insightsLink && (
+        <div className="mt-6 flex justify-end">{insightsLink}</div>
       )}
-
-      <UsageStrip buckets={usage} />
 
       <PanelSection title="Classification">
         {/* An exact rule supplies the current value; its source stays beside the

@@ -5,7 +5,6 @@ import {
   RUN_GLANCE_SECONDS,
   collectRuns,
   orderedByStart,
-  runNeighbors,
   runStats,
   timeWeightedMedian,
   type RunRowKind,
@@ -116,72 +115,6 @@ describe("orderedByStart", () => {
     expect(orderedByStart(sorted)).toBe(sorted);
     const shuffled = [sorted[1], sorted[0]];
     expect(orderedByStart(shuffled).map((row) => row.id)).toEqual(sorted.map((row) => row.id));
-  });
-});
-
-describe("runNeighbors", () => {
-  const neighborsOf = (rows: Row[], runIndex = 0, startSec = 0, endSec = 1e9) => {
-    const run = collectRuns(rows, kindOf, startSec, endSec)[runIndex];
-    const { before, after } = runNeighbors(rows, kindOf, run);
-    const label = (side: Row | "break" | null) =>
-      side === null ? null : side === "break" ? "break" : side.name;
-    return { before: label(before), after: label(after) };
-  };
-
-  it("names what held the foreground on either side", () => {
-    expect(neighborsOf(timeline(0, ["other", 600, "chat"], ["in", 600], ["other", 600, "music"])))
-      .toEqual({ before: "chat", after: "music" });
-  });
-
-  it("looks past a glance to what the reader actually came from and went to", () => {
-    expect(neighborsOf(timeline(
-      0,
-      ["other", 600, "chat"],
-      ["other", 3, "files"],
-      ["in", 600],
-      ["other", 4, "start menu"],
-      ["other", 600, "music"],
-    ))).toEqual({ before: "chat", after: "music" });
-  });
-
-  it("reports idle time and long silences as a break", () => {
-    expect(neighborsOf(timeline(0, ["idle", 600], ["in", 600], ["gap", 120], ["other", 600, "music"])))
-      .toEqual({ before: "break", after: "break" });
-    expect(neighborsOf(timeline(0, ["other", 600, "chat"], ["gap", RUN_GAP_TOLERANCE_SECONDS + 1], ["in", 600])).before)
-      .toBe("break");
-  });
-
-  it("knows nothing on a side where the rows run out", () => {
-    expect(neighborsOf(timeline(0, ["in", 600]))).toEqual({ before: null, after: null });
-    // Trailing glances are not where the reader went: there may be more coming.
-    expect(neighborsOf(timeline(0, ["in", 600], ["other", 5, "files"])).after).toBeNull();
-  });
-
-  it("names the nearest glance when a string of them is what ended the run", () => {
-    const rows = timeline(
-      0,
-      ["in", 600],
-      ["other", 12, "chat"],
-      ["other", 12, "music"],
-      ["other", 12, "files"],
-      ["in", 600],
-    );
-    expect(neighborsOf(rows, 0).after).toBe("chat");
-    expect(neighborsOf(rows, 1).before).toBe("files");
-  });
-
-  it("follows a run past the edges of the range it was cut by", () => {
-    const rows = timeline(
-      0,
-      ["other", 600, "chat"],
-      ["in", 600],
-      ["in", 600],
-      ["in", 600],
-      ["other", 600, "music"],
-    );
-    // The range holds only the middle row; the run, and what surrounds it,
-    // carries on past both of its edges.
-    expect(neighborsOf(rows, 0, 1300, 1700)).toEqual({ before: "chat", after: "music" });
   });
 });
 

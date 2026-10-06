@@ -404,12 +404,18 @@ export default function ProductiveHoursChart({
         ? [{ name: "Uncategorized", color: uncategorizedBar(theme), hours: uncategorizedBars }]
         : []),
     ]);
-    return { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks };
+    const totalStacks: CategorySeries[] = [{
+      name: TOTAL_STACK_NAME,
+      color: palette.neutral,
+      hours: prodBars.map((hours, index) =>
+        round2(hours + neutralBars[index] + unproductiveBars[index] + uncategorizedBars[index])),
+    }];
+    return { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks, totalStacks };
   }, [historyDays, range, labelMode, granularity, weekStart, palette, theme, averageMeasure]);
 
   const option = useMemo<EChartsOption>(() => {
     const chrome = chartChrome(theme);
-    const { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks } = agg;
+    const { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks, totalStacks } = agg;
     const categoryStacks = representedStacks(categorySeries(visible, categories, theme));
     const memberStacks = stackBy === "member" && members
       ? representedStacks(memberSeries(
@@ -423,7 +429,9 @@ export default function ProductiveHoursChart({
       ? categoryStacks
       : stackBy === "member"
         ? memberStacks
-        : stateStacks;
+        : stackBy === "total"
+          ? totalStacks
+          : stateStacks;
     const stackNames = stacks.map((stack) => stack.name);
     // The category view has always gone without the line. The member view
     // only exists narrowed, where the line averages the subject's own time,
@@ -464,16 +472,15 @@ export default function ProductiveHoursChart({
     const legendWidth = legendContentWidth(chartWidth);
     const stateLegendLabels = [...stateStacks.map((s) => s.name), averageName];
     const categoryLegendLabels = categoryStacks.map((s) => s.name);
-    const memberLegendLabels = [...memberStacks.map((s) => s.name), averageName];
     const thisRows = estimateLegendRows(
-      stackBy === "member"
-        ? memberLegendLabels
+      stackBy === "member" || stackBy === "total"
+        ? legendDataLabels(legendData)
         : showProductiveAverage ? stateLegendLabels : categoryLegendLabels,
       legendWidth,
     );
-    // The member view has no control to toggle away from, so it has no other
-    // view's legend to keep the plot the same height as.
-    const maxRows = stackBy === "member" ? thisRows : Math.max(
+    // The member and total views have no control to toggle away from, so they
+    // have no other view's legend to keep the plot the same height as.
+    const maxRows = stackBy === "member" || stackBy === "total" ? thisRows : Math.max(
       estimateLegendRows(stateLegendLabels, legendWidth),
       estimateLegendRows(categoryLegendLabels, legendWidth),
     );
@@ -542,7 +549,15 @@ export const STACK_WORDS: Record<ActivityStack, string> = {
   state: "productivity state",
   category: "category",
   member: "app and website",
+  total: "total time",
 };
+
+/** The one series of the "total" view. */
+export const TOTAL_STACK_NAME = "Time";
+
+function legendDataLabels(data: Array<string | { name: string }>): string[] {
+  return data.map((entry) => (typeof entry === "string" ? entry : entry.name));
+}
 
 export function formatHoursTooltipValue(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;

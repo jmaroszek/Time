@@ -3,14 +3,16 @@ import { createPortal } from "react-dom";
 
 import {
   CategoryDot,
-  MENU_SIZES,
-  MENU_VARIANTS,
   MENU_VIEWPORT_MARGIN,
 } from "../../components/ui";
 import { uncategorizedMark } from "../../lib/chartTheme";
+import type { Category } from "../../lib/classify";
 import { fmtDuration } from "../../lib/format";
 import {
+  parentScope,
+  scopeDescriptor,
   scopeKey,
+  matchedIdentity,
   searchScopeCandidates,
   type InsightsScope,
   type ScopeCandidate,
@@ -18,19 +20,20 @@ import {
 } from "../../lib/insightsScope";
 import { useMeta } from "../../state/meta";
 
-/** Rows per section before anything is typed. Categories are few and are the
- *  usual way in, so all of them fit; apps and websites show their heaviest. */
-const BROWSE_LIMITS = { categories: 20, apps: 6, websites: 6 };
+/** Rows per section before anything is typed. Every category, since they are
+ *  few and are the usual way in; apps and websites show their heaviest. */
+const BROWSE_LIMITS = { categories: Infinity, apps: 5, websites: 5 };
 /** Enough rows to find the one meant, few enough to read. */
-const SEARCH_LIMITS = { categories: 20, apps: 25, websites: 25 };
+const SEARCH_LIMITS = { categories: Infinity, apps: 25, websites: 25 };
 const POPOVER_WIDTH = 288;
 
 type PickerOption = {
-  /** Null clears the scope. */
-  scope: InsightsScope | null;
+  scope: InsightsScope;
   label: string;
-  seconds: number | null;
-  color: string | null;
+  /** The executable or host a search found this by, when not its name. */
+  matched: string | null;
+  seconds: number;
+  color: string;
 };
 
 const SECTION_LABELS = {
@@ -40,30 +43,38 @@ const SECTION_LABELS = {
 } as const;
 
 /**
- * Narrows Insights to any app, website, or category, by name.
+ * Narrows Insights to any app, website, or category, by name, and says what the
+ * page is narrowed to.
+ *
+ * It sits beside the tabs. Unscoped it is only a magnifier; scoped it grows to
+ * name the subject, which makes it the page's heading as well as the way to
+ * change it, so the subject is stated once, in the header, rather than in a row
+ * of its own above the tiles. An app or website held inside a category shows
+ * that category ahead of its name, and the category goes back one step to it;
+ * the clear button goes all the way out, which is why the list itself has no
+ * "All activity" row.
  *
  * The ranked lists only reach what made the top of this range, and Activity's
- * "View in Insights" needs a detour; this reaches anything with time in range
- * from where the date range is chosen, since the two together decide what the
- * page is about.
+ * "View in Insights" needs a detour; this reaches anything with time in range.
  *
  * Its options are a pass over every session in range, so they are gathered
  * when the menu opens rather than on every render of the page beneath it.
  */
 export default function ScopePicker({
   scope,
+  category,
   getCandidates,
   onSelect,
-  compact = false,
 }: {
   scope: InsightsScope | null;
+  /** The scope's own category, or the one most of an app's time resolved to. */
+  category: Category | null;
   getCandidates: () => ScopeCandidates;
   onSelect: (scope: InsightsScope | null) => void;
-  /** Icon only, for a header too narrow to spare the label. */
-  compact?: boolean;
 }) {
   const meta = useMeta();
   const id = useId();
+  const shellRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -73,7 +84,8 @@ export default function ScopePicker({
   const [candidates, setCandidates] = useState<ScopeCandidates | null>(null);
   const [box, setBox] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
   const currentKey = scope ? scopeKey(scope) : null;
-  const label = scope ? scope.name : "All activity";
+  const parent = scope ? parentScope(scope) : null;
+  const descriptor = scope ? scopeDescriptor(scope, category) : null;
 
   const sections = useMemo(() => {
     if (!candidates) return [];
@@ -81,6 +93,7 @@ export default function ScopePicker({
     const toOption = (candidate: ScopeCandidate): PickerOption => ({
       scope: candidate.scope,
       label: candidate.scope.name,
+      matched: matchedIdentity(candidate, query),
       seconds: candidate.seconds,
       color: candidate.category?.color ?? uncategorizedMark(meta.theme),
     });
@@ -88,11 +101,10 @@ export default function ScopePicker({
       .map((section) => ({ section, options: found[section].map(toOption) }))
       .filter(({ options }) => options.length > 0);
   }, [candidates, query, meta.theme]);
-  // The way back out heads the list whenever nothing is being searched for.
-  const options = useMemo<PickerOption[]>(() => [
-    ...(query.trim() ? [] : [{ scope: null, label: "All activity", seconds: null, color: null }]),
-    ...sections.flatMap(({ options: sectionOptions }) => sectionOptions),
-  ], [sections, query]);
+  const options = useMemo<PickerOption[]>(
+    () => sections.flatMap(({ options: sectionOptions }) => sectionOptions),
+    [sections],
+  );
 
   const close = (refocus = true) => {
     setOpen(false);
@@ -116,8 +128,7 @@ export default function ScopePicker({
   // arrows move from it rather than from the top of a long list.
   useEffect(() => {
     if (!open || query.trim()) return;
-    const at = options.findIndex((option) =>
-      (option.scope ? scopeKey(option.scope) : null) === currentKey);
+    const at = options.findIndex((option) => scopeKey(option.scope) === currentKey);
     setActive(Math.max(at, 0));
   }, [open, candidates]);
 
@@ -139,14 +150,14 @@ export default function ScopePicker({
       return;
     }
     const place = () => {
-      const trigger = triggerRef.current?.getBoundingClientRect();
+      const trigger = shellRef.current?.getBoundingClientRect();
       if (!trigger) return;
       const width = Math.min(POPOVER_WIDTH, window.innerWidth - MENU_VIEWPORT_MARGIN * 2);
       const top = trigger.bottom + 5;
       setBox({
         left: Math.max(
           MENU_VIEWPORT_MARGIN,
-          Math.min(trigger.right - width, window.innerWidth - width - MENU_VIEWPORT_MARGIN),
+          Math.min(trigger.left, window.innerWidth - width - MENU_VIEWPORT_MARGIN),
         ),
         top,
         maxHeight: Math.max(160, window.innerHeight - top - MENU_VIEWPORT_MARGIN),
@@ -165,7 +176,7 @@ export default function ScopePicker({
     if (!open) return;
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target) || shellRef.current?.contains(target)) return;
       close(false);
     };
     document.addEventListener("mousedown", onPointerDown);
@@ -197,12 +208,12 @@ export default function ScopePicker({
     }
   };
 
-  let optionIndex = query.trim() ? 0 : 1;
+  let optionIndex = 0;
   const renderOption = (option: PickerOption, index: number) => {
-    const selected = (option.scope ? scopeKey(option.scope) : null) === currentKey;
+    const selected = scopeKey(option.scope) === currentKey;
     return (
       <button
-        key={option.scope ? scopeKey(option.scope) : "all"}
+        key={scopeKey(option.scope)}
         type="button"
         id={`${id}-opt-${index}`}
         role="option"
@@ -214,46 +225,85 @@ export default function ScopePicker({
           index === active ? "bg-selected-strong text-ink" : "text-ink-2-raised"
         }`}
       >
-        {option.color
-          ? <CategoryDot color={option.color} />
-          : <span aria-hidden="true" className="h-2 w-2 shrink-0" />}
-        <span className="min-w-0 flex-1 truncate">{option.label}</span>
-        {option.seconds !== null && (
-          <span className="shrink-0 tabular-nums text-ink-3-raised">{fmtDuration(option.seconds)}</span>
-        )}
+        <CategoryDot color={option.color} />
+        <span className="min-w-0 flex-1 truncate">
+          {option.label}
+          {option.matched && <span className="ml-1.5 text-ink-3-raised">{option.matched}</span>}
+        </span>
+        <span className="shrink-0 tabular-nums text-ink-3-raised">{fmtDuration(option.seconds)}</span>
         <span className={`w-3 shrink-0 text-center ${selected ? "text-accent" : "invisible"}`} aria-hidden="true">✓</span>
       </button>
     );
   };
 
+  const ring = "outline-none focus-visible:ring-1 focus-visible:ring-accent/60";
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        title={compact ? `Narrow Insights: ${label}` : undefined}
-        onClick={() => (open ? close() : openMenu())}
-        onKeyDown={(event) => {
-          if (!open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-            event.preventDefault();
-            openMenu();
-          }
-        }}
-        className={`flex min-w-0 items-center gap-1.5 border shadow-control outline-none transition-colors ${MENU_SIZES.control} ${
-          open
-            ? "border-accent/60 bg-selected-strong text-ink"
-            : scope ? MENU_VARIANTS.engaged : MENU_VARIANTS.resting
-        } ${compact ? "" : "max-w-[11rem]"}`}
+      {/* The tab bar's own shell, so the two read as one row of chrome. */}
+      <div
+        ref={shellRef}
+        className={`flex min-w-0 items-center gap-0.5 rounded-xl border bg-surface p-1 transition-colors ${
+          open ? "border-accent/60" : "border-edge"
+        }`}
       >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-          <circle cx="11" cy="11" r="7" />
-          <path d="m20 20-3.5-3.5" />
-        </svg>
-        <span className="sr-only">Narrow Insights: </span>
-        <span className={compact ? "sr-only" : "min-w-0 truncate"}>{label}</span>
-      </button>
+        {parent && (
+          <>
+            <button
+              type="button"
+              onClick={() => onSelect(parent)}
+              title={`Back to ${parent.name}`}
+              className={`min-w-0 max-w-[8rem] shrink truncate rounded-lg px-2 py-1.5 text-xs text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink ${ring}`}
+            >
+              {parent.name}
+            </button>
+            <span aria-hidden="true" className="shrink-0 text-xs text-ink-3">›</span>
+          </>
+        )}
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={`Narrow Insights: ${scope ? scope.name : "All activity"}`}
+          title={scope ? `${scope.name} · Change` : "Narrow Insights to one app, website, or category"}
+          onClick={() => (open ? close() : openMenu())}
+          onKeyDown={(event) => {
+            if (!open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+              event.preventDefault();
+              openMenu();
+            }
+          }}
+          className={`flex min-w-0 items-center gap-2 rounded-lg py-1.5 text-xs transition-colors hover:bg-surface-3 ${ring} ${
+            scope ? "px-2.5 text-ink" : "px-2 text-ink-2 hover:text-ink"
+          } ${open ? "bg-selected" : ""}`}
+        >
+          {scope ? (
+            <>
+              <CategoryDot color={category?.color ?? uncategorizedMark(meta.theme)} />
+              <span className="min-w-0 truncate font-semibold">{scope.name}</span>
+              <span className="shrink-0 text-ink-3">{descriptor}</span>
+            </>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+          )}
+        </button>
+        {scope && (
+          <button
+            type="button"
+            onClick={() => onSelect(null)}
+            aria-label="Show all activity"
+            title="Show all activity"
+            className={`shrink-0 rounded-lg p-1.5 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink ${ring}`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
       {open && createPortal(
         <div
           ref={popoverRef}
@@ -292,7 +342,6 @@ export default function ScopePicker({
             aria-label="Apps, websites, and categories"
             className="min-h-0 overflow-y-auto"
           >
-            {!query.trim() && renderOption(options[0], 0)}
             {sections.map(({ section, options: sectionOptions }) => (
               <div key={section} role="group" aria-label={SECTION_LABELS[section]}>
                 <p
@@ -304,9 +353,11 @@ export default function ScopePicker({
                 {sectionOptions.map((option) => renderOption(option, optionIndex++))}
               </div>
             ))}
-            {query.trim() && options.length === 0 && (
+            {options.length === 0 && (
               <p className="px-2.5 py-3 text-xs text-ink-3-raised">
-                Nothing with time in this range matches “{query.trim()}”.
+                {query.trim()
+                  ? <>Nothing with time in this range matches “{query.trim()}”.</>
+                  : "Nothing recorded in this range."}
               </p>
             )}
           </div>

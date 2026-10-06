@@ -411,8 +411,8 @@ test("@minimum every primary tab stays reachable at the minimum viewport", async
 
 test("@minimum the narrowed Insights view fits the minimum viewport", async ({ page }) => {
   await waitForDashboard(page);
-  // Below md the picker is an icon on the tab row: the range's own row has no
-  // width to spare for it.
+  // The picker sits beside the tabs, where a long subject name has to share
+  // the row with them.
   const trigger = page.getByRole("button", { name: /^Narrow Insights/ });
   await expect(trigger).toBeVisible();
   await trigger.click();
@@ -420,15 +420,14 @@ test("@minimum the narrowed Insights view fits the minimum viewport", async ({ p
   await page.getByRole("combobox", { name: "Find an app, website, or category" }).fill("focus");
   await page.getByRole("option", { name: /^Focus/ }).click();
 
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Focus");
+  await expect(trigger).toHaveAccessibleName("Narrow Insights: Focus");
   await assertNoHorizontalOverflow(page);
   await assertChartsHaveGeometry(page);
 
   await page.getByRole("button", { name: "Chrome", exact: true }).click();
-  await expect(page.getByText("App · Focus only")).toBeVisible();
-  const transitions = page.getByRole("region", { name: "After" });
-  await transitions.scrollIntoViewIfNeeded();
-  await expect(transitions).toBeVisible();
+  await expect(trigger).toHaveAccessibleName("Narrow Insights: Chrome");
+  await expect(page.getByRole("button", { name: "Focus", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show all activity" })).toBeVisible();
   await assertNoHorizontalOverflow(page);
 });
 
