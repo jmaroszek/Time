@@ -311,15 +311,15 @@ export interface MenuOption {
   hint?: string;
 }
 
-const MENU_VIEWPORT_MARGIN = 8;
+export const MENU_VIEWPORT_MARGIN = 8;
 
-const SIZES = {
+export const MENU_SIZES = {
   control: "rounded-lg px-2.5 py-1.5 text-xs",
   field: "rounded-[9px] px-2.5 py-2 text-xs",
   compact: "rounded-md px-2 py-1 text-xs",
 } as const;
 
-const VARIANTS = {
+export const MENU_VARIANTS = {
   default: "border-control-edge bg-control text-ink hover:border-edge-2 focus-visible:border-accent/60",
   quiet: "menu-quiet",
   bare: "border-transparent text-ink-3 hover:bg-surface-3 disabled:hover:bg-transparent",
@@ -536,8 +536,8 @@ export function MenuSelect({
         title={title}
         onClick={() => (open ? close() : (setActive(selected), setOpen(true)))}
         onKeyDown={onKeyDown}
-        className={`flex items-center justify-between gap-2 border outline-none transition-colors disabled:cursor-not-allowed ${SIZES[size]} ${
-          open ? "border-accent/60 bg-selected-strong text-ink" : VARIANTS[variant]
+        className={`flex items-center justify-between gap-2 border outline-none transition-colors disabled:cursor-not-allowed ${MENU_SIZES[size]} ${
+          open ? "border-accent/60 bg-selected-strong text-ink" : MENU_VARIANTS[variant]
         } ${className}`}
       >
         {/* A placeholder is normally dimmed because it stands for a value not

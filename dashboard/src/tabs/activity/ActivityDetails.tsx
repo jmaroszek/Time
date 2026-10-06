@@ -38,6 +38,7 @@ import {
 import { type Category, type Rule } from "../../lib/classify";
 import { uncategorizedMark } from "../../lib/chartTheme";
 import { fmtDuration } from "../../lib/format";
+import { RUN_DEFINITION, type RunStats } from "../../lib/runs";
 import { useMeta } from "../../state/meta";
 import { LoadMore } from "./ActivityFeedback";
 import Chevron from "./Chevron";
@@ -389,6 +390,7 @@ export function WindowPanel({
   dock,
   group,
   usage,
+  runs,
   rangeDays,
   onLoadMoreVisits,
   selectedSessionIds,
@@ -407,6 +409,7 @@ export function WindowPanel({
   dock: CSSProperties | null;
   group: ActivityTitleGroup;
   usage: ActivityDayBucket[];
+  runs: RunStats | null;
   /** Calendar days the range spans, so "days seen" has a denominator. */
   rangeDays: number;
   onLoadMoreVisits: () => void;
@@ -470,13 +473,7 @@ export function WindowPanel({
           value={fmtDuration(group.seconds)}
           hint={`Every visit to this window across the ${countNoun(rangeDays, "day")} shown, added up.`}
         />
-        <DetailMetric
-          label="Average visit"
-          value={group.sessionCount > 0
-            ? fmtDuration(group.seconds / group.sessionCount)
-            : "—"}
-          hint={`Time in range divided by its ${countNoun(group.sessionCount, "visit")}.`}
-        />
+        <TypicalRunMetric runs={runs} />
         <DetailMetric
           label="Days seen"
           value={String(group.daysSeen)}
@@ -671,6 +668,7 @@ export function EntityPanel({
   entity,
   groups,
   usage,
+  runs,
   rangeSeconds,
   rangeDays,
   hasStoredTitles,
@@ -695,12 +693,14 @@ export function EntityPanel({
   onAssign,
   onSaveAlias,
   onRemoveExactRule,
+  onViewInInsights,
   actionsDisabled = false,
 }: {
   dock: CSSProperties | null;
   entity: ActivityEntitySummary;
   groups: ActivityTitleGroupPage;
   usage: ActivityDayBucket[];
+  runs: RunStats | null;
   /** All recorded time in the range, for the share this entity holds of it. */
   rangeSeconds: number;
   /** Calendar days the range spans, so "days seen" has a denominator. */
@@ -731,6 +731,8 @@ export function EntityPanel({
   onAssign: (categoryId: number) => Promise<void>;
   onSaveAlias: (alias: string) => Promise<void>;
   onRemoveExactRule: () => Promise<void>;
+  /** Opens Insights narrowed to this entity. */
+  onViewInInsights?: () => void;
   /** The result is stale while a replacement worker query is in flight. */
   actionsDisabled?: boolean;
 }) {
@@ -880,15 +882,7 @@ export function EntityPanel({
             ? `${formatSharePercent(entity.seconds, rangeSeconds)} of everything recorded across the ${countNoun(rangeDays, "day")} shown.`
             : `Measured across the ${countNoun(rangeDays, "day")} shown.`}
         />
-        {/* Average visit gives the count a time scale; the denominator remains
-            in the hint. */}
-        <DetailMetric
-          label="Average visit"
-          value={entity.sessionCount > 0
-            ? fmtDuration(entity.seconds / entity.sessionCount)
-            : "—"}
-          hint={`Time in range divided by its ${countNoun(entity.sessionCount, "visit")}.`}
-        />
+        <TypicalRunMetric runs={runs} />
         <DetailMetric
           label="Days seen"
           value={String(entity.daysSeen)}
@@ -897,6 +891,23 @@ export function EntityPanel({
         {/* Last seen is self-explanatory, so it needs no secondary hint. */}
         <DetailMetric label="Last seen" value={formatLastSeen(entity.lastSeen)} />
       </DetailMetricGrid>
+
+      {/* The tiles are a summary of one subject; Insights is where the same
+          subject is analyzed in full, so the way there sits right under them. */}
+      {onViewInInsights && (
+        <div className="mt-2.5 flex justify-end">
+          <button
+            type="button"
+            onClick={onViewInInsights}
+            className="flex items-center gap-1 rounded-sm text-xs text-accent underline-offset-2 outline-none hover:underline focus-visible:underline"
+          >
+            View in Insights
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M5 12h14m-7-7 7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       <UsageStrip buckets={usage} />
 
@@ -1164,6 +1175,26 @@ function DetailMetricGrid({ children }: { children: ReactNode }) {
     <div className="@container">
       <div className="grid grid-cols-2 gap-3 @[45rem]:grid-cols-4">{children}</div>
     </div>
+  );
+}
+
+/**
+ * How long this was used for at a stretch, measured the way Insights measures a
+ * subject it is narrowed to — so an app's panel here and its page there give
+ * the same answer about the same history.
+ *
+ * It replaces an average of recorded rows, which the tracker splits on every
+ * title change: an hour in one editor could average out to ninety seconds.
+ */
+function TypicalRunMetric({ runs }: { runs: RunStats | null }) {
+  return (
+    <DetailMetric
+      label="Typical run"
+      value={runs?.typicalSeconds ? fmtDuration(runs.typicalSeconds) : "—"}
+      hint={runs && runs.runs > 0
+        ? `Half of this time came in runs at least this long. ${countNoun(runs.runs, "run")} in range, the longest ${fmtDuration(runs.longestSeconds ?? 0)}. ${RUN_DEFINITION}`
+        : RUN_DEFINITION}
+    />
   );
 }
 

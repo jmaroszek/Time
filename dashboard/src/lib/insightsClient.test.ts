@@ -293,6 +293,20 @@ describe("in-flight and cached reuse", () => {
     expect(worker.posted).toHaveLength(1);
   });
 
+  it("never serves a model built without a member breakdown to a view that needs one", async () => {
+    const { analyzeInsights, peekInsightsModel, insightsRequestKey } = await loadClient();
+    const plain = request();
+    const promise = analyzeInsights(plain);
+    const worker = onlyWorker();
+    worker.respond({ id: worker.posted[0].id, model: model("plain") });
+    await promise;
+
+    // Same sessions, same range: only the breakdown differs, and it must miss.
+    const narrowed = { ...plain, memberBreakdown: true };
+    expect(insightsRequestKey(narrowed)).not.toBe(insightsRequestKey(plain));
+    expect(peekInsightsModel(insightsRequestKey(narrowed))).toBeNull();
+  });
+
   it("rejects the caller when the worker reports a failure", async () => {
     const { analyzeInsights } = await loadClient();
 

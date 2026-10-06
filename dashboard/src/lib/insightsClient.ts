@@ -33,6 +33,7 @@ export function insightsRequestKey(request: InsightsRequest): string {
     request.labelMode,
     request.firstObservedSec,
     request.analysisCutoffSec,
+    request.memberBreakdown ? 1 : 0,
   ].join(":");
 }
 

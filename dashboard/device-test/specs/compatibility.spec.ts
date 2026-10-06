@@ -409,6 +409,29 @@ test("@minimum every primary tab stays reachable at the minimum viewport", async
   await expect(rowTrigger).toBeFocused();
 });
 
+test("@minimum the narrowed Insights view fits the minimum viewport", async ({ page }) => {
+  await waitForDashboard(page);
+  // Below md the picker is an icon on the tab row: the range's own row has no
+  // width to spare for it.
+  const trigger = page.getByRole("button", { name: /^Narrow Insights/ });
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await assertOpenMenuFitsViewport(page);
+  await page.getByRole("combobox", { name: "Find an app, website, or category" }).fill("focus");
+  await page.getByRole("option", { name: /^Focus/ }).click();
+
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Focus");
+  await assertNoHorizontalOverflow(page);
+  await assertChartsHaveGeometry(page);
+
+  await page.getByRole("button", { name: "Chrome", exact: true }).click();
+  await expect(page.getByText("App · Focus only")).toBeVisible();
+  const transitions = page.getByRole("region", { name: "After" });
+  await transitions.scrollIntoViewIfNeeded();
+  await expect(transitions).toBeVisible();
+  await assertNoHorizontalOverflow(page);
+});
+
 test("@dpr charts render at high device pixel ratio", async ({ page }) => {
   await waitForDashboard(page);
   await expect.poll(() => page.evaluate(() => window.devicePixelRatio)).toBe(2);

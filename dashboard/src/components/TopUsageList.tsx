@@ -19,6 +19,7 @@ export default function TopUsageList({
   comparisonAvailable,
   hiddenCount,
   websiteCoverage,
+  onSelect,
 }: {
   items: UsageItem[];
   kind: RankedKind;
@@ -27,6 +28,8 @@ export default function TopUsageList({
   /** Rows of *this* kind held back by the minimum-time preference. */
   hiddenCount: number;
   websiteCoverage: BrowserDomainCoverage;
+  /** Narrows Insights to the row. Absent, the rows are a static ranking. */
+  onSelect?: (item: UsageItem) => void;
 }) {
   const meta = useMeta();
   const { browserSet, minAppSecondsPerDay } = meta;
@@ -79,16 +82,34 @@ export default function TopUsageList({
           return (
             <div
               key={item.key}
-              className="top-app-row grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1.5 text-xs sm:flex sm:gap-y-0"
+              // The whole row is the pointer's target, as a convenience only;
+              // the name is the keyboard and screen-reader control, so the row
+              // does not compete with it for a tab stop or an announcement.
+              onClick={onSelect ? () => onSelect(item) : undefined}
+              className={`top-app-row group grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1.5 text-xs sm:flex sm:gap-y-0 ${onSelect ? "cursor-pointer" : ""}`}
             >
               <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-2 truncate sm:w-36 sm:shrink-0">
                 <CategoryDot
                   color={item.category?.color ?? uncategorizedMark(meta.theme)}
                   label={item.category?.name ?? "Uncategorized"}
                 />
-                <span className="truncate" title={rawIdentity}>
-                  {item.name}
-                </span>
+                {onSelect ? (
+                  <button
+                    type="button"
+                    title={`${rawIdentity} · Show only ${item.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelect(item);
+                    }}
+                    className="truncate rounded-sm text-left underline-offset-2 outline-none group-hover:text-ink group-hover:underline focus-visible:underline"
+                  >
+                    {item.name}
+                  </button>
+                ) : (
+                  <span className="truncate" title={rawIdentity}>
+                    {item.name}
+                  </span>
+                )}
               </span>
               <div className="col-span-3 row-start-2 h-2 min-w-0 overflow-hidden rounded-full bg-surface-2 sm:col-auto sm:row-auto sm:flex-1">
                 {/* One accent fill for every bar: the dot already carries the

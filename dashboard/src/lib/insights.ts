@@ -6,6 +6,7 @@ import {
   type Classifier,
   type Rule,
 } from "./classify";
+import { insightsMember } from "./entityIdentity";
 import { appGroupKey } from "./format";
 import {
   addAppSeconds,
@@ -76,7 +77,11 @@ interface InsightsAggregation {
   historyDays: DailyActivitySummary[];
   /** Days in range that recorded any non-AFK activity. */
   activeDays: number;
+  /** Null unless a member breakdown was asked for. */
+  members: InsightsMemberTotal[] | null;
 }
+
+type MemberOf = (session: Session) => Omit<InsightsMemberTotal, "seconds">;
 
 export interface InsightsRequest {
   sessions: Session[];
@@ -101,6 +106,19 @@ export interface InsightsRequest {
   firstObservedSec: number | null;
   /** Exact end of the current observation window for partial-period math. */
   analysisCutoffSec: number;
+  /** Also total each day and hour by the app or website the time was spent in
+   *  (see `insightsMember`). Only a narrowed view asks: there the categories
+   *  and productivity states are all one, and its members are what splits it.
+   *  Across everything it would be every app on every day, for nothing. */
+  memberBreakdown?: boolean;
+}
+
+/** One app or website in a member breakdown, with its time in range. */
+export interface InsightsMemberTotal {
+  key: string;
+  name: string;
+  kind: "app" | "website";
+  seconds: number;
 }
 
 export interface InsightsModel {
@@ -124,6 +142,8 @@ export interface InsightsModel {
   rhythm: WeekdayRhythmSummary | null;
   monthly: MonthlyActivitySummary[] | null;
   hourly: HourlyActivitySummary[] | null;
+  /** Heaviest first. Null unless the request asked for `memberBreakdown`. */
+  members: InsightsMemberTotal[] | null;
 }
 
 export interface PackedInsightsRequest {
@@ -161,6 +181,7 @@ function makeDays(
   focusChainMaxGapSeconds: number,
   firstObservedSec: number | null,
   analysisCutoffSec: number,
+  memberBreakdown: boolean,
 ): Map<string, MutableDay> {
   return new Map(
     listDays(range).map((date) => {
@@ -184,6 +205,7 @@ function makeDays(
           unproductiveSeconds: 0,
           uncategorizedSeconds: 0,
           categorySeconds: new Map<string, number>(),
+          ...(memberBreakdown ? { memberSeconds: new Map<string, number>() } : {}),
           topApp: null,
           appSeconds: new Map<string, { name: string; seconds: number }>(),
           chain: focusChain(focusChainMaxGapSeconds),
@@ -199,6 +221,7 @@ function addDaySeconds(
   category: Category | null,
   seconds: number,
   aliases: Record<string, string> | undefined,
+  member: string | null,
 ): void {
   if (!day || seconds <= 0) return;
   day.trackedSeconds += seconds;
@@ -212,6 +235,9 @@ function addDaySeconds(
     categoryName,
     (day.categorySeconds.get(categoryName) ?? 0) + seconds,
   );
+  if (day.memberSeconds && member !== null) {
+    day.memberSeconds.set(member, (day.memberSeconds.get(member) ?? 0) + seconds);
+  }
   addTopAppSeconds(day.appSeconds, session.process, aliases, seconds);
 }
 
@@ -247,6 +273,7 @@ export function aggregateInsightsSessions(
   browserProcesses: ReadonlySet<string> = new Set(),
   firstObservedSec: number | null = range.start.getTime() / 1000,
   analysisCutoffSec: number = range.end.getTime() / 1000,
+  memberOf: MemberOf | null = null,
 ): InsightsAggregation {
   const previous = matchedPreviousRange(range, new Date(analysisCutoffSec * 1000));
   const granularity = overviewGranularity(range);
@@ -264,7 +291,9 @@ export function aggregateInsightsSessions(
     focusChainMaxGapSeconds,
     firstObservedSec,
     analysisCutoffSec,
+    memberOf !== null,
   );
+  const memberTotals = new Map<string, InsightsMemberTotal>();
   const currentDayIndex = new Map(listDays(range).map((date, index) => [dayKey(date), index]));
   const previousDayIndex = new Map(
     listDays(previous).map((date, index) => [dayKey(date), index]),
@@ -307,6 +336,7 @@ export function aggregateInsightsSessions(
     const inCurrent = clipped(source, rangeStart, rangeEnd);
     const inPrevious = clipped(source, previousStart, previousEnd);
     const inHistory = clipped(source, historyStart, rangeEnd);
+    const member = memberOf && !source.isAfk ? memberOf(source) : null;
 
     if (inCurrent) {
       current.push(inCurrent);
@@ -315,6 +345,11 @@ export function aggregateInsightsSessions(
       } else {
         const seconds = inCurrent.end - inCurrent.start;
         totalSec += seconds;
+        if (member) {
+          const total = memberTotals.get(member.key);
+          if (total) total.seconds += seconds;
+          else memberTotals.set(member.key, { ...member, seconds });
+        }
         addAppSeconds(currentApps, inCurrent.process, aliases, category, seconds);
         if (browserProcesses.has(inCurrent.process.toLowerCase())) {
           browserSeconds += seconds;
@@ -378,7 +413,7 @@ export function aggregateInsightsSessions(
           return;
         }
         const seconds = chunk.endSec - chunk.startSec;
-        addDaySeconds(day, inHistory, category, seconds, aliases);
+        addDaySeconds(day, inHistory, category, seconds, aliases, member?.key ?? null);
         day?.chain.add(chunk.startSec, chunk.endSec, seconds, category);
         if (inCurrent && currentValues) {
           const overlapStart = Math.max(chunk.startSec, inCurrent.start);
@@ -427,6 +462,11 @@ export function aggregateInsightsSessions(
     },
     historyDays: finalizeDays(historyDays),
     activeDays: activeDayKeys.size,
+    members: memberOf
+      ? [...memberTotals.values()].sort(
+          (left, right) => right.seconds - left.seconds || left.name.localeCompare(right.name),
+        )
+      : null,
   };
 }
 
@@ -453,6 +493,10 @@ function buildInsightsModelWithClassifier(
   );
   const granularity = overviewGranularity(request.range);
   const rangeDays = calendarDays(request.range);
+  const browserProcesses = new Set(request.browserProcesses);
+  const memberOf: MemberOf | null = request.memberBreakdown
+    ? (session) => insightsMember(session, request.aliases, browserProcesses)
+    : null;
   const aggregation = aggregateInsightsSessions(
     request.sessions,
     request.range,
@@ -460,9 +504,10 @@ function buildInsightsModelWithClassifier(
     request.focusChainMaxGapSeconds,
     request.weekStart,
     request.aliases,
-    new Set(request.browserProcesses),
+    browserProcesses,
     request.firstObservedSec,
     request.analysisCutoffSec,
+    memberOf,
   );
   const appComparisonAvailable =
     request.firstObservedSec !== null
@@ -570,6 +615,7 @@ function buildInsightsModelWithClassifier(
           classifier,
           request.dayStartHour,
           request.dayEndHour,
+          memberOf ? (session) => memberOf(session).key : undefined,
         )
       : null;
 
@@ -595,6 +641,7 @@ function buildInsightsModelWithClassifier(
     rhythm,
     monthly,
     hourly,
+    members: aggregation.members,
   };
 }
 

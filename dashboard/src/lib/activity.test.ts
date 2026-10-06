@@ -1163,6 +1163,81 @@ describe("the selected entity's usage strip", () => {
   });
 });
 
+describe("runs in the entity and window panels", () => {
+  const runSource: ActivitySource = {
+    categories,
+    rules,
+    browserProcesses: ["chrome.exe"],
+    aliases: {},
+    sessions: [
+      // One editor across three rows the tracker split on title changes, with
+      // a glance at a chat between two of them.
+      { id: 1, start: 0, end: 600, process: "code.exe", title: "a.ts", domain: null, isAfk: false },
+      { id: 2, start: 600, end: 610, process: "chat.exe", title: "", domain: null, isAfk: false },
+      { id: 3, start: 610, end: 1200, process: "code.exe", title: "b.ts", domain: null, isAfk: false },
+      // Ignored time reads as unrecorded: twenty seconds of it is a seam.
+      { id: 4, start: 1200, end: 1220, process: "shell.exe", title: "", domain: null, isAfk: false },
+      { id: 5, start: 1220, end: 1800, process: "code.exe", title: "a.ts", domain: null, isAfk: false },
+      // Idle time ends a run however short it is.
+      { id: 6, start: 1800, end: 1805, process: "code.exe", title: "", domain: null, isAfk: true },
+      { id: 7, start: 1805, end: 2105, process: "code.exe", title: "a.ts", domain: null, isAfk: false },
+    ],
+  };
+  const query = { ...baseQuery, endSec: 3000 };
+
+  it("counts the entity's runs the way Insights counts them, not its rows", () => {
+    const result = queryActivityIndex(buildActivityIndex(runSource), {
+      ...query,
+      selectedEntityId: "app:code.exe",
+    });
+    expect(result.selectedEntity?.sessionCount).toBe(4);
+    expect(result.selectedEntityRuns).toEqual({
+      runs: 2,
+      seconds: 600 + 590 + 580 + 300,
+      typicalSeconds: 600 + 590 + 580,
+      longestSeconds: 600 + 590 + 580,
+    });
+    // The runs account for every second the panel totals.
+    expect(result.selectedEntityRuns?.seconds).toBe(result.selectedEntity?.seconds);
+  });
+
+  it("ends a window's run at the entity's other windows", () => {
+    const index = buildActivityIndex(runSource);
+    const opened = queryActivityIndex(index, { ...query, selectedEntityId: "app:code.exe" });
+    const window = opened.detailGroups.rows.find((group) => group.title === "a.ts")!;
+    const result = queryActivityIndex(index, {
+      ...query,
+      selectedEntityId: "app:code.exe",
+      selectedWindowKey: window.key,
+    });
+    expect(result.selectedWindowRuns).toEqual({
+      runs: 3,
+      seconds: 600 + 580 + 300,
+      typicalSeconds: 580,
+      longestSeconds: 600,
+    });
+  });
+
+  it("counts an ignored entity's own time, which its panel totals", () => {
+    const result = queryActivityIndex(buildActivityIndex(runSource), {
+      ...query,
+      selectedEntityId: "app:shell.exe",
+    });
+    expect(result.selectedEntityRuns).toEqual({
+      runs: 1,
+      seconds: 20,
+      typicalSeconds: 20,
+      longestSeconds: 20,
+    });
+  });
+
+  it("has nothing to report when nothing is selected", () => {
+    const result = queryActivityIndex(buildActivityIndex(runSource), query);
+    expect(result.selectedEntityRuns).toBeNull();
+    expect(result.selectedWindowRuns).toBeNull();
+  });
+});
+
 describe("window list ordering in the entity panel", () => {
   it("takes the order the panel asks for", () => {
     const index = buildActivityIndex(source);

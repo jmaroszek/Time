@@ -5,9 +5,16 @@ import {
   type Rule,
 } from "./classify";
 import { cleanDomainName, cleanProcessName } from "./format";
-import { entityId as makeEntityId, entityIdentity } from "./entityIdentity";
+import { entityId as makeEntityId, entityIdentity, windowGroupKey } from "./entityIdentity";
 import type { Session } from "./metrics";
 import { classifyNoise, type NoisePolicy, type NoiseReason } from "./noise";
+import {
+  collectRuns,
+  orderedByStart,
+  runStats,
+  type RunRowKind,
+  type RunStats,
+} from "./runs";
 import { dayKey } from "./time";
 import { normalizeWindowTitle } from "./titleRules";
 
@@ -180,13 +187,6 @@ export interface ActivityEntityPage {
  *  worker boundary, and the group reports its true count either way. */
 export const GROUP_SESSION_SAMPLE = 25;
 
-/** Joins an entity id to a normalized title into one map key. NUL cannot occur
- *  in either half — normalization strips controls — so no pair of different
- *  (entity, title) values can collide on the joined string. Written as an
- *  escape because a literal NUL in source is invisible and makes the file read
- *  as binary. */
-const GROUP_KEY_SEP = "\u0000";
-
 /**
  * One window title, and every visit to it.
  *
@@ -245,6 +245,12 @@ export interface ActivityTitleGroup {
   normalizedTitle: string;
 }
 
+/** One window to open from outside the tab: its entity, and its group key. */
+export interface ActivityWindowTarget {
+  entityId: string;
+  windowKey: string;
+}
+
 export interface ActivityTitleGroupPage {
   rows: ActivityTitleGroup[];
   /** Distinct normalized titles, which is what `rows` is a page of. */
@@ -290,7 +296,7 @@ export const USAGE_STRIP_COLUMNS = 60;
 function titleGroupKey(
   session: Pick<ActivitySessionRow, "entityId" | "normalizedTitle">,
 ): string {
-  return `${session.entityId}${GROUP_KEY_SEP}${session.normalizedTitle}`;
+  return windowGroupKey(session.entityId, session.normalizedTitle);
 }
 
 function groupSessionsByTitle(sessions: ActivitySessionRow[]): ActivityTitleGroup[] {
@@ -503,6 +509,11 @@ export interface ActivityQueryResult {
   selectedEntityUsage: ActivityDayBucket[];
   /** The same, for the one window being inspected. Empty when none is. */
   selectedWindowUsage: ActivityDayBucket[];
+  /** The selected entity's runs across the range — the same count Insights
+   *  makes for a narrowed subject. Null when nothing is selected. */
+  selectedEntityRuns: RunStats | null;
+  /** The same, for the one window being inspected. */
+  selectedWindowRuns: RunStats | null;
   hasStoredTitles: boolean;
   ruleUsageSeconds: RuleUsageEntry[];
 }
@@ -546,6 +557,39 @@ export function restrictActivitySessionIds(
 
 interface IndexedSession extends ActivitySessionRow {
   rawSeconds: number;
+}
+
+/** A stretch of idle time. The catalog has no use for these, but a run ends
+ *  at one, so the timeline runs are traced along has to keep them. */
+interface IdleRow {
+  id: number;
+  start: number;
+  end: number;
+  idle: true;
+}
+
+type ActivityRunRow = IndexedSession | IdleRow;
+
+/** How each timeline row relates to one entity, or to one of its windows.
+ *
+ *  The subject's own rows always count, ignored or not: the panel totals every
+ *  second an entity was recorded, and its runs have to add up to that total.
+ *  Anything else that is ignored is treated as unrecorded, as Insights treats
+ *  it, so the same history yields the same runs on both tabs. */
+function activityRunKind(
+  entity: string,
+  normalizedTitle?: string,
+): (row: ActivityRunRow) => RunRowKind {
+  return (row) => {
+    if ("idle" in row) return "idle";
+    if (
+      row.entityId === entity
+      && (normalizedTitle === undefined || row.normalizedTitle === normalizedTitle)
+    ) {
+      return "in";
+    }
+    return row.categoryIgnored ? "unrecorded" : "other";
+  };
 }
 
 /**
@@ -613,12 +657,13 @@ interface WindowStage {
   maxSeconds: number;
 }
 
-/** Every session belonging to the selected identity, and its usage strip.
- *  Separate from the stage below because the detail search narrows which
+/** Every session belonging to the selected identity, its usage strip, and its
+ *  runs. Separate from the stage below because the detail search narrows which
  *  windows are listed, not which sessions the identity has. */
 interface EntityScanStage {
   rows: ActivitySessionRow[];
   usage: ActivityDayBucket[];
+  runs: RunStats | null;
 }
 
 /** The selected identity's windows as the detail search and sort leave them. */
@@ -652,6 +697,8 @@ function createQueryStages(): QueryStages {
 
 export interface ActivityIndex {
   sessions: IndexedSession[];
+  /** Every session and idle stretch in start order, for tracing runs. */
+  runRows: readonly ActivityRunRow[];
   categories: Category[];
   rules: Rule[];
   exactRuleByEntity: Map<string, number>;
@@ -787,11 +834,16 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
   const browserProcesses = new Set(source.browserProcesses.map((process) => process.toLowerCase()));
   const explain = buildClassificationExplainer(source.categories, source.rules, browserProcesses);
   const indexed: IndexedSession[] = [];
+  const runRows: ActivityRunRow[] = [];
   const ruleSeconds = new Map<number, number>();
   let hasStoredTitles = false;
 
   for (const session of source.sessions) {
-    if (session.isAfk || session.end <= session.start) continue;
+    if (session.end <= session.start) continue;
+    if (session.isAfk) {
+      runRows.push({ id: session.id, start: session.start, end: session.end, idle: true });
+      continue;
+    }
     const identity = entityIdentity(session, browserProcesses);
     const explanation = explain(session);
     const seconds = session.end - session.start;
@@ -800,7 +852,7 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
       const ruleId = explanation.winningRule.id;
       ruleSeconds.set(ruleId, (ruleSeconds.get(ruleId) ?? 0) + seconds);
     }
-    indexed.push({
+    const row: IndexedSession = {
       id: session.id,
       start: session.start,
       end: session.end,
@@ -823,7 +875,9 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
       classificationSource: explanation.source,
       isCorrected: session.isCorrected ?? false,
       normalizedTitle: normalizeWindowTitle(session.title),
-    });
+    };
+    indexed.push(row);
+    runRows.push(row);
   }
 
   const exactRuleByEntity = new Map<string, number>();
@@ -846,6 +900,7 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
   }
   const index: ActivityIndex = {
     sessions: indexed,
+    runRows: orderedByStart(runRows),
     categories: source.categories,
     rules: source.rules,
     exactRuleByEntity,
@@ -1290,6 +1345,14 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
       return {
         rows,
         usage: selectedEntity ? bucketDailyUsage(rows, query.startSec, query.endSec) : [],
+        runs: selectedEntity
+          ? runStats(collectRuns(
+              index.runRows,
+              activityRunKind(selectedEntity.id),
+              query.startSec,
+              query.endSec,
+            ))
+          : null,
       };
     },
   );
@@ -1330,6 +1393,7 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
   // ticked, corrected, or deleted on its own — only as part of "all visits".
   // One group at a time is cheap, so the one being inspected pages properly.
   let selectedWindowUsage: ActivityDayBucket[] = [];
+  let selectedWindowRuns: RunStats | null = null;
   let selectedWindow: ActivityTitleGroup | null = null;
   let detailPage = page(detail.groups, query.detailOffset ?? 0, query.detailLimit ?? 50);
   if (query.selectedWindowKey) {
@@ -1350,6 +1414,12 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
       // Every visit, not the page of them carried for the list: a strip drawn
       // from the first twenty-five would redraw itself on "load more".
       selectedWindowUsage = bucketDailyUsage(visits, query.startSec, query.endSec);
+      selectedWindowRuns = runStats(collectRuns(
+        index.runRows,
+        activityRunKind(inspected.entityId, inspected.normalizedTitle),
+        query.startSec,
+        query.endSec,
+      ));
     }
   }
 
@@ -1377,6 +1447,8 @@ export function queryActivityIndex(index: ActivityIndex, query: ActivityQuery): 
     },
     selectedEntityUsage: entityScan.usage,
     selectedWindowUsage,
+    selectedEntityRuns: entityScan.runs,
+    selectedWindowRuns,
     detailTotal: detail.rows.length,
     hasStoredTitles: index.hasStoredTitles,
     ruleUsageSeconds: index.ruleUsageSeconds,

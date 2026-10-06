@@ -15,6 +15,8 @@ import {
 } from "../components/ui";
 import { ExtensionLinks } from "../components/ExtensionLinks";
 import { withAlias } from "../lib/aliases";
+import { appGroupKey } from "../lib/format";
+import type { InsightsScope } from "../lib/insightsScope";
 import {
   GROUP_SESSION_SAMPLE,
   currentActivitySessionIds,
@@ -29,6 +31,7 @@ import {
   type ActivityTriageItem,
   type ActivityTypeFilter,
   type ActivityWindowSort,
+  type ActivityWindowTarget,
 } from "../lib/activity";
 import { parseDismissed, serializeDismissed } from "../lib/domainConsolidation";
 import { suggestForTriage, suggestionKey } from "../lib/starterSuggestions";
@@ -146,6 +149,9 @@ export default function ActivityTab({
   onTryAllTime,
   openExclusions = false,
   onExclusionsOpened,
+  requestedWindow = null,
+  onRequestedWindowOpened,
+  onViewInInsights,
 }: {
   view: ActivityView;
   onViewChange: (view: ActivityView) => void;
@@ -161,6 +167,12 @@ export default function ActivityTab({
   /** Settings asked for the exclusion list; honored once, on mount. */
   openExclusions?: boolean;
   onExclusionsOpened?: () => void;
+  /** Insights asked for one window, opened inside its entity's panel so Back
+   *  reaches the entity; honored once, on mount, like openExclusions. */
+  requestedWindow?: ActivityWindowTarget | null;
+  onRequestedWindowOpened?: () => void;
+  /** Leaves for Insights, narrowed to one app, website, or category. */
+  onViewInInsights?: (scope: InsightsScope) => void;
 }) {
   const meta = useMeta();
   const banner = useBanner();
@@ -179,7 +191,14 @@ export default function ActivityTab({
   const [includeNoise, setIncludeNoise] = useState(false);
   const [entityLimit, setEntityLimit] = useState(ENTITY_PAGE);
   const [windowLimit, setWindowLimit] = useState(WINDOW_PAGE);
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(
+    requestedWindow?.entityId ?? null,
+  );
+  // The window Insights asked for, until a query result can hand over the group
+  // it names. The panel needs the group itself, not just its key.
+  const [pendingWindowKey, setPendingWindowKey] = useState<string | null>(
+    requestedWindow?.windowKey ?? null,
+  );
   const [detailSearch, setDetailSearch] = useState("");
   const [detailLimit, setDetailLimit] = useState(PANEL_WINDOW_PAGE);
   const [windowVisitLimit, setWindowVisitLimit] = useState(GROUP_SESSION_SAMPLE);
@@ -212,6 +231,7 @@ export default function ActivityTab({
   // silently reopening a filter the reader did not ask for again.
   useEffect(() => {
     if (openExclusions) onExclusionsOpened?.();
+    if (requestedWindow) onRequestedWindowOpened?.();
   }, []);
 
   const allRange = useMemo(
@@ -258,7 +278,7 @@ export default function ActivityTab({
     detailLimit,
     detailSort,
     detailDirection,
-    selectedWindowKey: selectedWindow?.key ?? null,
+    selectedWindowKey: selectedWindow?.key ?? pendingWindowKey,
     selectedWindowSessionLimit: windowVisitLimit,
   }), [
     range.start,
@@ -280,6 +300,7 @@ export default function ActivityTab({
     detailSort,
     detailDirection,
     selectedWindow?.key,
+    pendingWindowKey,
     windowVisitLimit,
   ]);
   const analyzed = useActivityModel(source, query);
@@ -308,6 +329,17 @@ export default function ActivityTab({
       return next.size === current.size ? current : next;
     });
   }, [analyzed.current, result, selectedWindow?.key]);
+
+  // The first current result answers the request either way. A window missing
+  // from it leaves its entity's panel open, which is the nearest true answer.
+  useEffect(() => {
+    if (!pendingWindowKey || !analyzed.current || !result) return;
+    setPendingWindowKey(null);
+    if (result.selectedWindow?.key === pendingWindowKey) {
+      setWindowOrigin("entity-detail");
+      setSelectedWindow(result.selectedWindow);
+    }
+  }, [pendingWindowKey, analyzed.current, result]);
 
   // Mutation payloads are filtered against the current worker result as a
   // second line of defence. A stale panel is disabled, but this also protects
@@ -839,6 +871,7 @@ export default function ActivityTab({
       dock={detailMode === "outboard" ? panelStyle : null}
       group={currentWindow}
       usage={result?.selectedWindowUsage ?? []}
+      runs={result?.selectedWindowRuns ?? null}
       rangeDays={calendarDays(range)}
       onLoadMoreVisits={() => setWindowVisitLimit((limit) => limit + WINDOW_VISIT_MORE)}
       actionsDisabled={!analyzed.current}
@@ -863,6 +896,7 @@ export default function ActivityTab({
       actionsDisabled={!analyzed.current}
       groups={result.detailGroups}
       usage={result.selectedEntityUsage}
+      runs={result.selectedEntityRuns}
       rangeSeconds={result.totalSeconds}
       rangeDays={calendarDays(range)}
       hasStoredTitles={result.hasStoredTitles}
@@ -884,6 +918,14 @@ export default function ActivityTab({
           requestEntityDeletion(result.selectedEntity!);
         }
       }}
+      onViewInInsights={onViewInInsights
+        ? () => {
+            const entity = result.selectedEntity!;
+            onViewInInsights(entity.kind === "website"
+              ? { kind: "website", key: entity.key, name: entity.displayName }
+              : { kind: "app", key: appGroupKey(entity.key, meta.aliases), name: entity.displayName });
+          }
+        : undefined}
       onExclude={() => {
         if (currentResult?.selectedEntity?.id !== result.selectedEntity!.id) return;
         setExcludeScope({
@@ -1150,6 +1192,13 @@ export default function ActivityTab({
             source={source}
             ruleUsageSeconds={result?.ruleUsageSeconds ?? null}
             onChanged={refreshMeta}
+            onViewInInsights={onViewInInsights
+              ? (category) => onViewInInsights({
+                  kind: "category",
+                  categoryId: category.id,
+                  name: category.name,
+                })
+              : undefined}
           />
         )}
       </Card>

@@ -53,6 +53,7 @@ import {
   BACKLOG_BADGE_SECONDS,
   backlogOnlyQuery,
   type ActivitySource,
+  type ActivityWindowTarget,
 } from "./lib/activity";
 import { downloadPercent, updateButtonLabel, type AvailableUpdate, type UpdateProgress } from "./lib/appUpdate";
 import { BannerProvider, useBanner } from "./state/banner";
@@ -108,6 +109,12 @@ function Shell() {
   // reader to a specific section of Settings, and Settings clears the request
   // once it has acted on it.
   const [highlightSection, setHighlightSection] = useState<string | null>(null);
+  // And again for a window Insights lists, which Activity opens on arrival.
+  const [activityWindow, setActivityWindow] = useState<ActivityWindowTarget | null>(null);
+  // Where the header lends Insights room for its scope picker. State rather
+  // than refs, so the tab re-renders into a slot the moment it exists.
+  const [scopeSlotWide, setScopeSlotWide] = useState<HTMLDivElement | null>(null);
+  const [scopeSlotNarrow, setScopeSlotNarrow] = useState<HTMLDivElement | null>(null);
   const [preset, setPreset] = useState<PresetOrCustom>("last7");
   const [rolling, setRolling] = useState(true);
   const [customRange, setCustomRange] = useState<Range | null>(null);
@@ -577,6 +584,13 @@ function Shell() {
             />
           )}
         </div>
+        {/* Two homes for the Insights scope picker. Beside the range wherever
+            both fit on one row with it; below md the range takes a row of its
+            own that has no width to spare, so the picker moves up to the
+            tabs' row, as an icon. The two are never shown together. */}
+        {tab === "insights" && (
+          <div ref={setScopeSlotNarrow} className="ml-auto flex self-center md:hidden" />
+        )}
         {showRange && (
           <DateRangePicker
             preset={preset}
@@ -589,6 +603,9 @@ function Shell() {
               setPreset("custom");
             }}
             firstSessionSec={firstSessionSec}
+            leading={tab === "insights"
+              ? <div ref={setScopeSlotWide} className="hidden min-w-0 md:flex" />
+              : null}
           />
         )}
       </header>
@@ -632,6 +649,13 @@ function Shell() {
               setHighlightSection("Goals & time");
               setTab("settings");
             }}
+            onOpenWindow={(target) => {
+              setOpenExclusions(false);
+              setActivityView("library");
+              setActivityWindow(target);
+              setTab("activity");
+            }}
+            scopePickerSlots={{ wide: scopeSlotWide, narrow: scopeSlotNarrow }}
           />
         )}
         {tab === "activity" && (
@@ -646,6 +670,12 @@ function Shell() {
             onTryAllTime={() => setPreset("alltime")}
             openExclusions={openExclusions}
             onExclusionsOpened={() => setOpenExclusions(false)}
+            requestedWindow={activityWindow}
+            onRequestedWindowOpened={() => setActivityWindow(null)}
+            onViewInInsights={(scope) => {
+              insightsView.setScope(scope);
+              setTab("insights");
+            }}
           />
         )}
         {tab === "settings" && (

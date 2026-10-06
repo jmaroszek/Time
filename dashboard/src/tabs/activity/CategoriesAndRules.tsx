@@ -171,6 +171,7 @@ export default function CategoriesAndRules({
   source,
   ruleUsageSeconds,
   onChanged,
+  onViewInInsights,
 }: {
   /** All of history, for the match preview under the rule being written. Null
    *  until the sessions have loaded. */
@@ -180,6 +181,8 @@ export default function CategoriesAndRules({
    *  flashes on and off is worse than none. */
   ruleUsageSeconds: RuleUsageEntry[] | null;
   onChanged: () => Promise<void>;
+  /** Opens Insights narrowed to one category. */
+  onViewInInsights?: (category: Category) => void;
 }) {
   const meta = useMeta();
   const banner = useBanner();
@@ -848,6 +851,19 @@ export default function CategoriesAndRules({
                     words rather than an icon — destructive weight should
                     scale with blast radius. */}
                 <div className="mt-3 flex justify-end gap-2 border-t border-edge/40 pt-3">
+                  {onViewInInsights && (
+                    <span className="mr-auto">
+                      <Button
+                        disabled={category.isIgnored}
+                        title={category.isIgnored
+                          ? "Insights does not count ignored time"
+                          : `See ${category.name} on its own in Insights`}
+                        onClick={() => onViewInInsights(category)}
+                      >
+                        View in Insights
+                      </Button>
+                    </span>
+                  )}
                   <Button
                     disabled={locked}
                     title={locked ? "The built-in Ignored category cannot be renamed" : undefined}

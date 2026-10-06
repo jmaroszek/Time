@@ -84,8 +84,9 @@ export const ACTIVITY_METRIC_WORDS: Record<ActivityMetric, string> = {
 };
 
 /** Stack decomposition for the activity-hours bars: the productive/neutral/
- *  unproductive taxonomy, or the user's own categories. */
-export type ActivityStack = "state" | "category";
+ *  unproductive taxonomy, the user's own categories, or — for a narrowed view,
+ *  whose time is all one category — the apps and websites it was spent in. */
+export type ActivityStack = "state" | "category" | "member";
 
 /** Bucket key for sessions no rule matched. Categories cannot be named this
  *  without colliding, which is acceptable — it is already the label the charts
@@ -170,6 +171,9 @@ export interface DailyActivitySummary extends ActivityTotals {
   uncategorizedSeconds: number;
   /** Seconds per category name, UNCATEGORIZED_LABEL for unmatched sessions. */
   categorySeconds: Map<string, number>;
+  /** Seconds per `insightsMember` key. Present only when the request asked for
+   *  the breakdown. */
+  memberSeconds?: Map<string, number>;
   /** Busiest app row of the bucket, already named and merged. */
   topApp: { name: string; seconds: number } | null;
   /** Longest productive chain contained within this calendar day. */
@@ -180,6 +184,8 @@ export interface HourlyActivitySummary extends ActivityTotals {
   hour: number;
   uncategorizedSeconds: number;
   categorySeconds: Map<string, number>;
+  /** As on a day summary. */
+  memberSeconds?: Map<string, number>;
 }
 
 /** Zero-filled activity-state totals for each visible local hour of a
@@ -190,8 +196,9 @@ export function hourlyActivitySummaries(
   classifier: Classifier,
   startHour: number,
   endHour: number,
+  memberOf?: (session: Session) => string,
 ): HourlyActivitySummary[] {
-  const hours = Array.from({ length: endHour - startHour }, (_, index) => ({
+  const hours: HourlyActivitySummary[] = Array.from({ length: endHour - startHour }, (_, index) => ({
     hour: startHour + index,
     trackedSeconds: 0,
     productiveSeconds: 0,
@@ -199,6 +206,7 @@ export function hourlyActivitySummaries(
     unproductiveSeconds: 0,
     uncategorizedSeconds: 0,
     categorySeconds: new Map<string, number>(),
+    ...(memberOf ? { memberSeconds: new Map<string, number>() } : {}),
   }));
   const byHour = new Map(hours.map((hour) => [hour.hour, hour]));
   const startSec = range.start.getTime() / 1000;
@@ -228,6 +236,10 @@ export function hourlyActivitySummaries(
           addProductivitySeconds(bucket, kind, seconds);
         }
         addCategorySeconds(bucket.categorySeconds, category?.name, seconds);
+        if (bucket.memberSeconds && memberOf) {
+          const member = memberOf(session);
+          bucket.memberSeconds.set(member, (bucket.memberSeconds.get(member) ?? 0) + seconds);
+        }
       }
       cursor = chunkEnd;
     }
@@ -527,6 +539,8 @@ export interface HoursBucket extends ActivityTotals {
   observation: ObservationState;
   uncategorizedSeconds: number;
   categorySeconds: Map<string, number>;
+  /** Present when the days it sums carried one. */
+  memberSeconds?: Map<string, number>;
 }
 
 type BucketGranularity = Exclude<OverviewGranularity, "daily">;
@@ -592,6 +606,12 @@ export function bucketActivityHours(
     bucket.uncategorizedSeconds += day.uncategorizedSeconds;
     for (const [name, seconds] of day.categorySeconds) {
       bucket.categorySeconds.set(name, (bucket.categorySeconds.get(name) ?? 0) + seconds);
+    }
+    if (day.memberSeconds) {
+      bucket.memberSeconds ??= new Map<string, number>();
+      for (const [member, seconds] of day.memberSeconds) {
+        bucket.memberSeconds.set(member, (bucket.memberSeconds.get(member) ?? 0) + seconds);
+      }
     }
   }
 

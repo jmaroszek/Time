@@ -407,6 +407,81 @@ describe("comparison observation and website coverage", () => {
   });
 });
 
+describe("member breakdown", () => {
+  const memberSessions: Session[] = [
+    make(40, at(8, 9), at(8, 10), "chrome.exe", false, "youtube.com"),
+    make(41, at(8, 10), at(8, 10, 30), "chrome.exe"),
+    make(42, at(8, 11), at(8, 11, 15), "video.exe"),
+    make(43, at(9, 9), at(9, 9, 45), "chrome.exe", false, "YouTube.com"),
+    make(44, at(9, 10), at(9, 11), "hidden.exe"),
+    make(45, at(9, 11), at(9, 12), "idle", true),
+  ];
+  const request = {
+    sessions: memberSessions,
+    range,
+    categories,
+    rules,
+    browserProcesses: ["chrome.exe"],
+    weekStart: "Sunday" as const,
+    weeklyGoalHours: 0,
+    minAppSecondsPerDay: 0,
+    aliases: { "youtube.com": "YouTube" },
+    focusChainMaxGapSeconds: 120,
+    hideUtilityApps: false,
+    dayStartHour: 0,
+    dayEndHour: 24,
+    labelMode: "date" as const,
+    ...observation,
+  };
+  const dayOf = (model: ReturnType<typeof buildInsightsModel>, day: number) =>
+    model.historyDays.find((summary) => summary.date.getTime() === new Date(2026, 5, day).getTime())!;
+
+  it("totals each day by the website or app the time was spent in", () => {
+    const model = buildInsightsModel({ ...request, memberBreakdown: true });
+    // A browser's website time is its website's; what is left is the browser's.
+    expect([...dayOf(model, 8).memberSeconds!]).toEqual([
+      ["site:youtube.com", 3600],
+      ["app:chrome", 1800],
+      ["app:video", 900],
+    ]);
+    // Hosts fold case; ignored and idle time never reach a member.
+    expect([...dayOf(model, 9).memberSeconds!]).toEqual([["site:youtube.com", 2700]]);
+    expect(model.members).toEqual([
+      { key: "site:youtube.com", name: "YouTube", kind: "website", seconds: 6300 },
+      { key: "app:chrome", name: "Chrome", kind: "app", seconds: 1800 },
+      { key: "app:video", name: "Video", kind: "app", seconds: 900 },
+    ]);
+  });
+
+  it("totals a single day's hours the same way", () => {
+    const model = buildInsightsModel({
+      ...request,
+      range: { start: new Date(2026, 5, 8), end: new Date(2026, 5, 9) },
+      memberBreakdown: true,
+    });
+    const hour = (value: number) => model.hourly!.find((summary) => summary.hour === value)!;
+    expect([...hour(9).memberSeconds!]).toEqual([["site:youtube.com", 3600]]);
+    expect([...hour(10).memberSeconds!]).toEqual([["app:chrome", 1800]]);
+  });
+
+  it("is left out unless a narrowed view asks for it", () => {
+    const model = buildInsightsModel(request);
+    expect(model.members).toBeNull();
+    expect(model.historyDays.every((summary) => summary.memberSeconds === undefined)).toBe(true);
+  });
+
+  it("survives the packed transport", () => {
+    const longRequest = {
+      ...request,
+      range: { start: new Date(2026, 4, 25), end: new Date(2026, 5, 11) },
+      memberBreakdown: true,
+    };
+    expect(buildInsightsModelFromPacked(packInsightsRequest(longRequest))).toEqual(
+      buildInsightsModel(longRequest),
+    );
+  });
+});
+
 describe("packed Insights transport", () => {
   it("preserves long-range model output without transferring titles", () => {
     const longRange: Range = {

@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Category } from "../lib/classify";
+import type { InsightsMemberTotal } from "../lib/insights";
 import { rollingMeanObserved } from "../lib/metrics";
 import {
   bucketActivityHours,
@@ -12,6 +13,7 @@ import {
   overviewHistoryStart,
   UNCATEGORIZED_LABEL,
   type ActivityStack,
+  type ActivityTotals,
   type DailyActivitySummary,
   type HoursBucket,
   type OverviewGranularity,
@@ -94,6 +96,71 @@ export function categorySeries(
     .map(({ name, color, hours }) => ({ name, color, hours }));
 }
 
+/** Members drawn as stacks of their own before the rest fold into one. Past
+ *  this the legend outgrows the card and the colours stop being tellable apart:
+ *  six is what the palette's eight hue identities hold with margin. */
+export const MEMBER_SERIES_LIMIT = 6;
+export const OTHER_MEMBERS_LABEL = "Other";
+
+/**
+ * App and website stacks for a narrowed view, heaviest at the base.
+ *
+ * Colours are handed out in rank order rather than kept per app: a narrowed
+ * view has its own handful of members, and order is the one assignment that
+ * cannot give two of them the same colour. The tail folds into "Other" in the
+ * gray Uncategorized uses — it is a remainder, not a member — except when it
+ * would be a single member, which is then simply shown.
+ */
+export function memberSeries(
+  buckets: { memberSeconds?: Map<string, number> }[],
+  members: { key: string; name: string; kind: "app" | "website" }[],
+  swatches: readonly string[],
+  otherColor: string,
+): CategorySeries[] {
+  const round2 = (hours: number) => Math.round(hours * 100) / 100;
+  const totals = new Map<string, number>();
+  for (const bucket of buckets) {
+    for (const [key, seconds] of bucket.memberSeconds ?? []) {
+      totals.set(key, (totals.get(key) ?? 0) + seconds);
+    }
+  }
+  const ranked = members
+    .filter((member) => (totals.get(member.key) ?? 0) > 0)
+    .sort((left, right) =>
+      (totals.get(right.key) ?? 0) - (totals.get(left.key) ?? 0)
+      || left.name.localeCompare(right.name));
+  const shown = ranked.length > MEMBER_SERIES_LIMIT + 1
+    ? ranked.slice(0, MEMBER_SERIES_LIMIT)
+    : ranked;
+  const shownKeys = new Set(shown.map((member) => member.key));
+  // Series are keyed by name, so an app and a website that share one — an
+  // alias can make them — would merge into a single legend entry.
+  const names = new Set<string>();
+  const series: CategorySeries[] = shown.map((member, index) => {
+    const name = names.has(member.name) ? `${member.name} (${member.kind})` : member.name;
+    names.add(name);
+    return {
+      name,
+      color: swatches[index % swatches.length],
+      hours: buckets.map((bucket) => round2((bucket.memberSeconds?.get(member.key) ?? 0) / 3600)),
+    };
+  });
+  if (shown.length < ranked.length) {
+    series.push({
+      name: OTHER_MEMBERS_LABEL,
+      color: otherColor,
+      hours: buckets.map((bucket) => {
+        let seconds = 0;
+        for (const [key, memberSeconds] of bucket.memberSeconds ?? []) {
+          if (!shownKeys.has(key)) seconds += memberSeconds;
+        }
+        return round2(seconds / 3600);
+      }),
+    });
+  }
+  return series;
+}
+
 /**
  * The stacks that actually draw something in the visible range.
  *
@@ -113,6 +180,12 @@ const PRODUCTIVE_AVERAGES = {
   weekly: "4-week productive avg",
   monthly: "3-month productive avg",
   yearly: "3-year productive avg",
+} as const;
+const TRACKED_AVERAGES = {
+  daily: "7-day avg",
+  weekly: "4-week avg",
+  monthly: "3-month avg",
+  yearly: "3-year avg",
 } as const;
 /** Trailing periods averaged for the dashed line, per non-daily granularity. */
 const AVERAGE_WINDOWS = { weekly: 4, monthly: 3, yearly: 3 } as const;
@@ -208,6 +281,8 @@ export default function ProductiveHoursChart({
   weekStart = "Sunday",
   stackBy = "state",
   categories = [],
+  members = null,
+  averageMeasure = "productive",
 }: {
   historyDays: DailyActivitySummary[];
   range: Range;
@@ -216,6 +291,12 @@ export default function ProductiveHoursChart({
   weekStart?: WeekStart;
   stackBy?: ActivityStack;
   categories?: Category[];
+  /** Names for the member stacks; see `memberSeries`. */
+  members?: InsightsMemberTotal[] | null;
+  /** What the dashed line averages. Productive time is the page's own
+   *  question; a single app's is how much it was used, since its productivity
+   *  is just its category — and for an unproductive one, a flat zero. */
+  averageMeasure?: "productive" | "tracked";
 }) {
   const { palette, theme } = useMeta();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -242,9 +323,11 @@ export default function ProductiveHoursChart({
     let avgLine: Array<number | null>;
     let tooltipHeaders: string[];
     let buckets: HoursBucket[] = [];
-    // Whichever bucket run is on screen, for the category stacks.
-    let visible: { categorySeconds: Map<string, number> }[] = [];
-    const averageName = PRODUCTIVE_AVERAGES[granularity];
+    // Whichever bucket run is on screen, for the category and member stacks.
+    let visible: { categorySeconds: Map<string, number>; memberSeconds?: Map<string, number> }[] = [];
+    const averageName = (averageMeasure === "tracked" ? TRACKED_AVERAGES : PRODUCTIVE_AVERAGES)[granularity];
+    const averagedHours = (totals: ActivityTotals) =>
+      (averageMeasure === "tracked" ? totals.trackedSeconds : totals.productiveSeconds) / 3600;
     const visibleDays = historyDays.filter(
       (day) => day.date >= range.start && day.date < range.end,
     );
@@ -266,7 +349,7 @@ export default function ProductiveHoursChart({
       uncategorizedBars = visibleDays.map((day) => round2(day.uncategorizedSeconds / 3600));
       avgLine = rollingMeanObserved(
         historyDays.map((day) =>
-          day.observation === "complete" ? day.productiveSeconds / 3600 : null
+          day.observation === "complete" ? averagedHours(day) : null
         ),
         7,
       )
@@ -283,7 +366,7 @@ export default function ProductiveHoursChart({
       const averageWindow = AVERAGE_WINDOWS[granularity];
       const averages = rollingMeanObserved(
         historyBuckets.map((bucket) =>
-          bucket.observation === "complete" ? bucket.productiveSeconds / 3600 : null
+          bucket.observation === "complete" ? averagedHours(bucket) : null
         ),
         averageWindow,
       );
@@ -322,15 +405,30 @@ export default function ProductiveHoursChart({
         : []),
     ]);
     return { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks };
-  }, [historyDays, range, labelMode, granularity, weekStart, palette, theme]);
+  }, [historyDays, range, labelMode, granularity, weekStart, palette, theme, averageMeasure]);
 
   const option = useMemo<EChartsOption>(() => {
     const chrome = chartChrome(theme);
     const { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks } = agg;
     const categoryStacks = representedStacks(categorySeries(visible, categories, theme));
-    const stacks = stackBy === "category" ? categoryStacks : stateStacks;
+    const memberStacks = stackBy === "member" && members
+      ? representedStacks(memberSeries(
+          visible,
+          members,
+          palette.swatches.slice(0, 8),
+          uncategorizedBar(theme),
+        ))
+      : [];
+    const stacks = stackBy === "category"
+      ? categoryStacks
+      : stackBy === "member"
+        ? memberStacks
+        : stateStacks;
     const stackNames = stacks.map((stack) => stack.name);
-    const showProductiveAverage = stackBy === "state";
+    // The category view has always gone without the line. The member view
+    // only exists narrowed, where the line averages the subject's own time,
+    // and that is the comparison its bars are there to make.
+    const showProductiveAverage = stackBy !== "category";
     const tooltip = {
       trigger: "axis" as const,
       ...tooltipStyle(theme),
@@ -366,11 +464,16 @@ export default function ProductiveHoursChart({
     const legendWidth = legendContentWidth(chartWidth);
     const stateLegendLabels = [...stateStacks.map((s) => s.name), averageName];
     const categoryLegendLabels = categoryStacks.map((s) => s.name);
+    const memberLegendLabels = [...memberStacks.map((s) => s.name), averageName];
     const thisRows = estimateLegendRows(
-      showProductiveAverage ? stateLegendLabels : categoryLegendLabels,
+      stackBy === "member"
+        ? memberLegendLabels
+        : showProductiveAverage ? stateLegendLabels : categoryLegendLabels,
       legendWidth,
     );
-    const maxRows = Math.max(
+    // The member view has no control to toggle away from, so it has no other
+    // view's legend to keep the plot the same height as.
+    const maxRows = stackBy === "member" ? thisRows : Math.max(
       estimateLegendRows(stateLegendLabels, legendWidth),
       estimateLegendRows(categoryLegendLabels, legendWidth),
     );
@@ -419,7 +522,7 @@ export default function ProductiveHoursChart({
         }] : []),
       ],
     };
-  }, [agg, stackBy, categories, chartWidth, theme]);
+  }, [agg, stackBy, categories, members, chartWidth, theme, palette]);
 
   return (
     <div ref={wrapRef}>
@@ -428,11 +531,18 @@ export default function ProductiveHoursChart({
         height={254}
         accessibleDescription={`Stacked ${granularity} activity hours for the selected ${
           calendarDays(range)
-        }-day period, broken down by ${stackBy === "state" ? "productivity state" : "category"} with a productive-time rolling average.`}
+        }-day period, broken down by ${STACK_WORDS[stackBy]} with a ${averageMeasure === "tracked" ? "tracked" : "productive"}-time rolling average.`}
       />
     </div>
   );
 }
+
+/** How each stack view is named in the charts' accessible descriptions. */
+export const STACK_WORDS: Record<ActivityStack, string> = {
+  state: "productivity state",
+  category: "category",
+  member: "app and website",
+};
 
 export function formatHoursTooltipValue(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;

@@ -4,8 +4,78 @@ import {
   estimateLegendRows,
   formatHoursTooltipRow,
   legendContentWidth,
+  MEMBER_SERIES_LIMIT,
+  memberSeries,
+  OTHER_MEMBERS_LABEL,
   representedStacks,
 } from "./ProductiveHoursChart";
+
+describe("memberSeries", () => {
+  const swatches = ["a", "b", "c", "d", "e", "f", "g", "h"];
+  const member = (index: number) => ({
+    key: `app:m${index}`,
+    name: `Member ${index}`,
+    kind: "app" as const,
+  });
+  const bucket = (entries: Array<[string, number]>) => ({ memberSeconds: new Map(entries) });
+
+  it("stacks members heaviest first and colors them in that order", () => {
+    const series = memberSeries(
+      [bucket([["app:m1", 3600], ["app:m2", 7200]]), bucket([["app:m1", 1800]])],
+      [member(1), member(2)],
+      swatches,
+      "gray",
+    );
+    expect(series).toEqual([
+      { name: "Member 2", color: "a", hours: [2, 0] },
+      { name: "Member 1", color: "b", hours: [1, 0.5] },
+    ]);
+  });
+
+  it("folds the tail into Other, in the remainder's gray", () => {
+    const members = Array.from({ length: MEMBER_SERIES_LIMIT + 2 }, (_, index) => member(index));
+    // Every member a little lighter than the one before it.
+    const series = memberSeries(
+      [bucket(members.map((m, index) => [m.key, (20 - index) * 360]))],
+      members,
+      swatches,
+      "gray",
+    );
+    expect(series.map((stack) => stack.name)).toEqual([
+      ...members.slice(0, MEMBER_SERIES_LIMIT).map((m) => m.name),
+      OTHER_MEMBERS_LABEL,
+    ]);
+    const other = series[series.length - 1];
+    expect(other.color).toBe("gray");
+    // The last two members: (20 - 6) and (20 - 7) tenths of an hour.
+    expect(other.hours).toEqual([2.7]);
+  });
+
+  it("shows a lone member past the limit rather than an Other of one", () => {
+    const members = Array.from({ length: MEMBER_SERIES_LIMIT + 1 }, (_, index) => member(index));
+    const series = memberSeries([bucket(members.map((m) => [m.key, 3600]))], members, swatches, "gray");
+    expect(series).toHaveLength(MEMBER_SERIES_LIMIT + 1);
+    expect(series.some((stack) => stack.name === OTHER_MEMBERS_LABEL)).toBe(false);
+  });
+
+  it("keeps an app and a website that share a name apart", () => {
+    const series = memberSeries(
+      [bucket([["app:youtube", 3600], ["site:youtube.com", 7200]])],
+      [
+        { key: "app:youtube", name: "YouTube", kind: "app" },
+        { key: "site:youtube.com", name: "YouTube", kind: "website" },
+      ],
+      swatches,
+      "gray",
+    );
+    expect(series.map((stack) => stack.name)).toEqual(["YouTube", "YouTube (app)"]);
+  });
+
+  it("leaves out members with no time on screen", () => {
+    expect(memberSeries([bucket([["app:m1", 60]])], [member(1), member(2)], swatches, "gray")
+      .map((stack) => stack.name)).toEqual(["Member 1"]);
+  });
+});
 
 describe("formatHoursTooltipRow", () => {
   it("omits a zero-hour stack segment", () => {

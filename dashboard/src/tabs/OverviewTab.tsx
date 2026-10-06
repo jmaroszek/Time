@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 
 import ActivityCalendar from "../components/ActivityCalendar";
 import HourlyActivityChart from "../components/HourlyActivityChart";
@@ -9,10 +10,20 @@ import TopUsageList from "../components/TopUsageList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
 import { Card, MenuSelect, MetricCard, Spinner } from "../components/ui";
 import { fmtDuration, fmtPct } from "../lib/format";
+import type { ActivityWindowTarget } from "../lib/activity";
 import type { InsightsRequest } from "../lib/insights";
+import {
+  parentScope,
+  scopeCandidates,
+  scopeMatcher,
+  scopeTransitions,
+  summarizeScope,
+  topScopeWindows,
+  type ScopeContext,
+} from "../lib/insightsScope";
 import { productivityDataState } from "../lib/metrics";
 import { hidesUtilities } from "../lib/noise";
-import { calendarDays, type Range } from "../lib/time";
+import { calendarDays, matchedPreviousRange, type Range } from "../lib/time";
 import {
   MONTH_CALENDAR_MIN_DAYS,
   ACTIVITY_METRICS,
@@ -31,6 +42,20 @@ import {
   type RankedEntityKind,
 } from "../state/useInsightsView";
 import { useSessions } from "../state/useSessions";
+import ScopePicker from "./insights/ScopePicker";
+import {
+  ScopeHeader,
+  ScopeTiles,
+  TopWindowList,
+  TransitionsPanel,
+} from "./insights/ScopedInsights";
+
+/** Where the header lends this tab room for its scope picker: beside the date
+ *  range when the header is wide enough, and on the tab row when it is not. */
+export interface ScopePickerSlots {
+  wide: HTMLElement | null;
+  narrow: HTMLElement | null;
+}
 
 const HOURS_CARD_TITLES = {
   daily: "Daily Hours",
@@ -76,6 +101,8 @@ export default function OverviewTab({
   historyRevision,
   liveTick,
   onOpenSettings,
+  onOpenWindow,
+  scopePickerSlots,
 }: {
   range: Range;
   preset: PresetOrCustom;
@@ -92,6 +119,9 @@ export default function OverviewTab({
    *  this keeps the cached rows and refetches only the live edge. */
   liveTick: number;
   onOpenSettings: () => void;
+  /** Opens one of a narrowed app's top windows in Activity. */
+  onOpenWindow: (target: ActivityWindowTarget) => void;
+  scopePickerSlots: ScopePickerSlots;
 }) {
   const meta = useMeta();
   // The view controls (ranked identity/count, timeline resolution, aggregate view,
@@ -112,6 +142,8 @@ export default function OverviewTab({
     setMetric,
     stackBy,
     setStackBy,
+    scope,
+    setScope,
   } = view;
 
   const { startSec: fetchStart, endSec: fetchEnd } = insightsFetchWindow(range);
@@ -120,10 +152,33 @@ export default function OverviewTab({
     () => Math.min(Date.now() / 1000, range.end.getTime() / 1000),
     [range, historyRevision, liveTick, sessionData.sessions],
   );
+  // A scope narrows the sessions before the model sees them, so every chart
+  // below is the ordinary one, drawn from one subject's history. Nothing about
+  // the model changes; only its input does.
+  const scopeContext = useMemo<ScopeContext>(
+    () => ({
+      classifier: meta.classifier,
+      aliases: meta.aliases,
+      browserProcesses: meta.browserSet,
+    }),
+    [meta.classifier, meta.aliases, meta.browserSet],
+  );
+  const inScope = useMemo(
+    () => (scope ? scopeMatcher(scope, scopeContext) : null),
+    [scope, scopeContext],
+  );
+  const scopedSessions = useMemo(
+    () => (inScope ? sessionData.sessions.filter(inScope) : sessionData.sessions),
+    [inScope, sessionData.sessions],
+  );
+  // A category's time is all one category and one productivity state, and so
+  // is an app's inside one, so neither stacking splits it. What does is the
+  // apps and websites it was spent in.
+  const memberBreakdown = scope !== null && (scope.kind === "category" || scope.within !== undefined);
   const request = useMemo<InsightsRequest | null>(() => {
     if (!sessionData.ready) return null;
     return {
-      sessions: sessionData.sessions,
+      sessions: scopedSessions,
       range,
       categories: meta.categories,
       rules: meta.rules,
@@ -139,11 +194,60 @@ export default function OverviewTab({
       labelMode: preset === "last7" ? "weekday" : "date",
       firstObservedSec: firstSessionSec,
       analysisCutoffSec,
+      memberBreakdown,
     };
-  }, [sessionData.ready, sessionData.sessions, range, meta, preset, firstSessionSec, analysisCutoffSec]);
+  }, [sessionData.ready, scopedSessions, range, meta, preset, firstSessionSec, analysisCutoffSec, memberBreakdown]);
   const analyzed = useInsightsModel(request);
   const model = analyzed.model;
-  useInsightsWarmup(request, analyzed.current, firstSessionSec);
+  // Warming is for the unscoped presets a reader is likely to try next; a
+  // scoped request would only spend the cache on one subject's variants.
+  useInsightsWarmup(scope ? null : request, analyzed.current, firstSessionSec);
+
+  // The scope's own figures read the *whole* session stream, not the filtered
+  // one: whether a run continues depends on what happened between two of its
+  // sessions, and the filtered list has had exactly that removed.
+  const scopeSpans = useMemo(() => {
+    const previous = matchedPreviousRange(range, new Date(analysisCutoffSec * 1000));
+    const previousStartSec = previous.start.getTime() / 1000;
+    const comparable = preset !== "alltime"
+      && firstSessionSec !== null
+      && previous.end > previous.start
+      && previousStartSec >= firstSessionSec;
+    return {
+      range: {
+        startSec: range.start.getTime() / 1000,
+        endSec: Math.min(range.end.getTime() / 1000, analysisCutoffSec),
+      },
+      previous: comparable
+        ? { startSec: previousStartSec, endSec: previous.end.getTime() / 1000 }
+        : null,
+      previousDays: calendarDays(previous),
+    };
+  }, [range, analysisCutoffSec, preset, firstSessionSec]);
+  const scopeSummary = useMemo(() => {
+    if (!scope || !inScope || !sessionData.ready) return null;
+    const parent = parentScope(scope);
+    return summarizeScope(
+      sessionData.sessions,
+      inScope,
+      meta.classifier,
+      scopeSpans.range,
+      scopeSpans.previous,
+      parent ? scopeMatcher(parent, scopeContext) : null,
+    );
+  }, [scope, inScope, sessionData.ready, sessionData.sessions, meta.classifier, scopeSpans, scopeContext]);
+  const scopeWindows = useMemo(
+    () => (inScope && scope?.kind !== "category" && sessionData.ready
+      ? topScopeWindows(sessionData.sessions, inScope, scopeContext, scopeSpans.range, topN)
+      : null),
+    [inScope, scope, sessionData.ready, sessionData.sessions, scopeContext, scopeSpans, topN],
+  );
+  const transitions = useMemo(
+    () => (inScope && sessionData.ready
+      ? scopeTransitions(sessionData.sessions, inScope, scopeContext, scopeSpans.range)
+      : null),
+    [inScope, sessionData.ready, sessionData.sessions, scopeContext, scopeSpans],
+  );
 
   // Pin the aggregate view the first time the range is long enough to show one.
   // The calendar default is a starting point, not a rule: without this, any
@@ -154,6 +258,13 @@ export default function OverviewTab({
     if (aggregateRangeDays === null) return;
     setAggregateView((current) => current ?? "calendar");
   }, [aggregateRangeDays]);
+
+  // A new subject is a new page: it starts at its heading, not wherever the row
+  // that opened it happened to sit.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    rootRef.current?.closest(".app-viewport")?.scrollTo({ top: 0 });
+  }, [scope]);
 
   if (!model) {
     const error = sessionData.error ?? analyzed.error;
@@ -172,6 +283,10 @@ export default function OverviewTab({
   // and the card header lets you override it from then on.
   const middleView =
     rangeDays <= 14 ? "timeline" : (aggregateView ?? "calendar");
+  // One subject's productivity is its category, already named in the header,
+  // so a scoped grid always measures time. Filtering to "productive" would
+  // otherwise draw an empty grid for anything that is not.
+  const shownMetric: ActivityMetric = scope ? "tracked" : metric;
   // Past ~14 months, day cells slice too thin; the calendar shows month cells
   // (years as rows) instead. Rhythm needs no such switch — it is always 7×24.
   const calendarByMonth = rangeDays >= MONTH_CALENDAR_MIN_DAYS;
@@ -199,8 +314,28 @@ export default function OverviewTab({
     : "Nothing classified yet";
   const goalConfigured = meta.weeklyGoalHours > 0;
 
+  // The row's own identity, so the scope it opens totals exactly what the row
+  // showed. Website keys are already the lowercased host. Inside a category the
+  // rows were measured inside it, so the scope stays inside it too.
+  const within = scope?.kind === "category"
+    ? { categoryId: scope.categoryId, name: scope.name }
+    : undefined;
+  const selectRanked = (item: (typeof rankedItems)[number]) =>
+    setScope("processes" in item
+      ? { kind: "app", key: item.key, name: item.name, within }
+      : { kind: "website", key: item.key, name: item.name, within });
+  const heldIn = scope ? parentScope(scope) : null;
+  const scopeCategory = scope?.kind === "category"
+    ? meta.categories.find((category) => category.id === scope.categoryId) ?? null
+    : heldIn?.kind === "category"
+      ? meta.categories.find((category) => category.id === heldIn.categoryId) ?? null
+      : scopeSummary?.category ?? null;
+  const pickerCandidates = () => scopeCandidates(sessionData.sessions, scopeContext, scopeSpans.range);
+  const hoursTitle = isSingleDay ? "Hourly Activity" : HOURS_CARD_TITLES[granularity];
+  const shownStack = memberBreakdown ? "member" : stackBy;
+
   return (
-    <div className="relative flex flex-col gap-4" aria-busy={refreshing}>
+    <div ref={rootRef} className="relative flex flex-col gap-4" aria-busy={refreshing}>
       {updateError && (
         <span
           className="pointer-events-none absolute right-1 -top-3 text-xs text-bad"
@@ -209,6 +344,17 @@ export default function OverviewTab({
           Update failed
         </span>
       )}
+      {scopePickerSlots.wide && createPortal(
+        <ScopePicker scope={scope} getCandidates={pickerCandidates} onSelect={setScope} />,
+        scopePickerSlots.wide,
+      )}
+      {scopePickerSlots.narrow && createPortal(
+        <ScopePicker compact scope={scope} getCandidates={pickerCandidates} onSelect={setScope} />,
+        scopePickerSlots.narrow,
+      )}
+      {scope && (
+        <ScopeHeader scope={scope} category={scopeCategory} onNavigate={setScope} />
+      )}
       {/* Four across at every width the window can actually take. The break to
           two rows used to sit at 1024px, twenty-four pixels above the 1000px
           minimum in tauri.conf — so the only way to see it was to drag the
@@ -216,67 +362,76 @@ export default function OverviewTab({
           nobody had designed for. The stacked fallback is kept below a width
           the window cannot reach, so that lowering that minimum degrades the
           page instead of crushing it. Same reasoning on the pair below. */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <MetricCard
-          label="Daily productive time"
-          value={emptyReason ?? fmtDuration(kpis.prodSec / calendarDays(displayRange))}
-          sub={emptyReason ? emptyNote : undefined}
-          hint="Total productive time in this range divided by the number of days it spans."
+      {scope && scopeSummary ? (
+        <ScopeTiles
+          scope={scope}
+          summary={scopeSummary}
+          rangeDays={rangeDays}
+          previousDays={scopeSpans.previousDays}
         />
-        <MetricCard
-          label="Productive share"
-          value={emptyReason ?? fmtPct(kpis.prodFraction)}
-          sub={emptyReason ? emptyNote : undefined}
-          hint="Share of tracked time spent in apps and sites you've marked productive."
-        />
-        <MetricCard
-          label="Longest focus"
-          value={emptyReason ?? fmtDuration(kpis.longestFocusSec)}
-          sub={emptyReason ? emptyNote : undefined}
-          hint="Longest continuous run of productive time. Short gaps don't break the chain."
-        />
-        {/* The target is not part of the figure. "40h / 35h" reads as a
-            fraction — one number over another — when only the first is the
-            measurement; the second is the bar it is being held to. Two
-            typographic ranks say that, and a slash does not. */}
-        <MetricCard
-          label="Goal pace"
-          value={goalConfigured && emptyReason ? emptyReason : goalConfigured ? (
-            <span className="flex items-baseline gap-1.5 tabular-nums">
-              {`${pace.doneHours.toFixed(0)}h`}
-              {/* tracking-normal resets the tile's -.02em, which is drawn for
-                  24px and too tight at 12. */}
-              <span className="text-xs font-normal tracking-normal text-ink-3">
-                {`of ${pace.targetHours.toFixed(0)}h`}
+      ) : (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <MetricCard
+            label="Daily productive time"
+            value={emptyReason ?? fmtDuration(kpis.prodSec / calendarDays(displayRange))}
+            sub={emptyReason ? emptyNote : undefined}
+            hint="Total productive time in this range divided by the number of days it spans."
+          />
+          <MetricCard
+            label="Productive share"
+            value={emptyReason ?? fmtPct(kpis.prodFraction)}
+            sub={emptyReason ? emptyNote : undefined}
+            hint="Share of tracked time spent in apps and sites you've marked productive."
+          />
+          <MetricCard
+            label="Longest focus"
+            value={emptyReason ?? fmtDuration(kpis.longestFocusSec)}
+            sub={emptyReason ? emptyNote : undefined}
+            hint="Longest continuous run of productive time. Short gaps don't break the chain."
+          />
+          {/* The target is not part of the figure. "40h / 35h" reads as a
+              fraction — one number over another — when only the first is the
+              measurement; the second is the bar it is being held to. Two
+              typographic ranks say that, and a slash does not. */}
+          <MetricCard
+            label="Goal pace"
+            value={goalConfigured && emptyReason ? emptyReason : goalConfigured ? (
+              <span className="flex items-baseline gap-1.5 tabular-nums">
+                {`${pace.doneHours.toFixed(0)}h`}
+                {/* tracking-normal resets the tile's -.02em, which is drawn for
+                    24px and too tight at 12. */}
+                <span className="text-xs font-normal tracking-normal text-ink-3">
+                  {`of ${pace.targetHours.toFixed(0)}h`}
+                </span>
               </span>
-            </span>
-          ) : (
-            /* "Not set" named the state and left the reader to hunt for the
-               control. The tile is where the absence is noticed, so it is also
-               where the way out belongs. */
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="text-accent transition-colors hover:underline hover:decoration-accent/50 hover:underline-offset-4"
-            >
-              Set a goal
-            </button>
-          )}
-          sub={goalConfigured
-            ? emptyReason
-              ? emptyNote
-              : pace.roundedTieWhileBehind
-                ? "<1h left"
-                : undefined
-            : undefined}
-          mark={goalConfigured && !emptyReason && pace.met
-            ? <GoalMetMark />
-            : undefined}
-          hint={goalConfigured
-            ? "Productive time in this range vs your weekly goal, prorated to the range's length."
-            : "An optional weekly goal. Opens Settings, where you can set one."}
-        />
-      </div>
+            ) : (
+              /* "Not set" named the state and left the reader to hunt for the
+                 control. The tile is where the absence is noticed, so it is also
+                 where the way out belongs. */
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="text-accent transition-colors hover:underline hover:decoration-accent/50 hover:underline-offset-4"
+              >
+                Set a goal
+              </button>
+            )}
+            sub={goalConfigured
+              ? emptyReason
+                ? emptyNote
+                : pace.roundedTieWhileBehind
+                  ? "<1h left"
+                  : undefined
+              : undefined}
+            mark={goalConfigured && !emptyReason && pace.met
+              ? <GoalMetMark />
+              : undefined}
+            hint={goalConfigured
+              ? "Productive time in this range vs your weekly goal, prorated to the range's length."
+              : "An optional weekly goal. Opens Settings, where you can set one."}
+          />
+        </div>
+      )}
 
       <Card
         surface="chart"
@@ -287,7 +442,7 @@ export default function OverviewTab({
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Rhythm</span>
                   <span className="text-xs font-normal text-ink-3">
-                    {`Average ${ACTIVITY_METRIC_WORDS[metric]} time by weekday and hour`}
+                    {`Average ${ACTIVITY_METRIC_WORDS[shownMetric]} time by weekday and hour`}
                   </span>
                 </span>
               )
@@ -295,7 +450,7 @@ export default function OverviewTab({
                 <span className="flex flex-col gap-0.5">
                   <span>Activity Calendar</span>
                   <span className="text-xs font-normal text-ink-3">
-                    {`${ACTIVITY_METRIC_WORDS[metric].replace(/^./, (c) => c.toUpperCase())} time by ${calendarByMonth ? "month" : "day"}`}
+                    {`${ACTIVITY_METRIC_WORDS[shownMetric].replace(/^./, (c) => c.toUpperCase())} time by ${calendarByMonth ? "month" : "day"}`}
                   </span>
                 </span>
               )}
@@ -317,16 +472,18 @@ export default function OverviewTab({
           />
         ) : (
           <span className="flex items-center gap-2">
-            <MenuSelect
-              variant="quiet"
-              label="Metric"
-              value={metric}
-              onChange={(v) => setMetric(v as ActivityMetric)}
-              options={ACTIVITY_METRICS.map((m) => ({
-                value: m,
-                label: ACTIVITY_METRIC_LABELS[m],
-              }))}
-            />
+            {!scope && (
+              <MenuSelect
+                variant="quiet"
+                label="Metric"
+                value={metric}
+                onChange={(v) => setMetric(v as ActivityMetric)}
+                options={ACTIVITY_METRICS.map((m) => ({
+                  value: m,
+                  label: ACTIVITY_METRIC_LABELS[m],
+                }))}
+              />
+            )}
             <MenuSelect
               variant="quiet"
               label="Aggregate view"
@@ -350,71 +507,103 @@ export default function OverviewTab({
         ) : middleView === "rhythm" ? (
           <RhythmChart
             summary={model.rhythm!}
-            metric={metric}
+            metric={shownMetric}
           />
         ) : calendarByMonth ? (
           <MonthCalendarChart
             summaries={model.monthly!}
-            metric={metric}
+            metric={shownMetric}
           />
         ) : (
           <ActivityCalendar
             summaries={currentDays}
             range={displayRange}
-            metric={metric}
+            metric={shownMetric}
           />
         )}
       </Card>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Card
-          title={rankedEntityKind === "apps" ? "Top Apps" : "Top Websites"}
-          className="h-[345px]"
-          right={
-            <span className="flex items-center gap-2">
+        {scope && scope.kind !== "category" && scopeWindows ? (
+          <Card
+            title="Top Windows"
+            className="h-[345px]"
+            right={
               <MenuSelect
                 variant="quiet"
-                label={`How many ${rankedEntityKind} to list`}
+                label="How many windows to list"
                 value={String(topN)}
                 onChange={(v) => setTopN(Number(v))}
                 options={TOP_ITEMS_OPTIONS.map((x) => ({ value: String(x), label: `Top ${x}` }))}
               />
-              <MenuSelect
-                variant="quiet"
-                label="Ranked activity type"
-                value={rankedEntityKind}
-                onChange={(v) => setRankedEntityKind(v as RankedEntityKind)}
-                options={[
-                  { value: "apps", label: "Apps" },
-                  { value: "websites", label: "Websites" },
-                ]}
+            }
+          >
+            <div className="pt-2">
+              <TopWindowList
+                list={scopeWindows}
+                noun={scope.kind}
+                onOpen={(window) => onOpenWindow({
+                  entityId: window.entityId,
+                  windowKey: window.activityKey,
+                })}
               />
-            </span>
-          }
-        >
-          <div className="pt-2">
-            <TopUsageList
-              items={rankedItems}
-              kind={rankedEntityKind}
-              comparisonDays={calendarDays(prev)}
-              comparisonAvailable={preset !== "alltime" && (
-                rankedEntityKind === "apps"
-                  ? model.appComparisonAvailable
-                  : model.websiteComparisonAvailable
-              )}
-              hiddenCount={
-                rankedItems.length < topN
-                  ? (rankedEntityKind === "apps" ? hiddenAppCount : hiddenWebsiteCount)
-                  : 0
-              }
-              websiteCoverage={model.websiteCoverage}
-            />
-          </div>
-        </Card>
+            </div>
+          </Card>
+        ) : (
+          <Card
+            title={rankedEntityKind === "apps" ? "Top Apps" : "Top Websites"}
+            className="h-[345px]"
+            right={
+              <span className="flex items-center gap-2">
+                <MenuSelect
+                  variant="quiet"
+                  label={`How many ${rankedEntityKind} to list`}
+                  value={String(topN)}
+                  onChange={(v) => setTopN(Number(v))}
+                  options={TOP_ITEMS_OPTIONS.map((x) => ({ value: String(x), label: `Top ${x}` }))}
+                />
+                <MenuSelect
+                  variant="quiet"
+                  label="Ranked activity type"
+                  value={rankedEntityKind}
+                  onChange={(v) => setRankedEntityKind(v as RankedEntityKind)}
+                  options={[
+                    { value: "apps", label: "Apps" },
+                    { value: "websites", label: "Websites" },
+                  ]}
+                />
+              </span>
+            }
+          >
+            <div className="pt-2">
+              <TopUsageList
+                items={rankedItems}
+                kind={rankedEntityKind}
+                comparisonDays={calendarDays(prev)}
+                comparisonAvailable={preset !== "alltime" && (
+                  rankedEntityKind === "apps"
+                    ? model.appComparisonAvailable
+                    : model.websiteComparisonAvailable
+                )}
+                hiddenCount={
+                  rankedItems.length < topN
+                    ? (rankedEntityKind === "apps" ? hiddenAppCount : hiddenWebsiteCount)
+                    : 0
+                }
+                websiteCoverage={model.websiteCoverage}
+                onSelect={selectRanked}
+              />
+            </div>
+          </Card>
+        )}
         <Card
-          title={isSingleDay ? "Hourly Activity" : HOURS_CARD_TITLES[granularity]}
+          title={hoursTitle}
           className="h-[345px]"
-          right={
+          right={memberBreakdown ? (
+            // Fixed, so stated rather than offered: neither of the menu's
+            // views would split this subject at all.
+            <span className="py-1.5 text-xs text-ink-3">By app and website</span>
+          ) : (
             <MenuSelect
               variant="quiet"
               label="Stack bars by"
@@ -425,14 +614,15 @@ export default function OverviewTab({
                 { value: "category", label: "Categories" },
               ]}
             />
-          }
+          )}
         >
           <div className="pt-2">
             {isSingleDay ? (
               <HourlyActivityChart
                 hours={model.hourly!}
-                stackBy={stackBy}
+                stackBy={shownStack}
                 categories={meta.categories}
+                members={model.members}
               />
             ) : (
               <ProductiveHoursChart
@@ -441,13 +631,21 @@ export default function OverviewTab({
                 labelMode={model.labelMode}
                 granularity={granularity}
                 weekStart={meta.weekStart}
-                stackBy={stackBy}
+                stackBy={shownStack}
                 categories={meta.categories}
+                members={model.members}
+                averageMeasure={scope ? "tracked" : "productive"}
               />
             )}
           </div>
         </Card>
       </div>
+
+      {scope && transitions && (
+        <Card title="Before & After">
+          <TransitionsPanel scope={scope} transitions={transitions} />
+        </Card>
+      )}
     </div>
   );
 }

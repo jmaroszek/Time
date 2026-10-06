@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Category } from "../lib/classify";
 import { fmtCompactHour, fmtDuration, fmtHourRange } from "../lib/format";
+import type { InsightsMemberTotal } from "../lib/insights";
 import type { ActivityStack, HourlyActivitySummary } from "../lib/overview";
 import {
   CHART_FONT_FAMILY,
@@ -19,7 +20,10 @@ import {
   categorySeries,
   estimateLegendRows,
   legendContentWidth,
+  memberSeries,
+  representedStacks,
   shouldShowUncategorized,
+  STACK_WORDS,
   type CategorySeries,
 } from "./ProductiveHoursChart";
 
@@ -34,10 +38,13 @@ export default function HourlyActivityChart({
   hours,
   stackBy = "state",
   categories = [],
+  members = null,
 }: {
   hours: HourlyActivitySummary[];
   stackBy?: ActivityStack;
   categories?: Category[];
+  /** Names for the member stacks; see `memberSeries`. */
+  members?: InsightsMemberTotal[] | null;
 }) {
   const { palette, theme } = useMeta();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -75,22 +82,36 @@ export default function HourlyActivityChart({
     // an hour bucket carries categorySeconds in the same shape a day bucket
     // does. Its output is hours (2-decimal precision); minutes here are just
     // that figure rescaled, not measured independently.
-    const categoryStacks: CategorySeries[] = categorySeries(hours, categories, theme).map((stack) => ({
+    const toStackMinutes = (stack: CategorySeries): CategorySeries => ({
       ...stack,
       hours: stack.hours.map((h) => Math.round(h * 600) / 10),
-    }));
-    const stacks = stackBy === "category" ? categoryStacks : stateStacks;
+    });
+    const categoryStacks: CategorySeries[] = categorySeries(hours, categories, theme).map(toStackMinutes);
+    const memberStacks: CategorySeries[] = stackBy === "member" && members
+      ? representedStacks(memberSeries(
+          hours,
+          members,
+          palette.swatches.slice(0, 8),
+          uncategorizedBar(theme),
+        )).map(toStackMinutes)
+      : [];
+    const stacks = stackBy === "category"
+      ? categoryStacks
+      : stackBy === "member"
+        ? memberStacks
+        : stateStacks;
     const stackNames = stacks.map((stack) => stack.name);
     const maxMinutes = Math.max(60, ...hours.map((hour) => Math.ceil(hour.trackedSeconds / 900) * 15));
 
     // Reserve the same grid height regardless of which stacking is active, so
     // toggling the control never changes how tall the bars read — see the
-    // matching comment in ProductiveHoursChart.
+    // matching comment in ProductiveHoursChart. The member view has no control
+    // to toggle away from.
     const legendWidth = legendContentWidth(chartWidth);
     const stateLabels = stateStacks.map((stack) => stack.name);
     const categoryLabels = categoryStacks.map((stack) => stack.name);
     const thisRows = estimateLegendRows(stackNames, legendWidth);
-    const maxRows = Math.max(
+    const maxRows = stackBy === "member" ? thisRows : Math.max(
       estimateLegendRows(stateLabels, legendWidth),
       estimateLegendRows(categoryLabels, legendWidth),
     );
@@ -146,14 +167,14 @@ export default function HourlyActivityChart({
         barMaxWidth: 24,
       })),
     };
-  }, [hours, palette, theme, stackBy, categories, chartWidth]);
+  }, [hours, palette, theme, stackBy, categories, members, chartWidth]);
 
   return (
     <div ref={wrapRef}>
       <EChart
         option={option}
         height={254}
-        accessibleDescription={`Hourly activity for the selected day, broken down by ${stackBy === "state" ? "productivity state" : "category"} to show when tracked time occurred.`}
+        accessibleDescription={`Hourly activity for the selected day, broken down by ${STACK_WORDS[stackBy]} to show when tracked time occurred.`}
       />
     </div>
   );

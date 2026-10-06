@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import type { InsightsScope } from "../lib/insightsScope";
 import type { ActivityMetric, ActivityStack } from "../lib/overview";
 
 export const TOP_ITEMS_OPTIONS = [5, 10, 15, 20];
@@ -39,6 +40,12 @@ export interface InsightsViewState {
   setMetric: (metric: ActivityMetric) => void;
   stackBy: ActivityStack;
   setStackBy: (stack: ActivityStack) => void;
+  /** The one app, website, or category the tab is narrowed to; null for all
+   *  activity. Kept with the other view controls so leaving for Activity to
+   *  curate something and coming back lands on the same subject — but not
+   *  persisted, so a fresh launch always opens on everything. */
+  scope: InsightsScope | null;
+  setScope: (scope: InsightsScope | null) => void;
 }
 
 export function useInsightsView(): InsightsViewState {
@@ -48,6 +55,7 @@ export function useInsightsView(): InsightsViewState {
   const [aggregateView, setAggregateView] = useState<"rhythm" | "calendar" | null>(null);
   const [metric, setMetric] = useState<ActivityMetric>(DEFAULT_METRIC);
   const [stackBy, setStackBy] = useState<ActivityStack>(DEFAULT_STACK_BY);
+  const [scope, setScope] = useState<InsightsScope | null>(null);
 
   return {
     topN,
@@ -62,5 +70,7 @@ export function useInsightsView(): InsightsViewState {
     setMetric,
     stackBy,
     setStackBy,
+    scope,
+    setScope,
   };
 }

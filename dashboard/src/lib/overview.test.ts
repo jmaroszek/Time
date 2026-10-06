@@ -696,6 +696,21 @@ describe("bucketActivityHours", () => {
     expect(isCompleteHoursBucket(buckets[1], "weekly")).toBe(false);
   });
 
+  it("sums a member breakdown when the days carry one, and adds none when they do not", () => {
+    const range = rangeFrom(new Date(2026, 5, 10), 10);
+    const days = syntheticDays(range).map((day, index) => ({
+      ...day,
+      memberSeconds: new Map([["app:code", 100], ...(index === 0 ? [["site:youtube.com", 50] as const] : [])]),
+    }));
+    const buckets = bucketActivityHours(days, range, "weekly", "Sunday");
+    expect(buckets.map((bucket) => Object.fromEntries(bucket.memberSeconds ?? []))).toEqual([
+      { "app:code": 400, "site:youtube.com": 50 },
+      { "app:code": 600 },
+    ]);
+    expect(bucketActivityHours(syntheticDays(range), range, "weekly", "Sunday")
+      .every((bucket) => bucket.memberSeconds === undefined)).toBe(true);
+  });
+
   it("aligns partial weeks to Monday", () => {
     const range = rangeFrom(new Date(2026, 5, 10), 10);
     const buckets = bucketActivityHours(syntheticDays(range), range, "weekly", "Monday");
