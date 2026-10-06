@@ -7,6 +7,26 @@ export function fmtDuration(seconds: number): string {
   return `${s}s`;
 }
 
+/**
+ * Whole minutes for each amount, summing to the rounded total. Truncating each
+ * line on its own drops up to a minute apiece, so a short list can read three
+ * minutes under its own total. Leftover minutes go to the largest remainders.
+ */
+export function allocateMinutes(seconds: number[]): { minutes: number[]; total: number } {
+  const total = Math.round(seconds.reduce((sum, s) => sum + s, 0) / 60);
+  const minutes = seconds.map((s) => Math.floor(s / 60));
+  let leftover = total - minutes.reduce((sum, m) => sum + m, 0);
+  const byRemainder = seconds
+    .map((s, i) => ({ i, rem: s - minutes[i] * 60 }))
+    .sort((a, b) => b.rem - a.rem || a.i - b.i);
+  for (const { i } of byRemainder) {
+    if (leftover <= 0) break;
+    minutes[i] += 1;
+    leftover -= 1;
+  }
+  return { minutes, total };
+}
+
 export function fmtPct(fraction: number): string {
   return `${Math.round(fraction * 100)}%`;
 }

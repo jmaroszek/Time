@@ -10,7 +10,7 @@ import type { Classifier } from "../lib/classify";
 import { aggregateBlocks } from "../lib/blocks";
 import { clipSessions, splitAtMidnights, type Session } from "../lib/metrics";
 import { dayKey, listDays, type Range } from "../lib/time";
-import { fmtClockRange, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
+import { allocateMinutes, fmtClockRange, fmtDayLabel, fmtDuration, cleanProcessName } from "../lib/format";
 import { escapeHtml } from "../lib/chartTooltip";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
@@ -206,6 +206,9 @@ export default function TimelineChart({
     : chart;
 }
 
+/** Apps listed individually in a block tooltip; the rest collapse into one line. */
+const TOOLTIP_APP_LIMIT = 3;
+
 export function formatTooltip(
   seg: TimelineSegment,
   aliases?: Record<string, string>,
@@ -213,14 +216,27 @@ export function formatTooltip(
   const window = fmtClockRange(seg.startSec, seg.endSec);
   if (seg.breakdown) {
     if (seg.isAfk) return `AFK · ${window}`;
-    const apps = seg.breakdown
-      .slice(0, 4)
-      .map(
-        (a) =>
-          `<div class="chart-tip-muted">${escapeHtml(cleanProcessName(a.process, aliases))} · ${fmtDuration(a.seconds)}</div>`,
-      )
-      .join("");
-    return `<b>${escapeHtml(seg.categoryName)}</b> · ${window}<div>${fmtDuration(seg.activeSec ?? 0)} active</div>${apps}`;
+    const shown = seg.breakdown.slice(0, TOOLTIP_APP_LIMIT);
+    const rest = seg.breakdown.slice(TOOLTIP_APP_LIMIT);
+    // The cut-off apps still count toward "active", so they get a line of their
+    // own rather than letting the list silently fall short of the total.
+    const restSec = rest.reduce((sum, a) => sum + a.seconds, 0);
+    const { minutes, total } = allocateMinutes([
+      ...shown.map((a) => a.seconds),
+      ...(rest.length > 0 ? [restSec] : []),
+    ]);
+    const fmtLine = (m: number) => (m > 0 ? fmtDuration(m * 60) : "&lt;1m");
+    const lines = shown.map(
+      (a, i) =>
+        `<div class="chart-tip-muted">${escapeHtml(cleanProcessName(a.process, aliases))} · ${fmtLine(minutes[i])}</div>`,
+    );
+    if (rest.length > 0) {
+      lines.push(
+        `<div class="chart-tip-muted">+${rest.length} other${rest.length === 1 ? "" : "s"} · ${fmtLine(minutes[shown.length])}</div>`,
+      );
+    }
+    const apps = lines.join("");
+    return `<b>${escapeHtml(seg.categoryName)}</b> · ${window}<div>${fmtDuration(total * 60)} active</div>${apps}`;
   }
   const retainedAfkIdentity =
     seg.isAfk && seg.process !== "afk"

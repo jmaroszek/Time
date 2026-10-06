@@ -38,6 +38,71 @@ describe("TimelineChart AFK tooltip", () => {
   });
 });
 
+describe("TimelineChart block tooltip breakdown", () => {
+  const block = (count: number) =>
+    segment({
+      isAfk: false,
+      categoryName: "Browsing",
+      activeSec: 900,
+      breakdown: Array.from({ length: count }, (_, i) => ({
+        process: `app${i}.exe`,
+        seconds: 120 - i * 10,
+      })),
+    });
+
+  it("lists every app when there are three or fewer, with no remainder line", () => {
+    const tooltip = formatTooltip(block(3));
+    expect(tooltip).toContain("App2");
+    expect(tooltip).not.toContain("other");
+  });
+
+  it("collapses apps past the third into a remainder line that carries their time", () => {
+    const tooltip = formatTooltip(block(8));
+    expect(tooltip).toContain("App2");
+    expect(tooltip).not.toContain("App3");
+    // app3..app7 = 90 + 80 + 70 + 60 + 50 = 350s; the block is 680s in all
+    expect(tooltip).toContain("11m active");
+    expect(tooltip).toContain("+5 others · 6m");
+  });
+
+  it("shows lines that add up to the active total", () => {
+    // Truncating each of these alone would show 5 + 4 + 2 + 1 = 12m of 15m.
+    const tooltip = formatTooltip(
+      segment({
+        isAfk: false,
+        breakdown: [
+          { process: "a.exe", seconds: 350 },
+          { process: "b.exe", seconds: 290 },
+          { process: "c.exe", seconds: 170 },
+          { process: "d.exe", seconds: 50 },
+          { process: "e.exe", seconds: 40 },
+        ],
+      }),
+    );
+    expect(tooltip).toContain("15m active");
+    const shown = [...tooltip.matchAll(/ · (\d+)m<\/div>/g)].map((m) => Number(m[1]));
+    expect(shown.reduce((a, b) => a + b, 0)).toBe(15);
+  });
+
+  it("marks an app that rounds to no minutes as under a minute", () => {
+    const tooltip = formatTooltip(
+      segment({
+        isAfk: false,
+        breakdown: [
+          { process: "a.exe", seconds: 840 },
+          { process: "b.exe", seconds: 40 },
+          { process: "c.exe", seconds: 10 },
+        ],
+      }),
+    );
+    expect(tooltip).toContain("C · &lt;1m");
+  });
+
+  it("uses the singular for one hidden app", () => {
+    expect(formatTooltip(block(4))).toContain("+1 other · 1m");
+  });
+});
+
 describe("TimelineChart tooltip time", () => {
   it("lists a shared meridiem once", () => {
     const startSec = new Date(2026, 0, 1, 9, 15).getTime() / 1000;
