@@ -606,6 +606,8 @@ test("@workflow the update control names its version without moving the header",
   // the tabs beside it do not.
   await expect(control).toContainText("Update to 0.2.0");
   expect(await tabs.boundingBox()).toEqual(before);
+  // The revealed label already says it; a native tooltip would repeat it.
+  await expect(control).not.toHaveAttribute("title");
 
   // Reachable without a mouse, which is the whole reason the label is tied to
   // focus as well as hover.

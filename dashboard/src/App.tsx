@@ -812,7 +812,6 @@ function UpdateButton({
         type="button"
         onClick={onInstall}
         disabled={installing}
-        title={label}
         aria-label={label}
         className={`group absolute top-0 left-0 flex h-7 min-w-7 items-center justify-center rounded-lg px-1.5 whitespace-nowrap transition-colors motion-reduce:transition-none disabled:cursor-progress ${
           installing
