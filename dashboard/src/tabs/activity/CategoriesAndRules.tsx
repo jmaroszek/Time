@@ -71,12 +71,12 @@ const CATEGORY_ORDER_STORAGE_KEY = "time.categories-and-rules.category-order";
 const RULE_ORDER_STORAGE_KEY = "time.categories-and-rules.rule-order";
 
 function readCategoryListOrder(): CategoryListOrder {
-  if (typeof window === "undefined") return "name";
+  if (typeof window === "undefined") return "productivity";
   try {
     const stored = window.localStorage.getItem(CATEGORY_ORDER_STORAGE_KEY);
-    return stored === "productivity" ? stored : "name";
+    return stored === "name" ? stored : "productivity";
   } catch {
-    return "name";
+    return "productivity";
   }
 }
 
@@ -576,8 +576,8 @@ export default function CategoriesAndRules({
           value={categoryOrder}
           onChange={(value) => chooseCategoryOrder(value as CategoryListOrder)}
           options={[
-            { value: "name", label: "Name", triggerLabel: "Categories by Name" },
             { value: "productivity", label: "Productivity", triggerLabel: "Categories by Productivity" },
+            { value: "name", label: "Name", triggerLabel: "Categories by Name" },
           ]}
         />
         <MenuSelect
@@ -588,9 +588,9 @@ export default function CategoriesAndRules({
           value={ruleOrder}
           onChange={(value) => chooseRuleOrder(value as RuleListOrder)}
           options={[
+            { value: "use", label: "Use", triggerLabel: "Rules by Use" },
             { value: "type-name", label: "Type", triggerLabel: "Rules by Type" },
             { value: "name", label: "Name", triggerLabel: "Rules by Name" },
-            { value: "use", label: "Use", triggerLabel: "Rules by Use" },
           ]}
         />
         {normalizedRuleSearch !== "" && (
@@ -734,7 +734,7 @@ export default function CategoriesAndRules({
                         event.preventDefault();
                         beginRuleEdit(rule);
                       }}
-                      className={`-mx-2 flex flex-wrap items-center gap-2 rounded-lg px-2 py-1 text-xs ${
+                      className={`group/rule -mx-2 flex flex-wrap items-center gap-2 rounded-lg px-2 py-1 text-xs ${
                         activeEdit?.ruleId === rule.id
                           ? "bg-accent/[.06]"
                           : "hover:bg-hover"
@@ -784,8 +784,18 @@ export default function CategoriesAndRules({
                           {fmtDuration(usage.get(rule.id) ?? 0)}
                         </span>
                       )}
-                      <EditRuleButton rule={rule} onClick={() => beginRuleEdit(rule)} />
-                      <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
+                      {/* Hidden until the row is hovered or focused, so a
+                          long list reads as rules rather than as a column of
+                          buttons. Opacity, not display, so the row does not
+                          reflow and the buttons stay reachable by keyboard. */}
+                      <span
+                        className={`flex shrink-0 items-center gap-0.5 transition-opacity focus-within:opacity-100 group-hover/rule:opacity-100 ${
+                          activeEdit?.ruleId === rule.id ? "opacity-100" : "opacity-0"
+                        }`}
+                      >
+                        <EditRuleButton rule={rule} onClick={() => beginRuleEdit(rule)} />
+                        <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
+                      </span>
                     </div>
                   ))}
                   {visibleRules.length === 0 && (
