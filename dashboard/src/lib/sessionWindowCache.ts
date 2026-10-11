@@ -131,6 +131,9 @@ export class SessionWindowCache {
     forceRefresh: boolean,
     generation: number,
   ): Promise<Session[]> {
+    // Freshness describes the snapshot requested, not when a slow fetch happens
+    // to finish. Rows recorded while the query is in flight still need a refresh.
+    const fetchedAtSec = this.nowSec();
     if (forceRefresh) {
       const sessions = sortSessions(await fetcher(startSec, endSec));
       if (generation !== this.generation) {
@@ -146,7 +149,7 @@ export class SessionWindowCache {
         startSec,
         endSec,
         sessions,
-        refreshedAtSec: this.nowSec(),
+        refreshedAtSec: fetchedAtSec,
         lastUsed: ++this.useCounter,
         version: 1,
         slices: new Map(),
@@ -172,7 +175,7 @@ export class SessionWindowCache {
         startSec,
         endSec,
         sessions,
-        refreshedAtSec: this.nowSec(),
+        refreshedAtSec: fetchedAtSec,
         lastUsed: ++this.useCounter,
         version: 1,
         slices: new Map(),
@@ -188,9 +191,11 @@ export class SessionWindowCache {
     if (startSec < oldStart) segments.push([startSec, Math.min(oldStart, endSec)]);
     if (endSec > oldEnd) segments.push([Math.max(oldEnd, startSec), endSec]);
 
-    const refreshLiveEdge = endSec <= oldEnd && this.needsLiveRefresh(entry, endSec);
+    const refreshLiveEdge = this.needsLiveRefresh(entry, oldEnd)
+      || (endSec > oldEnd
+        && oldEnd >= Math.min(fetchedAtSec, entry.refreshedAtSec) - LIVE_EDGE_GRACE_SEC);
     if (refreshLiveEdge) {
-      const refreshEnd = Math.min(endSec, oldEnd);
+      const refreshEnd = oldEnd;
       // Refetch back to the last refresh, not a fixed slice of the recent past.
       // A constant window silently lost history: nothing starts a fetch while a
       // tab sits open, so an entry could go an hour without refreshing and then
@@ -199,11 +204,21 @@ export class SessionWindowCache {
       // missing until an invalidation or a restart. Measuring from
       // refreshedAtSec makes the cost proportional to the time actually skipped.
       const refreshedAtSec = Math.min(entry.refreshedAtSec, this.nowSec());
-      const refreshStart = Math.max(startSec, refreshedAtSec - LIVE_REFRESH_LOOKBACK_SEC);
+      // Refresh the entry's whole unfinished tail, even when the caller asks
+      // for a subset. One freshness timestamp must never certify unfetched rows.
+      const refreshStart = Math.max(oldStart, refreshedAtSec - LIVE_REFRESH_LOOKBACK_SEC);
       if (refreshEnd > refreshStart) segments.push([refreshStart, refreshEnd]);
     }
 
-    const fetched = await Promise.all(segments.map(([from, to]) => fetcher(from, to)));
+    // Expansion and refresh can touch. Coalesce them into one query per edge.
+    segments.sort((left, right) => left[0] - right[0]);
+    const windows: Array<[number, number]> = [];
+    for (const segment of segments) {
+      const previous = windows[windows.length - 1];
+      if (previous && segment[0] <= previous[1]) previous[1] = Math.max(previous[1], segment[1]);
+      else windows.push([...segment]);
+    }
+    const fetched = await Promise.all(windows.map(([from, to]) => fetcher(from, to)));
     if (generation !== this.generation) {
       return overlappingSessions(sortSessions(fetched.flat()), startSec, endSec);
     }
@@ -212,7 +227,7 @@ export class SessionWindowCache {
     entry.startSec = Math.min(entry.startSec, startSec);
     entry.endSec = Math.max(entry.endSec, endSec);
     entry.lastUsed = ++this.useCounter;
-    if (endSec >= this.nowSec() - LIVE_EDGE_GRACE_SEC) entry.refreshedAtSec = this.nowSec();
+    if (refreshLiveEdge || endSec > oldEnd) entry.refreshedAtSec = fetchedAtSec;
     if (coverageChanged || rowsChanged) {
       entry.version += 1;
       entry.slices.clear();
@@ -272,7 +287,10 @@ export class SessionWindowCache {
 
   private needsLiveRefresh(entry: CacheEntry, endSec: number): boolean {
     const now = this.nowSec();
-    return endSec >= now - LIVE_EDGE_GRACE_SEC && now - entry.refreshedAtSec >= this.freshForSec;
+    // A window fetched while it was live stays unfinished until a later fetch
+    // captures its final rows. Merely passing midnight cannot make it complete.
+    return endSec >= Math.min(now, entry.refreshedAtSec) - LIVE_EDGE_GRACE_SEC
+      && now - entry.refreshedAtSec >= this.freshForSec;
   }
 
   private evictOldEntries(keep: CacheEntry): void {

@@ -4,7 +4,7 @@ import {
   type ActivityEntitySummary,
   type ActivityTriageItem,
 } from "../lib/activity";
-import { addRule, deleteRule } from "../lib/queries";
+import { assignEntityRule, deleteRule } from "../lib/queries";
 import { type StarterSuggestion } from "../lib/starterSuggestions";
 import { useBanner } from "./banner";
 import { useMeta } from "./meta";
@@ -51,12 +51,7 @@ export function useEntityRuleWrites(pending: PendingClassification) {
 
   const writeEntityRule = async (entity: RuleEntity, categoryId: number) => {
     const matchType = entity.kind === "website" ? "domain" : "process";
-    const exactRules = exactRulesFor(entity);
-    const retained = exactRules.find((rule) => rule.categoryId === categoryId);
-    for (const rule of exactRules) {
-      if (rule.id !== retained?.id) await deleteRule(rule.id);
-    }
-    if (!retained) await addRule(matchType, entity.key, categoryId);
+    await assignEntityRule(matchType, entity.key, categoryId);
     await meta.refresh();
   };
 

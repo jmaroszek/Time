@@ -332,6 +332,21 @@ export async function addRule(
   );
 }
 
+/** Replace an entity's exact rules in one native transaction. */
+export async function assignEntityRule(
+  matchType: "process" | "domain",
+  pattern: string,
+  categoryId: number,
+): Promise<void> {
+  const normalized = normalizedRuleWrite(matchType, pattern, {});
+  await invoke("assign_entity_rule", {
+    matchType,
+    pattern: normalized.pattern,
+    categoryId,
+    priority: normalized.priority,
+  });
+}
+
 export async function updateRule(
   ruleId: number,
   matchType: MatchType,

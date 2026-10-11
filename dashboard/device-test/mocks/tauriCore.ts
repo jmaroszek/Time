@@ -432,6 +432,31 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
       }
       throw new Error(`Device fixture has no db_execute response for: ${query}`);
     }
+    case "assign_entity_rule": {
+      const matchType = String(args?.matchType);
+      const pattern = String(args?.pattern ?? "").trim().toLowerCase();
+      const categoryId = Number(args?.categoryId);
+      const priority = Number(args?.priority);
+      if (!["process", "domain"].includes(matchType) || !pattern
+        || !categoryRows.some((category) => category.id === categoryId)) {
+        throw new Error("Invalid entity rule");
+      }
+      const canonical = ruleRows.find((rule) =>
+        rule.match_type === matchType && rule.pattern === pattern);
+      for (let index = ruleRows.length - 1; index >= 0; index--) {
+        const rule = ruleRows[index];
+        if (rule.match_type === matchType && rule.pattern.toLowerCase() === pattern) {
+          ruleRows.splice(index, 1);
+        }
+      }
+      ruleRows.push({
+        id: canonical?.id ?? nextRuleId++, match_type: matchType, pattern,
+        category_id: categoryId, priority, scope_kind: "", scope_value: "",
+        title_match_mode: "", title_anchor: "",
+      });
+      result = undefined;
+      break;
+    }
     case "update_user_settings": {
       const updates = (args?.updates ?? []) as Array<{ key?: string; value?: string }>;
       for (const update of updates) {

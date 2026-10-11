@@ -13,6 +13,7 @@ vi.mock("./historyInvalidation", () => ({ invalidateHistory }));
 
 import {
   DEFAULT_USER_SETTINGS,
+  assignEntityRule,
   backupDatabase,
   chooseDatabaseBackupFile,
   deleteActivity,
@@ -67,6 +68,14 @@ describe("rule updates", () => {
     vi.clearAllMocks();
     getDb.mockResolvedValue({ execute: dbExecute });
     dbExecute.mockResolvedValue({ rowsAffected: 1 });
+  });
+
+  it("replaces an entity rule through one native transaction", async () => {
+    await assignEntityRule("process", "  EDITOR.EXE  ", 4);
+    expect(invoke).toHaveBeenCalledWith("assign_entity_rule", {
+      matchType: "process", pattern: "editor.exe", categoryId: 4, priority: 3,
+    });
+    expect(dbExecute).not.toHaveBeenCalled();
   });
 
   it("updates one rule by id with normalized fields and fixed precedence", async () => {

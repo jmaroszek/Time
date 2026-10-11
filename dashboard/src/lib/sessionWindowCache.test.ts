@@ -94,6 +94,61 @@ describe("SessionWindowCache", () => {
     expect(cache.peek(0, 100)).toBeNull();
   });
 
+  it("refreshes the existing live tail when expanding the end", async () => {
+    let now = 1_000;
+    const cache = new SessionWindowCache(() => now);
+    let rows = [session(1, 900, 950)];
+    const fetcher = vi.fn(async (start: number, end: number) =>
+      rows.filter((row) => row.end > start && row.start < end));
+    await cache.load(800, 1_100, fetcher);
+    now = 1_010;
+    rows = [...rows, session(2, 1_001, 1_006)];
+
+    expect((await cache.load(800, 1_200, fetcher)).map((row) => row.id)).toEqual([1, 2]);
+    expect(fetcher.mock.calls).toEqual([[800, 1_100], [940, 1_200]]);
+    expect(cache.peek(800, 1_200)?.stale).toBe(false);
+  });
+
+  it("finishes a formerly live window before treating it as historical", async () => {
+    let now = 1_000;
+    const cache = new SessionWindowCache(() => now);
+    const fetcher = vi.fn<(start: number, end: number) => Promise<Session[]>>()
+      .mockResolvedValueOnce([session(1, 900, 950)])
+      .mockResolvedValueOnce([session(1, 900, 950), session(2, 1_001, 1_006)]);
+    await cache.load(800, 1_100, fetcher);
+    now = 1_300;
+    expect(cache.peek(800, 1_100)?.stale).toBe(true);
+    expect((await cache.load(800, 1_100, fetcher)).map((row) => row.id)).toEqual([1, 2]);
+    now = 2_000;
+    await cache.load(800, 1_100, fetcher);
+    expect(fetcher.mock.calls).toEqual([[800, 1_100], [940, 1_100]]);
+    expect(cache.peek(800, 1_100)?.stale).toBe(false);
+  });
+
+  it("does not certify unfetched portions of an entry after refreshing a subset", async () => {
+    let now = 1_000;
+    const cache = new SessionWindowCache(() => now);
+    let rows = [session(1, 900, 950)];
+    const fetcher = vi.fn(async (start: number, end: number) =>
+      rows.filter((row) => row.end > start && row.start < end));
+    await cache.load(800, 2_000, fetcher);
+    now = 1_500;
+    rows = [...rows, session(2, 1_001, 1_006), session(3, 1_300, 1_400)];
+    await cache.load(1_200, 1_450, fetcher);
+    expect(cache.peek(800, 2_000)?.sessions.map((row) => row.id)).toEqual([1, 2, 3]);
+    expect(fetcher.mock.calls[1]).toEqual([940, 2_000]);
+  });
+
+  it("does not count time spent fetching as already refreshed", async () => {
+    let now = 1_000;
+    const cache = new SessionWindowCache(() => now);
+    await cache.load(800, 2_000, async () => {
+      now = 1_010;
+      return [session(1, 900, 950)];
+    });
+    expect(cache.peek(800, 2_000)?.stale).toBe(true);
+  });
+
   it("does not let a deferred fetch repopulate after clear", async () => {
     let resolveFetch!: (rows: Session[]) => void;
     const deferred = new Promise<Session[]>((resolve) => {

@@ -30,6 +30,38 @@ use std::{
 pub(crate) const SCHEMA_VERSION: i64 = 5;
 const MAX_CORRECTION_SPAN_SEC: i64 = 7 * 86_400;
 
+// Each scalar bound uses its own index lookup. Choose the shorter time span to
+// scan: the start index for early history, the end index for recent history.
+// This is a cost heuristic only; both paths retain the exact overlap predicate,
+// including arbitrarily long sessions. Corrected rows use their effective span
+// independently, since raw bounds cannot say where a correction moved a row.
+// CROSS JOIN keeps the one-row choice outside each session scan: a scalar
+// WHERE subquery can otherwise walk the unused index before rejecting its rows.
+const FETCH_SESSIONS_SQL: &str = r#"
+WITH scan_choice AS (
+    SELECT ?2 - (SELECT MIN(start_ts) FROM sessions)
+         < (SELECT MAX(end_ts) FROM sessions) - ?1 AS use_start
+)
+SELECT s.id,s.start_ts AS effective_start,s.end_ts AS effective_end,
+       s.process,s.title,s.domain,s.is_afk,NULL AS category_id,0 AS is_corrected
+FROM scan_choice CROSS JOIN sessions s INDEXED BY idx_sessions_start
+WHERE use_start AND s.start_ts<?2 AND s.end_ts>?1
+  AND NOT EXISTS (SELECT 1 FROM session_corrections c WHERE c.session_id=s.id)
+UNION ALL
+SELECT s.id,s.start_ts,s.end_ts,s.process,s.title,s.domain,s.is_afk,NULL,0
+FROM scan_choice CROSS JOIN sessions s INDEXED BY idx_sessions_end
+WHERE NOT use_start AND s.end_ts>?1 AND s.start_ts<?2
+  AND NOT EXISTS (SELECT 1 FROM session_corrections c WHERE c.session_id=s.id)
+UNION ALL
+SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts),
+       COALESCE(c.corrected_end_ts,s.end_ts),s.process,s.title,s.domain,
+       s.is_afk,c.category_id,1
+FROM session_corrections c JOIN sessions s ON s.id=c.session_id
+WHERE COALESCE(c.corrected_end_ts,s.end_ts)>?1
+  AND COALESCE(c.corrected_start_ts,s.start_ts)<?2
+ORDER BY effective_start ASC,id ASC
+"#;
+
 /// Marks the one open failure a launch can repair by itself, so the caller can
 /// recognize it without matching a formatted sentence.  Mirrors the
 /// `DatabaseSchemaTooNew:` prefix the renderer uses for the opposite direction
@@ -749,40 +781,12 @@ impl TimeDatabase {
         if !start_sec.is_finite() || !end_sec.is_finite() || end_sec <= start_sec {
             return Err("Invalid session window".into());
         }
-        // Split by whether a correction exists, rather than filtering on
-        // COALESCE over the joined column. COALESCE is not sargable, so the
-        // single-query form scanned every row of `sessions` no matter how
-        // narrow the window. Filtering the uncorrected branch on end_ts first
-        // lets idx_sessions_end drive it — a live-edge refresh on a mature
-        // database should visit only recent rows — while start_ts remains the
-        // exact half-open overlap bound. The corrected branch stays exact by
-        // keeping the COALESCE, driven from session_corrections, which holds
-        // one row per *edited* session rather than one per session.
-        //
-        // session_corrections.session_id is the primary key, so the branches
-        // are disjoint and UNION ALL needs no deduplication.
-        let rows = sqlx::query(
-            "SELECT s.id,s.start_ts AS effective_start,s.end_ts AS effective_end, \
-             s.process,s.title,s.domain,s.is_afk,NULL AS category_id,0 AS is_corrected \
-             FROM sessions s INDEXED BY idx_sessions_end \
-             WHERE s.end_ts>? AND s.start_ts<? \
-             AND NOT EXISTS (SELECT 1 FROM session_corrections c WHERE c.session_id=s.id) \
-             UNION ALL \
-             SELECT s.id,COALESCE(c.corrected_start_ts,s.start_ts), \
-             COALESCE(c.corrected_end_ts,s.end_ts),s.process,s.title,s.domain, \
-             s.is_afk,c.category_id,1 \
-             FROM session_corrections c JOIN sessions s ON s.id=c.session_id \
-             WHERE COALESCE(c.corrected_end_ts,s.end_ts)>? \
-             AND COALESCE(c.corrected_start_ts,s.start_ts)<? \
-             ORDER BY effective_start ASC,id ASC",
-        )
-        .bind(start_sec)
-        .bind(end_sec)
-        .bind(start_sec)
-        .bind(end_sec)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| error.to_string())?;
+        let rows = sqlx::query(FETCH_SESSIONS_SQL)
+            .bind(start_sec)
+            .bind(end_sec)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
 
         let mut out = SessionColumns {
             ids: Vec::with_capacity(rows.len()),
@@ -824,6 +828,47 @@ impl TimeDatabase {
             out.is_corrected.push(is_corrected != 0);
         }
         Ok(out)
+    }
+
+    pub async fn assign_entity_rule(
+        &self,
+        match_type: &str,
+        pattern: &str,
+        category_id: i64,
+        priority: i64,
+    ) -> Result<(), String> {
+        self.ensure_writable_schema()?;
+        let pattern = pattern.trim().to_lowercase();
+        if !matches!(match_type, "process" | "domain") || pattern.is_empty() {
+            return Err("Invalid entity rule".into());
+        }
+        let mut transaction = self.pool.begin().await.map_err(|error| error.to_string())?;
+        // Keep the canonical rule's identity when possible. Legacy case variants
+        // are removed in the same transaction, so a failed replacement never
+        // leaves an entity unclassified or exposes half-finished cleanup.
+        sqlx::query(
+            "INSERT INTO rules (match_type,pattern,category_id,priority) VALUES (?,?,?,?) \
+             ON CONFLICT(match_type,pattern,scope_kind,scope_value,title_match_mode,title_anchor) \
+             DO UPDATE SET category_id=excluded.category_id,priority=excluded.priority",
+        )
+        .bind(match_type)
+        .bind(&pattern)
+        .bind(category_id)
+        .bind(priority)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        sqlx::query("DELETE FROM rules WHERE match_type=? AND lower(pattern)=? AND pattern<>?")
+            .bind(match_type)
+            .bind(&pattern)
+            .bind(&pattern)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| error.to_string())?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn execute(
@@ -3216,6 +3261,66 @@ mod tests {
     }
 
     #[test]
+    fn entity_rule_replacement_rolls_back_failed_writes_and_cleanup() {
+        let path = scratch_database("database-entity-rule-transaction-test");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(path).await.unwrap();
+            sqlx::query(
+                "INSERT INTO rules (id,match_type,pattern,category_id,priority) VALUES \
+                 (100,'process','editor.exe',1,3),(101,'process','EDITOR.EXE',1,3),\
+                 (102,'domain','editor.exe',1,2)",
+            )
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            assert!(database
+                .assign_entity_rule("process", "editor.exe", 999_999, 3)
+                .await
+                .is_err());
+            // Force the second statement to fail after the upsert succeeded.
+            sqlx::query(
+                "CREATE TRIGGER reject_rule_cleanup BEFORE DELETE ON rules \
+                 WHEN OLD.id=101 BEGIN SELECT RAISE(ABORT,'injected failure'); END",
+            )
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            assert!(database
+                .assign_entity_rule("process", "editor.exe", 2, 3)
+                .await
+                .is_err());
+            let rows: Vec<(i64, i64)> =
+                sqlx::query_as("SELECT id,category_id FROM rules WHERE id>=100 ORDER BY id")
+                    .fetch_all(&database.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(rows, vec![(100, 1), (101, 1), (102, 1)]);
+            sqlx::query("DROP TRIGGER reject_rule_cleanup")
+                .execute(&database.pool)
+                .await
+                .unwrap();
+            database
+                .assign_entity_rule("process", " EDITOR.EXE ", 2, 3)
+                .await
+                .unwrap();
+            let rows: Vec<(i64, i64)> =
+                sqlx::query_as("SELECT id,category_id FROM rules WHERE id>=100 ORDER BY id")
+                    .fetch_all(&database.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(rows, vec![(100, 2), (102, 1)]);
+            assert!(database
+                .assign_entity_rule("title", "editor.exe", 2, 3)
+                .await
+                .is_err());
+            assert!(database
+                .assign_entity_rule("process", " ", 2, 3)
+                .await
+                .is_err());
+        });
+    }
+
+    #[test]
     fn session_windows_follow_corrected_spans_not_raw_ones() {
         // fetch_sessions filters the uncorrected rows on raw end/start columns
         // so idx_sessions_end can drive them, and the corrected rows on their
@@ -3297,7 +3402,7 @@ mod tests {
     }
 
     #[test]
-    fn mature_narrow_session_query_uses_the_end_time_index() {
+    fn session_window_query_keeps_both_indexed_paths() {
         let path = scratch_database("database-session-end-index-test");
         tauri::async_runtime::block_on(async {
             let database = TimeDatabase::open(path).await.unwrap();
@@ -3316,25 +3421,41 @@ mod tests {
                 .await
                 .unwrap();
 
-            let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
-                "EXPLAIN QUERY PLAN \
-                 SELECT s.id,s.start_ts AS effective_start,s.end_ts AS effective_end, \
-                        s.process,s.title,s.domain,s.is_afk \
-                 FROM sessions s INDEXED BY idx_sessions_end \
-                 WHERE s.end_ts>? AND s.start_ts<? \
-                 AND NOT EXISTS (SELECT 1 FROM session_corrections c WHERE c.session_id=s.id) \
-                 ORDER BY effective_start ASC,id ASC",
-            )
-            .bind(2_999_900_i64)
-            .bind(3_000_000_i64)
-            .fetch_all(&database.pool)
-            .await
-            .unwrap();
+            let plan: Vec<(i64, i64, i64, String)> =
+                sqlx::query_as(&format!("EXPLAIN QUERY PLAN {}", super::FETCH_SESSIONS_SQL))
+                    .bind(2_999_900_i64)
+                    .bind(3_000_000_i64)
+                    .fetch_all(&database.pool)
+                    .await
+                    .unwrap();
             assert!(
                 plan.iter()
                     .any(|(_, _, _, detail)| detail.contains("idx_sessions_end")),
                 "exact-overlap query should use idx_sessions_end, plan: {plan:?}",
             );
+            assert!(
+                plan.iter()
+                    .any(|(_, _, _, detail)| detail.contains("idx_sessions_start")),
+                "early-history query should use idx_sessions_start, plan: {plan:?}",
+            );
+            for (start, end) in [
+                (0.0, 300.0),
+                (1_499_900.0, 1_500_100.0),
+                (2_999_900.0, 3_000_000.0),
+                (-200.0, -100.0),
+                (3_000_100.0, 3_000_200.0),
+            ] {
+                let expected: Vec<i64> = sqlx::query_scalar(
+                    "SELECT id FROM sessions WHERE end_ts>? AND start_ts<? ORDER BY start_ts,id",
+                )
+                .bind(start)
+                .bind(end)
+                .fetch_all(&database.pool)
+                .await
+                .unwrap();
+                let actual = database.fetch_sessions(start, end).await.unwrap();
+                assert_eq!(actual.ids, expected, "window {start}..{end}");
+            }
         });
     }
 

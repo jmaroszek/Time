@@ -85,7 +85,14 @@ export function createWorkerClient<Req, Res>(
   const pendingByKey = new Map<string, Promise<Res>>();
   const pendingById = new Map<
     number,
-    { key: string; request: Req; resolve: (value: Res) => void; reject: (error: Error) => void }
+    {
+      key: string;
+      request: Req;
+      resolve: (value: Res) => void;
+      reject: (error: Error) => void;
+      phase: "preparing" | "worker" | "local";
+      timer?: ReturnType<typeof setTimeout>;
+    }
   >();
   let worker: Worker | null = null;
   let workerUnavailable = false;
@@ -102,18 +109,34 @@ export function createWorkerClient<Req, Res>(
     return value;
   }
 
-  function onMainThread(key: string, request: Req): Promise<Res> {
+  function fail(id: number, error: unknown): void {
+    const pending = pendingById.get(id);
+    if (!pending) return;
+    pendingById.delete(id);
+    pending.reject(error instanceof Error ? error : new Error(String(error)));
+  }
+
+  function finish(id: number, result: Res): void {
+    const pending = pendingById.get(id);
+    if (!pending) return;
+    pendingById.delete(id);
+    pending.resolve(remember(pending.key, result));
+  }
+
+  function onMainThread(id: number): void {
+    const pending = pendingById.get(id);
+    if (!pending || pending.phase === "local") return;
+    pending.phase = "local";
     // A worker load/CSP failure must not make the view unusable. Yield first so
     // the retained prior view and its loading affordance can paint.
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        try {
-          resolve(remember(key, computeLocally(request)));
-        } catch (error) {
-          reject(error instanceof Error ? error : new Error(String(error)));
-        }
-      }, 0);
-    });
+    pending.timer = setTimeout(() => {
+      if (!pendingById.has(id)) return;
+      try {
+        finish(id, computeLocally(pending.request));
+      } catch (error) {
+        fail(id, error);
+      }
+    }, 0);
   }
 
   function disableWorkerAndFallback(): void {
@@ -121,10 +144,8 @@ export function createWorkerClient<Req, Res>(
     worker?.terminate();
     worker = null;
     onWorkerLost?.();
-    const waiting = [...pendingById.values()];
-    pendingById.clear();
-    for (const pending of waiting) {
-      void onMainThread(pending.key, pending.request).then(pending.resolve, pending.reject);
+    for (const [id, pending] of pendingById) {
+      if (pending.phase === "worker") onMainThread(id);
     }
   }
 
@@ -132,16 +153,24 @@ export function createWorkerClient<Req, Res>(
     if (workerUnavailable) return null;
     if (worker) return worker;
     try {
-      worker = createWorker();
+      const created = createWorker();
+      worker = created;
       worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+        if (worker !== created) return;
         const pending = pendingById.get(event.data.id);
         if (!pending) return;
-        pendingById.delete(event.data.id);
-        if (event.data.error !== undefined) pending.reject(new Error(event.data.error));
-        else pending.resolve(remember(pending.key, readResult(event.data)));
+        try {
+          if (event.data.error !== undefined) fail(event.data.id, event.data.error);
+          else finish(event.data.id, readResult(event.data));
+        } catch (error) {
+          fail(event.data.id, error);
+        }
       };
-      worker.onerror = () => disableWorkerAndFallback();
-      worker.onmessageerror = () => disableWorkerAndFallback();
+      const onLost = () => {
+        if (worker === created) disableWorkerAndFallback();
+      };
+      worker.onerror = onLost;
+      worker.onmessageerror = onLost;
       return worker;
     } catch {
       workerUnavailable = true;
@@ -150,51 +179,50 @@ export function createWorkerClient<Req, Res>(
   }
 
   function analyze(key: string, request: Req): Promise<Res> {
-    const cached = cache.get(key);
-    if (cached) return Promise.resolve(cached);
+    if (cache.has(key)) return Promise.resolve(cache.get(key)!);
     const active = pendingByKey.get(key);
     if (active) return active;
 
-    const initialWorker = getWorker();
-    const promise = initialWorker
-      ? new Promise<Res>((resolve, reject) => {
-          const id = nextRequestId++;
-          const fail = (error: unknown) =>
-            reject(error instanceof Error ? error : new Error(String(error)));
-          const post = (ready: WorkerMessage, live: Worker) => {
-            pendingById.set(id, { key, request, resolve, reject });
-            live.postMessage(ready.message, ready.transfer ?? []);
-          };
+    const id = nextRequestId++;
+    const promise = new Promise<Res>((resolve, reject) => {
+      // Registration precedes packing and fallback scheduling: clear() must
+      // settle every caller, including work that has not reached a worker yet.
+      pendingById.set(id, { key, request, resolve, reject, phase: "preparing" });
+      const initialWorker = getWorker();
+      if (!initialWorker) {
+        onMainThread(id);
+        return;
+      }
+      const post = (ready: WorkerMessage) => {
+        const pending = pendingById.get(id);
+        if (!pending) return;
+        const live = getWorker();
+        if (!live) {
+          onMainThread(id);
+          return;
+        }
+        pending.phase = "worker";
+        try {
+          live.postMessage(ready.message, ready.transfer ?? []);
+        } catch {
+          disableWorkerAndFallback();
+        }
+      };
 
-          let built: WorkerMessage | Promise<WorkerMessage>;
-          try {
-            built = buildMessage(id, request);
-          } catch (error) {
-            fail(error);
-            return;
-          }
+      try {
+        const built = buildMessage(id, request);
 
-          // Post synchronously when the message was built synchronously. A
-          // client that packs its request (Insights, on long ranges) yields
-          // first, so its worker is re-read afterwards — it can be lost while
-          // packing. A client that does not (Activity) must not be pushed onto
-          // a microtask: its `workerSessionKey` bookkeeping decides whether to
-          // resend the sessions, and an await between deciding and posting is
-          // a window for a second request to decide the same thing.
-          if (built instanceof Promise) {
-            void built.then((ready) => {
-              const live = getWorker();
-              if (!live) {
-                void onMainThread(key, request).then(resolve, reject);
-                return;
-              }
-              post(ready, live);
-            }, fail);
-          } else {
-            post(built, initialWorker);
-          }
-        })
-      : onMainThread(key, request);
+        // Activity's session memo assumes synchronous posting. Only chunked
+        // packing yields; post() then rechecks both cancellation and the worker.
+        if (built instanceof Promise) {
+          void built.then(post).catch((error) => fail(id, error));
+        } else {
+          post(built);
+        }
+      } catch (error) {
+        fail(id, error);
+      }
+    });
 
     // Only clear the slot this promise put there: a slower predecessor settling
     // late must not evict the newer request now holding the key.
@@ -210,7 +238,10 @@ export function createWorkerClient<Req, Res>(
     peek: (key) => cache.get(key) ?? null,
     clear: () => {
       const error = new Error(clearedMessage);
-      for (const pending of pendingById.values()) pending.reject(error);
+      for (const pending of pendingById.values()) {
+        if (pending.timer !== undefined) clearTimeout(pending.timer);
+        pending.reject(error);
+      }
       cache.clear();
       pendingByKey.clear();
       pendingById.clear();

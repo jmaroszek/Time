@@ -580,6 +580,28 @@ test("@workflow website-rule hint leads through the row Classification control",
   ).toBeVisible();
 });
 
+for (const fail of [false, true]) {
+  test(`@workflow entity classification ${fail ? "preserves the old value on failure" : "uses the atomic native command"}`, async ({ page }) => {
+    await page.goto(fail ? "/?fail=assign_entity_rule" : "/");
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await page.locator("tbody tr").filter({ hasText: /slack/i }).getByRole("button").first().click();
+    const panel = page.getByRole("complementary", { name: /^Activity details/ });
+    const category = panel.getByRole("combobox", { name: "Set app default" });
+    await expect(category).toContainText("Communication");
+    await category.click();
+    await page.getByRole("option", { name: "Focus", exact: true }).click();
+    if (fail) {
+      await expect(page.getByText("device fixture forced assign_entity_rule failure")).toBeVisible();
+      await expect(category).toContainText("Communication");
+    } else {
+      await expect(category).toContainText("Focus");
+    }
+    const names = await invocationNames(page);
+    expect(names.filter((name) => name === "assign_entity_rule")).toHaveLength(1);
+    expect(names).not.toContain("db_execute");
+  });
+}
+
 // The update control is the whole update feature as far as a user is concerned:
 // if it does not appear, nobody updates, and if it moves the header when it
 // appears or expands, it breaks the one rule this header has — the date-range

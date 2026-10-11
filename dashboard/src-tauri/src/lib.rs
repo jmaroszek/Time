@@ -275,6 +275,19 @@ async fn fetch_session_correction(
 }
 
 #[tauri::command]
+async fn assign_entity_rule(
+    database: tauri::State<'_, TimeDatabase>,
+    match_type: String,
+    pattern: String,
+    category_id: i64,
+    priority: i64,
+) -> Result<(), String> {
+    database
+        .assign_entity_rule(&match_type, &pattern, category_id, priority)
+        .await
+}
+
+#[tauri::command]
 async fn correct_session(
     database: tauri::State<'_, TimeDatabase>,
     request: SessionCorrectionRequest,
@@ -856,6 +869,7 @@ pub fn run() {
             remove_tracking_exclusion,
             fetch_session_correction,
             correct_session,
+            assign_entity_rule,
             reset_session_correction,
             classify_sessions,
             save_activity_export,
