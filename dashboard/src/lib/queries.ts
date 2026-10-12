@@ -333,18 +333,46 @@ export async function addRule(
 }
 
 /** Replace an entity's exact rules in one native transaction. */
+export interface EntityRuleChange {
+  matchType: "process" | "domain";
+  pattern: string;
+  before: Array<{ id: number; pattern: string; categoryId: number; priority: number }>;
+  after: Array<{ id: number; pattern: string; categoryId: number; priority: number }>;
+}
+
 export async function assignEntityRule(
   matchType: "process" | "domain",
   pattern: string,
   categoryId: number,
-): Promise<void> {
+): Promise<EntityRuleChange> {
   const normalized = normalizedRuleWrite(matchType, pattern, {});
-  await invoke("assign_entity_rule", {
+  return invoke<EntityRuleChange>("assign_entity_rule", {
     matchType,
     pattern: normalized.pattern,
     categoryId,
     priority: normalized.priority,
   });
+}
+
+export async function assignEntityRules(
+  assignments: Array<{ matchType: "process" | "domain"; pattern: string; categoryId: number }>,
+): Promise<EntityRuleChange[]> {
+  return invoke<EntityRuleChange[]>("assign_entity_rules", {
+    assignments: assignments.map(({ matchType, pattern, categoryId }) => {
+      const normalized = normalizedRuleWrite(matchType, pattern);
+      return { matchType, pattern: normalized.pattern, categoryId, priority: normalized.priority };
+    }),
+  });
+}
+
+export async function undoEntityRules(changes: EntityRuleChange[]): Promise<void> {
+  await invoke("undo_entity_rules", { changes });
+}
+
+export async function removeEntityRules(matchType: "process" | "domain", pattern: string): Promise<void> {
+  const normalized = normalizedRuleWrite(matchType, pattern);
+  const db = await getDb();
+  await db.execute("DELETE FROM rules WHERE match_type=$1 AND lower(pattern)=$2", [matchType, normalized.pattern]);
 }
 
 export async function updateRule(

@@ -200,8 +200,8 @@ const TRACKER_UNRESPONSIVE_SECONDS: i64 = 120;
 ///
 /// A live process is not evidence of a working tracker. `tracker/tracker.py`
 /// wraps its whole tick in one `except Exception`, and the health stamp is
-/// written inside that guard and before the probe runs, so a persistent failure
-/// in the settings read or the power-event drain leaves the loop spinning
+/// written after successful capture and session handling, so a persistent failure
+/// in settings, power-event handling, or capture leaves the loop spinning
 /// forever: stamping nothing, recording nothing, and still listed under its own
 /// image name.
 ///

@@ -175,28 +175,17 @@ def test_shutdown_coordinator_continues_after_failures_and_is_idempotent(
         human_input_monitor=human_input_monitor,
     )
 
-    first = threading.Thread(target=coordinator)
-    first.start()
-    assert tray_controller.entered.wait(timeout=1)
-
-    second_started = threading.Event()
-    second_returned = threading.Event()
-
-    def call_second():
-        second_started.set()
-        coordinator()
-        second_returned.set()
-
-    second = threading.Thread(target=call_second)
-    second.start()
-    assert second_started.wait(timeout=1)
-    assert not second_returned.wait(timeout=0.05)
+    callbacks = [threading.Thread(target=coordinator) for _ in range(2)]
+    for callback in callbacks:
+        callback.start()
+    assert coordinator._stop_event.wait(timeout=1)
+    # Callback threads request shutdown; only the creating thread owns cleanup.
+    assert not tray_controller.entered.is_set()
     tray_controller.release.set()
-    first.join(timeout=2)
-    second.join(timeout=2)
-    assert not first.is_alive()
-    assert not second.is_alive()
-    assert second_returned.is_set()
+    coordinator()
+    for callback in callbacks:
+        callback.join(timeout=2)
+        assert not callback.is_alive()
     assert coordinator() is True
     assert tray_controller.calls == 1
     assert power_monitor.calls == 1

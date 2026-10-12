@@ -167,6 +167,10 @@ function resolvedNoiseMode(raw: string | undefined): NoiseMode {
 
 type SaveOutcome = "idle" | "saved" | "failed";
 
+// Pending writes outlive the tab. A fresh mount must join the same queue so
+// older selections cannot commit after the user's latest choice.
+const settingWrites = new KeyedSerialQueue();
+
 
 export default function SettingsTab({
   onManageExclusions,
@@ -193,7 +197,6 @@ export default function SettingsTab({
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [saveOutcome, setSaveOutcome] = useState<SaveOutcome>("idle");
-  const writeQueueRef = useRef(new KeyedSerialQueue());
   const writeSequenceRef = useRef(0);
   const latestWriteRef = useRef(new Map<string, number>());
   const optimisticDraftsRef = useRef(new Map<string, string>());
@@ -364,7 +367,7 @@ export default function SettingsTab({
     optimisticDraftsRef.current.set(key, draftValue);
     setDrafts((current) => ({ ...current, [key]: draftValue }));
     markSaving(key);
-    const operation = writeQueueRef.current.run(key, () =>
+    const operation = settingWrites.run(key, () =>
       updateSetting(key, storedValue),
     );
     void operation.then(

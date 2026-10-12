@@ -1,9 +1,9 @@
 // Whether the tracker is doing what the reader has asked of it.
 //
 // Two axes, deliberately separate. The heartbeat answers "is the process
-// alive"; the settings answer "is recording supposed to be happening". The
-// tracker stamps its health unconditionally, before any recording gate is
-// applied, so a paused or descheduled tracker is a *live* process that is
+// completing polls"; the settings answer "is recording supposed to be happening".
+// The tracker stamps health after successful polls, including polls blocked by
+// recording gates, so a paused or descheduled tracker is a *live* process that is
 // recording nothing. Collapsing the two axes into one boolean is what let the
 // welcome panel tell a paused reader that Time was recording in the background.
 //

@@ -1,15 +1,17 @@
-import { useRef } from "react";
-
 import {
   type ActivityEntitySummary,
   type ActivityTriageItem,
 } from "../lib/activity";
-import { assignEntityRule, deleteRule } from "../lib/queries";
+import { assignEntityRule, assignEntityRules, undoEntityRules, removeEntityRules, type EntityRuleChange } from "../lib/queries";
+import { KeyedSerialQueue } from "../lib/keyedSerialQueue";
 import { type StarterSuggestion } from "../lib/starterSuggestions";
 import { useBanner } from "./banner";
 import { useMeta } from "./meta";
 
 type RuleEntity = Pick<ActivityEntitySummary, "kind" | "key" | "displayName">;
+// Shared across mounts: navigating away must not let a later action overtake
+// an earlier write still in flight from the previous screen.
+const writes = new KeyedSerialQueue();
 
 /** What is still unclassified before the write, in the two shapes this hook
  *  reports on: the rows the Unclassified section lists, and the uncategorized
@@ -30,10 +32,6 @@ export function useEntityRuleWrites(pending: PendingClassification) {
   const { triageCount: pendingTriageCount, residualSeconds } = pending;
   const meta = useMeta();
   const banner = useBanner();
-  // Undo runs after the write and therefore must not close over the rules from
-  // the render that offered it.
-  const rulesRef = useRef(meta.rules);
-  rulesRef.current = meta.rules;
 
   /** Everything the section tracks is classified. Deliberately not
    *  `remainingTriage === 0` alone: emptying the list while partly-classified
@@ -42,23 +40,19 @@ export function useEntityRuleWrites(pending: PendingClassification) {
    *  Claiming otherwise here contradicts it. */
   const nothingLeft = (remainingTriage: number) => remainingTriage === 0 && residualSeconds === 0;
 
-  const exactRulesFor = (entity: RuleEntity) => {
+  const writeEntityRule = (entity: RuleEntity, categoryId: number) => writes.run("rules", async () => {
     const matchType = entity.kind === "website" ? "domain" : "process";
-    return rulesRef.current.filter(
-      (rule) => rule.matchType === matchType && rule.pattern.toLowerCase() === entity.key.toLowerCase(),
-    );
-  };
-
-  const writeEntityRule = async (entity: RuleEntity, categoryId: number) => {
-    const matchType = entity.kind === "website" ? "domain" : "process";
-    await assignEntityRule(matchType, entity.key, categoryId);
+    const change = await assignEntityRule(matchType, entity.key, categoryId);
     await meta.refresh();
-  };
+    return change;
+  });
 
-  const undoTriageAssign = async (item: ActivityTriageItem) => {
+  const undo = async (changes: EntityRuleChange[]) => {
     try {
-      for (const rule of exactRulesFor(item)) await deleteRule(rule.id);
-      await meta.refresh();
+      await writes.run("rules", async () => {
+        await undoEntityRules(changes);
+        await meta.refresh();
+      });
     } catch (error) {
       banner.report(error, "classification");
     }
@@ -78,27 +72,16 @@ export function useEntityRuleWrites(pending: PendingClassification) {
 
   const assignFromTriage = async (item: ActivityTriageItem, categoryId: number) => {
     try {
-      await writeEntityRule(item, categoryId);
+      const change = await writeEntityRule(item, categoryId);
       const category = meta.categories.find((option) => option.id === categoryId);
       if (category) {
         banner.show(
           nothingLeft(pendingTriageCount - 1)
             ? `${item.displayName} is now ${category.name}. Everything is classified.`
             : `${item.displayName} is now ${category.name}.`,
-          { label: "Undo", run: () => void undoTriageAssign(item) },
+          { label: "Undo", run: () => void undo([change]) },
         );
       }
-    } catch (error) {
-      banner.report(error, "classification");
-    }
-  };
-
-  const undoSuggestions = async (accepted: StarterSuggestion<ActivityTriageItem>[]) => {
-    try {
-      for (const suggestion of accepted) {
-        for (const rule of exactRulesFor(suggestion.entity)) await deleteRule(rule.id);
-      }
-      await meta.refresh();
     } catch (error) {
       banner.report(error, "classification");
     }
@@ -107,9 +90,14 @@ export function useEntityRuleWrites(pending: PendingClassification) {
   const applySuggestions = async (accepted: StarterSuggestion<ActivityTriageItem>[]) => {
     if (accepted.length === 0) return;
     try {
-      for (const suggestion of accepted) {
-        await writeEntityRule(suggestion.entity, suggestion.categoryId);
-      }
+      const changes = await writes.run("rules", async () => {
+        const committed = await assignEntityRules(accepted.map((suggestion) => ({
+          matchType: suggestion.entity.kind === "website" ? "domain" : "process",
+          pattern: suggestion.entity.key, categoryId: suggestion.categoryId,
+        })));
+        await meta.refresh();
+        return committed;
+      });
       const remaining = pendingTriageCount - accepted.length;
       banner.show(
         `Classified ${accepted.length} app${accepted.length === 1 ? "" : "s"}.`
@@ -118,7 +106,7 @@ export function useEntityRuleWrites(pending: PendingClassification) {
           : nothingLeft(remaining)
             ? " Everything is classified."
             : " Some time on partly-classified rows is still unclassified."),
-        { label: "Undo", run: () => void undoSuggestions(accepted) },
+        { label: "Undo", run: () => void undo(changes) },
       );
     } catch (error) {
       banner.report(error, "classification");
@@ -127,8 +115,10 @@ export function useEntityRuleWrites(pending: PendingClassification) {
 
   const removeExactRules = async (entity: ActivityEntitySummary) => {
     try {
-      for (const rule of exactRulesFor(entity)) await deleteRule(rule.id);
-      await meta.refresh();
+      await writes.run("rules", async () => {
+        await removeEntityRules(entity.kind === "website" ? "domain" : "process", entity.key);
+        await meta.refresh();
+      });
       banner.show(`Removed the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}.`);
     } catch (error) {
       banner.report(error, "rule");

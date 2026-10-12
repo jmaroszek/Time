@@ -23,10 +23,10 @@ fn saved_window_state_flags() -> StateFlags {
 
 use database::{
     database_path, ActivityDeletePreview, ActivityDeleteRequest, ActivityDeleteResult,
-    DatabaseBackup, ExecuteResult, RestoreNotice, SessionClassificationRequest,
-    SessionClassificationResult, SessionColumns, SessionCorrection, SessionCorrectionRequest,
-    SettingUpdate, TimeDatabase, TrackingExclusion, TrackingExclusionPreview,
-    TrackingExclusionResult,
+    DatabaseBackup, EntityRuleAssignment, EntityRuleChange, ExecuteResult, RestoreNotice,
+    SessionClassificationRequest, SessionClassificationResult, SessionColumns, SessionCorrection,
+    SessionCorrectionRequest, SettingUpdate, TimeDatabase, TrackingExclusion,
+    TrackingExclusionPreview, TrackingExclusionResult,
 };
 use lifecycle::{
     execute_tracking_lifecycle, prepare_restore_for_restart, reconcile_startup_registration,
@@ -281,10 +281,26 @@ async fn assign_entity_rule(
     pattern: String,
     category_id: i64,
     priority: i64,
-) -> Result<(), String> {
+) -> Result<EntityRuleChange, String> {
     database
         .assign_entity_rule(&match_type, &pattern, category_id, priority)
         .await
+}
+
+#[tauri::command]
+async fn assign_entity_rules(
+    database: tauri::State<'_, TimeDatabase>,
+    assignments: Vec<EntityRuleAssignment>,
+) -> Result<Vec<EntityRuleChange>, String> {
+    database.assign_entity_rules(assignments).await
+}
+
+#[tauri::command]
+async fn undo_entity_rules(
+    database: tauri::State<'_, TimeDatabase>,
+    changes: Vec<EntityRuleChange>,
+) -> Result<(), String> {
+    database.undo_entity_rules(changes).await
 }
 
 #[tauri::command]
@@ -870,6 +886,8 @@ pub fn run() {
             fetch_session_correction,
             correct_session,
             assign_entity_rule,
+            assign_entity_rules,
+            undo_entity_rules,
             reset_session_correction,
             classify_sessions,
             save_activity_export,

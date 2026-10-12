@@ -57,11 +57,13 @@ UNOBSERVED_GAP_SECONDS = 60.0
 def acquire_single_instance() -> bool:
     global _mutex_handle
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
     # Global\ so a second logon session (RDP, fast user switching) of the same
     # user cannot run a second tracker against the same database.
     _mutex_handle = kernel32.CreateMutexW(None, False, config.MUTEX_NAME)
     if not _mutex_handle:
-        return True  # cannot check; do not block tracking over it
+        raise ctypes.WinError(ctypes.get_last_error())
     return ctypes.get_last_error() != _ERROR_ALREADY_EXISTS
 
 
@@ -292,9 +294,16 @@ class _ShutdownCoordinator:
         self._completed = threading.Event()
         self._owner_thread = None
         self._started = False
+        self._writer_thread = threading.get_ident()
 
     def __call__(self, *_args) -> bool:
         current_thread = threading.get_ident()
+        if current_thread != self._writer_thread:
+            # Windows invokes console handlers on another thread. SQLite and
+            # the session manager belong to the poll loop; wake it for cleanup.
+            self._stop_event.set()
+            self._completed.wait(timeout=4.0)
+            return True
         with self._lock:
             if self._started:
                 if self._owner_thread == current_thread:
@@ -416,70 +425,85 @@ def run() -> None:
     last_health_publish = 0.0
     failures = FailureThrottle()
 
-    while not stop_event.is_set():
-        try:
-            now = time.time()
-            continuity.apply_boundaries(
-                manager, power_monitor.drain() if power_monitor is not None else [], now,
-            )
-            # Boundary writes can wait on SQLite; timestamp the new observation
-            # after that wait instead of attributing it to the earlier poll.
-            now = time.time()
-            # Consent, pause, schedule, and title-privacy switches take effect
-            # within one poll instead of waiting for the database heartbeat.
-            settings_clock = time.monotonic()
-            if last_settings_refresh is None or settings_clock - last_settings_refresh >= poll:
-                manager.settings = db.get_settings(conn, now)
-                if tray_controller is not None:
-                    raw_settings = db.read_settings_raw(conn)
-                    tray_active = _sync_tray(tray_controller, raw_settings, now)
-                else:
-                    # No controller at all — the optional UI packages are
-                    # missing. Publish it rather than leaving the last value, or
-                    # the dashboard reports a tray from a previous run.
-                    tray_active = False
-                published_tray = _publish_tray_state(conn, tray_active, published_tray)
-                last_settings_refresh = settings_clock
-            monotonic_now = time.monotonic()
-            if monotonic_now - last_health_publish >= HEALTH_HEARTBEAT_SECONDS:
-                stamp_tracker_health(conn, now)
-                last_health_publish = monotonic_now
-            idle_seconds = (
-                human_input_monitor.idle_seconds()
-                if human_input_monitor is not None
-                else None
-            )
-            snap = win32_probe.snapshot(now, idle_seconds=idle_seconds)
-            if (
-                media_monitor is not None
-                and snap.process != LOCK_PROCESS
-                and is_idle(snap, manager.settings)
-            ):
-                is_browser = (
-                    snap.process is not None
-                    and snap.process in manager.settings.browser_processes
+    try:
+        while not stop_event.is_set():
+            try:
+                now = time.time()
+                continuity.apply_boundaries(
+                    manager, power_monitor.drain() if power_monitor is not None else [], now,
                 )
-                domain = parse_domain(snap.title) if is_browser else None
-                snap = replace(
-                    snap,
-                    media_playing=media_monitor.is_foreground_playing(
-                        process=snap.process,
-                        app_user_model_id=snap.app_user_model_id,
-                        domain=domain,
-                        browser_processes=manager.settings.browser_processes,
-                        media_domains=manager.settings.media_domains,
-                    ),
+                # Boundary writes can wait on SQLite; timestamp the new observation
+                # after that wait instead of attributing it to the earlier poll.
+                now = time.time()
+                # Consent, pause, schedule, and title-privacy switches take effect
+                # within one poll instead of waiting for the database heartbeat.
+                settings_clock = time.monotonic()
+                if last_settings_refresh is None or settings_clock - last_settings_refresh >= poll:
+                    manager.settings = db.get_settings(conn, now)
+                    if tray_controller is not None:
+                        raw_settings = db.read_settings_raw(conn)
+                        tray_active = _sync_tray(tray_controller, raw_settings, now)
+                    else:
+                        # No controller at all — the optional UI packages are
+                        # missing. Publish it rather than leaving the last value, or
+                        # the dashboard reports a tray from a previous run.
+                        tray_active = False
+                    published_tray = _publish_tray_state(conn, tray_active, published_tray)
+                    last_settings_refresh = settings_clock
+                idle_seconds = None
+                if human_input_monitor is not None:
+                    try:
+                        idle_seconds = human_input_monitor.idle_seconds()
+                    except Exception as exc:
+                        failures.record("human input failed; using Windows idle", exc, time.monotonic())
+                snap = win32_probe.snapshot(now, idle_seconds=idle_seconds)
+                if (
+                    media_monitor is not None
+                    and snap.process != LOCK_PROCESS
+                    and is_idle(snap, manager.settings)
+                ):
+                    is_browser = (
+                        snap.process is not None
+                        and snap.process in manager.settings.browser_processes
+                    )
+                    domain = parse_domain(snap.title) if is_browser else None
+                    snap = replace(
+                        snap,
+                        media_playing=media_monitor.is_foreground_playing(
+                            process=snap.process,
+                            app_user_model_id=snap.app_user_model_id,
+                            domain=domain,
+                            browser_processes=manager.settings.browser_processes,
+                            media_domains=manager.settings.media_domains,
+                        ),
+                    )
+                manager.tick(snap)
+                # A spinning loop with broken capture is not a healthy recorder.
+                # Successful paused/excluded polls still reach this stamp.
+                monotonic_now = time.monotonic()
+                capture_available = (
+                    snap.process is not None or is_idle(snap, manager.settings)
+                    or manager.settings.tracking_paused
+                    or not manager.settings.recording_consent
+                    or not manager.settings.recording_schedule_allowed
                 )
-            manager.tick(snap)
-        except Exception as exc:
-            failures.record("tick failed", exc, time.monotonic())
+                if capture_available and monotonic_now - last_health_publish >= HEALTH_HEARTBEAT_SECONDS:
+                    stamp_tracker_health(conn, now)
+                    last_health_publish = monotonic_now
+            except Exception as exc:
+                manager.observation_interrupted()
+                failures.record("tick failed", exc, time.monotonic())
 
-        next_tick += poll
-        delay = next_tick - time.monotonic()
-        if delay <= 0:  # resync after sleep/suspend/slow tick
-            next_tick = time.monotonic() + poll
-            delay = poll
-        time.sleep(delay)
+            next_tick += poll
+            delay = next_tick - time.monotonic()
+            if delay <= 0:  # resync after sleep/suspend/slow tick
+                next_tick = time.monotonic() + poll
+                delay = poll
+            stop_event.wait(delay)
+    finally:
+        shutdown()
+        atexit.unregister(shutdown)
+
 
 
 def main() -> int:
@@ -498,9 +522,13 @@ def main() -> int:
         return 1
 
     log_startup_environment()
-    if not acquire_single_instance():
-        logging.error("Another tracker instance is already running; exiting.")
-        return 0
+    try:
+        if not acquire_single_instance():
+            logging.error("Another tracker instance is already running; exiting.")
+            return 0
+    except OSError:
+        logging.exception("Could not establish exclusive tracker ownership; exiting.")
+        return 1
     try:
         run()
     except KeyboardInterrupt:

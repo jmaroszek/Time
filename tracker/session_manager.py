@@ -35,6 +35,9 @@ from tracker.domains import browser_privacy_fields
 
 LOCK_PROCESS = "lockapp.exe"
 AFK_PROCESS = "afk"
+# Brief focus transitions may hide the foreground; a minute without an identity
+# is a capture outage and cannot keep extending the previous app indefinitely.
+UNKNOWN_FOREGROUND_GRACE_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
@@ -123,6 +126,8 @@ class SessionManager:
     _system_suspended: bool = False
     _media_protected_idle: bool = False
     _recording_blocked: bool | None = None
+    _observation_interrupted: bool = False
+    _unknown_foreground_since: float | None = None
     # Highest end_ts this run has written via close. Opens clamp to it so a
     # wall clock stepped backwards while no session is current (post-pause,
     # post-AFK-unknown) cannot open a row overlapping an already-closed one
@@ -134,13 +139,17 @@ class SessionManager:
     def tick(self, snap: Snapshot) -> None:
         if self._system_suspended:
             return
-        self._last_observed_ts = snap.now
+        if self._observation_interrupted:
+            self.system_resumed(snap.now)
+            self._observation_interrupted = False
         blocked = (
             self.settings.tracking_paused
             or not self.settings.recording_consent
             or not self.settings.recording_schedule_allowed
         )
         if blocked:
+            self._last_observed_ts = snap.now
+            self._unknown_foreground_since = None
             # Every recording gate finalizes the open session and opens nothing
             # new. A schedule never mutates the independent manual-pause keys.
             self._finalize_current(snap.now)
@@ -161,6 +170,24 @@ class SessionManager:
                 self.settings.recording_schedule_window_start,
             )
         self._recording_blocked = False
+
+        if snap.process is None and not is_idle(snap, self.settings):
+            if self._unknown_foreground_since is None:
+                self._unknown_foreground_since = self._last_observed_ts or snap.now
+            if snap.now - self._unknown_foreground_since >= UNKNOWN_FOREGROUND_GRACE_SECONDS:
+                self._finalize_current(self._unknown_foreground_since)
+                self._floor_ts = max(self._floor_ts, snap.now)
+                self._reset_pending()
+                self._media_protected_idle = False
+                return
+        else:
+            if (self._unknown_foreground_since is not None
+                    and snap.now - self._unknown_foreground_since >= UNKNOWN_FOREGROUND_GRACE_SECONDS):
+                self._finalize_current(self._unknown_foreground_since)
+                self._floor_ts = max(self._floor_ts, snap.now)
+            self._unknown_foreground_since = None
+        if snap.process is not None or is_idle(snap, self.settings):
+            self._last_observed_ts = snap.now
 
         locked = snap.process == LOCK_PROCESS
         idle = is_idle(snap, self.settings)
@@ -189,6 +216,7 @@ class SessionManager:
             # observed by the tracker rather than stretching the row to wake.
             self._finalize_current(self._last_observed_ts)
         self._system_suspended = False
+        self._unknown_foreground_since = None
         self._floor_ts = max(self._floor_ts, now)
         self._reset_pending()
         self._media_protected_idle = False
@@ -206,7 +234,11 @@ class SessionManager:
 
     def shutdown(self, now: float) -> None:
         """Finalize the open session (process exit, ctrl-c, logoff)."""
-        self._finalize_current(now)
+        self._finalize_current(self._last_observed_ts if self._observation_interrupted else now)
+
+    def observation_interrupted(self) -> None:
+        """A failed poll cannot be filled in by a later snapshot or shutdown."""
+        self._observation_interrupted = True
 
     # ---------- AFK ----------
 

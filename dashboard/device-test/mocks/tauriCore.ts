@@ -11,6 +11,7 @@ declare global {
       invocations: InvocationRecord[];
       settings: Record<string, string>;
       sessionCount: () => number;
+      releaseSettingWrite: () => void;
     };
   }
 }
@@ -18,6 +19,7 @@ declare global {
 const fixtureParams = new URLSearchParams(window.location.search);
 const forcedFailure = fixtureParams.get("fail");
 const lifecycleDelayMs = Math.max(0, Number(fixtureParams.get("lifecycleDelay") ?? 0));
+const pendingSettingWrites: Array<() => void> = [];
 const now = Date.now() / 1000;
 const day = 86_400;
 /** A dev build and an installed build of one app, aliased to the same name so
@@ -301,6 +303,7 @@ const trackingExclusions: Array<{
 
 const invocations: InvocationRecord[] = [];
 window.__TIME_DEVICE_TEST__ = {
+  releaseSettingWrite: () => pendingSettingWrites.shift()?.(),
   invocations,
   settings,
   sessionCount: () => sessions.length,
@@ -373,6 +376,9 @@ function sessionColumns(args: InvokeArgs) {
 export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
   invocations.push({ command, args: structuredClone(args) });
   failWhenRequested(command);
+  if (command === "update_user_settings" && fixtureParams.get("holdSettings") === "1") {
+    await new Promise<void>((resolve) => pendingSettingWrites.push(resolve));
+  }
   let result: unknown;
   switch (command) {
     case "db_path":
@@ -425,6 +431,17 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
         break;
       }
       if (query.startsWith("delete from rules")) {
+        if (query.includes("match_type=")) {
+          let removed = 0;
+          for (let index = ruleRows.length - 1; index >= 0; index--) {
+            if (ruleRows[index].match_type === values[0] && ruleRows[index].pattern.toLowerCase() === values[1]) {
+              ruleRows.splice(index, 1);
+              removed++;
+            }
+          }
+          result = { rowsAffected: removed, lastInsertId: 0 };
+          break;
+        }
         const at = ruleRows.findIndex((rule) => rule.id === Number(values[0]));
         if (at !== -1) ruleRows.splice(at, 1);
         result = { rowsAffected: at === -1 ? 0 : 1, lastInsertId: 0 };
@@ -432,28 +449,51 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
       }
       throw new Error(`Device fixture has no db_execute response for: ${query}`);
     }
-    case "assign_entity_rule": {
-      const matchType = String(args?.matchType);
-      const pattern = String(args?.pattern ?? "").trim().toLowerCase();
-      const categoryId = Number(args?.categoryId);
-      const priority = Number(args?.priority);
-      if (!["process", "domain"].includes(matchType) || !pattern
-        || !categoryRows.some((category) => category.id === categoryId)) {
-        throw new Error("Invalid entity rule");
-      }
-      const canonical = ruleRows.find((rule) =>
-        rule.match_type === matchType && rule.pattern === pattern);
-      for (let index = ruleRows.length - 1; index >= 0; index--) {
-        const rule = ruleRows[index];
-        if (rule.match_type === matchType && rule.pattern.toLowerCase() === pattern) {
-          ruleRows.splice(index, 1);
+    case "assign_entity_rule":
+    case "assign_entity_rules": {
+      const assignments = (command === "assign_entity_rule" ? [args] : args?.assignments) as
+        Array<{ matchType: string; pattern: string; categoryId: number; priority: number }>;
+      for (const assignment of assignments) {
+        if (!["process", "domain"].includes(assignment.matchType) || !assignment.pattern.trim()
+          || !categoryRows.some((category) => category.id === assignment.categoryId)) {
+          throw new Error("Invalid entity rule");
         }
       }
-      ruleRows.push({
-        id: canonical?.id ?? nextRuleId++, match_type: matchType, pattern,
-        category_id: categoryId, priority, scope_kind: "", scope_value: "",
-        title_match_mode: "", title_anchor: "",
+      const changes = assignments.map(({ matchType, pattern: raw, categoryId, priority }) => {
+        const pattern = raw.trim().toLowerCase();
+        const matching = () => ruleRows.filter((rule) => rule.match_type === matchType
+          && rule.pattern.toLowerCase() === pattern).sort((a, b) => a.id - b.id)
+          .map((rule) => ({ id: rule.id, pattern: rule.pattern, categoryId: rule.category_id, priority: rule.priority }));
+        const before = matching();
+        const canonical = ruleRows.find((rule) => rule.match_type === matchType && rule.pattern === pattern);
+        for (let index = ruleRows.length - 1; index >= 0; index--) {
+          if (ruleRows[index].match_type === matchType && ruleRows[index].pattern.toLowerCase() === pattern) ruleRows.splice(index, 1);
+        }
+        ruleRows.push({ id: canonical?.id ?? nextRuleId++, match_type: matchType, pattern,
+          category_id: categoryId, priority, scope_kind: "", scope_value: "", title_match_mode: "", title_anchor: "" });
+        return { matchType, pattern, before, after: matching() };
       });
+      result = command === "assign_entity_rule" ? changes[0] : changes;
+      break;
+    }
+    case "undo_entity_rules": {
+      const changes = args?.changes as Array<{ matchType: string; pattern: string;
+        before: Array<{ id: number; pattern: string; categoryId: number; priority: number }>;
+        after: Array<{ id: number; pattern: string; categoryId: number; priority: number }> }>;
+      for (const change of changes) {
+        const current = ruleRows.filter((rule) => rule.match_type === change.matchType
+          && rule.pattern.toLowerCase() === change.pattern).sort((a, b) => a.id - b.id)
+          .map((rule) => ({ id: rule.id, pattern: rule.pattern, categoryId: rule.category_id, priority: rule.priority }));
+        if (JSON.stringify(current) !== JSON.stringify(change.after)) throw new Error("Classifications changed after this action");
+      }
+      for (const change of changes) {
+        for (let index = ruleRows.length - 1; index >= 0; index--) {
+          if (ruleRows[index].match_type === change.matchType && ruleRows[index].pattern.toLowerCase() === change.pattern) ruleRows.splice(index, 1);
+        }
+        for (const rule of change.before) ruleRows.push({ id: nextRuleId++, match_type: change.matchType,
+          pattern: rule.pattern, category_id: rule.categoryId, priority: rule.priority,
+          scope_kind: "", scope_value: "", title_match_mode: "", title_anchor: "" });
+      }
       result = undefined;
       break;
     }

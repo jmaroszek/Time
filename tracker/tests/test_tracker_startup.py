@@ -1,4 +1,5 @@
 import logging
+import sqlite3
 import sys
 from types import SimpleNamespace
 
@@ -182,6 +183,7 @@ def test_loop_applies_privacy_and_recording_gates_after_clock_setback(
     stop = []
     def tray(_path, event):
         stop.append(event)
+        event.wait = lambda delay: sleep(delay)
         return None
     monkeypatch.setattr(tracker.tray, "create_tray_controller", tray)
     monkeypatch.setattr(tracker.atexit, "register", lambda _: None)
@@ -195,7 +197,7 @@ def test_loop_applies_privacy_and_recording_gates_after_clock_setback(
         if step == 3:
             stop[0].set()
     monkeypatch.setattr(tracker, "time", SimpleNamespace(
-        time=lambda: [10000, 6400, 6401][step],
+        time=lambda: [10000, 6400, 6401][min(step, 2)],
         monotonic=lambda: float(step), sleep=sleep,
     ))
     monkeypatch.setattr(tracker.win32_probe, "snapshot", lambda now, **_: Snapshot(
@@ -203,6 +205,8 @@ def test_loop_applies_privacy_and_recording_gates_after_clock_setback(
     ))
     try:
         tracker.run()
+        conn = sqlite3.connect(tmp_path / "clock.db")
+        conn.row_factory = sqlite3.Row
         assert step == 3
         assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
         rows = conn.execute("SELECT start_ts,title FROM sessions WHERE process='private.exe'").fetchall()

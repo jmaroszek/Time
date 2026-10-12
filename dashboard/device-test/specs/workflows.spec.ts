@@ -6,6 +6,45 @@ test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(FIXED_NOW);
 });
 
+test("@workflow suggested classifications commit together and Undo restores the offer", async ({ page }) => {
+  await page.goto("/?fixture=unclassified");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const review = page.getByRole("button", { name: /^Review \d+ suggestions?$/ });
+  await expect(review).toBeVisible();
+  const originalOffer = await review.textContent();
+  await review.click();
+  const dialog = page.getByRole("dialog", { name: /^Classify \d+ recognized apps?$/ });
+  await dialog.getByRole("button", { name: /^Classify \d+ apps?$/ }).click();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeVisible();
+  const names = await invocationNames(page);
+  expect(names.filter((name) => name === "assign_entity_rules")).toHaveLength(1);
+  expect(names).not.toContain("assign_entity_rule");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(review).toHaveText(originalOffer!);
+  expect(await invocationNames(page)).toContain("undo_entity_rules");
+});
+
+test("@workflow settings writes retain user order across navigation", async ({ page }) => {
+  await page.goto("/?theme=dark&holdSettings=1");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const theme = page.getByRole("radiogroup", { name: "Theme" });
+  await theme.getByRole("radio", { name: "Light", exact: true }).click();
+  await theme.getByRole("radio", { name: "System", exact: true }).click();
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await theme.getByRole("radio", { name: "Light", exact: true }).click();
+  const writes = () => page.evaluate(() => window.__TIME_DEVICE_TEST__.invocations
+    .filter((call) => call.command === "update_user_settings"));
+  expect(await writes()).toHaveLength(1);
+  for (let count = 2; count <= 3; count++) {
+    await page.evaluate(() => window.__TIME_DEVICE_TEST__.releaseSettingWrite());
+    await expect.poll(async () => (await writes()).length).toBe(count);
+  }
+  await page.evaluate(() => window.__TIME_DEVICE_TEST__.releaseSettingWrite());
+  await expect.poll(async () => (await fixtureSettings(page)).theme).toBe("light");
+  await expect(theme.getByRole("radio", { name: "Light", exact: true })).toHaveAttribute("aria-checked", "true");
+});
+
 async function invocationNames(page: Page): Promise<string[]> {
   return page.evaluate(() =>
     window.__TIME_DEVICE_TEST__.invocations.map((entry) => entry.command)
@@ -89,8 +128,8 @@ test("@workflow first run starts tracking, then offers to register startup", asy
   await expect(page.getByRole("button", { name: "Start at sign-in" })).toHaveCount(0);
 });
 
-// A running process is not consent. The tracker stamps its health before any
-// recording gate is applied, so it beats on happily after "Not now" — and
+// A running process is not consent. The tracker stamps health even when a
+// recording gate blocks storage, so it beats on happily after "Not now" — and
 // reading that stamp as "tracking is on" told a reader Time was recording in
 // the background while it was storing nothing at all. Consent decides what this
 // panel says; liveness only decides whether starting is still needed.
