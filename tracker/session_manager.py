@@ -20,6 +20,8 @@ Behavior spec:
 - An interval nobody observed is a gap, not a session. Sleep Windows never
   announced looks the same from here as a frozen loop, and both end the open
   row where the last snapshot actually saw it.
+- Startup never backdates before the first observation or the previous run's
+  persisted end, even when the first observation is already idle.
 - An open session's end_ts is pushed forward by heartbeat so a crash loses at
   most `heartbeat_seconds`.
 """
@@ -108,6 +110,9 @@ class _Current:
 class SessionManager:
     store: Store
     settings: Settings = field(default_factory=Settings)
+    # Persisted end boundary from the previous process, including when the
+    # clock was moved back while the tracker was stopped.
+    recording_floor: float = 0.0
 
     _current: _Current | None = None
     _pending_identity: tuple[str, str | None] | None = None
@@ -147,12 +152,13 @@ class SessionManager:
         if self._recording_blocked:
             # A resume must not let idle backdating reach into a manual pause or
             # the off-hours window that just ended.
-            self._floor_ts = max(self._floor_ts, snap.now)
+            self._floor_ts = max(self._floor_ts, self.recording_floor, snap.now)
         elif self._recording_blocked is None:
-            # On tracker startup inside a window, retain normal idle backdating
-            # but never let it cross the schedule's opening boundary.
+            # Idle at startup says nothing about time this process did not
+            # observe. Never backdate into an earlier run or a stopped interval.
             self._floor_ts = max(
-                self._floor_ts, self.settings.recording_schedule_window_start
+                self._floor_ts, self.recording_floor, snap.now,
+                self.settings.recording_schedule_window_start,
             )
         self._recording_blocked = False
 

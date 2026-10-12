@@ -1,6 +1,11 @@
 import logging
+import sys
+from types import SimpleNamespace
+
+import pytest
 
 from tracker import config, db, tracker
+from tracker.session_manager import Snapshot
 
 
 class FakeController:
@@ -146,6 +151,65 @@ def test_fresh_database_without_consent_exits_before_recording(tmp_path, monkeyp
         assert raw["recording_consent"] == "0"
         assert raw["privacy_onboarding_complete"] == "0"
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("updates,records", [
+    ({"record_window_titles": "0"}, True),
+    ({"tracking_paused": "1"}, False),
+    ({"recording_consent": "0"}, False),
+    ({"tracking_schedule_enabled": "1", "tracking_schedule_days": ""}, False),
+])
+def test_loop_applies_privacy_and_recording_gates_after_clock_setback(
+    tmp_path, monkeypatch, caplog, updates, records,
+):
+    conn = db.open_db(tmp_path / "clock.db")
+    db.set_settings(conn, {
+        "privacy_onboarding_complete": "1", "recording_consent": "1",
+        "record_window_titles": "1",
+    })
+    # A previous run ended ahead of today's wall clock. Startup must use it.
+    conn.execute("INSERT INTO sessions(start_ts,end_ts,process) VALUES(9990,10010,'old.exe')")
+    monkeypatch.delenv("TIME_MIGRATE_ONLY", raising=False)
+    monkeypatch.setattr(db, "open_db", lambda _: conn)
+    for component, function in [
+        (tracker.human_input, "start_human_input_monitor"),
+        (tracker.media_playback, "start_media_playback_monitor"),
+        (tracker.power_events, "start_power_event_monitor"),
+    ]:
+        monkeypatch.setattr(component, function, lambda: None)
+    stop = []
+    def tray(_path, event):
+        stop.append(event)
+        return None
+    monkeypatch.setattr(tracker.tray, "create_tray_controller", tray)
+    monkeypatch.setattr(tracker.atexit, "register", lambda _: None)
+    monkeypatch.setitem(sys.modules, "win32api", SimpleNamespace(SetConsoleCtrlHandler=lambda *_: None))
+    step = 0
+    def sleep(_):
+        nonlocal step
+        step += 1
+        if step == 1:
+            db.set_settings(conn, updates)
+        if step == 3:
+            stop[0].set()
+    monkeypatch.setattr(tracker, "time", SimpleNamespace(
+        time=lambda: [10000, 6400, 6401][step],
+        monotonic=lambda: float(step), sleep=sleep,
+    ))
+    monkeypatch.setattr(tracker.win32_probe, "snapshot", lambda now, **_: Snapshot(
+        now, 0, "before.exe" if step == 0 else "private.exe", "PRIVATE CONTENT",
+    ))
+    try:
+        tracker.run()
+        assert step == 3
+        assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+        rows = conn.execute("SELECT start_ts,title FROM sessions WHERE process='private.exe'").fetchall()
+        assert len(rows) == int(records)
+        if records:
+            assert rows[0]["title"] == ""
+        assert conn.execute("SELECT start_ts FROM sessions WHERE process='before.exe'").fetchone()[0] == 10010
     finally:
         conn.close()
 

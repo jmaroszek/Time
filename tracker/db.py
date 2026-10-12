@@ -563,6 +563,11 @@ def _seed(conn: sqlite3.Connection) -> None:
     )
 
 
+def latest_session_end(conn: sqlite3.Connection) -> float:
+    """Indexed startup boundary; a new run must not overlap persisted history."""
+    return float(conn.execute("SELECT COALESCE(MAX(end_ts),0) FROM sessions").fetchone()[0])
+
+
 def read_settings_raw(conn: sqlite3.Connection) -> dict[str, str]:
     return {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM settings")}
 

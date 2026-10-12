@@ -344,7 +344,10 @@ def run() -> None:
         conn.close()
         logging.info("Database initialized; waiting for first-run privacy choice.")
         return
-    manager = SessionManager(store=db.SqliteStore(conn), settings=db.get_settings(conn))
+    manager = SessionManager(
+        store=db.SqliteStore(conn), settings=db.get_settings(conn),
+        recording_floor=db.latest_session_end(conn),
+    )
     human_input_monitor = human_input.start_human_input_monitor()
     media_monitor = media_playback.start_media_playback_monitor()
     power_monitor = power_events.start_power_event_monitor()
@@ -382,7 +385,7 @@ def run() -> None:
     poll = config.POLL_SECONDS
     next_tick = time.monotonic()
     continuity = LoopContinuity()
-    last_settings_refresh = 0.0
+    last_settings_refresh = None
     last_health_publish = 0.0
     failures = FailureThrottle()
 
@@ -417,7 +420,8 @@ def run() -> None:
                 )
             # Consent, pause, schedule, and title-privacy switches take effect
             # within one poll instead of waiting for the database heartbeat.
-            if now - last_settings_refresh >= poll:
+            settings_clock = time.monotonic()
+            if last_settings_refresh is None or settings_clock - last_settings_refresh >= poll:
                 manager.settings = db.get_settings(conn, now)
                 if tray_controller is not None:
                     raw_settings = db.read_settings_raw(conn)
@@ -428,7 +432,7 @@ def run() -> None:
                     # the dashboard reports a tray from a previous run.
                     tray_active = False
                 published_tray = _publish_tray_state(conn, tray_active, published_tray)
-                last_settings_refresh = now
+                last_settings_refresh = settings_clock
             monotonic_now = time.monotonic()
             if monotonic_now - last_health_publish >= HEALTH_HEARTBEAT_SECONDS:
                 stamp_tracker_health(conn, now)

@@ -2318,11 +2318,30 @@ impl TimeDatabase {
         database_path: &Path,
     ) -> Result<Option<RestoreSwap>, String> {
         let marker_path = Self::pending_marker_path(database_path)?;
+        let pending_path = Self::pending_database_path(database_path)?;
+        let rollback_path = Self::rollback_path(database_path)?;
+        let failed_path = Self::failed_restore_path(database_path)?;
+        // Rollback parks the rejected database before putting the original
+        // back. That file also identifies an interrupted rollback, including
+        // an exit after the original was restored but before cleanup finished.
+        if failed_path.exists() && !pending_path.exists() {
+            if rollback_path.exists() && !database_path.exists() {
+                Self::remove_database_sidecars(database_path)?;
+                Self::rename_with_retry(&rollback_path, database_path)?;
+            }
+            if database_path.exists() && !rollback_path.exists() {
+                Self::remove_if_exists(&marker_path)?;
+                let _ = Self::remove_if_exists(&failed_path);
+                let _ = Self::write_restore_notice(database_path, RestoreNotice {
+                    ok: false,
+                    message: "An interrupted restore was rolled back; the previous database was recovered.".into(),
+                });
+                return Ok(None);
+            }
+        }
         if !marker_path.exists() {
             return Ok(None);
         }
-        let pending_path = Self::pending_database_path(database_path)?;
-        let rollback_path = Self::rollback_path(database_path)?;
         let pending: PendingRestore =
             serde_json::from_slice(&fs::read(&marker_path).map_err(|error| error.to_string())?)
                 .map_err(|error| format!("Could not read pending restore: {error}"))?;
@@ -2462,8 +2481,8 @@ impl RestoreSwap {
             let _ = TimeDatabase::rename_with_retry(&failed_path, &self.database_path);
             return Err(error);
         }
-        TimeDatabase::remove_if_exists(&failed_path)?;
         TimeDatabase::remove_if_exists(&self.marker_path)?;
+        TimeDatabase::remove_if_exists(&failed_path)?;
         let pending_path = TimeDatabase::pending_database_path(&self.database_path)?;
         TimeDatabase::remove_if_exists(&pending_path)?;
         TimeDatabase::remove_database_sidecars(&pending_path)
@@ -3560,6 +3579,117 @@ mod tests {
             .filter(|name| name.starts_with("restore_"))
             .collect();
         assert!(strays.is_empty(), "restore left {strays:?} behind");
+    }
+
+    #[test]
+    fn interrupted_rollback_recovers_the_original_at_every_rename_and_cleanup_boundary() {
+        for phase in 1..=4 {
+            let root = scratch_root("interrupted-rollback");
+            let live = root.join("database.db");
+            tauri::async_runtime::block_on(async {
+                let database = TimeDatabase::open(live.clone()).await.unwrap();
+                let backup = database.backup_with_name("older").await.unwrap();
+                sqlx::query(
+                    "INSERT INTO sessions(start_ts,end_ts,process) VALUES(10,20,'original.exe')",
+                )
+                .execute(&database.pool)
+                .await
+                .unwrap();
+                database
+                    .prepare_restore(PathBuf::from(backup))
+                    .await
+                    .unwrap();
+                database.close().await;
+                let swap = TimeDatabase::begin_pending_restore(&live)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                drop(swap);
+                let failed = TimeDatabase::failed_restore_path(&live).unwrap();
+                let previous = TimeDatabase::rollback_path(&live).unwrap();
+                let marker = TimeDatabase::pending_marker_path(&live).unwrap();
+                // Exact persistent states after each operation in rollback().
+                TimeDatabase::rename_with_retry(&live, &failed).unwrap();
+                if phase >= 2 {
+                    TimeDatabase::rename_with_retry(&previous, &live).unwrap();
+                }
+                if phase >= 3 {
+                    TimeDatabase::remove_if_exists(&marker).unwrap();
+                }
+                if phase >= 4 {
+                    TimeDatabase::remove_if_exists(&failed).unwrap();
+                }
+                for _ in 0..2 {
+                    assert!(TimeDatabase::begin_pending_restore(&live)
+                        .await
+                        .unwrap()
+                        .is_none());
+                    let recovered = TimeDatabase::open(live.clone()).await.unwrap();
+                    let processes: Vec<String> = sqlx::query_scalar("SELECT process FROM sessions")
+                        .fetch_all(&recovered.pool)
+                        .await
+                        .unwrap();
+                    assert_eq!(processes, ["original.exe"], "phase {phase}");
+                    recovered.close().await;
+                }
+                assert!(!previous.exists());
+                assert!(!marker.exists());
+                assert!(!failed.exists());
+            });
+        }
+    }
+
+    #[test]
+    fn interrupted_forward_swap_still_finishes_the_selected_restore() {
+        for phase in 0..=2 {
+            let root = scratch_root("interrupted-forward-restore");
+            let live = root.join("database.db");
+            tauri::async_runtime::block_on(async {
+                let database = TimeDatabase::open(live.clone()).await.unwrap();
+                let backup = database.backup_with_name("empty").await.unwrap();
+                sqlx::query(
+                    "INSERT INTO sessions(start_ts,end_ts,process) VALUES(10,20,'original.exe')",
+                )
+                .execute(&database.pool)
+                .await
+                .unwrap();
+                database
+                    .prepare_restore(PathBuf::from(backup))
+                    .await
+                    .unwrap();
+                database.close().await;
+                if phase >= 1 {
+                    TimeDatabase::rename_with_retry(
+                        &live,
+                        &TimeDatabase::rollback_path(&live).unwrap(),
+                    )
+                    .unwrap();
+                }
+                if phase >= 2 {
+                    TimeDatabase::rename_with_retry(
+                        &TimeDatabase::pending_database_path(&live).unwrap(),
+                        &live,
+                    )
+                    .unwrap();
+                }
+                let swap = TimeDatabase::begin_pending_restore(&live)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                swap.commit().unwrap();
+                assert!(TimeDatabase::begin_pending_restore(&live)
+                    .await
+                    .unwrap()
+                    .is_none());
+                let restored = TimeDatabase::open(live).await.unwrap();
+                let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+                    .fetch_one(&restored.pool)
+                    .await
+                    .unwrap();
+                assert_eq!(count, 0, "phase {phase}");
+                restored.close().await;
+            });
+        }
     }
 
     /// A backup copied out of a running Time keeps its write-ahead log, and the

@@ -744,7 +744,7 @@ def test_schedule_start_prevents_idle_backdating_into_off_hours(store):
     assert store.opened[0][1] == 1010.0
 
 
-def test_startup_idle_backdating_is_clamped_to_schedule_window(store):
+def test_startup_idle_does_not_claim_the_unobserved_part_of_a_schedule_window(store):
     manager = SessionManager(
         store=store,
         settings=Settings(
@@ -753,7 +753,7 @@ def test_startup_idle_backdating_is_clamped_to_schedule_window(store):
         ),
     )
     manager.tick(active(1000.0, idle=500.0))
-    assert store.opened[0][1] == 900.0
+    assert store.opened[0][1] == 1000.0
 
 
 def test_pause_clears_title_debounce(store):

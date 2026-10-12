@@ -19,6 +19,7 @@ interface CacheEntry {
   startSec: number;
   endSec: number;
   sessions: Session[];
+  maxEnds: number[];
   refreshedAtSec: number;
   lastUsed: number;
   version: number;
@@ -39,12 +40,12 @@ function sameSession(left: Session, right: Session): boolean {
   );
 }
 
-function upperBoundByStart(sessions: Session[], value: number): number {
+function upperBound(values: number[], value: number): number {
   let low = 0;
-  let high = sessions.length;
+  let high = values.length;
   while (low < high) {
     const middle = (low + high) >>> 1;
-    if (sessions[middle].start <= value) low = middle + 1;
+    if (values[middle] <= value) low = middle + 1;
     else high = middle;
   }
   return low;
@@ -54,12 +55,18 @@ function sortSessions(sessions: Session[]): Session[] {
   return [...sessions].sort((a, b) => a.start - b.start || a.id - b.id);
 }
 
-function overlappingSessions(sessions: Session[], startSec: number, endSec: number): Session[] {
-  // Sessions are validated as non-overlapping, so only the latest row that
-  // starts at or before the requested range can cross its left edge. Starting
-  // there preserves arbitrarily long sessions without a historical duration
-  // bound, then the normal forward scan handles the rest of the half-open range.
-  const first = Math.max(0, upperBoundByStart(sessions, startSec) - 1);
+function maximumEnds(sessions: Session[]): number[] {
+  let end = -Infinity;
+  return sessions.map((session) => (end = Math.max(end, session.end)));
+}
+
+function overlappingSessions(
+  sessions: Session[], startSec: number, endSec: number,
+  maxEnds = maximumEnds(sessions),
+): Session[] {
+  // Older recordings can contain overlaps. Prefix maxima preserve every row
+  // crossing the left edge while keeping ordinary cache slices logarithmic.
+  const first = upperBound(maxEnds, startSec);
   const out: Session[] = [];
   for (let index = first; index < sessions.length; index++) {
     const session = sessions[index];
@@ -149,6 +156,7 @@ export class SessionWindowCache {
         startSec,
         endSec,
         sessions,
+        maxEnds: maximumEnds(sessions),
         refreshedAtSec: fetchedAtSec,
         lastUsed: ++this.useCounter,
         version: 1,
@@ -175,6 +183,7 @@ export class SessionWindowCache {
         startSec,
         endSec,
         sessions,
+        maxEnds: maximumEnds(sessions),
         refreshedAtSec: fetchedAtSec,
         lastUsed: ++this.useCounter,
         version: 1,
@@ -187,6 +196,7 @@ export class SessionWindowCache {
 
     const oldStart = entry.startSec;
     const oldEnd = entry.endSec;
+    const oldVersion = entry.version;
     const segments: Array<[number, number]> = [];
     if (startSec < oldStart) segments.push([startSec, Math.min(oldStart, endSec)]);
     if (endSec > oldEnd) segments.push([Math.max(oldEnd, startSec), endSec]);
@@ -206,7 +216,15 @@ export class SessionWindowCache {
       const refreshedAtSec = Math.min(entry.refreshedAtSec, this.nowSec());
       // Refresh the entry's whole unfinished tail, even when the caller asks
       // for a subset. One freshness timestamp must never certify unfetched rows.
-      const refreshStart = Math.max(oldStart, refreshedAtSec - LIVE_REFRESH_LOOKBACK_SEC);
+      // The most recently recorded row can shrink all the way to its start
+      // when AFK is detected. Refetch it even if its new end leaves the usual
+      // lookback. IDs reflect recording order even when corrections move times.
+      const latest = entry.sessions.reduce<Session | undefined>(
+        (last, row) => !last || row.id > last.id ? row : last, undefined,
+      );
+      const refreshStart = Math.max(oldStart, Math.min(
+        refreshedAtSec - LIVE_REFRESH_LOOKBACK_SEC, latest?.start ?? Infinity,
+      ));
       if (refreshEnd > refreshStart) segments.push([refreshStart, refreshEnd]);
     }
 
@@ -222,8 +240,13 @@ export class SessionWindowCache {
     if (generation !== this.generation) {
       return overlappingSessions(sortSessions(fetched.flat()), startSec, endSec);
     }
+    if (entry.version !== oldVersion) {
+      // Another window refreshed this entry while we fetched. Re-evaluate
+      // coverage instead of replacing newer rows with an older query result.
+      return this.loadUnshared(startSec, endSec, fetcher, false, generation);
+    }
     const coverageChanged = startSec < oldStart || endSec > oldEnd;
-    const rowsChanged = this.merge(entry, fetched.flat());
+    const rowsChanged = this.merge(entry, fetched.flat(), windows);
     entry.startSec = Math.min(entry.startSec, startSec);
     entry.endSec = Math.max(entry.endSec, endSec);
     entry.lastUsed = ++this.useCounter;
@@ -235,10 +258,19 @@ export class SessionWindowCache {
     return this.slice(entry, startSec, endSec);
   }
 
-  private merge(entry: CacheEntry, incoming: Session[]): boolean {
-    if (incoming.length === 0) return false;
+  private merge(entry: CacheEntry, incoming: Session[], windows: Array<[number, number]>): boolean {
     const byId = new Map(entry.sessions.map((session) => [session.id, session]));
+    const returnedIds = new Set(incoming.map((session) => session.id));
     let changed = false;
+    // Absence from a refreshed window is authoritative too: a shortened or
+    // removed row must not survive merely because there is no replacement ID.
+    for (const row of entry.sessions) {
+      if (!returnedIds.has(row.id)
+        && windows.some(([start, end]) => row.end > start && row.start < end)) {
+        byId.delete(row.id);
+        changed = true;
+      }
+    }
     for (const session of incoming) {
       const prior = byId.get(session.id);
       if (!prior || !sameSession(prior, session)) {
@@ -248,6 +280,7 @@ export class SessionWindowCache {
     }
     if (changed) {
       entry.sessions = [...byId.values()].sort((a, b) => a.start - b.start || a.id - b.id);
+      entry.maxEnds = maximumEnds(entry.sessions);
     }
     return changed;
   }
@@ -257,7 +290,7 @@ export class SessionWindowCache {
     const cached = entry.slices.get(key);
     if (cached?.version === entry.version) return cached.sessions;
 
-    const out = overlappingSessions(entry.sessions, startSec, endSec);
+    const out = overlappingSessions(entry.sessions, startSec, endSec, entry.maxEnds);
     entry.slices.set(key, { version: entry.version, sessions: out });
     return out;
   }
