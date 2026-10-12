@@ -2314,6 +2314,11 @@ impl TimeDatabase {
         Self::remove_if_exists(&Self::pending_marker_path(&self.path)?)
     }
 
+    pub fn restore_needs_recovery(database_path: &Path) -> bool {
+        !database_path.exists()
+            || Self::rollback_path(database_path).is_ok_and(|path| path.exists())
+    }
+
     pub async fn begin_pending_restore(
         database_path: &Path,
     ) -> Result<Option<RestoreSwap>, String> {
@@ -2340,6 +2345,11 @@ impl TimeDatabase {
             }
         }
         if !marker_path.exists() {
+            // commit() removes the marker before deleting its rollback copy.
+            // An exit between those operations must not block the next restore.
+            if database_path.exists() && !pending_path.exists() && rollback_path.exists() {
+                let _ = Self::remove_if_exists(&rollback_path);
+            }
             return Ok(None);
         }
         let pending: PendingRestore =
@@ -2352,16 +2362,38 @@ impl TimeDatabase {
             Self::rename_with_retry(&rollback_path, database_path)?;
         }
         if rollback_path.exists() && database_path.exists() && !pending_path.exists() {
-            let restored = Self::read_restore_settings(database_path, true).await?;
-            if restored.0 != pending.schema_version {
-                return Err("Restored database does not match its pending marker".into());
-            }
-            return Ok(Some(RestoreSwap {
+            let restored = Self::read_restore_settings(database_path, true).await;
+            let mut swap = RestoreSwap {
                 pending,
                 rollback_path,
                 marker_path,
                 database_path: database_path.to_path_buf(),
-            }));
+            };
+            // The tracker may have committed migration before the host exited.
+            // That is a valid continuation of this swap, not a different backup.
+            match restored {
+                Ok((version, _, _))
+                    if version == swap.pending.schema_version
+                        || (swap.pending.schema_version < SCHEMA_VERSION
+                            && version == SCHEMA_VERSION) =>
+                {
+                    swap.pending.schema_version = version;
+                    return Ok(Some(swap));
+                }
+                result => {
+                    let error = result.err().unwrap_or_else(|| {
+                        "Restored database does not match its pending marker".into()
+                    });
+                    // Validation failed after the swap, so leaving this file in
+                    // place and discarding the marker would strand the original.
+                    swap.rollback()?;
+                    let _ = Self::write_restore_notice(database_path, RestoreNotice {
+                        ok: false,
+                        message: format!("Interrupted restore failed and the previous database was recovered: {error}"),
+                    });
+                    return Ok(None);
+                }
+            }
         }
         if rollback_path.exists() {
             return Err("A previous database restore did not finish cleanly".into());
@@ -2743,6 +2775,167 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Once;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    struct RecorderProcess {
+        child: std::process::Child,
+        input: std::process::ChildStdin,
+        output: std::io::BufReader<std::process::ChildStdout>,
+    }
+
+    impl RecorderProcess {
+        fn start(path: &Path) -> Self {
+            use std::io::BufRead;
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let local = root.join("data/tracker-build-env/Scripts/python.exe");
+            let python = std::env::var_os("TIME_TEST_PYTHON").unwrap_or_else(|| {
+                if local.is_file() {
+                    local.into_os_string()
+                } else {
+                    "python".into()
+                }
+            });
+            let mut child = std::process::Command::new(python)
+                .arg(root.join("tracker/tests/interop_worker.py"))
+                .arg(path)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .expect("Python is required for the native/tracker contract tests");
+            let input = child.stdin.take().unwrap();
+            let mut output = std::io::BufReader::new(child.stdout.take().unwrap());
+            let mut ready = String::new();
+            output.read_line(&mut ready).unwrap();
+            assert!(
+                ready.contains("ready"),
+                "recorder did not initialize: {ready}"
+            );
+            Self {
+                child,
+                input,
+                output,
+            }
+        }
+
+        fn step(&mut self, command: serde_json::Value) -> serde_json::Value {
+            use std::io::{BufRead, Write};
+            writeln!(self.input, "{command}").unwrap();
+            self.input.flush().unwrap();
+            let mut response = String::new();
+            self.output.read_line(&mut response).unwrap();
+            serde_json::from_str(&response).expect("recorder response")
+        }
+    }
+
+    impl Drop for RecorderProcess {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    #[test]
+    fn native_exclusion_cannot_be_reintroduced_by_a_stale_recorder_afk_transition() {
+        use serde_json::json;
+        tauri::async_runtime::block_on(async {
+            let path = scratch_database("recorder-exclusion-interleaving");
+            let database = TimeDatabase::open(path.clone()).await.unwrap();
+            database
+                .update_lifecycle_settings(&[("recording_consent", "1")])
+                .await
+                .unwrap();
+            let now = super::unix_now().unwrap();
+            let mut recorder = RecorderProcess::start(&path);
+            recorder.step(json!({"now": now - 400}));
+            recorder.step(json!({"now": now - 20, "idle": 280}));
+            database
+                .add_tracking_exclusion("app", "editor.exe", true)
+                .await
+                .unwrap();
+            let stale = recorder.step(json!({"now": now, "idle": 300, "refresh": false}));
+            assert!(
+                stale
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["process"] != "editor.exe"),
+                "the exclusion must apply even before the next settings refresh: {stale}"
+            );
+            let refreshed = recorder.step(json!({"now": now + 1, "idle": 301}));
+            assert!(refreshed
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["process"] == "afk"));
+            recorder.step(json!({"now": now + 2, "shutdown": true}));
+            drop(recorder);
+            database.close().await;
+        });
+    }
+
+    #[test]
+    fn native_edits_and_deletion_respect_a_running_recorder_and_pause_boundary() {
+        use serde_json::json;
+        tauri::async_runtime::block_on(async {
+            let path = scratch_database("recorder-native-boundaries");
+            let database = TimeDatabase::open(path.clone()).await.unwrap();
+            database
+                .update_lifecycle_settings(&[("recording_consent", "1")])
+                .await
+                .unwrap();
+            let now = super::unix_now().unwrap();
+            let mut recorder = RecorderProcess::start(&path);
+            recorder.step(json!({"now": now - 40}));
+            recorder.step(json!({"now": now - 20}));
+            let correction = SessionCorrectionRequest {
+                session_id: 1,
+                start_sec: (now - 40) as f64,
+                end_sec: (now - 30) as f64,
+                category_id: None,
+            };
+            assert!(database.correct_session(&correction).await.is_err());
+            let mut request = ActivityDeleteRequest {
+                mode: "sessions".into(),
+                session_ids: vec![1],
+                entity_kind: None,
+                entity_key: None,
+                start_sec: None,
+                end_sec: None,
+                browser_processes: vec![],
+                snapshot_max_id: None,
+                preview_protected_session_id: None,
+            };
+            let preview = database.preview_activity_delete(&request).await.unwrap();
+            assert_eq!(preview.protected_count, 1);
+            database
+                .update_lifecycle_settings(&[("tracking_paused", "1")])
+                .await
+                .unwrap();
+            recorder.step(json!({"now": now - 10}));
+            let corrected = database.correct_session(&correction).await.unwrap();
+            assert_eq!(corrected.original_end, now - 10);
+            assert_eq!(corrected.end, now - 30);
+            let preview = database.preview_activity_delete(&request).await.unwrap();
+            request.snapshot_max_id = Some(preview.snapshot_max_id);
+            assert_eq!(
+                database
+                    .delete_activity(&request)
+                    .await
+                    .unwrap()
+                    .deleted_count,
+                1
+            );
+            database
+                .update_lifecycle_settings(&[("tracking_paused", "0")])
+                .await
+                .unwrap();
+            let resumed = recorder.step(json!({"now": now, "idle": 600}));
+            assert_eq!(resumed.as_array().unwrap().len(), 1);
+            assert_eq!(resumed[0]["start_ts"], now);
+            recorder.step(json!({"now": now + 1, "shutdown": true}));
+            drop(recorder);
+            database.close().await;
+        });
+    }
 
     /// A directory no previous run has touched.
     ///
@@ -3491,6 +3684,61 @@ mod tests {
         );
     }
 
+    #[test]
+    fn corrected_window_projection_matches_independent_interval_oracle() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch_database("projection-oracle"))
+                .await
+                .unwrap();
+            let mut effective = Vec::new();
+            for id in 1_i64..=80 {
+                let start = id * 100;
+                let end = start + id % 70 + 1;
+                sqlx::query("INSERT INTO sessions(id,start_ts,end_ts,process,is_afk) VALUES(?,?,?,'oracle.exe',?)")
+                    .bind(id).bind(start).bind(end).bind(i64::from(id % 7 == 0))
+                    .execute(&database.pool).await.unwrap();
+                let (from, to) = if id % 3 == 0 {
+                    (start + 10000, end + 10000)
+                } else if id % 3 == 1 {
+                    (start - 10000, end - 10000)
+                } else {
+                    (start, end)
+                };
+                if from != start {
+                    sqlx::query("INSERT INTO session_corrections(session_id,corrected_start_ts,corrected_end_ts,updated_ts) VALUES(?,?,?,0)")
+                        .bind(id).bind(from).bind(to).execute(&database.pool).await.unwrap();
+                }
+                effective.push((id, from, to));
+            }
+            effective.sort_by_key(|&(id, start, _)| (start, id));
+            for (from, to) in [
+                (-12000, 20000),
+                (-10000, -9000),
+                (0, 10000),
+                (10000, 20000),
+                (200, 203),
+                (203, 300),
+                (17999, 18000),
+                (30000, 30100),
+            ] {
+                let expected: Vec<i64> = effective
+                    .iter()
+                    .filter(|&&(_, start, end)| end > from && start < to)
+                    .map(|&(id, _, _)| id)
+                    .collect();
+                assert_eq!(
+                    database
+                        .fetch_sessions(from as f64, to as f64)
+                        .await
+                        .unwrap()
+                        .ids,
+                    expected
+                );
+            }
+            database.close().await;
+        });
+    }
+
     /// A restore force-stops the tracker, so the live database is left exactly
     /// like this one: a main file plus a log nobody folded in. The swap has to
     /// delete that log — pairing it with the database that replaces it would
@@ -3637,6 +3885,145 @@ mod tests {
                 assert!(!failed.exists());
             });
         }
+    }
+
+    #[test]
+    fn interrupted_restore_after_tracker_migration_can_finish_and_restore_again() {
+        let root = scratch_root("interrupted-migrated-restore");
+        let live = root.join("database.db");
+        let old = root.join("old.db");
+        tauri::async_runtime::block_on(async {
+            let source = TimeDatabase::open(old.clone()).await.unwrap();
+            sqlx::query("INSERT INTO sessions(start_ts,end_ts,process) VALUES(10,20,'backup.exe')")
+                .execute(&source.pool)
+                .await
+                .unwrap();
+            sqlx::query("DROP INDEX idx_sessions_end")
+                .execute(&source.pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE settings SET value='4' WHERE key='schema_version'")
+                .execute(&source.pool)
+                .await
+                .unwrap();
+            source.close().await;
+            let database = TimeDatabase::open(live.clone()).await.unwrap();
+            database.prepare_restore(old.clone()).await.unwrap();
+            database.close().await;
+            drop(
+                TimeDatabase::begin_pending_restore(&live)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+            // Startup migrates the swapped backup, then the host exits before
+            // committing restore bookkeeping. The original marker still says 4.
+            drop(RecorderProcess::start(&live));
+            let swap = TimeDatabase::begin_pending_restore(&live)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(swap.pending.schema_version, SCHEMA_VERSION);
+            swap.commit().unwrap();
+            let restored = TimeDatabase::open(live.clone()).await.unwrap();
+            let processes: Vec<String> = sqlx::query_scalar("SELECT process FROM sessions")
+                .fetch_all(&restored.pool)
+                .await
+                .unwrap();
+            assert_eq!(processes, ["backup.exe"]);
+            // No orphan rollback file may prevent the next restore.
+            restored.prepare_restore(old).await.unwrap();
+            restored.close().await;
+            TimeDatabase::begin_pending_restore(&live)
+                .await
+                .unwrap()
+                .unwrap()
+                .rollback()
+                .unwrap();
+        });
+    }
+
+    #[test]
+    fn interrupted_restore_with_invalid_replacement_recovers_the_original() {
+        for corrupt in [false, true] {
+            let root = scratch_root("interrupted-invalid-restore");
+            let live = root.join("database.db");
+            tauri::async_runtime::block_on(async {
+                let database = TimeDatabase::open(live.clone()).await.unwrap();
+                let backup = database.backup_with_name("empty").await.unwrap();
+                sqlx::query(
+                    "INSERT INTO sessions(start_ts,end_ts,process) VALUES(10,20,'original.exe')",
+                )
+                .execute(&database.pool)
+                .await
+                .unwrap();
+                database
+                    .prepare_restore(PathBuf::from(backup))
+                    .await
+                    .unwrap();
+                database.close().await;
+                drop(
+                    TimeDatabase::begin_pending_restore(&live)
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                );
+                if corrupt {
+                    std::fs::write(&live, b"interrupted or damaged replacement").unwrap();
+                } else {
+                    let replaced = TimeDatabase::open(live.clone()).await.unwrap();
+                    sqlx::query("UPDATE settings SET value='999' WHERE key='schema_version'")
+                        .execute(&replaced.pool)
+                        .await
+                        .unwrap();
+                    replaced.close().await;
+                }
+                assert!(TimeDatabase::begin_pending_restore(&live)
+                    .await
+                    .unwrap()
+                    .is_none());
+                let recovered = TimeDatabase::open(live.clone()).await.unwrap();
+                let processes: Vec<String> = sqlx::query_scalar("SELECT process FROM sessions")
+                    .fetch_all(&recovered.pool)
+                    .await
+                    .unwrap();
+                assert_eq!(processes, ["original.exe"]);
+                recovered.close().await;
+                assert!(!TimeDatabase::rollback_path(&live).unwrap().exists());
+            });
+        }
+    }
+
+    #[test]
+    fn interrupted_restore_commit_cleans_up_before_another_restore() {
+        let root = scratch_root("interrupted-restore-commit");
+        let live = root.join("database.db");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(live.clone()).await.unwrap();
+            let backup = PathBuf::from(database.backup_with_name("empty").await.unwrap());
+            database.prepare_restore(backup.clone()).await.unwrap();
+            database.close().await;
+            let swap = TimeDatabase::begin_pending_restore(&live)
+                .await
+                .unwrap()
+                .unwrap();
+            TimeDatabase::remove_if_exists(&swap.marker_path).unwrap();
+            drop(swap);
+            assert!(TimeDatabase::begin_pending_restore(&live)
+                .await
+                .unwrap()
+                .is_none());
+            assert!(!TimeDatabase::rollback_path(&live).unwrap().exists());
+            let restored = TimeDatabase::open(live.clone()).await.unwrap();
+            restored.prepare_restore(backup).await.unwrap();
+            restored.close().await;
+            TimeDatabase::begin_pending_restore(&live)
+                .await
+                .unwrap()
+                .unwrap()
+                .commit()
+                .unwrap();
+        });
     }
 
     #[test]

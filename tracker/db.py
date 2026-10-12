@@ -336,7 +336,10 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
             _backup_before_migration(conn, path, version)
         conn.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA)
         try:
-            _migrate(conn, version)
+            # Another startup can finish migrating between our initial read and
+            # acquiring the writer lock. Replaying an old table rebuild would
+            # discard rules already saved under the new schema.
+            _migrate(conn, _read_schema_version(conn))
             _seed(conn)
             conn.execute("COMMIT")
         except Exception:
@@ -675,14 +678,14 @@ class SqliteStore:
             cur = self._conn.execute(
                 "INSERT INTO sessions (start_ts, end_ts, process, title, domain, is_afk, source)"
                 " SELECT ?,?,?,?,?,?,'live'"
-                " WHERE ? OR NOT EXISTS ("
+                " WHERE NOT EXISTS ("
                 " SELECT 1 FROM tracking_exclusions"
                 " WHERE (kind='app' AND pattern=lower(?))"
                 " OR (kind='website' AND ? IS NOT NULL AND pattern=lower(?))"
                 " )",
                 (
                     int(start_ts), int(start_ts), process, title[:512], domain, int(is_afk),
-                    int(is_afk), process, domain, domain,
+                    process, domain, domain,
                 ),
             )
             if cur.rowcount == 0:

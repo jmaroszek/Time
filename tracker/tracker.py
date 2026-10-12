@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import traceback
+from collections import deque
 from dataclasses import replace
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -219,6 +220,32 @@ class LoopContinuity:
     def __init__(self, gap_seconds: float = UNOBSERVED_GAP_SECONDS):
         self._gap_seconds = gap_seconds
         self._last_seen = 0.0
+        self._pending: deque[power_events.PowerEvent] = deque()
+
+    def apply_boundaries(
+        self, manager: SessionManager, events: list[power_events.PowerEvent], now: float,
+    ) -> None:
+        """Acknowledge boundaries only after their session writes succeed."""
+        self._pending.extend(events)
+        missed = self.gap_before(now)
+        if missed and not self._pending:
+            self._pending.append(power_events.PowerEvent("resume", now, False))
+            logging.info(
+                "Loop did not run for %.0fs with no power boundary"
+                " announced; that interval stays a gap.", missed,
+            )
+        while self._pending:
+            event = self._pending[0]
+            if event.kind == "suspend":
+                manager.system_suspended(event.at)
+                logging.info("System suspend detected; recording gap started.")
+            else:
+                manager.system_resumed(event.at)
+                logging.info(
+                    "System resume detected; recording gap ended |"
+                    " suspend_observed=%s", event.suspend_observed,
+                )
+            self._pending.popleft()
 
     def gap_before(self, now: float) -> float:
         """Seconds missed before `now`; 0.0 when the loop kept up (or is new)."""
@@ -391,33 +418,13 @@ def run() -> None:
 
     while not stop_event.is_set():
         try:
-            announced_boundary = False
-            if power_monitor is not None:
-                for event in power_monitor.drain():
-                    announced_boundary = True
-                    if event.kind == "suspend":
-                        manager.system_suspended(event.at)
-                        logging.info("System suspend detected; recording gap started.")
-                    else:
-                        manager.system_resumed(event.at)
-                        logging.info(
-                            "System resume detected; recording gap ended |"
-                            " suspend_observed=%s",
-                            event.suspend_observed,
-                        )
             now = time.time()
-            missed = continuity.gap_before(now)
-            if missed and not announced_boundary:
-                # Windows said nothing about a power boundary, so this is the
-                # only notice the session state will get. Reporting it matters
-                # as much as acting on it: a silent hole in an otherwise busy
-                # day is exactly what a later field report has to explain.
-                manager.unobserved_interval_ended(now)
-                logging.info(
-                    "Loop did not run for %.0fs with no power boundary"
-                    " announced; that interval stays a gap.",
-                    missed,
-                )
+            continuity.apply_boundaries(
+                manager, power_monitor.drain() if power_monitor is not None else [], now,
+            )
+            # Boundary writes can wait on SQLite; timestamp the new observation
+            # after that wait instead of attributing it to the earlier poll.
+            now = time.time()
             # Consent, pause, schedule, and title-privacy switches take effect
             # within one poll instead of waiting for the database heartbeat.
             settings_clock = time.monotonic()

@@ -455,9 +455,14 @@ def test_store_refuses_excluded_sessions_even_with_stale_manager_settings(conn):
     )
     assert store.open_session(1, "code.exe", "private", None, False) is None
     assert store.open_session(2, "chrome.exe", "private", "example.com", False) is None
+    # A native exclusion may commit after the manager's settings read. Idle
+    # attribution must honor the same atomic exclusion check as active rows.
+    assert store.open_session(2, "code.exe", "idle", None, True) is None
+    assert store.open_session(2, "chrome.exe", "idle", "example.com", True) is None
     allowed = store.open_session(3, "chrome.exe", "allowed", "openai.com", False)
     assert allowed is not None
     assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+    assert store.open_session(4, "afk", "idle", None, True) is not None
 
 
 def test_retry_recovers_from_transient_lock(monkeypatch):

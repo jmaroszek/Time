@@ -56,9 +56,10 @@ pub(crate) fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDa
         Ok(Some(swap)) => swap,
         Ok(None) => return open_current_database(path),
         Err(error) => {
-            // Keep the marker if the database vanished partway through the
-            // swap: the next launch needs it to put the rollback copy back.
-            if !path.exists() {
+            // A failed rollback can leave both databases present. Preserve the
+            // marker in that case too; discarding it would abandon the original
+            // and treat an unvalidated replacement as a completed restore.
+            if TimeDatabase::restore_needs_recovery(&path) {
                 return Err(format!(
                     "Restore could not be completed and the previous database is not back in \
                      place: {error}"
@@ -133,4 +134,35 @@ pub(crate) fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDa
         },
     ));
     Ok(database)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn unreadable_marker_does_not_abandon_a_swapped_database() {
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target/test-scratch")
+            .join(format!(
+                "restore-marker-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        std::fs::create_dir_all(&root).unwrap();
+        let live = root.join("database.db");
+        let database =
+            tauri::async_runtime::block_on(crate::database::TimeDatabase::open(live.clone()))
+                .unwrap();
+        tauri::async_runtime::block_on(database.close());
+        let previous = root.join("restore_previous.db");
+        std::fs::copy(&live, &previous).unwrap();
+        let marker = root.join("restore_pending.json");
+        std::fs::write(&marker, b"incomplete marker").unwrap();
+        assert!(super::open_database_with_pending_restore(live.clone()).is_err());
+        assert!(marker.exists());
+        assert!(previous.exists());
+        assert!(live.exists());
+    }
 }
