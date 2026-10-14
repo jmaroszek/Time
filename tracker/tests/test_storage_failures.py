@@ -146,3 +146,32 @@ def test_killed_recorder_keeps_last_heartbeat_and_restart_does_not_backdate(tmp_
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize(
+    ("ahead", "expected"),
+    [
+        # A small setback keeps history non-overlapping at the cost of a brief gap.
+        (300, [(100300, 100600, "word.exe"), (100600, 101200, "excel.exe")]),
+        # A clock that ran hours fast must not blank every later restart.
+        (18000, [(100000, 100600, "word.exe"), (100600, 101200, "excel.exe")]),
+    ],
+)
+def test_startup_floor_honors_small_setbacks_but_not_hours_of_them(tmp_path, ahead, expected):
+    conn = db.open_db(tmp_path / "clock.db")
+    try:
+        conn.execute(
+            "INSERT INTO sessions(start_ts,end_ts,process,title,is_afk,source)"
+            " VALUES(?,?,'code.exe','x',0,'live')", (100000 + ahead - 60, 100000 + ahead),
+        )
+        conn.commit()
+        floor = db.startup_recording_floor(conn, 100000)
+        manager = SessionManager(db.SqliteStore(conn), Settings(recording_consent=True), floor)
+        for now in range(100000, 101200, 5):
+            manager.tick(snapshot(now, "word.exe" if now < 100600 else "excel.exe"))
+        manager.shutdown(101200)
+        assert [tuple(row) for row in conn.execute(
+            "SELECT start_ts,end_ts,process FROM sessions WHERE id>1 ORDER BY id"
+        )] == expected
+    finally:
+        conn.close()

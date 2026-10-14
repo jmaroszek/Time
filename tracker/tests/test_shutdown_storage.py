@@ -42,7 +42,8 @@ def test_mutex_failure_cannot_start_an_unprotected_recorder(monkeypatch):
         return None
     monkeypatch.setattr(tracker.ctypes, "WinDLL", lambda *_a, **_k:
                         SimpleNamespace(CreateMutexW=create_mutex))
-    monkeypatch.setattr(tracker.ctypes, "get_last_error", lambda: 5)
+    # ERROR_NO_SYSTEM_RESOURCES: ownership is genuinely unknown.
+    monkeypatch.setattr(tracker.ctypes, "get_last_error", lambda: 1450)
     with pytest.raises(OSError):
         tracker.acquire_single_instance()
     monkeypatch.setattr(tracker, "set_up_logging", lambda: None)
@@ -73,3 +74,34 @@ def test_real_mutex_excludes_second_process_and_releases_on_exit():
                            capture_output=True, text=True, timeout=10)
     assert third.returncode == 0, third.stderr
     assert third.stdout == "True\n"
+
+
+def test_mutex_held_by_another_windows_account_does_not_block_recording():
+    # Another account's mutex is unreadable to this one. An empty DACL
+    # reproduces that denial without a second Windows account.
+    name = "Local\\TimeTrackerTest-" + uuid.uuid4().hex
+    owner = (
+        "import sys, win32event, win32security; "
+        "attributes = win32security.SECURITY_ATTRIBUTES(); "
+        "descriptor = win32security.SECURITY_DESCRIPTOR(); "
+        "descriptor.SetSecurityDescriptorDacl(1, win32security.ACL(), 0); "
+        "attributes.SECURITY_DESCRIPTOR = descriptor; "
+        "handle = win32event.CreateMutex(attributes, False, sys.argv[1]); "
+        "print('held', flush=True); sys.stdin.readline()"
+    )
+    contender = (
+        "import sys; from tracker import tracker, config; "
+        "config.MUTEX_NAME=sys.argv[1]; "
+        "print(tracker.acquire_single_instance(), flush=True)"
+    )
+    first = subprocess.Popen([sys.executable, "-c", owner, name], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        answer = first.stdout.readline()
+        assert answer == "held\n", first.stderr.read() if not answer else answer
+        second = subprocess.run([sys.executable, "-c", contender, name],
+                                capture_output=True, text=True, timeout=10)
+        assert second.returncode == 0, second.stderr
+        assert second.stdout == "True\n"
+    finally:
+        first.communicate("\n", timeout=10)

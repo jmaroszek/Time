@@ -29,6 +29,7 @@ from tracker.domains import parse_domain
 from tracker.session_manager import LOCK_PROCESS, SessionManager, is_idle
 from tracker.tracking_schedule import schedule_state
 
+_ERROR_ACCESS_DENIED = 5
 _ERROR_ALREADY_EXISTS = 183
 _mutex_handle = None  # keep a module-level reference so the handle lives forever
 
@@ -63,7 +64,15 @@ def acquire_single_instance() -> bool:
     # user cannot run a second tracker against the same database.
     _mutex_handle = kernel32.CreateMutexW(None, False, config.MUTEX_NAME)
     if not _mutex_handle:
-        raise ctypes.WinError(ctypes.get_last_error())
+        error = ctypes.get_last_error()
+        if error == _ERROR_ACCESS_DENIED:
+            # The name is machine-wide, but its default DACL admits only the
+            # account that created it. Denial means another Windows account's
+            # tracker holds it, and that account records into its own
+            # per-user database, so this one may record too. 1.2.0 allowed it.
+            logging.info("Tracker mutex is held by another Windows account; continuing.")
+            return True
+        raise ctypes.WinError(error)
     return ctypes.get_last_error() != _ERROR_ALREADY_EXISTS
 
 
@@ -382,7 +391,7 @@ def run() -> None:
         return
     manager = SessionManager(
         store=db.SqliteStore(conn), settings=db.get_settings(conn),
-        recording_floor=db.latest_session_end(conn),
+        recording_floor=db.startup_recording_floor(conn, time.time()),
     )
     human_input_monitor = human_input.start_human_input_monitor()
     media_monitor = media_playback.start_media_playback_monitor()

@@ -2440,9 +2440,15 @@ impl TimeDatabase {
         Self::remove_if_exists(&Self::pending_marker_path(&self.path)?)
     }
 
+    /// Whether a failed startup restore may have left the original outside the
+    /// live path. A rollback copy alongside a still-staged replacement means the
+    /// swap never began (it renames the staged copy away), so that copy is a
+    /// leftover from an earlier restore and canceling this one is safe.
     pub fn restore_needs_recovery(database_path: &Path) -> bool {
+        let exists = |path: Result<PathBuf, String>| path.is_ok_and(|path| path.exists());
         !database_path.exists()
-            || Self::rollback_path(database_path).is_ok_and(|path| path.exists())
+            || (exists(Self::rollback_path(database_path))
+                && !exists(Self::pending_database_path(database_path)))
     }
 
     pub async fn begin_pending_restore(
@@ -2520,6 +2526,12 @@ impl TimeDatabase {
                     return Ok(None);
                 }
             }
+        }
+        if rollback_path.exists() && database_path.exists() && pending_path.exists() {
+            // The swap renames the staged copy away, so it has not started. This
+            // rollback copy is left from an earlier, committed restore whose
+            // cleanup failed; the swap needs its name.
+            Self::remove_if_exists(&rollback_path)?;
         }
         if rollback_path.exists() {
             return Err("A previous database restore did not finish cleanly".into());
@@ -4237,6 +4249,54 @@ mod tests {
                 .commit()
                 .unwrap();
         });
+    }
+
+    #[test]
+    fn leftover_rollback_copy_does_not_block_a_later_restore() {
+        let root = scratch_root("leftover-rollback-restore");
+        let live = root.join("database.db");
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(live.clone()).await.unwrap();
+            let backup = database.backup_with_name("empty").await.unwrap();
+            sqlx::query(
+                "INSERT INTO sessions(start_ts,end_ts,process) VALUES(10,20,'original.exe')",
+            )
+            .execute(&database.pool)
+            .await
+            .unwrap();
+            database
+                .prepare_restore(PathBuf::from(backup))
+                .await
+                .unwrap();
+            database.close().await;
+            // An earlier restore committed but could not delete its rollback copy.
+            std::fs::copy(&live, TimeDatabase::rollback_path(&live).unwrap()).unwrap();
+            let swap = TimeDatabase::begin_pending_restore(&live)
+                .await
+                .unwrap()
+                .unwrap();
+            swap.commit().unwrap();
+            assert!(!TimeDatabase::rollback_path(&live).unwrap().exists());
+            let restored = TimeDatabase::open(live.clone()).await.unwrap();
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+                .fetch_one(&restored.pool)
+                .await
+                .unwrap();
+            assert_eq!(count, 0);
+            restored.close().await;
+        });
+        // Even if that copy cannot be removed, startup cancels the restore and
+        // opens the intact live database instead of refusing to launch.
+        let root = scratch_root("leftover-rollback-startup");
+        let live = root.join("database.db");
+        std::fs::write(
+            TimeDatabase::pending_database_path(&live).unwrap(),
+            b"staged",
+        )
+        .unwrap();
+        std::fs::write(TimeDatabase::rollback_path(&live).unwrap(), b"leftover").unwrap();
+        std::fs::write(&live, b"live").unwrap();
+        assert!(!TimeDatabase::restore_needs_recovery(&live));
     }
 
     #[test]

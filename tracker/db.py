@@ -571,6 +571,29 @@ def latest_session_end(conn: sqlite3.Connection) -> float:
     return float(conn.execute("SELECT COALESCE(MAX(end_ts),0) FROM sessions").fetchone()[0])
 
 
+# How far ahead of the clock persisted history may end and still bound a new
+# run. Opens clamp to the floor, so a floor ahead of the clock records only
+# zero-length rows until the clock catches up. A small setback (NTP slew, a
+# quick manual fix) is worth that brief gap to keep history non-overlapping.
+# A large one is usually a clock that ran hours or years fast and was then
+# corrected; honoring it would silently record nothing for that long, across
+# every restart, so overlapping that stretch of history is the lesser harm.
+MAX_STARTUP_FLOOR_AHEAD_SECONDS = 10 * 60
+
+
+def startup_recording_floor(conn: sqlite3.Connection, now: float) -> float:
+    """The persisted end a new run may not backdate into, or 0 to ignore it."""
+    floor = latest_session_end(conn)
+    ahead = floor - now
+    if ahead > MAX_STARTUP_FLOOR_AHEAD_SECONDS:
+        logging.warning(
+            "Recorded history ends %.0fs after the current clock; the clock was"
+            " moved back. Recording from now rather than waiting for it.", ahead,
+        )
+        return 0.0
+    return floor
+
+
 def read_settings_raw(conn: sqlite3.Connection) -> dict[str, str]:
     return {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM settings")}
 
