@@ -287,12 +287,11 @@ export default function OverviewTab({
     ? activityComposition(isSingleDay ? model.hourly ?? [] : currentDays)
     : null;
   // A scoped grid always measures the subject's time — filtering to
-  // "productive" would draw an empty grid for anything that is not — but it
-  // wears the colour of that time's one state when it has one, as the
-  // unscoped page's state metrics do: System reads gray, not blue.
-  const shownMetric: ActivityMetric = composition
-    ? composition.soleState ?? "tracked"
-    : metric;
+  // "productive" would draw an empty grid for anything that is not — and it is
+  // always the blue "amount" ramp. The subject's productivity state is on the
+  // scope chip; coloring every cell by it would repeat one fact per cell and
+  // leave neutral subjects a hard-to-read gray.
+  const shownMetric: ActivityMetric = composition ? "tracked" : metric;
   // Past ~14 months, day cells slice too thin; the calendar shows month cells
   // (years as rows) instead. Rhythm needs no such switch — it is always 7×24.
   const calendarByMonth = rangeDays >= MONTH_CALENDAR_MIN_DAYS;
@@ -366,6 +365,7 @@ export default function OverviewTab({
         <ScopePicker
           scope={scope}
           category={scopeCategory}
+          states={composition?.classifiedStates ?? []}
           getCandidates={pickerCandidates}
           onSelect={setScope}
         />,
@@ -506,8 +506,8 @@ export default function OverviewTab({
               value={middleView}
               onChange={(v) => setAggregateView(v as "rhythm" | "calendar")}
               options={[
-                { value: "rhythm", label: "Rhythm" },
                 { value: "calendar", label: "Calendar" },
+                { value: "rhythm", label: "Rhythm" },
               ]}
             />
           </span>

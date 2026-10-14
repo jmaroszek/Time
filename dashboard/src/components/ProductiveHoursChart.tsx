@@ -37,6 +37,7 @@ import {
   uncategorizedBar,
 } from "../lib/chartTheme";
 import { tooltipRow } from "../lib/chartTooltip";
+import { totalBarColor } from "../lib/palettes";
 
 export interface CategorySeries {
   name: string;
@@ -406,7 +407,7 @@ export default function ProductiveHoursChart({
     ]);
     const totalStacks: CategorySeries[] = [{
       name: TOTAL_STACK_NAME,
-      color: palette.neutral,
+      color: totalBarColor(theme),
       hours: prodBars.map((hours, index) =>
         round2(hours + neutralBars[index] + unproductiveBars[index] + uncategorizedBars[index])),
     }];

@@ -326,6 +326,13 @@ function rampFrom(surface: string, color: string): string[] {
   return RAMP_BLEND_STRENGTHS.map((strength) => mix(surface, color, strength));
 }
 
+/** The bar fill for a plain total-time series: the tracked heatmap's blue,
+ *  dimmed to the ramp's second stop so the trend line, drawn at the full peak,
+ *  is what stands out. */
+export function totalBarColor(theme: ThemeName): string {
+  return rampFrom(RAMP_SURFACE[theme], TRACKED_PEAK[theme])[1];
+}
+
 /** Heatmap ramp per shaded metric, derived from the palette's state colours and
  *  the active theme's card surface. Tracked stays the neutral blue. */
 export function metricRamps(

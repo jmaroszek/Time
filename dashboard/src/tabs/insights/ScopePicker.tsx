@@ -2,11 +2,10 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 
 import {
-  CategoryDot,
   MENU_VIEWPORT_MARGIN,
+  StateDot,
 } from "../../components/ui";
-import { uncategorizedMark } from "../../lib/chartTheme";
-import type { Category } from "../../lib/classify";
+import type { Category, Productivity } from "../../lib/classify";
 import { fmtDuration } from "../../lib/format";
 import {
   parentScope,
@@ -33,7 +32,7 @@ type PickerOption = {
   /** The executable or host a search found this by, when not its name. */
   matched: string | null;
   seconds: number;
-  color: string;
+  states: Productivity[];
 };
 
 const SECTION_LABELS = {
@@ -63,10 +62,13 @@ const SECTION_LABELS = {
 export default function ScopePicker({
   scope,
   category,
+  states,
   getCandidates,
   onSelect,
 }: {
   scope: InsightsScope | null;
+  /** Every productivity state the scope's categorized time is in. */
+  states: Productivity[];
   /** The scope's own category, or the one most of an app's time resolved to. */
   category: Category | null;
   getCandidates: () => ScopeCandidates;
@@ -86,6 +88,7 @@ export default function ScopePicker({
   const currentKey = scope ? scopeKey(scope) : null;
   const parent = scope ? parentScope(scope) : null;
   const descriptor = scope ? scopeDescriptor(scope, category) : null;
+  const stateColor = (kind: Productivity) => meta.palette[kind];
 
   const sections = useMemo(() => {
     if (!candidates) return [];
@@ -95,12 +98,12 @@ export default function ScopePicker({
       label: candidate.scope.name,
       matched: matchedIdentity(candidate, query),
       seconds: candidate.seconds,
-      color: candidate.category?.color ?? uncategorizedMark(meta.theme),
+      states: candidate.states,
     });
     return (["categories", "apps", "websites"] as const)
       .map((section) => ({ section, options: found[section].map(toOption) }))
       .filter(({ options }) => options.length > 0);
-  }, [candidates, query, meta.theme]);
+  }, [candidates, query]);
   const options = useMemo<PickerOption[]>(
     () => sections.flatMap(({ options: sectionOptions }) => sectionOptions),
     [sections],
@@ -225,7 +228,7 @@ export default function ScopePicker({
           index === active ? "bg-selected-strong text-ink" : "text-ink-2-raised"
         }`}
       >
-        <CategoryDot color={option.color} />
+        <StateDot colors={option.states.map(stateColor)} />
         <span className="min-w-0 flex-1 truncate">
           {option.label}
           {option.matched && <span className="ml-1.5 text-ink-3-raised">{option.matched}</span>}
@@ -279,7 +282,7 @@ export default function ScopePicker({
         >
           {scope ? (
             <>
-              <CategoryDot color={category?.color ?? uncategorizedMark(meta.theme)} />
+              <StateDot colors={states.map(stateColor)} />
               <span className="min-w-0 truncate font-semibold">{scope.name}</span>
               <span className="shrink-0 text-ink-3">{descriptor}</span>
             </>

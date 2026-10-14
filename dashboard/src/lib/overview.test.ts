@@ -368,13 +368,13 @@ describe("activityComposition", () => {
     expect(activityComposition([
       bucket({ neutral: 600 }, [["System", 600]]),
       bucket({ neutral: 300 }, [["System", 300]]),
-    ])).toEqual({ categories: 1, states: 1, soleState: "neutral" });
+    ])).toEqual({ categories: 1, states: 1, soleState: "neutral", classifiedStates: ["neutral"] });
   });
 
   it("counts two categories that share a state as one state", () => {
     expect(activityComposition([
       bucket({ productive: 900 }, [["Dev", 600], ["Writing", 300]]),
-    ])).toEqual({ categories: 2, states: 1, soleState: "productive" });
+    ])).toEqual({ categories: 2, states: 1, soleState: "productive", classifiedStates: ["productive"] });
   });
 
   it("has no sole state when the time is mixed or unclassified", () => {
@@ -382,14 +382,17 @@ describe("activityComposition", () => {
       bucket({ productive: 600, unproductive: 60 }, [["Dev", 600], ["Games", 60]]),
     ]).soleState).toBeNull();
     expect(activityComposition([
+      bucket({ productive: 600, unproductive: 60 }, [["Dev", 600], ["Games", 60]]),
+    ]).classifiedStates).toEqual(["productive", "unproductive"]);
+    expect(activityComposition([
       bucket({ uncategorized: 600 }, [["Uncategorized", 600]]),
-    ])).toEqual({ categories: 1, states: 1, soleState: null });
+    ])).toEqual({ categories: 1, states: 1, soleState: null, classifiedStates: [] });
   });
 
   it("ignores empty buckets and zero entries", () => {
     expect(activityComposition([
       bucket({}, [["Dev", 0]]),
-    ])).toEqual({ categories: 0, states: 0, soleState: null });
+    ])).toEqual({ categories: 0, states: 0, soleState: null, classifiedStates: [] });
   });
 });
 

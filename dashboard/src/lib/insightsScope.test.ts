@@ -398,6 +398,20 @@ describe("scopeCandidates", () => {
     ]);
   });
 
+  it("reports the productivity states a candidate's categorized time is in", () => {
+    const states = (list: typeof candidates.apps) =>
+      Object.fromEntries(list.map(({ scope, states }) => [scope.name, states]));
+    expect(states(candidates.categories)).toEqual({ Focus: ["productive"], Media: ["unproductive"] });
+    // Time is all uncategorized, so it has none; Chrome's uncategorized time
+    // does not add a state of its own.
+    expect(states(candidates.apps)).toEqual({
+      Code: ["productive"],
+      Time: [],
+      Chrome: ["unproductive"],
+    });
+    expect(states(candidates.websites)).toEqual({ YouTube: ["unproductive"] });
+  });
+
   it("searches names and hosts, and caps each section", () => {
     const limits = { categories: 5, apps: 5, websites: 5 };
     expect(searchScopeCandidates(candidates, "TIME", limits).apps.map((c) => c.scope.name)).toEqual(["Time"]);

@@ -14,6 +14,7 @@ import {
   uncategorizedBar,
 } from "../lib/chartTheme";
 import { tooltipRow } from "../lib/chartTooltip";
+import { totalBarColor } from "../lib/palettes";
 import { useMeta } from "../state/meta";
 import EChart, { type EChartsOption } from "./EChart";
 import {
@@ -98,7 +99,7 @@ export default function HourlyActivityChart({
       : [];
     const totalStacks: CategorySeries[] = [{
       name: TOTAL_STACK_NAME,
-      color: palette.neutral,
+      color: totalBarColor(theme),
       hours: hours.map((hour) => toMinutes(hour.trackedSeconds)),
     }];
     const stacks = stackBy === "category"

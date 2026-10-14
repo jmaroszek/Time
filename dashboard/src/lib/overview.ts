@@ -98,7 +98,13 @@ export type ActivityStack = "state" | "category" | "member" | "total";
  */
 export function activityComposition(
   buckets: Array<ActivityTotals & { uncategorizedSeconds: number; categorySeconds: Map<string, number> }>,
-): { categories: number; states: number; soleState: Exclude<ActivityMetric, "tracked"> | null } {
+): {
+  categories: number;
+  states: number;
+  soleState: Exclude<ActivityMetric, "tracked"> | null;
+  /** Every productivity state the time falls in, uncategorized time left out. */
+  classifiedStates: Array<Exclude<ActivityMetric, "tracked">>;
+} {
   const categories = new Set<string>();
   const totals = { productive: 0, neutral: 0, unproductive: 0, uncategorized: 0 };
   for (const bucket of buckets) {
@@ -117,6 +123,8 @@ export function activityComposition(
     categories: categories.size,
     states: present.length,
     soleState: sole === "uncategorized" ? null : sole,
+    classifiedStates: (["productive", "neutral", "unproductive"] as const)
+      .filter((state) => totals[state] > 0),
   };
 }
 
