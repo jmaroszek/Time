@@ -772,7 +772,7 @@ export default function SettingsTab({
             version is waiting. */}
         <Row
           label="Check for updates"
-          help="Check for updates once per day. Time will not install a new version without your consent."
+          help="Check for updates each time you open Time. Time will not install a new version without your consent."
           control={
             <PrivacyToggle
               label="Check for updates"

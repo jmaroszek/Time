@@ -5,50 +5,28 @@ import {
   shouldCheckForUpdates,
   updateButtonLabel,
   updateChecksEnabled,
-  UPDATE_CHECK_INTERVAL_MS,
 } from "./appUpdate";
 
 const onboarded = { privacy_onboarding_complete: "1" };
-const NOW = 1_800_000_000_000;
 
 describe("whether to check at all", () => {
   it("treats an absent setting as enabled", () => {
     // The row is backfilled by the tracker, so a dashboard that reads the
     // database first sees nothing here — and must not read that as an opt-out.
     expect(updateChecksEnabled({})).toBe(true);
-    expect(shouldCheckForUpdates(onboarded, null, NOW)).toBe(true);
+    expect(shouldCheckForUpdates(onboarded)).toBe(true);
   });
 
   it("respects an explicit opt-out", () => {
     expect(updateChecksEnabled({ check_updates_automatically: "0" })).toBe(false);
-    expect(
-      shouldCheckForUpdates(
-        { ...onboarded, check_updates_automatically: "0" },
-        null,
-        NOW,
-      ),
-    ).toBe(false);
+    expect(shouldCheckForUpdates({ ...onboarded, check_updates_automatically: "0" })).toBe(false);
   });
 
   it("waits for the privacy screen", () => {
     // Time's first network request must not precede the sentence that says it
     // makes one.
-    expect(shouldCheckForUpdates({ privacy_onboarding_complete: "0" }, null, NOW)).toBe(false);
-    expect(shouldCheckForUpdates({}, null, NOW)).toBe(false);
-  });
-});
-
-describe("the once-a-day debounce", () => {
-  it("asks again only after the interval", () => {
-    expect(shouldCheckForUpdates(onboarded, NOW - 1_000, NOW)).toBe(false);
-    expect(shouldCheckForUpdates(onboarded, NOW - UPDATE_CHECK_INTERVAL_MS + 1, NOW)).toBe(false);
-    expect(shouldCheckForUpdates(onboarded, NOW - UPDATE_CHECK_INTERVAL_MS, NOW)).toBe(true);
-  });
-
-  it("recovers from a clock that moved backwards", () => {
-    // An NTP correction or a laptop waking in another timezone would otherwise
-    // park the next check a full day in the future.
-    expect(shouldCheckForUpdates(onboarded, NOW + 86_400_000, NOW)).toBe(true);
+    expect(shouldCheckForUpdates({ privacy_onboarding_complete: "0" })).toBe(false);
+    expect(shouldCheckForUpdates({})).toBe(false);
   });
 });
 

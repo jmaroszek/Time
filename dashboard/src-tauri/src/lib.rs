@@ -13,6 +13,7 @@ use windows::Win32::Graphics::Dwm::{
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 mod database;
+mod install_id;
 mod lifecycle;
 mod restore;
 mod window_state;
@@ -643,9 +644,19 @@ fn log_update_check(app: &tauri::AppHandle, outcome: &str) {
         .and_then(|mut file| std::io::Write::write_all(&mut file, line.as_bytes()));
 }
 
-/// Time's only outbound request: an unconditional GET of a static version file.
-/// The check runs in Rust rather than through the JavaScript plugin so the
-/// WebView never reaches the network and the content-security policy stays shut.
+/// The anonymous install ID for this copy, or `None` when it cannot be read or
+/// saved. See install_id.rs for why `None` is the safe answer.
+fn current_install_id(app: &tauri::AppHandle) -> Option<String> {
+    let base = app.path().local_data_dir().ok()?;
+    install_id::load_or_create(&install_id::install_id_path(&database_path(&base))?)
+}
+
+/// Time's only automatic outbound request: a GET of a static version file,
+/// carrying the anonymous install ID as a header so the website can count
+/// returning installs. The URL stays constant, so nothing per-user lands in a
+/// URL or a server log line. The check runs in Rust rather than through the
+/// JavaScript plugin so the WebView never reaches the network and the
+/// content-security policy stays shut.
 ///
 /// Every failure collapses to `None`. A check that cannot reach the endpoint is
 /// a non-event — offline, asleep, DNS, a hotel captive portal — and reporting it
@@ -657,10 +668,28 @@ fn log_update_check(app: &tauri::AppHandle, outcome: &str) {
 /// unchanged: still `None` for every outcome that is not an available update.
 #[tauri::command]
 async fn check_for_update(app: tauri::AppHandle) -> Option<AvailableUpdate> {
-    let updater = match app.updater() {
+    let install_id = current_install_id(&app);
+    // Only presence is logged. The value would be harmless in a local file, but
+    // a diagnostic people paste into bug reports is no place for it.
+    let id_state = if install_id.is_some() {
+        "present"
+    } else {
+        "absent"
+    };
+    let updater = match install_id {
+        Some(id) => app
+            .updater_builder()
+            .header(install_id::INSTALL_ID_HEADER, id)
+            .and_then(|builder| builder.build()),
+        None => app.updater(),
+    };
+    let updater = match updater {
         Ok(updater) => updater,
         Err(error) => {
-            log_update_check(&app, &format!("outcome=unavailable error={error}"));
+            log_update_check(
+                &app,
+                &format!("install_id={id_state} outcome=unavailable error={error}"),
+            );
             return None;
         }
     };
@@ -668,7 +697,10 @@ async fn check_for_update(app: tauri::AppHandle) -> Option<AvailableUpdate> {
         Ok(Some(update)) => {
             log_update_check(
                 &app,
-                &format!("outcome=available remote={}", update.version),
+                &format!(
+                    "install_id={id_state} outcome=available remote={}",
+                    update.version
+                ),
             );
             Some(AvailableUpdate {
                 version: update.version.clone(),
@@ -682,11 +714,14 @@ async fn check_for_update(app: tauri::AppHandle) -> Option<AvailableUpdate> {
         // the advertised version cannot be logged without a second request —
         // and a second request would break the "exactly one" claim in README.
         Ok(None) => {
-            log_update_check(&app, "outcome=current");
+            log_update_check(&app, &format!("install_id={id_state} outcome=current"));
             None
         }
         Err(error) => {
-            log_update_check(&app, &format!("outcome=failed error={error}"));
+            log_update_check(
+                &app,
+                &format!("install_id={id_state} outcome=failed error={error}"),
+            );
             None
         }
     }
@@ -700,6 +735,11 @@ async fn check_for_update(app: tauri::AppHandle) -> Option<AvailableUpdate> {
 /// the tracker, and the post-install hook starts it again, so recording resumes
 /// without help. Windows exits this process during the install step, which is
 /// why nothing here restarts the app.
+///
+/// Deliberately the plain updater, without the install ID: the plugin copies
+/// custom headers onto the installer download as well, and the ID's only job is
+/// the check above. The website counts this fetch of the manifest as an
+/// ID-less check, which is one extra in the legacy total per install.
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     let updater = app.updater().map_err(|error| error.to_string())?;

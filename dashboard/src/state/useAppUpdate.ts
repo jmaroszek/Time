@@ -6,10 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   checkForUpdate,
+  forgetLegacyUpdateCheck,
   installUpdate,
-  readLastUpdateCheck,
   shouldCheckForUpdates,
-  writeLastUpdateCheck,
   UPDATE_PROGRESS_EVENT,
   type AvailableUpdate,
   type UpdateProgress,
@@ -32,22 +31,19 @@ export function useAppUpdate(
   const [available, setAvailable] = useState<AvailableUpdate | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
-  // Settings arrive as a fresh object on every refresh, and a write anywhere in
-  // the app produces one. Without this the check would fire again on each.
+  // Once per launch. Settings arrive as a fresh object on every refresh, and a
+  // write anywhere in the app produces one; without this the check would fire
+  // again on each. Closing the window ends the process, so the next open is a
+  // new launch and asks again.
   const asked = useRef(false);
 
   useEffect(() => {
     if (!ready || asked.current) return;
-    if (!shouldCheckForUpdates(settings, readLastUpdateCheck(), Date.now())) return;
+    if (!shouldCheckForUpdates(settings)) return;
     asked.current = true;
+    forgetLegacyUpdateCheck();
     void checkForUpdate()
-      .then((update) => {
-        // Stamped even when the answer was "nothing", including the nothing a
-        // failed request produces: a machine that is offline at launch should
-        // not retry on every window it opens.
-        writeLastUpdateCheck(Date.now());
-        setAvailable(update);
-      })
+      .then(setAvailable)
       .catch(() => {});
   }, [ready, settings]);
 

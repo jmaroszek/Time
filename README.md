@@ -27,7 +27,7 @@ These are the claims the website makes. Each one is verifiable in a few minutes:
 | Claim | Where to check it |
 | --- | --- |
 | The updater is the only feature that touches the network | `dashboard/src/` contains no `fetch`, `XMLHttpRequest`, `WebSocket`, or `sendBeacon`; `tracker/` imports no HTTP client; the only networking crate in [Cargo.toml](dashboard/src-tauri/Cargo.toml) is `tauri-plugin-updater` |
-| The update check carries no identifier or activity data | The endpoint is a fixed static manifest in [tauri.conf.json](dashboard/src-tauri/tauri.conf.json); no URL template means no per-user version in anyone's server logs |
+| The update check carries a random install ID and no activity data | The ID is a UUID v4 made and stored by [install_id.rs](dashboard/src-tauri/src/install_id.rs), sent as one header by `check_for_update` in [lib.rs](dashboard/src-tauri/src/lib.rs); the endpoint is a fixed static manifest in [tauri.conf.json](dashboard/src-tauri/tauri.conf.json), so no URL template puts a per-user version in anyone's server logs |
 | Browser URLs are reduced to a domain before storage | [tracker/domains.py](tracker/domains.py) strips path, query, fragment, port, and credentials in memory |
 | Window titles are off until you turn them on | `DEFAULT_SETTINGS` in [tracker/db.py](tracker/db.py) |
 | Titles and domains never reach the log file | [tracker/tests/test_logging.py](tracker/tests/test_logging.py) asserts it against real writes |

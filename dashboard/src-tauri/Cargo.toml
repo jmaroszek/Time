@@ -32,6 +32,8 @@ tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2.4.1"
+# The anonymous install ID the update check carries. See src/install_id.rs.
+uuid = { version = "1", features = ["v4"] }
 
 [profile.dev]
 # Full debug info is what makes a debug build enormous, and most of it is never
