@@ -58,12 +58,17 @@ export function useEntityRuleWrites(pending: PendingClassification) {
     }
   };
 
+  // Undo for the same reason triage has it: from a table row this is one
+  // misplaced click away, with no panel open to show what just changed.
   const assignEntity = async (entity: ActivityEntitySummary, categoryId: number) => {
     try {
-      await writeEntityRule(entity, categoryId);
+      const change = await writeEntityRule(entity, categoryId);
       const category = meta.categories.find((option) => option.id === categoryId);
       if (category) {
-        banner.show(`${entity.displayName} is now ${category.name}, in all history and from now on.`);
+        banner.show(
+          `${entity.displayName} is now ${category.name}, in all history and from now on.`,
+          { label: "Undo", run: () => void undo([change]) },
+        );
       }
     } catch (error) {
       banner.report(error, "classification");

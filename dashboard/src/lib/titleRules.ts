@@ -27,7 +27,7 @@ export interface TitleMatchContext {
 export const ANY_APP: TitleRuleScopeKind = "any";
 export const BROWSER_SCOPE: TitleRuleScopeKind = "browsers";
 
-const TITLE_SEPARATOR = /\s+[-–—|·•]\s+/u;
+export const TITLE_SEPARATOR = /\s+[-–—|·•]\s+/u;
 const WORD = /[\p{L}\p{N}]+/gu;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
 const VERSION = /(?:^|[^\p{L}\p{N}])v?\d+\.\d+(?:\.\d+){0,2}(?:[^\p{L}\p{N}]|$)/iu;

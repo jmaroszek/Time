@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 
 import {
@@ -74,7 +75,7 @@ import { useEntityRuleWrites } from "../state/useEntityRuleWrites";
 import ExcludedPanel from "./activity/ExcludedPanel";
 import ActivityExportMenu from "./activity/ActivityExportMenu";
 import CategoriesAndRules from "./activity/CategoriesAndRules";
-import { EntityPanel, WindowPanel } from "./activity/ActivityDetails";
+import { DETAIL_PANEL_DRILL_IN_WIDTH, EntityPanel, WindowPanel } from "./activity/ActivityDetails";
 import {
   EntityCatalog,
   LibraryControls,
@@ -83,6 +84,7 @@ import {
   UnclassifiedSection,
   ViewSwitcher,
   type ActivityView,
+  type EntityQuickActions,
   type LibraryFilter,
 } from "./activity/ActivityTables";
 import {
@@ -96,15 +98,22 @@ import {
 
 export type { ActivityView } from "./activity/ActivityTables";
 
+/** Categories & Rules' column. Shared with whatever sits above the card, so a
+ *  notice there ends where the card does. */
+const RULES_COLUMN_WIDTH = "mr-auto w-full max-w-[800px]";
+
 const ENTITY_PAGE = 50;
 const WINDOW_PAGE = 50;
 
 /** The panel's own window list is a preview, not an archive — the searched
- *  Windows table is where a long list belongs. Fifty rows put half a screen of
- *  scrolling between the reader and the actions below them, for a list whose
- *  first few entries answer "what did I do in here". */
-const PANEL_WINDOW_PAGE = 10;
+ *  Windows table is where a long list belongs. A handful of the heaviest
+ *  windows usually holds nearly all of an app's time, and the preview says how
+ *  much, so the rest waits behind "Show all" with the controls that go with it. */
+const PANEL_WINDOW_PAGE = 5;
 const PANEL_WINDOW_MORE = 20;
+/** The full list's first page, so "Show all" lands on more than one press of
+ *  Load more would have given. */
+const PANEL_WINDOW_EXPANDED = PANEL_WINDOW_PAGE + PANEL_WINDOW_MORE;
 
 /** Visits shown for the one window under inspection, and how many more each
  *  press adds. The first page matches the sample every group already carries,
@@ -152,6 +161,8 @@ export default function ActivityTab({
   requestedWindow = null,
   onRequestedWindowOpened,
   onViewInInsights,
+  notice = null,
+  onOpenSettings,
 }: {
   view: ActivityView;
   onViewChange: (view: ActivityView) => void;
@@ -173,6 +184,11 @@ export default function ActivityTab({
   onRequestedWindowOpened?: () => void;
   /** Leaves for Insights, narrowed to one app, website, or category. */
   onViewInInsights?: (scope: InsightsScope) => void;
+  /** An app-wide notice (a stopped tracker, a feedback ask), placed here so it
+   *  can take the width of whichever column it sits above. */
+  notice?: ReactNode;
+  /** Leaves for Settings, scrolled to and flashing the named section. */
+  onOpenSettings?: (section: string) => void;
 }) {
   const meta = useMeta();
   const banner = useBanner();
@@ -201,6 +217,7 @@ export default function ActivityTab({
   );
   const [detailSearch, setDetailSearch] = useState("");
   const [detailLimit, setDetailLimit] = useState(PANEL_WINDOW_PAGE);
+  const [windowsExpanded, setWindowsExpanded] = useState(false);
   const [windowVisitLimit, setWindowVisitLimit] = useState(GROUP_SESSION_SAMPLE);
   const [detailSort, setDetailSort] = useState<ActivityWindowSort>("seconds");
   const [detailDirection, setDetailDirection] = useState<ActivitySortDirection>("desc");
@@ -365,9 +382,15 @@ export default function ActivityTab({
   // Only the panel's own ticks are cleared here. A selection is about rows a
   // reader can see, and opening a different entity replaces every row in the
   // panel — but none of the ones in the list beside it.
+  // The order goes too: the preview has no control for it and promises the
+  // heaviest windows, so an order carried over from another app's full list
+  // would quietly make that promise false.
   useEffect(() => {
     setDetailSearch("");
     setDetailLimit(PANEL_WINDOW_PAGE);
+    setWindowsExpanded(false);
+    setDetailSort("seconds");
+    setDetailDirection("desc");
     setPanelSessionIds(new Set());
     setSelectedWindowKeys(new Set());
   }, [selectedEntityId]);
@@ -380,8 +403,11 @@ export default function ActivityTab({
   // The window selection goes with the filter, not with the order: filtering
   // changes which rows exist, so a selection that survived it would act on
   // windows the reader can no longer see. Re-ordering moves the same rows.
+  // Read from the render that changed the filter or order, deliberately not a
+  // dependency: expanding is not a change of rows, and opening another app
+  // resets the order in the same pass that collapses the list.
   useEffect(() => {
-    setDetailLimit(PANEL_WINDOW_PAGE);
+    setDetailLimit(windowsExpanded ? PANEL_WINDOW_EXPANDED : PANEL_WINDOW_PAGE);
     setPanelSessionIds(new Set());
   }, [detailSearch, detailSort, detailDirection]);
 
@@ -852,9 +878,35 @@ export default function ActivityTab({
     setSelectedEntityId(null);
   };
 
-  if (!meta.loaded || (!result && (sessionData.loading || analyzed.refreshing))) return <Spinner />;
+  // The column everything above the table shares, so a notice or hint is never
+  // wider than the content it sits on: Categories & Rules caps its card, and an
+  // undocked panel caps itself when it replaces the table.
+  const columnWidth = view !== "library"
+    ? RULES_COLUMN_WIDTH
+    : panelOpen && detailMode === "drill-in"
+      ? DETAIL_PANEL_DRILL_IN_WIDTH
+      : "";
+  const noticeBlock = notice && (
+    <div className={`flex shrink-0 flex-col gap-4 ${columnWidth}`}>{notice}</div>
+  );
+
+  if (!meta.loaded || (!result && (sessionData.loading || analyzed.refreshing))) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        {noticeBlock}
+        <Spinner />
+      </div>
+    );
+  }
   const error = sessionData.error ?? analyzed.error;
-  if (error && !result) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
+  if (error && !result) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        {noticeBlock}
+        <p className="p-8 text-sm text-bad">DB error: {error}</p>
+      </div>
+    );
+  }
 
   const showingExclusions = classificationFilter === "excluded";
   // Read from the same triage the section renders, not recounted: the two are
@@ -865,6 +917,13 @@ export default function ActivityTab({
   const clearLibraryFilters = () => {
     setTypeFilter("all");
     setClassificationFilter("all");
+  };
+  // Rows are disabled while a replacement query is in flight, so whatever a
+  // row hands back here is the row the reader is looking at.
+  const quickActions: EntityQuickActions = {
+    categories: meta.categories,
+    disabled: !analyzed.current,
+    onAssign: (entity, categoryId) => void assignEntity(entity, categoryId),
   };
   const detailPanel = currentWindow ? (
     <WindowPanel
@@ -896,8 +955,6 @@ export default function ActivityTab({
       actionsDisabled={!analyzed.current}
       groups={result.detailGroups}
       usage={result.selectedEntityUsage}
-      runs={result.selectedEntityRuns}
-      rangeSeconds={result.totalSeconds}
       rangeDays={calendarDays(range)}
       hasStoredTitles={result.hasStoredTitles}
       detailSearch={detailSearch}
@@ -909,6 +966,19 @@ export default function ActivityTab({
         setDetailDirection(nextDirection);
       }}
       onLoadMore={() => setDetailLimit((limit) => limit + PANEL_WINDOW_MORE)}
+      windowsExpanded={windowsExpanded}
+      onExpandWindows={() => {
+        setWindowsExpanded(true);
+        setDetailLimit(PANEL_WINDOW_EXPANDED);
+      }}
+      onCollapseWindows={() => {
+        setWindowsExpanded(false);
+        setDetailSearch("");
+        setDetailSort("seconds");
+        setDetailDirection("desc");
+        setSelectedWindowKeys(new Set());
+        setDetailLimit(PANEL_WINDOW_PAGE);
+      }}
       onClose={closeActivityDetail}
       categories={meta.categories}
       rules={meta.rules}
@@ -949,6 +1019,8 @@ export default function ActivityTab({
       onRemoveExactRule={() => currentResult?.selectedEntity?.id === result.selectedEntity!.id
         ? removeExactRules(result.selectedEntity!)
         : Promise.resolve()}
+      titlesStored={meta.settings.record_window_titles === "1"}
+      onStoreTitles={onOpenSettings ? () => onOpenSettings("Privacy & recording") : undefined}
     />
   ) : null;
   return (
@@ -956,8 +1028,10 @@ export default function ActivityTab({
       className="relative flex min-h-0 flex-1 flex-col gap-4"
       aria-busy={analyzed.refreshing || sessionData.refreshing}
     >
+      {noticeBlock}
+
       {view === "library" && showDomainHint && (
-        <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2">
+        <section className={`shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2 ${columnWidth}`}>
           <p>
             Browser time is not being split by website. Time reads websites from browser window
             titles; install the first-party Time Web Extension to add that signal.
@@ -972,13 +1046,13 @@ export default function ActivityTab({
       )}
 
       {view === "library" && showWebsiteSignal && (
-        <section className="shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2">
+        <section className={`shrink-0 rounded-[12px] border border-accent/20 bg-accent/[.045] px-4 py-3 text-xs text-ink-2 ${columnWidth}`}>
           <p>
             <span className="font-medium text-ink">Website tracking is working.</span>{" "}
             {needsWebsiteRuleGuidance ? (
               <>
                 Time is now separating your browser time by site. Websites can have their own
-                categories—select one below, then choose a category under Classification.
+                categories—click the category under a website's name below to set it.
               </>
             ) : (
               <>Time is splitting your browser time by site. Websites now appear here alongside your apps.</>
@@ -1010,7 +1084,7 @@ export default function ActivityTab({
             // 800px cap keeps that row flat without stretching the folded list.
             // mr-auto, not mx-auto: centring would slide the view switcher out
             // from under the cursor that just clicked it.
-            : "mr-auto w-full max-w-[800px]"
+            : RULES_COLUMN_WIDTH
         }`}
       >
       {detailMode === "drill-in" && panelOpen ? detailPanel : (
@@ -1105,7 +1179,7 @@ export default function ActivityTab({
                 <p>
                   Websites can have their own categories.{" "}
                   {typeFilter === "website" && classificationFilter !== "excluded" ? (
-                    <>Select one, then choose a category under Classification.</>
+                    <>Click the category under a website's name to set it.</>
                   ) : (
                     <>
                       <button
@@ -1117,8 +1191,8 @@ export default function ActivityTab({
                         className="text-ink-2 underline-offset-2 hover:text-ink hover:underline"
                       >
                         Show websites
-                      </button>{" "}
-                      to select one, then choose a category under Classification.
+                      </button>
+                      , then click the category under one's name to set it.
                     </>
                   )}
                 </p>
@@ -1166,6 +1240,7 @@ export default function ActivityTab({
                       onTryAllTime={onTryAllTime}
                       hasActiveFilters={hasActiveLibraryFilters}
                       onClearFilters={clearLibraryFilters}
+                      quickActions={quickActions}
                     />
                   ) : (
                     <EntityCatalog
@@ -1181,6 +1256,7 @@ export default function ActivityTab({
                       onTryAllTime={onTryAllTime}
                       hasActiveFilters={hasActiveLibraryFilters}
                       onClearFilters={clearLibraryFilters}
+                      quickActions={quickActions}
                     />
                   )}
                 </TableRegion>

@@ -613,9 +613,9 @@ test("@workflow website-rule hint leads through the row Classification control",
   await expect(showWebsites).toBeVisible();
   await showWebsites.click();
   await expect(page.getByRole("combobox", { name: "Activity type" })).toContainText("Websites");
-  await page.locator("tbody button").first().click();
+  // The hint points at the category under each name, which is the control.
   await expect(
-    page.getByRole("complementary").getByText("Classification", { exact: true }),
+    page.getByRole("combobox", { name: /^Set website category for / }).first(),
   ).toBeVisible();
 });
 
@@ -754,4 +754,55 @@ test("@workflow a tray icon the tracker could not create is reported", async ({ 
   await expect(
     page.getByText("The tracker could not create a tray icon on this system"),
   ).toBeHidden();
+});
+
+test("@workflow an app's panel previews its heaviest windows and expands to the full list", async ({ page }) => {
+  await page.goto("/?fixture=windows");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("button", { name: /^Obsidian —/ }).click();
+  const panel = page.getByRole("complementary", { name: "Activity details: Obsidian" });
+  const windowBoxes = panel.getByRole("checkbox", { name: /^Select every visit to / });
+
+  // The preview: the app's own suffix trimmed, no list controls, and a share
+  // saying how much of the app the rows shown account for.
+  await expect(panel.getByText("How to Take Smart Notes", { exact: true })).toBeVisible();
+  await expect(panel.getByText(/Smart Notes - Obsidian/)).toHaveCount(0);
+  await expect(panel.getByText(/^Top 5 · \d+% of the time$/)).toBeVisible();
+  await expect(panel.getByRole("textbox", { name: "Filter windows" })).toHaveCount(0);
+  await expect(windowBoxes).toHaveCount(0);
+
+  await panel.getByRole("button", { name: "Show all 12 windows" }).click();
+  await expect(panel.getByRole("textbox", { name: "Filter windows" })).toBeVisible();
+  await expect(windowBoxes).toHaveCount(12);
+
+  await panel.getByRole("button", { name: "Show fewer" }).click();
+  await expect(panel.getByRole("textbox", { name: "Filter windows" })).toHaveCount(0);
+  await expect(panel.getByText(/^Top 5 · /)).toBeVisible();
+});
+
+test("@workflow an app with no stored titles links to the setting that stores them", async ({ page }) => {
+  await page.goto("/?titles=none");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("button", { name: /^Slack —/ }).click();
+  const panel = page.getByRole("complementary", { name: "Activity details: Slack" });
+  await expect(panel.getByText(/With window titles stored, this list shows/)).toBeVisible();
+  await panel.getByRole("button", { name: "Store window titles" }).click();
+  await expect(page.getByRole("switch", { name: "Store window titles" })).toBeVisible();
+});
+
+test("@workflow a Library row reclassifies in place, without opening its panel", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const picker = page.getByRole("combobox", { name: "Set app default for Slack" });
+  await expect(picker).toContainText("Communication");
+  await picker.click();
+  await page.getByRole("option", { name: "Focus", exact: true }).click();
+  await expect(picker).toContainText("Focus");
+  await expect(page.getByRole("complementary", { name: /^Activity details/ })).toHaveCount(0);
+  const names = await invocationNames(page);
+  expect(names.filter((name) => name === "assign_entity_rule")).toHaveLength(1);
+
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(picker).toContainText("Communication");
+  expect(await invocationNames(page)).toContain("undo_entity_rules");
 });

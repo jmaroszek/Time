@@ -105,6 +105,45 @@ const consolidationSessions = consolidationDomains.flatMap((domain, domainIndex)
   }),
 );
 
+/** One app with many windows, for the panel's preview and its full list. Every
+ *  default-fixture app has a single title, so the preview never has a tail to
+ *  summarize. Behind a flag for the reason consolidationSessions explains:
+ *  added unconditionally, these would restate totals other specs read. Titles
+ *  carry the app's own doubled suffix, as Obsidian writes them, and lengths
+ *  fall off steeply so the first few hold most of the time. */
+const manyWindows = fixtureParams.get("fixture") === "windows";
+const notesWindows = [
+  "How to Take Smart Notes",
+  "Skill Tree",
+  "Seeds",
+  "Temp",
+  "Time Tracker App",
+  "New tab",
+  "Bracelets",
+  "Soft Zone",
+  "Reading list",
+  "Daily note",
+  "Garden plan",
+  "Inbox",
+];
+const notesSessions = manyWindows
+  ? notesWindows.flatMap((name, windowIndex) =>
+      Array.from({ length: 3 }, (_, visit) => {
+        const start = now - (visit + 1) * day - 5 * 3_600 - windowIndex * 600;
+        return {
+          id: 30_000 + windowIndex * 10 + visit,
+          start,
+          end: start + Math.max(60, Math.round(4_800 / (windowIndex + 1) ** 1.6)),
+          process: "obsidian.exe",
+          title: `${name} - Obsidian - Obsidian 1.14.4`,
+          domain: null,
+          isAfk: false,
+          categoryOverrideId: null,
+          isCorrected: false,
+        };
+      }))
+  : [];
+
 /** The welcome panel is shown only to a reader whose history is still new (see
  *  WELCOME_MAX_HISTORY_DAYS), so seeing it at all requires a fixture with no
  *  sessions — the default fixture's are far too old. Pair with
@@ -133,7 +172,12 @@ let sessions = firstRun
       },
       ...recentSessions,
       ...consolidationSessions,
+      ...notesSessions,
     ].sort((a, b) => a.start - b.start);
+/** A history recorded with title storage off, which is the default: no row
+ *  carries a title, and the setting is still off. */
+const noTitles = fixtureParams.get("titles") === "none";
+if (noTitles) sessions = sessions.map((session) => ({ ...session, title: "" }));
 
 const categoryRows = [
   { id: 1, name: "Focus", color: "#6ba0da", is_productive: 1, is_neutral: 0, is_ignored: 0, sort_order: 1 },
@@ -229,7 +273,7 @@ const settings: Record<string, string> = {
   // Consent, not the health stamp, is what makes the panel offer to start:
   // this fixture's tracker is live and still records nothing.
   recording_consent: firstRun ? "0" : "1",
-  record_window_titles: "1",
+  record_window_titles: noTitles ? "0" : "1",
   launch_at_login: firstRun ? "0" : "1",
   show_tray_icon: "1",
   // What the tracker managed, as opposed to what show_tray_icon asked for.

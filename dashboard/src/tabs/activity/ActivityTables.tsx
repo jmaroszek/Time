@@ -669,6 +669,7 @@ export function EntityCatalog({
   onTryAllTime,
   hasActiveFilters,
   onClearFilters,
+  quickActions,
 }: {
   page: { rows: ActivityEntitySummary[]; total: number };
   scale: BarScale;
@@ -682,6 +683,7 @@ export function EntityCatalog({
   onTryAllTime: () => void;
   hasActiveFilters: boolean;
   onClearFilters: () => void;
+  quickActions: EntityQuickActions;
 }) {
   if (page.total === 0) {
     return (
@@ -703,6 +705,7 @@ export function EntityCatalog({
         onSort={onSort}
         selectedEntityId={selectedEntityId}
         onSelect={onSelect}
+        quickActions={quickActions}
       />
       {page.rows.length < page.total && <LoadMore shown={page.rows.length} total={page.total} onClick={onLoadMore} />}
     </>
@@ -742,6 +745,7 @@ export function SearchResults({
   onTryAllTime,
   hasActiveFilters,
   onClearFilters,
+  quickActions,
 }: {
   identities: ActivityEntityPage;
   windows: ActivityTitleGroupPage;
@@ -763,6 +767,7 @@ export function SearchResults({
   onTryAllTime: () => void;
   hasActiveFilters: boolean;
   onClearFilters: () => void;
+  quickActions: EntityQuickActions;
 }) {
   if (identities.total === 0 && windows.total === 0) {
     return (
@@ -795,6 +800,7 @@ export function SearchResults({
             selectedEntityId={selectedEntityId}
             onSelect={onSelectEntity}
             headOffset="top-12"
+            quickActions={quickActions}
           />
           {identities.rows.length < identities.total && (
             <LoadMore shown={identities.rows.length} total={identities.total} onClick={onLoadIdentities} />
@@ -869,6 +875,7 @@ function EntityTable({
   selectedEntityId,
   onSelect,
   headOffset,
+  quickActions,
 }: {
   rows: ActivityEntitySummary[];
   scale: BarScale;
@@ -878,6 +885,7 @@ function EntityTable({
   selectedEntityId: string | null;
   onSelect: (id: string) => void;
   headOffset?: string;
+  quickActions: EntityQuickActions;
 }) {
   const summarySort: SummaryTableSort = sort === "name" ? "label" : sort;
   const summaryRows: SummaryTableRow[] = rows.map((entity) => {
@@ -905,7 +913,7 @@ function EntityTable({
       primaryTitle: entity.key,
       metadata: (
         <>
-          <ClassificationLabel entity={entity} />
+          <RowClassification entity={entity} actions={quickActions} />
           <span aria-hidden="true" className="shrink-0">·</span>
           <span className="shrink-0 capitalize">{entity.kind}</span>
         </>
@@ -932,6 +940,66 @@ function EntityTable({
         headOffset={headOffset}
       />
     </div>
+  );
+}
+
+/** What an Apps & Websites row can do without its panel being opened. */
+export interface EntityQuickActions {
+  categories: Category[];
+  /** A replacement query is in flight and the rows may be stale. */
+  disabled: boolean;
+  onAssign: (entity: ActivityEntitySummary, categoryId: number) => void;
+}
+
+/**
+ * Stops a click inside a row control from also opening the row. React bubbles
+ * events through portals along the component tree, so this has to wrap the
+ * menu itself: a choice in its portalled list reaches the `<tr>` too.
+ */
+function RowControl({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <span
+      className={className}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * The row's category, as the control that changes it.
+ *
+ * The metadata line is where a reader already looks for the category, so the
+ * words themselves open the picker: no icon, no chevron, only a hover fill.
+ * The trigger always shows the row's own summary rather than a selected value,
+ * because a value would bring back the category dot this table dropped, and
+ * would show one category for a row whose time is split between several.
+ * Picking writes the same App or Website rule as the panel's control.
+ */
+function RowClassification({
+  entity,
+  actions,
+}: {
+  entity: ActivityEntitySummary;
+  actions: EntityQuickActions;
+}) {
+  const verb = entity.kind === "website" ? "Set website category" : "Set app default";
+  return (
+    <RowControl className="min-w-0">
+      <MenuSelect
+        variant="bare"
+        size="inline"
+        align="start"
+        value=""
+        placeholder={<ClassificationLabel entity={entity} />}
+        label={`${verb} for ${entity.displayName}`}
+        title={verb}
+        disabled={actions.disabled}
+        onChange={(value) => actions.onAssign(entity, Number(value))}
+        options={categoryDestinationOptions(actions.categories)}
+      />
+    </RowControl>
   );
 }
 

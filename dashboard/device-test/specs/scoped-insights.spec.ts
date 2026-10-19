@@ -35,7 +35,7 @@ test("@workflow a Top Apps row narrows Insights to that app, and back out", asyn
   await expect(tile(page, "Days used")).toHaveText(/^7\s*of 7$/);
   await expect(tile(page, "Runs per day")).toHaveText("1");
   await expect(tile(page, "Typical run")).toHaveText("54m");
-  await expect(page.getByRole("button", { name: "Product Design — Time — Slack" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Product Design — Time", exact: true })).toBeVisible();
   // All of Slack's time is one classification, so there is nothing to stack by.
   await expect(page.getByRole("combobox", { name: "Stack bars by" })).toHaveCount(0);
 
@@ -85,7 +85,7 @@ test("@workflow a top window opens in Activity, and the panels count runs as Ins
 }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Slack", exact: true }).click();
-  await page.getByRole("button", { name: "Product Design — Time — Slack" }).click();
+  await page.getByRole("button", { name: "Product Design — Time", exact: true }).click();
 
   const window = page.getByRole("complementary", { name: "Window details: Product Design — Time — Slack" });
   await expect(window).toBeVisible();
@@ -95,7 +95,8 @@ test("@workflow a top window opens in Activity, and the panels count runs as Ins
   await window.getByRole("button", { name: "Back to Slack details" }).click();
   const entity = page.getByRole("complementary", { name: "Activity details: Slack" });
   await expect(entity).toBeVisible();
-  await expect(tile(entity, "Typical run")).toHaveText("54m");
+  // The app's panel leaves run length to Insights, one link away.
+  await expect(entity.getByLabel(/^Typical run\./)).toHaveCount(0);
   await expect(entity.getByText("Average visit")).toHaveCount(0);
 
   await entity.getByRole("button", { name: "View insights" }).click();

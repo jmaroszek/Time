@@ -559,6 +559,21 @@ function Shell() {
   // scroll with their padding intact.
   const bounded = tab === "activity";
 
+  const trackerBanner = renderTrackerBanner();
+  // Never beside a tracker banner: `enabled` above already resolved to false
+  // whenever one is up, so this cannot be a second interruption.
+  const feedbackPanel = feedback.plan && (
+    <FeedbackPanel
+      plan={feedback.plan}
+      daysOfUse={feedback.daysOfUse}
+      appVersion={feedback.appVersion}
+      trackerVersion={meta.settings.tracker_version}
+    />
+  );
+  const notice = trackerBanner || feedbackPanel
+    ? <>{trackerBanner}{feedbackPanel}</>
+    : null;
+
   // One width for every tab, deliberately: the date range picker sits at the
   // top right of both Insights and Activity, and a tab that measured itself
   // differently moved that control when the reader switched between them.
@@ -611,18 +626,10 @@ function Shell() {
           Activity. The short ones — a stopped tracker, a pause — reach every
           tab, because a reader who is not on Insights is no less affected, and
           they leave the table its room. */}
-      {renderTrackerBanner()}
-
-      {/* Never beside a tracker banner: `enabled` above already resolved to
-          false whenever one is up, so this cannot be a second interruption. */}
-      {feedback.plan && (
-        <FeedbackPanel
-          plan={feedback.plan}
-          daysOfUse={feedback.daysOfUse}
-          appVersion={feedback.appVersion}
-          trackerVersion={meta.settings.tracker_version}
-        />
-      )}
+      {/* Activity places these itself: some of its views are narrower than
+          this container, and a notice spanning past the column under it read
+          as belonging to nothing. */}
+      {tab !== "activity" && notice}
 
       {/* A flex column so a tab can opt into filling the leftover viewport
           height — Activity does, to bound its own scroll wells. Tabs that do
@@ -666,6 +673,11 @@ function Shell() {
             onViewInInsights={(scope) => {
               insightsView.setScope(scope);
               setTab("insights");
+            }}
+            notice={notice}
+            onOpenSettings={(section) => {
+              setHighlightSection(section);
+              setTab("settings");
             }}
           />
         )}
