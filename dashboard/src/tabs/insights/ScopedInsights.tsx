@@ -7,7 +7,6 @@ import {
   type ScopeWindow,
   type ScopeWindowList,
 } from "../../lib/insightsScope";
-import { RUN_DEFINITION } from "../../lib/runs";
 
 /**
  * The four tiles, for one subject instead of everything.
@@ -65,19 +64,19 @@ export function ScopeTiles({
             </span>
           </span>
         )}
-        hint={`Days with any time in ${scope.name}. Separates a daily habit from one long stretch.`}
+        hint={`Days in the interval with any time in ${scope.name}.`}
       />
       <MetricCard
         label="Runs per day"
         value={perDay === null ? "—" : fmtRate(perDay)}
-        hint={`Averaged over the days it was used. A run is one stretch of time in ${scope.name}. ${RUN_DEFINITION}`}
+        hint={`Average number of separate sittings in ${scope.name} on the days you used it. A sitting ends when you go idle or switch away for a while.`}
       />
       <MetricCard
         label="Typical run"
         value={summary.typicalRunSeconds === null ? "—" : fmtDuration(summary.typicalRunSeconds)}
         hint={summary.longestRunSeconds === null
-          ? "Half of this time came in runs at least this long."
-          : `Half of this time came in runs at least this long. The longest was ${fmtDuration(summary.longestRunSeconds)}.`}
+          ? `Half your time in ${scope.name} was spent in runs at least this long.`
+          : `Half your time in ${scope.name} was spent in runs at least this long. Longest run: ${fmtDuration(summary.longestRunSeconds)}.`}
       />
     </div>
   );
