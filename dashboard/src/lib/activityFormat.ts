@@ -7,7 +7,12 @@ import type {
 import type { MatchType, TitleRuleSpec } from "./classify";
 import { fmtDuration } from "./format";
 import type { SessionCorrection } from "./queries";
-import { containsVersion, normalizeWindowTitle, splitWindowTitle } from "./titleRules";
+import {
+  containsVersion,
+  normalizeWindowTitle,
+  splitWindowTitle,
+  TITLE_SEPARATOR,
+} from "./titleRules";
 
 const RULE_LABELS: Record<MatchType, string> = {
   domain: "Website",
@@ -42,6 +47,16 @@ export function formatShortDate(seconds: number): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+/** formatShortDate without the year when it is the current one. For labels
+ *  read beside other dates from the same range, where "2026" on every one of
+ *  them is the only part that never changes. */
+export function formatCompactDate(seconds: number, now = new Date()): string {
+  const date = new Date(seconds * 1000);
+  return date.getFullYear() === now.getFullYear()
+    ? date.toLocaleDateString([], { month: "short", day: "numeric" })
+    : formatShortDate(seconds);
 }
 
 export function formatDateSpan(startSec: number, endSec: number): string {
@@ -119,6 +134,42 @@ export function titleMatchParts(title: string, search: string): {
     hit: title.slice(at, at + search.length),
     tail: title.slice(at + search.length),
   };
+}
+
+/**
+ * A window title without the trailing segments that only name its own app.
+ *
+ * Inside one app's list every title ends the same way — "Notes - Obsidian -
+ * Obsidian 1.14.4" — so the shared tail is most of each row and the part that
+ * tells them apart is what truncates. A segment goes when it is one of `names`
+ * outright, or one of them plus words on one side ("Obsidian 1.14.4", "Google
+ * Chrome"). The first segment always stays, so a title that is nothing but the
+ * app's name is shown as it is rather than as nothing.
+ *
+ * Display only: search, rules, and the Window panel keep the recorded title.
+ */
+export function trimAppSuffix(title: string, names: string[]): string {
+  const marks = [...new Set(names.map((name) => name.trim().toLowerCase()).filter(Boolean))];
+  if (marks.length === 0) return title;
+  // The capture keeps each separator as its own element, so the kept part
+  // rejoins with the spelling it was recorded with: segments sit at even
+  // indexes, separators at odd ones.
+  const parts = title.split(new RegExp(`(${TITLE_SEPARATOR.source})`, "u"));
+  let end = parts.length;
+  while (end > 1) {
+    const segment = parts[end - 1].trim().toLowerCase();
+    const namesApp = marks.some((mark) =>
+      segment === mark || segment.startsWith(`${mark} `) || segment.endsWith(` ${mark}`));
+    if (!namesApp) break;
+    end -= 2;
+  }
+  return end === parts.length ? title : parts.slice(0, end).join("").trimEnd();
+}
+
+/** The names a title's app suffix can spell: what Time calls it, and the
+ *  executable or domain it was recorded under, with and without extension. */
+export function appSuffixNames(displayName: string, entityKey: string): string[] {
+  return [displayName, entityKey, entityKey.replace(/\.exe$/i, "")];
 }
 
 export function windowRowCategory(
@@ -234,7 +285,6 @@ export function entityRowDomId(entityId: string): string {
 export function entityRowTriggerDomId(entityId: string): string {
   return `${entityRowDomId(entityId)}-trigger`;
 }
-
 export function windowGroupClassification(
   group: ActivityTitleGroup,
 ): { label: string; detail: string } {

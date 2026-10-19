@@ -317,6 +317,10 @@ export const MENU_SIZES = {
   control: "rounded-lg px-2.5 py-1.5 text-xs",
   field: "rounded-[9px] px-2.5 py-2 text-xs",
   compact: "rounded-md px-2 py-1 text-xs",
+  // A trigger set into a line of text, such as a table row's metadata. The
+  // negative margins give back the padding and border, so the words sit where
+  // plain text would and only the hover fill shows it is a control.
+  inline: "-mx-[5px] -my-px rounded px-1 py-0 text-xs",
 } as const;
 
 export const MENU_VARIANTS = {
@@ -386,7 +390,7 @@ export function MenuSelect({
   /** "field" matches the taller text inputs, for menus that sit in a row
    *  beside one. Passing the padding through className instead would leave
    *  which utility wins up to Tailwind's ordering rather than the call site. */
-  size?: "control" | "field" | "compact";
+  size?: "control" | "field" | "compact" | "inline";
   /** Which trigger edge the menu lines up with. Right-anchored controls want
    *  "end" so a menu wider than its trigger grows inward. */
   align?: "start" | "end";

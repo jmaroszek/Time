@@ -557,6 +557,8 @@ export default function OverviewTab({
             <div className="pt-2">
               <TopWindowList
                 list={scopeWindows}
+                scopeName={scope.name}
+                scopeKey={scope.key}
                 noun={scope.kind}
                 titlesStored={meta.settings.record_window_titles === "1"}
                 onStoreTitles={() => onOpenSettings("Privacy & recording")}

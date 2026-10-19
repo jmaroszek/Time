@@ -1,4 +1,5 @@
 import { MetricCard } from "../../components/ui";
+import { appSuffixNames, trimAppSuffix } from "../../lib/activityFormat";
 import { fmtDuration, fmtPct } from "../../lib/format";
 import {
   type InsightsScope,
@@ -92,12 +93,19 @@ export function ScopeTiles({
  */
 export function TopWindowList({
   list,
+  scopeName,
+  scopeKey,
   noun,
   titlesStored,
   onStoreTitles,
   onOpen,
 }: {
   list: ScopeWindowList;
+  /** The subject's name and key, which its windows' titles tend to end with:
+   *  "Notes - Obsidian - Obsidian 1.14.4". Trimmed off as the Activity panel
+   *  trims them, so the part that tells windows apart is what shows. */
+  scopeName: string;
+  scopeKey: string;
   noun: "app" | "website";
   /** Whether "Store window titles" is on now, which decides whether an empty
    *  list is a setting to change or just this subject having no titles. */
@@ -146,7 +154,19 @@ export function TopWindowList({
       <div
         className={`scroll-well flex flex-col gap-3 overflow-y-auto pr-2 sm:pr-4 ${footer ? "max-h-[231px]" : "max-h-[250px]"}`}
       >
-        {list.rows.map((row) => (
+        {list.rows.map((row) => {
+          // An app scope can gather several processes under one alias, so each
+          // row also offers the process its own window came from. Only a
+          // process: in a browser's scope a row's entity is often the website,
+          // and "— docs.example.com" is what tells its windows apart.
+          const ownProcess = row.entityId.startsWith("app:")
+            ? appSuffixNames("", row.entityId.slice("app:".length))
+            : [];
+          const shown = trimAppSuffix(row.title, [
+            ...appSuffixNames(scopeName, scopeKey),
+            ...ownProcess,
+          ]);
+          return (
           <div
             key={row.key}
             // As in the ranked lists: the row is the pointer's target as a
@@ -165,11 +185,11 @@ export function TopWindowList({
                   }}
                   className="min-w-0 flex-1 cursor-pointer truncate rounded-sm text-left text-ink-2 outline-none group-hover:text-ink focus-visible:text-ink focus-visible:ring-1 focus-visible:ring-accent/60"
                 >
-                  {row.title}
+                  {shown}
                 </button>
               ) : (
                 <span className="min-w-0 flex-1 truncate text-ink-2" title={row.title}>
-                  {row.title}
+                  {shown}
                 </span>
               )}
               <span className="w-14 shrink-0 text-right tabular-nums text-ink-2">
@@ -183,7 +203,8 @@ export function TopWindowList({
               />
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
       {footer && (
         <div className="mt-2 flex h-[15px] items-center">

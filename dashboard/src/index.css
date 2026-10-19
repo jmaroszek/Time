@@ -93,8 +93,8 @@
        text-micro  10.5px / 500   micro-labels, chips, eyebrows
        text-meta   11.5px / 400   metadata, hints, chart axes
        text-xs        12px / 400   body, controls, table cells
-       text-row       13px / 600   row labels, panel section headings
-       text-sm        14px / 600   card and dialog titles
+       text-row       13px / 600   row labels
+       text-sm        14px / 600   card, dialog, and panel section titles
        text-lg        18px / 600   panel entity name
        text-2xl       24px / 600   KPI figures
 

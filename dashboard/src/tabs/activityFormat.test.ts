@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appSuffixNames,
   defaultRulePattern,
   describeCorrectionWindow,
+  formatCompactDate,
+  trimAppSuffix,
   countNoun,
   entityRowDomId,
   entityRowTriggerDomId,
@@ -91,6 +94,48 @@ describe("formatLastSeen", () => {
 
   it("treats a live session's end as today rather than the future", () => {
     expect(formatLastSeen(sec(at(2026, 7, 24, 23, 59)), now)).toMatch(/^Today, /);
+  });
+});
+
+describe("formatCompactDate", () => {
+  const now = at(2026, 10, 19, 9, 0);
+
+  it("drops the year only when it is the current one", () => {
+    expect(formatCompactDate(sec(at(2026, 10, 13, 12)), now)).not.toMatch(/2026/);
+    expect(formatCompactDate(sec(at(2026, 10, 13, 12)), now)).toMatch(/13/);
+    expect(formatCompactDate(sec(at(2025, 12, 30, 12)), now)).toMatch(/2025/);
+  });
+});
+
+describe("trimAppSuffix", () => {
+  const obsidian = appSuffixNames("Obsidian", "obsidian.exe");
+
+  it("removes a repeated app name and its versioned twin", () => {
+    expect(trimAppSuffix("How to Take Smart Notes - Obsidian - Obsidian 1.14.4", obsidian))
+      .toBe("How to Take Smart Notes");
+  });
+
+  it("keeps the separator spelling of what remains", () => {
+    expect(trimAppSuffix("Product Design — Time — Slack", appSuffixNames("Slack", "slack.exe")))
+      .toBe("Product Design — Time");
+  });
+
+  it("matches a vendor-prefixed or alias name", () => {
+    expect(trimAppSuffix("Inbox - Google Chrome", appSuffixNames("Chrome", "chrome.exe"))).toBe("Inbox");
+    expect(trimAppSuffix("notes.md - Editor", appSuffixNames("Editor", "notepad.exe"))).toBe("notes.md");
+  });
+
+  it("never empties a title that is only the app's name", () => {
+    expect(trimAppSuffix("Obsidian", obsidian)).toBe("Obsidian");
+    expect(trimAppSuffix("Obsidian - Obsidian 1.14.4", obsidian)).toBe("Obsidian");
+  });
+
+  it("leaves titles without a matching tail alone", () => {
+    expect(trimAppSuffix("Seeds", obsidian)).toBe("Seeds");
+    expect(trimAppSuffix("Obsidian Help - Forum", obsidian)).toBe("Obsidian Help - Forum");
+    // A hyphen inside a word is not a separator.
+    expect(trimAppSuffix("Re-read-Obsidian", obsidian)).toBe("Re-read-Obsidian");
+    expect(trimAppSuffix("Anything - Obsidian", [])).toBe("Anything - Obsidian");
   });
 });
 

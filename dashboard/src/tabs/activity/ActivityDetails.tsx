@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -12,7 +13,6 @@ import {
   Checkbox,
   FloatingTooltip,
   MenuSelect,
-  RemoveButton,
 } from "../../components/ui";
 import {
   type ActivityDayBucket,
@@ -23,14 +23,16 @@ import {
   type ActivityWindowSort,
 } from "../../lib/activity";
 import {
+  appSuffixNames,
   countNoun,
   entityClassification,
   formatSharePercent,
   formatDateTime,
   formatLastSeen,
-  formatShortDate,
+  formatCompactDate,
   formatVisitDay,
   groupVisitsByDay,
+  trimAppSuffix,
   visitEditLabel,
   windowGroupClassification,
   windowRowCategory,
@@ -141,6 +143,15 @@ function GroupSessions({
 /** Exclusions are per-entity curation, like corrections and deletions, so they
  *  live beside them instead of behind a second CRUD surface in Settings. */
 /**
+ * The undocked panel's column. Undocked, the panel takes the card's place, and
+ * at the card's full width its bars and rows stretched to a thousand pixels for
+ * a list read at a glance. Capped near the docked panel's width and kept left,
+ * under the view switcher, the way Categories & Rules caps its own column. The
+ * tab gives anything above the panel the same width.
+ */
+export const DETAIL_PANEL_DRILL_IN_WIDTH = "mr-auto w-full max-w-[720px]";
+
+/**
  * The shell both Activity panels sit in.
  *
  * It is an inspector, not a dialog: the source list remains live behind it.
@@ -184,7 +195,7 @@ function DetailPanel({
       className={`panel-in flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-edge bg-surface ${
         dock
           ? "z-30"
-          : "h-full w-full flex-1"
+          : `h-full flex-1 ${DETAIL_PANEL_DRILL_IN_WIDTH}`
       }`}
     >
       <div className="shrink-0 border-b border-edge">
@@ -258,20 +269,22 @@ function PanelSection({
   title,
   right,
   children,
-  className = "",
+  className = "mt-8",
 }: {
   title: string;
   right?: ReactNode;
   children: ReactNode;
+  /** Replaces the default gap rather than adding to it, so a section that
+   *  opens the panel can sit flush with its top. */
   className?: string;
 }) {
   return (
-    // 13px, not 12: these are the panel's top-level markers and sit a step
-    // under the card titles' 14px rather than level with body copy. The gap
-    // grew with them, or the sections read as one run of text.
-    <section className={`mt-6 ${className}`}>
+    // The card-title step, not the row step: at 13px beside 12px rows and
+    // controls these read as one more line of body copy, and they are the
+    // panel's only landmarks once the header is out of view.
+    <section className={className}>
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-row font-semibold">{title}</h3>
+        <h3 className="text-sm font-semibold">{title}</h3>
         {right}
       </div>
       {children}
@@ -298,90 +311,108 @@ function PanelSection({
  * The row is a checkbox beside a button rather than one whole-row button: a
  * checkbox cannot be nested inside a button, and the two do different things —
  * one opens the Window, the other enrols every visit it stands for in a batch.
- * The border, hover and focus ring therefore belong to the wrapper, so the row
+ * The hover and selection tint therefore belong to the wrapper, so the row
  * still lights as one object whichever half the pointer is over.
+ *
+ * A divided list rather than a stack of bordered cards: inside a bordered panel
+ * each card was a box in a box, and forty of them read as one striped block.
+ * Visits and last-seen ride in the tooltip. They describe a window someone has
+ * already picked out, which is what opening it is for.
  */
 function PanelWindowRow({
   group,
+  appNames,
   search,
   maxSeconds,
   totalSeconds,
   category,
+  selectable,
+  selectionActive,
   selected,
   actionsDisabled,
   onToggle,
   onOpen,
 }: {
   group: ActivityTitleGroup;
+  /** What the app's own title suffix can spell, for trimming it off. */
+  appNames: string[];
   search: string;
   maxSeconds: number;
   totalSeconds: number;
   /** Null when it matches the app's own, and so is not worth the words. */
   category: string | null;
+  /** False in the preview, which is for reading rather than batch work. */
+  selectable: boolean;
+  /** Any row is ticked, so every box shows instead of waiting for hover. */
+  selectionActive: boolean;
   selected: boolean;
   actionsDisabled: boolean;
   onToggle: (group: ActivityTitleGroup) => void;
   onOpen: (group: ActivityTitleGroup) => void;
 }) {
+  const trimmed = trimAppSuffix(group.title, appNames);
+  // A search can match only inside the trimmed tail ("obsidian"), and a row
+  // listed for a match it does not show reads as a wrong result.
+  const shownTitle = search && !trimmed.toLowerCase().includes(search.toLowerCase())
+    ? group.title
+    : trimmed;
+  const tooltip = [
+    group.title || "No title recorded",
+    `${countNoun(group.sessionCount, "visit")} · last seen ${formatLastSeen(group.lastSeen)}`,
+  ].join("\n");
   return (
     <div
       // The tint the catalog table already uses for a selected row, and only
-      // that: the tick states the selection, so a second accent on the border
-      // says it twice — and with every row selected the panel read as one
-      // continuous glow rather than a list.
-      className={`flex items-start gap-2 rounded-lg border border-edge/60 px-2.5 py-2 transition-colors focus-within:border-accent/60 ${
-        selected ? "bg-accent/[.09]" : "hover:border-edge-2 hover:bg-hover"
+      // that: the tick states the selection, so a second accent says it twice.
+      className={`group/row flex items-start gap-2 rounded-lg border-t border-edge/50 px-1.5 py-2 transition-colors first:border-t-0 ${
+        selected ? "bg-accent/[.09]" : "hover:bg-hover"
       }`}
     >
-      {/* Nudged onto the title's line rather than the row's top edge: the row
-          is three lines tall and a box aligned to the block reads as belonging
-          to the bar beneath the title as much as to the title itself. */}
-      <Checkbox
-        checked={selected}
-        onChange={actionsDisabled ? () => undefined : () => onToggle(group)}
-        label={`Select every visit to ${group.title || "this untitled window"}`}
-        className={`mt-[3px] shrink-0 ${actionsDisabled ? "pointer-events-none opacity-50" : ""}`}
-      />
-    <button
-      type="button"
-      onClick={() => onOpen(group)}
-      className="min-w-0 flex-1 text-left text-xs outline-none"
-    >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 flex-1 truncate text-ink-2">
-          {/* Title capture can be switched on part way through a history, so
-              one app can hold both kinds of row. A bare em dash left the
-              untitled one looking like a rendering fault rather than a fact. */}
-          {group.title
-            ? <MatchedTitle title={group.title} search={search} />
-            : <span className="italic text-ink-3">No title recorded</span>}
+      {/* Present but invisible until the row is pointed at or focused, or a
+          selection exists: a column of empty boxes down every row was the
+          loudest thing in a list most people only read. */}
+      {selectable && (
+        <Checkbox
+          checked={selected}
+          onChange={actionsDisabled ? () => undefined : () => onToggle(group)}
+          label={`Select every visit to ${group.title || "this untitled window"}`}
+          className={`mt-px shrink-0 transition-opacity ${
+            selectionActive
+              ? ""
+              : "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+          } ${actionsDisabled ? "pointer-events-none opacity-50" : ""}`}
+        />
+      )}
+      <button
+        type="button"
+        onClick={() => onOpen(group)}
+        title={tooltip}
+        className="min-w-0 flex-1 text-left text-xs outline-none"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-ink-2">
+            {/* Title capture can be switched on part way through a history, so
+                one app can hold both kinds of row. A bare em dash left the
+                untitled one looking like a rendering fault rather than a fact. */}
+            {group.title
+              ? <MatchedTitle title={shownTitle} search={search} tooltip={tooltip} />
+              : <span className="italic text-ink-3">No title recorded</span>}
+          </span>
+          {category !== null && (
+            <span className="max-w-[40%] shrink-0 truncate text-ink-3">{category}</span>
+          )}
+          <span className="shrink-0 tabular-nums text-ink-3">{fmtDuration(group.seconds)}</span>
+          {/* The row opens something. Without this it read as a static summary,
+              and the only hint otherwise was the cursor. */}
+          <Chevron open={false} />
         </span>
-        {group.isNew && (
-          <RowTag tone="accent" title="First seen in all of your history inside this date range.">New</RowTag>
-        )}
-        {/* The row opens something. Without this it read as a static summary,
-            and the only hint otherwise was the cursor. */}
-        <Chevron open={false} />
-      </span>
-      {/* The same bar the library table draws, against the heaviest window this
-          app has rather than the heaviest row on screen — so it does not
-          rescale when the list is re-sorted or extended. */}
-      <span className="mt-1.5 block">
-        <ShareBar seconds={group.seconds} maxSeconds={maxSeconds} totalSeconds={totalSeconds} />
-      </span>
-      <span className="mt-1 flex flex-wrap items-center gap-x-1.5 text-ink-3">
-        <span className="tabular-nums">{fmtDuration(group.seconds)}</span>
-        <span aria-hidden="true">·</span>
-        <span className="tabular-nums">{countNoun(group.sessionCount, "visit")}</span>
-        {category !== null && (
-          <>
-            <span aria-hidden="true">·</span>
-            <span className="min-w-0 truncate">{category}</span>
-          </>
-        )}
-        <span className="ml-auto shrink-0 tabular-nums">{formatLastSeen(group.lastSeen)}</span>
-      </span>
-    </button>
+        {/* The same bar the library table draws, against the heaviest window this
+            app has rather than the heaviest row on screen — so it does not
+            rescale when the list is re-sorted or extended. */}
+        <span className="mt-1.5 block">
+          <ShareBar seconds={group.seconds} maxSeconds={maxSeconds} totalSeconds={totalSeconds} />
+        </span>
+      </button>
     </div>
   );
 }
@@ -492,9 +523,9 @@ export function WindowPanel({
         <p className="mt-2 text-xs text-ink-2">{classification.label}</p>
         <p className="mt-0.5 text-xs leading-snug text-ink-3">{classification.detail}</p>
       </PanelSection>
-      <section className="mt-6">
+      <section className="mt-8">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-row font-semibold">Visits</h3>
+          <h3 className="mr-auto text-sm font-semibold">Visits</h3>
           {/* Keep the reversible selection control at the right edge; batch
               actions appear before it when a selection exists. */}
           {selectedSessionIds.size > 0 && (
@@ -623,17 +654,17 @@ function UsageStrip({ buckets, right }: { buckets: ActivityDayBucket[]; right?: 
   const peak = usageStripPeak(buckets);
   if (peak === null) return null;
   const spanLabel = (bucket: ActivityDayBucket) => (bucket.days === 1
-    ? formatShortDate(bucket.startSec)
-    : `${formatShortDate(bucket.startSec)} – ${formatShortDate(bucket.endSec - 1)}`);
+    ? formatCompactDate(bucket.startSec)
+    : `${formatCompactDate(bucket.startSec)} – ${formatCompactDate(bucket.endSec - 1)}`);
   return (
-    <section className="mt-6">
+    <section className="mt-8">
       {/* The same word Insights gives the same idea. A section heading naming
           its own chart beats one phrased as the question the chart answers. */}
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-row font-semibold">Timeline</h3>
+        <h3 className="text-sm font-semibold">Timeline</h3>
         {right}
       </div>
-      <div className="mt-2.5 flex h-10 items-end gap-px border-b border-edge/70">
+      <div className="mt-4 flex h-10 items-end gap-px border-b border-edge/70">
         {buckets.map((bucket) => (
           <span
             key={bucket.startSec}
@@ -654,9 +685,9 @@ function UsageStrip({ buckets, right }: { buckets: ActivityDayBucket[]; right?: 
         ))}
       </div>
       <div className="mt-1 flex justify-between text-xs tabular-nums text-ink-3">
-        <span>{formatShortDate(buckets[0].startSec)}</span>
+        <span>{formatCompactDate(buckets[0].startSec)}</span>
         <span>{fmtDuration(peak)} on the busiest {buckets[0].days === 1 ? "day" : "column"}</span>
-        <span>{formatShortDate(buckets[buckets.length - 1].endSec - 1)}</span>
+        <span>{formatCompactDate(buckets[buckets.length - 1].endSec - 1)}</span>
       </div>
     </section>
   );
@@ -676,8 +707,6 @@ export function EntityPanel({
   entity,
   groups,
   usage,
-  runs,
-  rangeSeconds,
   rangeDays,
   hasStoredTitles,
   detailSearch,
@@ -686,6 +715,9 @@ export function EntityPanel({
   detailDirection,
   onDetailSort,
   onLoadMore,
+  windowsExpanded,
+  onExpandWindows,
+  onCollapseWindows,
   onClose,
   categories,
   rules,
@@ -702,15 +734,14 @@ export function EntityPanel({
   onSaveAlias,
   onRemoveExactRule,
   onViewInInsights,
+  titlesStored,
+  onStoreTitles,
   actionsDisabled = false,
 }: {
   dock: CSSProperties | null;
   entity: ActivityEntitySummary;
   groups: ActivityTitleGroupPage;
   usage: ActivityDayBucket[];
-  runs: RunStats | null;
-  /** All recorded time in the range, for the share this entity holds of it. */
-  rangeSeconds: number;
   /** Calendar days the range spans, so "days seen" has a denominator. */
   rangeDays: number;
   hasStoredTitles: boolean;
@@ -720,6 +751,13 @@ export function EntityPanel({
   detailDirection: ActivitySortDirection;
   onDetailSort: (sort: ActivityWindowSort, direction: ActivitySortDirection) => void;
   onLoadMore: () => void;
+  /** False shows the short preview: the heaviest few windows and no list
+   *  controls. True is the full, filterable, selectable list. */
+  windowsExpanded: boolean;
+  onExpandWindows: () => void;
+  /** Also clears the filter, order and selection that only the full list has
+   *  controls for, so the preview never answers to settings it hides. */
+  onCollapseWindows: () => void;
   onClose: () => void;
   categories: Category[];
   rules: Rule[];
@@ -741,6 +779,11 @@ export function EntityPanel({
   onRemoveExactRule: () => Promise<void>;
   /** Opens Insights narrowed to this entity. */
   onViewInInsights?: () => void;
+  /** Whether "Store window titles" is on now. Distinct from hasStoredTitles,
+   *  which is whether any history has them. */
+  titlesStored: boolean;
+  /** Opens the setting that turns title storage on. */
+  onStoreTitles?: () => void;
   /** The result is stale while a replacement worker query is in flight. */
   actionsDisabled?: boolean;
 }) {
@@ -816,6 +859,15 @@ export function EntityPanel({
     (total, group) => total + (selectedWindowKeys.has(group.key) ? group.sessionCount : 0),
     0,
   );
+  // An app with no category at all has a baseline too, just not a numbered
+  // one: "Uncategorized" against each of its windows is the header's line
+  // repeated, and only a window something did classify is worth naming.
+  const rowCategory = (group: ActivityTitleGroup) => {
+    const label = windowRowCategory(group, baselineCategoryId);
+    return entity.status === "uncategorized" && label === "Uncategorized" ? null : label;
+  };
+  const previewSeconds = groups.rows.reduce((total, group) => total + group.seconds, 0);
+  const appNames = appSuffixNames(entity.displayName, entity.key);
 
   return (
     <DetailPanel
@@ -890,41 +942,14 @@ export function EntityPanel({
       onClose={onClose}
       closeLabel="Close activity details"
     >
-      <DetailMetricGrid>
-        {/* Each hint carries the fact its tile could not fit — a share, a
-            denominator, the arithmetic behind a derived number — and stops
-            there. No restating the label, and no sentence explaining how to
-            feel about the figure. */}
-        <DetailMetric
-          label="Time in range"
-          value={fmtDuration(entity.seconds)}
-          hint={rangeSeconds > 0
-            ? `${formatSharePercent(entity.seconds, rangeSeconds)} of everything recorded across the ${countNoun(rangeDays, "day")} shown.`
-            : `Measured across the ${countNoun(rangeDays, "day")} shown.`}
-        />
-        <TypicalRunMetric runs={runs} />
-        <DetailMetric
-          label="Days seen"
-          value={String(entity.daysSeen)}
-          hint={`Out of ${countNoun(rangeDays, "day")} in this range.`}
-        />
-        {/* Last seen is self-explanatory, so it needs no secondary hint. */}
-        <DetailMetric label="Last seen" value={formatLastSeen(entity.lastSeen)} />
-      </DetailMetricGrid>
+      {/* Undocked, the panel replaces the table, and with it the row that
+          states these. Docked, that row is beside the panel and says them. */}
+      {dock === null && <EntityFacts entity={entity} rangeDays={rangeDays} />}
 
-      {/* The strip is a glance at what Insights draws in full, so the way
-          there reads as its "more". A single day draws no strip, and the link
-          keeps the strip's place on its own. */}
-      {usageStripPeak(usage) !== null ? (
-        <UsageStrip buckets={usage} right={insightsLink} />
-      ) : insightsLink && (
-        <div className="mt-6 flex justify-end">{insightsLink}</div>
-      )}
-
-      <PanelSection title="Classification">
-        {/* An exact rule supplies the current value; its source stays beside the
-            control. Other states show the explanatory line below. */}
-        <div className="mt-2 flex items-center justify-between gap-3">
+      {/* First in the body: the panel's one standing decision. Not pinned in
+          the header, which it made taller than the name it sits under. */}
+      <PanelSection title="Classification" className={dock === null ? "mt-6" : ""}>
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span className="shrink-0">
             <MenuSelect
               align="start"
@@ -939,31 +964,52 @@ export function EntityPanel({
               options={categoryDestinationOptions(categories)}
             />
           </span>
-          {/* With an exact rule, this line explains what decided the value. */}
-          {exactRule && (
-            <div className="flex min-w-0 items-center gap-1.5">
-              <p className="min-w-0 truncate text-xs leading-snug text-ink-2">{summary.detail}</p>
-              {/* Keep rule removal compact beside the rule it removes. */}
-              {!confirmingRuleRemoval && (
-                // Align the compact glyph with the rule text.
-                <span className="flex translate-y-px">
-                  <RemoveButton
-                    compact
-                    label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
-                    onClick={actionsDisabled ? () => undefined : () => setConfirmingRuleRemoval(true)}
-                  />
-                </span>
-              )}
-            </div>
-          )}
+          {/* What decided the value. With an exact rule the control already
+              shows the category, so only the source is left to say. Wraps
+              rather than truncating, and drops under the control when the panel
+              is narrow: this is the line that says why, and cut short it said
+              nothing. */}
+          <p className="min-w-[12rem] flex-1 text-xs leading-snug text-ink-3">
+            <span>
+              {exactRule ? summary.detail : `${summary.label} · ${summary.detail}`}
+            </span>
+            {/* A word, not a ✕: beside a category name a bare cross read as
+                "clear this category", when what it removes is the rule. */}
+            {exactRule && !confirmingRuleRemoval && (
+              <>
+                <span aria-hidden="true"> · </span>
+                <button
+                  type="button"
+                  disabled={actionsDisabled}
+                  onClick={() => setConfirmingRuleRemoval(true)}
+                  aria-label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
+                  className="shrink-0 rounded-sm underline-offset-2 outline-none transition-colors hover:text-bad hover:underline focus-visible:text-bad focus-visible:underline disabled:pointer-events-none disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              </>
+            )}
+          </p>
         </div>
-        {/* Without an exact rule, show the category and its source below the
-            action control. */}
-        {!exactRule && (
-          <>
-            <p className="mt-3.5 text-xs text-ink-2">{summary.label}</p>
-            <p className="mt-0.5 text-xs leading-snug text-ink-3">{summary.detail}</p>
-          </>
+        {exactRule && confirmingRuleRemoval && (
+          // Confirm removal because existing activity may become uncategorized.
+          <div className="mt-3 rounded-lg border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-xs leading-snug text-ink-2">
+            <p>
+              Remove the {entity.kind === "website" ? "Website" : "App"} rule
+              {" "}<span className="font-mono">{exactRule.pattern}</span>? Time it decided becomes
+              uncategorized unless another rule matches. Manual corrections are kept.
+            </p>
+            <div className="mt-2.5 flex justify-end gap-2">
+              <Button onClick={() => setConfirmingRuleRemoval(false)}>Cancel</Button>
+              <Button
+                variant="danger"
+                disabled={actionsDisabled}
+                onClick={() => { setConfirmingRuleRemoval(false); void onRemoveExactRule(); }}
+              >
+                Remove rule
+              </Button>
+            </div>
+          </div>
         )}
         {entity.status === "mixed" && (
           <p className="mt-2 text-xs text-ink-3">Website and Window rules can override an App default.</p>
@@ -988,36 +1034,26 @@ export function EntityPanel({
             </div>
           </div>
         )}
-        {exactRule && confirmingRuleRemoval && (
-          // Confirm removal because existing activity may become uncategorized.
-          <div className="mt-3 rounded-lg border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-xs leading-snug text-ink-2">
-            <p>
-              Remove the {entity.kind === "website" ? "Website" : "App"} rule
-              {" "}<span className="font-mono">{exactRule.pattern}</span>? Time it decided becomes
-              uncategorized unless another rule matches. Manual corrections are kept.
-            </p>
-            <div className="mt-2.5 flex justify-end gap-2">
-              <Button onClick={() => setConfirmingRuleRemoval(false)}>Cancel</Button>
-              <Button
-                variant="danger"
-                disabled={actionsDisabled}
-                onClick={() => { setConfirmingRuleRemoval(false); void onRemoveExactRule(); }}
-              >
-                Remove rule
-              </Button>
-            </div>
-          </div>
-        )}
       </PanelSection>
 
+      {/* The strip is a glance at what Insights draws in full, so the way
+          there reads as its "more". A single day draws no strip, and the link
+          keeps the strip's place on its own. */}
+      {usageStripPeak(usage) !== null ? (
+        <UsageStrip buckets={usage} right={insightsLink} />
+      ) : insightsLink && (
+        <div className="mt-8 flex justify-end">{insightsLink}</div>
+      )}
+
       {/* Group visits by window title so this entity's history is readable. */}
-      <section className="mt-6">
-        {/* Keep filtering and ordering visible while the window list scrolls. */}
-        <div className="sticky top-0 z-10 -mx-5 -mt-2 bg-surface px-5 pb-2.5 pt-2">
+      <section className="mt-8">
+        {/* Expanded, the filter and order stay visible while the list scrolls.
+            The preview has neither, so there is nothing to keep in view. */}
+        <div className={windowsExpanded ? "sticky top-0 z-10 -mx-5 -mt-2 bg-surface px-5 pb-2.5 pt-2" : ""}>
           <div className="flex flex-wrap items-center gap-2">
             {/* Selection covers the loaded rows; pagination keeps the scope
                 visible instead of selecting unseen windows. */}
-            {titlesReadable && groups.rows.length > 0 && (
+            {windowsExpanded && titlesReadable && groups.rows.length > 0 && (
               <Checkbox
                 checked={allWindowsSelected}
                 indeterminate={selectedWindowCount > 0}
@@ -1028,19 +1064,32 @@ export function EntityPanel({
                 className={actionsDisabled ? "pointer-events-none opacity-50" : ""}
               />
             )}
-            <h3 className="text-row font-semibold">Windows</h3>
+            <h3 className="text-sm font-semibold">Windows</h3>
             {/* Keep the total and selected counts adjacent to the heading. */}
             <span className="min-w-0 truncate text-xs tabular-nums text-ink-3">
               {selectedWindowCount > 0
                 ? `${countNoun(selectedVisitCount, "visit")} selected`
-                : groups.sessionTotal > groups.total
+                // Untitled visits group into one blank "window", which is not
+                // a window anyone had open.
+                : !titlesReadable
+                  ? countNoun(groups.sessionTotal, "visit")
+                  : groups.sessionTotal > groups.total
                   ? `${countNoun(groups.sessionTotal, "visit")} in ${countNoun(groups.total, "window")}`
                   : countNoun(groups.total, "window")}
             </span>
+            {windowsExpanded && (
+              <button
+                type="button"
+                onClick={onCollapseWindows}
+                className="ml-auto shrink-0 rounded-sm text-xs text-ink-3 underline-offset-2 outline-none hover:text-ink-2 hover:underline focus-visible:text-ink-2 focus-visible:underline"
+              >
+                Show fewer
+              </button>
+            )}
           </div>
           {/* Show either list controls or batch actions; filtering clears the
               current selection. */}
-          {titlesReadable && (selectedWindowCount > 0 ? (
+          {windowsExpanded && titlesReadable && (selectedWindowCount > 0 ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
               <Button variant="danger" disabled={actionsDisabled} onClick={onDeleteWindows}>Delete selected</Button>
               <MenuSelect
@@ -1088,23 +1137,49 @@ export function EntityPanel({
           ))}
         </div>
         {!titlesReadable ? (
-          // Without stored titles there is no meaningful window breakdown.
-          <p className="rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-4 text-xs leading-snug text-ink-3">
-            No window titles were recorded for this {kindLabel}, so its{" "}
-            {countNoun(groups.sessionTotal, "visit")} cannot be broken down. Title capture is off by
-            default; Settings can turn it on for what is recorded from now on.
-          </p>
+          // Without stored titles there is no meaningful window breakdown. The
+          // two cases are the ones Insights' window card tells apart: a setting
+          // to change, or a setting already changed that only applies from now.
+          <div className="mt-2 rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-4 text-xs leading-snug text-ink-3">
+            {titlesStored ? (
+              <p>
+                No window titles were recorded for this {kindLabel}, so its{" "}
+                {countNoun(groups.sessionTotal, "visit")} cannot be broken down. Titles are stored
+                for what is recorded from now on.
+              </p>
+            ) : (
+              <>
+                <p>
+                  With window titles stored, this list shows what the time in this {kindLabel} was
+                  spent on: documents, pages, conversations. Titles stay on this computer, and only
+                  what is recorded after turning them on is broken down.
+                </p>
+                {onStoreTitles && (
+                  <button
+                    type="button"
+                    onClick={onStoreTitles}
+                    className="mt-2.5 text-accent underline-offset-4 outline-none transition-colors hover:underline hover:decoration-accent/50 focus-visible:underline"
+                  >
+                    Store window titles
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         ) : (
           <>
-            <div className="flex flex-col gap-1.5">
+            <div className={`flex flex-col ${windowsExpanded ? "" : "mt-2"}`}>
               {groups.rows.map((group) => (
                 <PanelWindowRow
                   key={group.key}
                   group={group}
+                  appNames={appNames}
                   search={detailSearch}
                   maxSeconds={groups.maxSeconds}
                   totalSeconds={entity.seconds}
-                  category={windowRowCategory(group, baselineCategoryId)}
+                  category={rowCategory(group)}
+                  selectable={windowsExpanded}
+                  selectionActive={selectedWindowCount > 0}
                   selected={selectedWindowKeys.has(group.key)}
                   actionsDisabled={actionsDisabled}
                   onToggle={onToggleWindow}
@@ -1115,15 +1190,30 @@ export function EntityPanel({
                 <p className="py-5 text-center text-xs text-ink-3">No windows match this filter.</p>
               )}
             </div>
-            {groups.rows.length < groups.total && (
+            {groups.rows.length < groups.total && (windowsExpanded ? (
               <LoadMore shown={groups.rows.length} total={groups.total} onClick={onLoadMore} />
-            )}
+            ) : (
+              // The share is the point of the line: it says whether the few
+              // rows above are the whole story or the start of a long tail.
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-edge/50 px-1.5 pt-2.5 text-xs text-ink-3">
+                <span className="tabular-nums">
+                  Top {groups.rows.length} · {formatSharePercent(previewSeconds, entity.seconds)} of the time
+                </span>
+                <button
+                  type="button"
+                  onClick={onExpandWindows}
+                  className="shrink-0 rounded-sm text-accent underline-offset-2 outline-none hover:underline focus-visible:underline"
+                >
+                  Show all {groups.total} windows
+                </button>
+              </div>
+            ))}
           </>
         )}
       </section>
 
       {/* Keep curation actions together at the end of the panel. */}
-      <section className="mt-7 border-t border-edge/60 pt-5">
+      <section className="mt-8 border-t border-edge/60 pt-6">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-row font-semibold text-ink-2">Manage this {kindLabel}</h3>
           {/* Keep the actions together when the panel narrows. */}
@@ -1205,6 +1295,32 @@ function TypicalRunMetric({ runs }: { runs: RunStats | null }) {
         ? `Half of this time came in runs at least this long. ${countNoun(runs.runs, "run")} in range, the longest ${fmtDuration(runs.longestSeconds ?? 0)}. ${RUN_DEFINITION}`
         : RUN_DEFINITION}
     />
+  );
+}
+
+/**
+ * What the table row says about an app, for when the row is not on screen.
+ *
+ * Undocked, the panel replaces the table, so time, days seen and last seen
+ * would otherwise be nowhere. Docked, the row sits beside the panel and this
+ * is not drawn. Run length and share of the range are Insights' to answer.
+ */
+function EntityFacts({ entity, rangeDays }: { entity: ActivityEntitySummary; rangeDays: number }) {
+  const value = (text: string) => <span className="tabular-nums text-ink-2">{text}</span>;
+  const facts: { key: string; node: ReactNode }[] = [
+    { key: "time", node: <>{value(fmtDuration(entity.seconds))} in range</> },
+    { key: "days", node: <>{value(String(entity.daysSeen))} of {countNoun(rangeDays, "day")}</> },
+    { key: "last", node: <>Last seen {value(formatLastSeen(entity.lastSeen))}</> },
+  ];
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-ink-3">
+      {facts.map((fact, i) => (
+        <Fragment key={fact.key}>
+          {i > 0 && <span aria-hidden="true">·</span>}
+          <span>{fact.node}</span>
+        </Fragment>
+      ))}
+    </p>
   );
 }
 
