@@ -96,7 +96,9 @@ others produces a failure on a user's machine rather than at build time.
   enforces the boundary.
 - **The schema exists twice.** `_SCHEMA` in `tracker/db.py` and `BOOTSTRAP_SQL`
   in `dashboard/src-tauri/src/database/schema.rs` must stay equivalent, because
-  either runtime may create a new database first.
+  either runtime may create a new database first. Both suites build a fresh
+  database and compare it with `contracts/schema.json`, so a schema change
+  updates all three.
 - **A schema bump touches three files.** `SCHEMA_VERSION` in `tracker/db.py`,
   `SCHEMA_VERSION` and the `('schema_version','N')` bootstrap literal in
   `database/schema.rs`, and `SUPPORTED_SCHEMA_VERSION` in

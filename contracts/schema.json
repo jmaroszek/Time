@@ -1,0 +1,133 @@
+{
+  "note": "What a freshly created database contains, whichever runtime creates it: tracker/db.py and dashboard/src-tauri/src/database/schema.rs both bootstrap one and compare it with this file. SQL is as SQLite stores it, with comments removed and whitespace collapsed. Seeded settings are checked separately, by dashboard/src/lib/schema.test.ts.",
+  "objects": [
+    {
+      "type": "index",
+      "name": "idx_session_corrections_category",
+      "table": "session_corrections",
+      "sql": "CREATE INDEX idx_session_corrections_category ON session_corrections(category_id)"
+    },
+    {
+      "type": "index",
+      "name": "idx_sessions_end",
+      "table": "sessions",
+      "sql": "CREATE INDEX idx_sessions_end ON sessions(end_ts)"
+    },
+    {
+      "type": "index",
+      "name": "idx_sessions_proc",
+      "table": "sessions",
+      "sql": "CREATE INDEX idx_sessions_proc ON sessions(process)"
+    },
+    {
+      "type": "index",
+      "name": "idx_sessions_start",
+      "table": "sessions",
+      "sql": "CREATE INDEX idx_sessions_start ON sessions(start_ts)"
+    },
+    {
+      "type": "table",
+      "name": "categories",
+      "table": "categories",
+      "sql": "CREATE TABLE categories ( id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, color TEXT NOT NULL, is_productive INTEGER NOT NULL DEFAULT 0, is_neutral INTEGER NOT NULL DEFAULT 0, is_ignored INTEGER NOT NULL DEFAULT 0, sort_order INTEGER )"
+    },
+    {
+      "type": "table",
+      "name": "rules",
+      "table": "rules",
+      "sql": "CREATE TABLE rules ( id INTEGER PRIMARY KEY, match_type TEXT NOT NULL CHECK(match_type IN ('process','domain','title')), pattern TEXT NOT NULL, category_id INTEGER NOT NULL REFERENCES categories(id), priority INTEGER NOT NULL DEFAULT 0, scope_kind TEXT NOT NULL DEFAULT '' CHECK(scope_kind IN ('','any','browsers','process','domain')), scope_value TEXT NOT NULL DEFAULT '', title_match_mode TEXT NOT NULL DEFAULT '' CHECK(title_match_mode IN ('','segment','phrase','contains')), title_anchor TEXT NOT NULL DEFAULT '' CHECK(title_anchor IN ('','any','first','interior','last')), CHECK ( ( match_type = 'title' AND scope_kind IN ('any','browsers','process','domain') AND title_match_mode IN ('segment','phrase','contains') AND title_anchor IN ('any','first','interior','last') AND (title_match_mode = 'segment' OR title_anchor = 'any') AND ( (scope_kind IN ('any','browsers') AND scope_value = '') OR (scope_kind IN ('process','domain') AND length(scope_value) > 0) ) ) OR ( match_type <> 'title' AND scope_kind = '' AND scope_value = '' AND title_match_mode = '' AND title_anchor = '' ) ), UNIQUE( match_type, pattern, scope_kind, scope_value, title_match_mode, title_anchor ) )"
+    },
+    {
+      "type": "table",
+      "name": "session_corrections",
+      "table": "session_corrections",
+      "sql": "CREATE TABLE session_corrections ( session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, corrected_start_ts INTEGER, corrected_end_ts INTEGER, category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL, updated_ts INTEGER NOT NULL, CHECK ( (corrected_start_ts IS NULL AND corrected_end_ts IS NULL) OR (corrected_start_ts IS NOT NULL AND corrected_end_ts IS NOT NULL AND corrected_end_ts > corrected_start_ts) ) )"
+    },
+    {
+      "type": "table",
+      "name": "sessions",
+      "table": "sessions",
+      "sql": "CREATE TABLE sessions ( id INTEGER PRIMARY KEY, start_ts INTEGER NOT NULL, end_ts INTEGER NOT NULL CHECK(end_ts >= start_ts), process TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', domain TEXT, is_afk INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'live' )"
+    },
+    {
+      "type": "table",
+      "name": "settings",
+      "table": "settings",
+      "sql": "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)"
+    },
+    {
+      "type": "table",
+      "name": "tracking_exclusions",
+      "table": "tracking_exclusions",
+      "sql": "CREATE TABLE tracking_exclusions ( kind TEXT NOT NULL CHECK(kind IN ('app','website')), pattern TEXT NOT NULL, created_ts INTEGER NOT NULL, PRIMARY KEY(kind, pattern) )"
+    },
+    {
+      "type": "trigger",
+      "name": "cleanup_empty_session_corrections",
+      "table": "categories",
+      "sql": "CREATE TRIGGER cleanup_empty_session_corrections AFTER DELETE ON categories FOR EACH ROW BEGIN DELETE FROM session_corrections WHERE corrected_start_ts IS NULL AND corrected_end_ts IS NULL AND category_id IS NULL; END"
+    },
+    {
+      "type": "trigger",
+      "name": "delete_category_rules",
+      "table": "categories",
+      "sql": "CREATE TRIGGER delete_category_rules BEFORE DELETE ON categories FOR EACH ROW BEGIN DELETE FROM rules WHERE category_id = OLD.id; END"
+    }
+  ],
+  "categories": [
+    {
+      "id": 1,
+      "name": "Work",
+      "color": "#2f6fc0",
+      "is_productive": 1,
+      "is_neutral": 0,
+      "is_ignored": 0,
+      "sort_order": 1
+    },
+    {
+      "id": 2,
+      "name": "Communication",
+      "color": "#56c8d8",
+      "is_productive": 0,
+      "is_neutral": 1,
+      "is_ignored": 0,
+      "sort_order": 2
+    },
+    {
+      "id": 3,
+      "name": "Browsing",
+      "color": "#e0a53a",
+      "is_productive": 0,
+      "is_neutral": 1,
+      "is_ignored": 0,
+      "sort_order": 3
+    },
+    {
+      "id": 4,
+      "name": "Entertainment",
+      "color": "#e75fa0",
+      "is_productive": 0,
+      "is_neutral": 0,
+      "is_ignored": 0,
+      "sort_order": 4
+    },
+    {
+      "id": 5,
+      "name": "System",
+      "color": "#828994",
+      "is_productive": 0,
+      "is_neutral": 1,
+      "is_ignored": 0,
+      "sort_order": 5
+    },
+    {
+      "id": 6,
+      "name": "Ignored",
+      "color": "#44474e",
+      "is_productive": 0,
+      "is_neutral": 0,
+      "is_ignored": 1,
+      "sort_order": 99
+    }
+  ]
+}

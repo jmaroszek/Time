@@ -10,7 +10,8 @@
 //! The bootstrap schema in `schema` is duplicated in `tracker/db.py`, because
 //! either half may legitimately create the database first (dashboard opened
 //! before the tracker's first run, or the reverse). The two must stay
-//! identical; the Python side owns migrations.
+//! identical, which contracts/schema.json holds both to; the Python side owns
+//! migrations.
 
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},

@@ -16,6 +16,9 @@ pub(crate) fn is_older_schema_error(error: &str) -> bool {
     error.starts_with(OLDER_SCHEMA_PREFIX)
 }
 
+/// Duplicated as `_SCHEMA` in tracker/db.py, because either runtime may create
+/// the database first. Both suites compare a fresh database with
+/// contracts/schema.json; change all three together.
 pub(super) const BOOTSTRAP_SQL: &str = r#"
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS sessions (

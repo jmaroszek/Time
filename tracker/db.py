@@ -33,6 +33,9 @@ BEGIN
 END;
 """
 
+# Duplicated as BOOTSTRAP_SQL in dashboard/src-tauri/src/database/schema.rs,
+# because either runtime may create the database first. Both suites compare a
+# fresh database with contracts/schema.json; change all three together.
 _SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY,

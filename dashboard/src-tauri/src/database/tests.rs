@@ -501,6 +501,60 @@ fn user_setting_batches_are_atomic_and_keep_protected_keys_out() {
     });
 }
 
+/// A fresh database is the same whichever runtime creates it. `BOOTSTRAP_SQL`
+/// and the tracker's `_SCHEMA` each build one in their own suite and compare it
+/// with contracts/schema.json, so a change to either copy fails in the suite of
+/// the copy left behind. The Python half is tracker/tests/test_schema_contract.py.
+#[test]
+fn bootstrap_matches_the_schema_contract() {
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../contracts/schema.json")).unwrap();
+    // Comments removed and whitespace collapsed: the form the contract stores.
+    let normalized = |sql: &str| {
+        sql.lines()
+            .map(|line| line.split("--").next().unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    tauri::async_runtime::block_on(async {
+        let database = TimeDatabase::open(scratch_root("schema-contract").join("database.db"))
+            .await
+            .unwrap();
+        let objects: Vec<serde_json::Value> = database
+            .select(
+                "SELECT type, name, tbl_name, sql FROM sqlite_master \
+                 WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
+                    .into(),
+                Vec::new(),
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "type": row["type"],
+                    "name": row["name"],
+                    "table": row["tbl_name"],
+                    "sql": normalized(row["sql"].as_str().unwrap_or_default()),
+                })
+            })
+            .collect();
+        assert_eq!(serde_json::Value::Array(objects), contract["objects"]);
+        let categories = database
+            .select("SELECT * FROM categories ORDER BY id".into(), Vec::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(categories).unwrap(),
+            contract["categories"]
+        );
+        database.close().await;
+    });
+}
+
 #[test]
 fn website_normalization_matches_shared_contract_fixture() {
     #[derive(serde::Deserialize)]
