@@ -26,7 +26,7 @@ TRACKER = read("tracker", "tracker.py")
 RENDERER = read("dashboard", "src", "lib", "trackerHealth.ts")
 HOST = read("dashboard", "src-tauri", "src", "lifecycle.rs")
 QUERIES = read("dashboard", "src", "lib", "queries.ts")
-DATABASE = read("dashboard", "src-tauri", "src", "database.rs")
+DATABASE = read("dashboard", "src-tauri", "src", "database", "settings.rs")
 
 
 def constant(source, pattern, label):

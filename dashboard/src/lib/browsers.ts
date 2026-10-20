@@ -6,7 +6,7 @@
 // is normalized on the way in: "Chrome", "chrome", and a pasted install path
 // all become chrome.exe. Mirrors normalize_browser_processes in tracker/db.py.
 
-// Mirrors DEFAULT_SETTINGS in tracker/db.py and BOOTSTRAP_SQL in database.rs.
+// Mirrors DEFAULT_SETTINGS in tracker/db.py and BOOTSTRAP_SQL in database/schema.rs.
 export const DEFAULT_BROWSER_PROCESSES =
   "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe";
 

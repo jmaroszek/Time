@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 // Vite resolves these at build time so a moved file breaks the import loudly
 // instead of silently reading nothing.
 import pythonSource from "../../../tracker/db.py?raw";
-import rustSource from "../../src-tauri/src/database.rs?raw";
+import rustSource from "../../src-tauri/src/database/schema.rs?raw";
 import { DEFAULT_USER_SETTINGS } from "./queries";
 import {
   SUPPORTED_SCHEMA_VERSION,

@@ -92,18 +92,18 @@ others produces a failure on a user's machine rather than at build time.
 - **The tracker owns recorded sessions and migrations.** It alone creates or
   edits `sessions` rows and alone migrates the schema. The dashboard deletes
   history only through fixed Rust commands and stores user corrections
-  separately. The SQL allowlist in `dashboard/src-tauri/src/database.rs`
+  separately. The SQL allowlist in `dashboard/src-tauri/src/database/guard.rs`
   enforces the boundary.
 - **The schema exists twice.** `_SCHEMA` in `tracker/db.py` and `BOOTSTRAP_SQL`
-  in `database.rs` must stay equivalent, because either runtime may create a new
-  database first.
+  in `dashboard/src-tauri/src/database/schema.rs` must stay equivalent, because
+  either runtime may create a new database first.
 - **A schema bump touches three files.** `SCHEMA_VERSION` in `tracker/db.py`,
   `SCHEMA_VERSION` and the `('schema_version','N')` bootstrap literal in
-  `database.rs`, and `SUPPORTED_SCHEMA_VERSION` in
+  `database/schema.rs`, and `SUPPORTED_SCHEMA_VERSION` in
   `dashboard/src/lib/schema.ts`.
 - **Setting defaults and setting ranges are separate contracts.** Defaults are
   mirrored by `DEFAULT_SETTINGS` in `tracker/db.py` and `BOOTSTRAP_SQL` in
-  `database.rs`. Ranges are mirrored by `get_settings` in `tracker/db.py` and
+  `database/schema.rs`. Ranges are mirrored by `get_settings` in `tracker/db.py` and
   `SPECS` in `dashboard/src/tabs/SettingsTab.tsx`.
 - **Window titles and browser domains must never reach INFO logs.**
   `tracker/tests/test_logging.py` verifies this against real writes.

@@ -2,7 +2,7 @@
  * Schema compatibility boundary shared with tracker/db.py.
  *
  * The third of three copies of this number — `SCHEMA_VERSION` in
- * `tracker/db.py`, `SCHEMA_VERSION` in `database.rs`, and this one. Raise all
+ * `tracker/db.py`, `SCHEMA_VERSION` in `database/schema.rs`, and this one. Raise all
  * three together. The tracker's is the only one that migrates; the other two
  * are refusals, and leaving this one behind makes the dashboard reject a
  * database the tracker has already upgraded.

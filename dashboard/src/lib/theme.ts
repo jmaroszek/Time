@@ -12,7 +12,7 @@ export type ThemePreference = ThemeName | "system";
 
 /** New installs follow the OS so a light-mode user never gets a dark first run.
  *  Mirrored in DEFAULT_SETTINGS (tracker/db.py) and BOOTSTRAP_SQL
- *  (src-tauri/src/database.rs) — see the settings-defaults invariant in
+ *  (src-tauri/src/database/schema.rs) — see the settings-defaults invariant in
  *  CONTRIBUTING.md. */
 export const DEFAULT_THEME_PREFERENCE: ThemePreference = "system";
 

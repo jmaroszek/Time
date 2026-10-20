@@ -32,7 +32,7 @@ These are the claims the website makes. Each one is verifiable in a few minutes:
 | Window titles are off until you turn them on | `DEFAULT_SETTINGS` in [tracker/db.py](tracker/db.py) |
 | Titles and domains never reach the log file | [tracker/tests/test_logging.py](tracker/tests/test_logging.py) asserts it against real writes |
 | The webview cannot reach your filesystem or pick a database | The capability set in [capabilities/default.json](dashboard/src-tauri/capabilities/default.json) and the CSP in [tauri.conf.json](dashboard/src-tauri/tauri.conf.json) |
-| The dashboard cannot run arbitrary SQL | The statement allowlist in [database.rs](dashboard/src-tauri/src/database.rs) |
+| The dashboard cannot run arbitrary SQL | The statement allowlist in [database/guard.rs](dashboard/src-tauri/src/database/guard.rs) |
 
 [SECURITY.md](SECURITY.md) has the full threat model, the limits of local
 storage, and how to report a vulnerability privately.
