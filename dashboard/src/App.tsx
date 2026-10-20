@@ -16,6 +16,7 @@ import {
 } from "./components/AppStates";
 import { FeedbackPanel } from "./components/FeedbackPanel";
 import { isMissingSchemaError } from "./lib/dbErrors";
+import { tabForShortcut, tabShortcutLabel } from "./lib/tabShortcuts";
 import { browserDomainCoverage, websiteSignalConfirmed } from "./lib/domainCoverage";
 import {
   currentHistoryRevision,
@@ -83,6 +84,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "activity", label: "Activity" },
   { id: "settings", label: "Settings" },
 ];
+const TAB_IDS = TABS.map((t) => t.id);
 
 export default function App() {
   return (
@@ -128,6 +130,22 @@ function Shell() {
   // the Insights tab survives leaving for another tab and coming back.
   const insightsView = useInsightsView();
   const liveTick = useLiveRefresh();
+
+  // The tab strip scrolls away with the page on Insights and Settings; these
+  // keys switch tabs from wherever the reader is. Not under a modal dialog:
+  // the dialog's owner lives in a tab, and switching would unmount it mid-edit.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (document.querySelector("[aria-modal='true']")) return;
+      const next = tabForShortcut(event, TAB_IDS, tab);
+      if (next === null) return;
+      event.preventDefault();
+      setTab(next);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [tab]);
 
   useEffect(() => {
     void takeRestoreNotice()
@@ -745,7 +763,7 @@ function TabBar({
           style={{ width: pill.width, transform: `translateX(${pill.left}px)`, left: 0 }}
         />
       )}
-      {TABS.map((t) => (
+      {TABS.map((t, index) => (
         <button
           key={t.id}
           type="button"
@@ -758,10 +776,14 @@ function TabBar({
             tab === t.id ? "text-ink" : "text-ink-2 hover:text-ink"
           }`}
           aria-describedby={t.id === "activity" && backlog ? BACKLOG_HINT_ID : undefined}
+          aria-keyshortcuts={`Control+${index + 1}`}
           // The same sentence the hint below carries, for the reader who has
           // neither a screen reader to read it nor any other way to find out
-          // what a bare dot means.
-          title={t.id === "activity" && backlog ? BACKLOG_HINT : undefined}
+          // what a bare dot means. Every tab's tooltip also names its key, the
+          // one place a mouse reader will come across the shortcuts at all.
+          title={t.id === "activity" && backlog
+            ? `${BACKLOG_HINT} (${tabShortcutLabel(index)})`
+            : `${t.label} (${tabShortcutLabel(index)})`}
         >
           {t.label}
           {/* A dot, not a count: the number belongs where you can act on it, and
