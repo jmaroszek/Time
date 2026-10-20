@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import DateRangePicker, { type PresetOrCustom } from "./components/DateRangePicker";
 import { Spinner } from "./components/ui";
@@ -15,8 +15,10 @@ import {
   WelcomePanel,
 } from "./components/AppStates";
 import { FeedbackPanel } from "./components/FeedbackPanel";
+import { TAB_IDS, TabBar, type Tab } from "./components/TabBar";
+import { UpdateButton } from "./components/UpdateButton";
 import { isMissingSchemaError } from "./lib/dbErrors";
-import { tabForShortcut, tabShortcutLabel } from "./lib/tabShortcuts";
+import { tabForShortcut } from "./lib/tabShortcuts";
 import { browserDomainCoverage, websiteSignalConfirmed } from "./lib/domainCoverage";
 import {
   currentHistoryRevision,
@@ -56,7 +58,6 @@ import {
   type ActivitySource,
   type ActivityWindowTarget,
 } from "./lib/activity";
-import { downloadPercent, updateButtonLabel, type AvailableUpdate, type UpdateProgress } from "./lib/appUpdate";
 import { BannerProvider, useBanner } from "./state/banner";
 import { useAppUpdate } from "./state/useAppUpdate";
 import { useFeedbackPrompt } from "./state/useFeedbackPrompt";
@@ -68,23 +69,6 @@ import { useSessions } from "./state/useSessions";
 import ActivityTab, { type ActivityView } from "./tabs/ActivityTab";
 import OverviewTab from "./tabs/OverviewTab";
 import SettingsTab from "./tabs/SettingsTab";
-
-type Tab = "insights" | "activity" | "settings";
-
-/** Ties the Activity tab to its backlog hint without putting the hint inside
- *  the button, where it would become part of the tab's accessible name. */
-const BACKLOG_HINT_ID = "activity-backlog-hint";
-
-/** One sentence, spent twice — as the tab's description and as its tooltip — so
- *  the dot means the same thing however a reader arrives at it. */
-const BACKLOG_HINT = "Unclassified activity is waiting";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "insights", label: "Insights" },
-  { id: "activity", label: "Activity" },
-  { id: "settings", label: "Settings" },
-];
-const TAB_IDS = TABS.map((t) => t.id);
 
 export default function App() {
   return (
@@ -716,182 +700,6 @@ function Shell() {
           />
         )}
       </main>
-    </div>
-  );
-}
-
-/** Tab switcher whose selected pill slides between tabs instead of jumping. The
- *  pill is one absolutely positioned element measured off the button rects, so it
- *  tracks label widths and font/zoom changes rather than assuming equal tabs. */
-function TabBar({
-  tab,
-  onTab,
-  backlog,
-}: {
-  tab: Tab;
-  onTab: (t: Tab) => void;
-  /** Enough unclassified time to be worth a mark on the Activity tab. */
-  backlog: boolean;
-}) {
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const buttonRefs = useRef(new Map<Tab, HTMLButtonElement>());
-  const [pill, setPill] = useState<{ left: number; width: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const measure = () => {
-      const list = listRef.current;
-      const button = buttonRefs.current.get(tab);
-      if (!list || !button) return;
-      setPill({ left: button.offsetLeft, width: button.offsetWidth });
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    if (listRef.current) observer.observe(listRef.current);
-    for (const button of buttonRefs.current.values()) observer.observe(button);
-    return () => observer.disconnect();
-  }, [tab]);
-
-  return (
-    <div
-      ref={listRef}
-      className="relative flex items-center gap-1 rounded-xl border border-edge bg-surface p-1"
-    >
-      {pill && (
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute top-1 bottom-1 rounded-lg bg-selected transition-[transform,width] duration-200 ease-out motion-reduce:transition-none"
-          style={{ width: pill.width, transform: `translateX(${pill.left}px)`, left: 0 }}
-        />
-      )}
-      {TABS.map((t, index) => (
-        <button
-          key={t.id}
-          type="button"
-          ref={(node) => {
-            if (node) buttonRefs.current.set(t.id, node);
-            else buttonRefs.current.delete(t.id);
-          }}
-          onClick={() => onTab(t.id)}
-          className={`relative rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors ${
-            tab === t.id ? "text-ink" : "text-ink-2 hover:text-ink"
-          }`}
-          aria-describedby={t.id === "activity" && backlog ? BACKLOG_HINT_ID : undefined}
-          aria-keyshortcuts={`Control+${index + 1}`}
-          // The same sentence the hint below carries, for the reader who has
-          // neither a screen reader to read it nor any other way to find out
-          // what a bare dot means. Every tab's tooltip also names its key, the
-          // one place a mouse reader will come across the shortcuts at all.
-          title={t.id === "activity" && backlog
-            ? `${BACKLOG_HINT} (${tabShortcutLabel(index)})`
-            : `${t.label} (${tabShortcutLabel(index)})`}
-        >
-          {t.label}
-          {/* A dot, not a count: the number belongs where you can act on it, and
-              the Library's own section carries it. Absolutely positioned so the
-              tab keeps its width — a label that grew when the mark appeared
-              would shift the tabs beside it and move the sliding pill under the
-              cursor that just clicked. */}
-          {t.id === "activity" && backlog && (
-            <span
-              aria-hidden="true"
-              className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-accent"
-            />
-          )}
-        </button>
-      ))}
-      {/* Described, not renamed. This text sits outside the button on purpose:
-          inside it, it would join the accessible name, and a tab that is called
-          "Activity" while idle and something longer while work is pending is a
-          different control to anyone finding it by name. */}
-      {backlog && (
-        <span id={BACKLOG_HINT_ID} className="sr-only">
-          {BACKLOG_HINT}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/**
- * The whole update affordance: present only when there is something to install,
- * and absent entirely the rest of the time. It sits beside the tab strip rather
- * than inside Settings because an update nobody finds is an update nobody
- * applies — and beside it rather than in it, because the sliding pill measures
- * itself off the tab buttons and a fourth child in that container would join
- * the row it is measuring.
- *
- * At rest it is the download glyph the CSV export uses, at the same weight. The
- * label appears on hover and on keyboard focus, over the header rather than
- * within it: the wrapper holds a fixed 28px square and the button is absolute
- * inside it, so nothing reflows when the label arrives. That is not fussiness —
- * every tab here is one width for the same reason, because the date picker at
- * the other end of this header moves when anything to its left changes size.
- */
-function UpdateButton({
-  update,
-  installing,
-  progress,
-  onInstall,
-}: {
-  update: AvailableUpdate;
-  installing: boolean;
-  progress: UpdateProgress | null;
-  onInstall: () => void;
-}) {
-  const label = updateButtonLabel(update, installing, progress);
-  const percent = downloadPercent(progress);
-  return (
-    <div className="relative h-7 w-7 shrink-0">
-      <button
-        type="button"
-        onClick={onInstall}
-        disabled={installing}
-        aria-label={label}
-        className={`group absolute top-0 left-0 flex h-7 min-w-7 items-center justify-center rounded-lg px-1.5 whitespace-nowrap transition-colors motion-reduce:transition-none disabled:cursor-progress ${
-          installing
-            ? "bg-hover-2 text-ink-2"
-            : "text-accent hover:bg-hover-2 focus-visible:bg-hover-2"
-        }`}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-          className="shrink-0"
-        >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="7 10 12 15 17 10" />
-          <line x1="12" x2="12" y1="15" y2="3" />
-        </svg>
-        {/* max-width rather than display, so the reveal can be animated and so
-            the text stays in the accessible tree either way. */}
-        <span
-          aria-hidden="true"
-          className={`overflow-hidden text-xs font-medium transition-all duration-150 motion-reduce:transition-none ${
-            installing
-              ? "ml-1.5 max-w-56 opacity-100"
-              : "ml-0 max-w-0 opacity-0 group-hover:ml-1.5 group-hover:max-w-56 group-hover:opacity-100 group-focus-visible:ml-1.5 group-focus-visible:max-w-56 group-focus-visible:opacity-100"
-          }`}
-        >
-          {label}
-        </span>
-        {/* Measured against the button, not the 28px wrapper — the button is
-            what grew. Absent until the endpoint declares a length, which is
-            what tells the reader "working" from "half done". */}
-        {installing && percent !== null && (
-          <span
-            aria-hidden="true"
-            className="absolute bottom-0 left-0 h-0.5 rounded-full bg-accent transition-[width] duration-200 motion-reduce:transition-none"
-            style={{ width: `${percent}%` }}
-          />
-        )}
-      </button>
     </div>
   );
 }

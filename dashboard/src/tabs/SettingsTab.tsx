@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
-import { ConfirmDialog, Spinner } from "../components/ui";
+import { Spinner } from "../components/ui";
 import { ExtensionLinks } from "../components/ExtensionLinks";
 import { displayBrowserProcesses, normalizeBrowserProcesses } from "../lib/browsers";
 import { fmtDuration } from "../lib/format";
@@ -39,8 +38,6 @@ import {
   fetchSettings,
   fetchStartupIsRegistered,
   fetchTrackerStatus,
-  listTrackingExclusions,
-  restoreDefaultSettings,
   runTrackingLifecycle,
   updateSetting,
   type TrackerStatus,
@@ -53,11 +50,13 @@ import {
   SPECS,
   type NumericSpec,
 } from "../lib/settingsSpecs";
-import { SUPPORT_EMAIL, supportEmailUrl } from "../lib/support";
 import { useBanner } from "../state/banner";
 import { useLifecycleBusy } from "../lib/lifecycleBusy";
 import { useMeta } from "../state/meta";
 import DataSection from "./settings/DataSection";
+import ExclusionSummary from "./settings/ExclusionSummary";
+import HelpAndFeedbackSection from "./settings/HelpAndFeedbackSection";
+import RestoreDefaultsSection from "./settings/RestoreDefaultsSection";
 import {
   FlashedSection,
   SECTION_FLASH_MS,
@@ -109,7 +108,6 @@ type SaveOutcome = "idle" | "saved" | "failed";
 // Pending writes outlive the tab. A fresh mount must join the same queue so
 // older selections cannot commit after the user's latest choice.
 const settingWrites = new KeyedSerialQueue();
-
 
 export default function SettingsTab({
   onManageExclusions,
@@ -1166,147 +1164,3 @@ export default function SettingsTab({
     </FlashedSection.Provider>
   );
 }
-
-/** Privacy stays discoverable from Settings without Settings hosting the list:
- *  exclusions are per-entity curation, and that belongs with the other
- *  per-entity work in Activity. This row only ever says how many there are —
- *  a count is the one rendering that reads the same at three exclusions and at
- *  three hundred — and hands off to the list that can actually edit them. */
-function ExclusionSummary({ onManage }: { onManage: () => void }) {
-  const [counts, setCounts] = useState<{ app: number; website: number } | null>(null);
-  useEffect(() => {
-    void listTrackingExclusions()
-      .then((items) => setCounts({
-        app: items.filter((item) => item.kind === "app").length,
-        website: items.filter((item) => item.kind === "website").length,
-      }))
-      .catch(() => setCounts(null));
-  }, []);
-  if (counts === null) return null;
-  const total = counts.app + counts.website;
-  const parts = [
-    `${counts.app} app${counts.app === 1 ? "" : "s"}`,
-    `${counts.website} website${counts.website === 1 ? "" : "s"}`,
-  ];
-  return (
-    <div className="flex flex-col items-start gap-2 border-t border-surface-2 px-4 py-[13px] sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-      <p className="min-w-0 text-xs leading-snug text-ink-3">
-        {total === 0
-          ? "Nothing is excluded from tracking — mark an app or website “Do not track” in Activity."
-          : `${parts.join(" and ")} are never tracked.`}
-      </p>
-      {total > 0 && (
-        <TextAction onClick={onManage}>View and manage</TextAction>
-      )}
-    </div>
-  );
-}
-
-/** The app versions that make a report actionable travel with the email
- *  itself rather than sitting in this section — the one place they're worth
- *  reading on their own is beside the update control in Privacy & recording,
- *  which already reports what's installed. */
-function HelpAndFeedbackSection({
-  appVersion,
-  trackerVersion,
-}: {
-  appVersion: string | null;
-  trackerVersion: string | undefined;
-}) {
-  const banner = useBanner();
-
-  const emailSupport = async () => {
-    try {
-      await openUrl(supportEmailUrl({ dashboardVersion: appVersion, trackerVersion }));
-    } catch (error) {
-      banner.report(error, "opening an email to Time support");
-    }
-  };
-
-  return (
-    <Section title="Help & feedback">
-      <Row
-        label="Contact support"
-        help={
-          <>
-            Questions, bugs, or ideas? Write to{" "}
-            <span className="font-medium text-ink-2">{SUPPORT_EMAIL}</span>.
-          </>
-        }
-        control={<TextAction onClick={() => void emailSupport()}>Email support</TextAction>}
-      />
-    </Section>
-  );
-}
-
-function RestoreDefaultsSection({
-  disabled,
-  onRestored,
-}: {
-  disabled: boolean;
-  onRestored: () => void;
-}) {
-  const meta = useMeta();
-  const banner = useBanner();
-  const [restoring, setRestoring] = useState(false);
-  const [restored, setRestored] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-
-  const restore = async () => {
-    if (disabled || restoring) return;
-    setRestoring(true);
-    setRestored(false);
-    try {
-      await restoreDefaultSettings();
-      await meta.refresh();
-      onRestored();
-      setRestored(true);
-      setTimeout(() => setRestored(false), 2_000);
-      setConfirming(false);
-    } catch (error) {
-      banner.report(error, "default settings");
-    } finally {
-      setRestoring(false);
-    }
-  };
-
-  return (
-    <Section title="Defaults">
-      {confirming && (
-        <ConfirmDialog
-          title="Restore default settings?"
-          body="Every setting on this page returns to its default, including recording and Windows startup, which will be turned off."
-          note="Recorded history, categories, rules, aliases, exclusions, corrections, and backups are not touched."
-          confirmLabel="Restore defaults"
-          busyLabel="Restoring…"
-          busy={restoring}
-          confirmDisabled={disabled}
-          // Not "danger": this resets preferences and destroys no data. The red
-          // button is reserved for the ones that remove recorded activity.
-          variant="default"
-          onConfirm={() => void restore()}
-          onClose={() => setConfirming(false)}
-        />
-      )}
-      <Row
-        label="Restore default settings"
-        help="Resets every setting on this page without changing recorded history."
-        control={
-          <TextAction
-            disabled={disabled || restoring}
-            title={disabled ? "Wait for settings to finish saving" : undefined}
-            onClick={() => setConfirming(true)}
-          >
-            {restoring ? "Restoring…" : restored ? "Defaults restored" : "Restore defaults"}
-          </TextAction>
-        }
-      />
-    </Section>
-  );
-}
-
-/** One card, one story: where the data lives, how to save it, how to shed it.
- *  Retention sits with backups because the safe order is back up, then delete —
- *  and it ends in the danger row so the destructive step is last, not floating
- *  in its own card. Lifecycle-level deletion stays in Settings; exact record
- *  correction lives in Activity. */
