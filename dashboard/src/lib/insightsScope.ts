@@ -1,9 +1,7 @@
 import {
-  categoryKind,
   categoryState,
   type Category,
   type Classifier,
-  type Productivity,
 } from "./classify";
 import { entityIdentity, windowGroupKey } from "./entityIdentity";
 import { appGroupKey, cleanDomainName, cleanProcessName } from "./format";
@@ -321,10 +319,6 @@ export interface ScopeCandidate {
   /** The category the candidate's time mostly resolved to — itself, for a
    *  category. Null when that was uncategorized time. */
   category: Category | null;
-  /** Every productivity state the candidate's categorized time is in, in
-   *  productive, neutral, unproductive order. Empty when none of it is
-   *  categorized. */
-  states: Productivity[];
   /** What was actually recorded under the name, for search: every process an
    *  app's alias gathers, lowercased, or a website's host. Empty for a
    *  category. */
@@ -415,15 +409,10 @@ export function scopeCandidates(
             category = candidate;
           }
         }
-        const present = new Set(
-          [...split.keys()].flatMap((member) => (member ? [categoryKind(member)] : [])),
-        );
         return {
           scope,
           seconds,
           category,
-          states: (["productive", "neutral", "unproductive"] as const)
-            .filter((state) => present.has(state)),
           identities: [...identities].sort(),
         };
       })

@@ -32,7 +32,6 @@ type PickerOption = {
   /** The executable or host a search found this by, when not its name. */
   matched: string | null;
   seconds: number;
-  states: Productivity[];
 };
 
 const SECTION_LABELS = {
@@ -46,9 +45,10 @@ const SECTION_LABELS = {
  * page is narrowed to.
  *
  * It sits beside the tabs. Unscoped it is only a magnifier; scoped it grows to
- * name the subject, which makes it the page's heading as well as the way to
- * change it, so the subject is stated once, in the header, rather than in a row
- * of its own above the tiles. An app or website held inside a category shows
+ * name the subject, with its productivity dot, which makes it the page's
+ * heading as well as the way to change it, so the subject is stated once, in
+ * the header, rather than in a row of its own above the tiles. The menu's rows
+ * carry no dots: a wall of them is noise when picking by name. An app or website held inside a category shows
  * that category ahead of its name, and the category goes back one step to it;
  * the clear button goes all the way out, which is why the list itself has no
  * "All activity" row.
@@ -98,7 +98,6 @@ export default function ScopePicker({
       label: candidate.scope.name,
       matched: matchedIdentity(candidate, query),
       seconds: candidate.seconds,
-      states: candidate.states,
     });
     return (["categories", "apps", "websites"] as const)
       .map((section) => ({ section, options: found[section].map(toOption) }))
@@ -228,7 +227,6 @@ export default function ScopePicker({
           index === active ? "bg-selected-strong text-ink" : "text-ink-2-raised"
         }`}
       >
-        <StateDot colors={option.states.map(stateColor)} />
         <span className="min-w-0 flex-1 truncate">
           {option.label}
           {option.matched && <span className="ml-1.5 text-ink-3-raised">{option.matched}</span>}
@@ -345,11 +343,16 @@ export default function ScopePicker({
             aria-label="Apps, websites, and categories"
             className="min-h-0 overflow-y-auto"
           >
-            {sections.map(({ section, options: sectionOptions }) => (
-              <div key={section} role="group" aria-label={SECTION_LABELS[section]}>
+            {sections.map(({ section, options: sectionOptions }, sectionIndex) => (
+              <div
+                key={section}
+                role="group"
+                aria-label={SECTION_LABELS[section]}
+                className={sectionIndex > 0 ? "mt-1.5 border-t border-raised-edge" : ""}
+              >
                 <p
                   role="presentation"
-                  className="px-2.5 pb-1 pt-2.5 text-micro font-medium uppercase tracking-wide text-ink-3-raised"
+                  className="px-2.5 pb-1 pt-2.5 text-micro font-medium uppercase tracking-[0.08em] text-ink-3-raised"
                 >
                   {SECTION_LABELS[section]}
                 </p>
