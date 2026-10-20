@@ -803,7 +803,6 @@ export default function CategoriesAndRules({
                       </span>
                       <span
                         className="min-w-0 shrink cursor-text truncate font-mono"
-                        title="Double-click to edit"
                       >
                         {rule.pattern}
                       </span>
@@ -841,7 +840,7 @@ export default function CategoriesAndRules({
                       <span className="grid shrink-0 justify-items-end [&>*]:col-start-1 [&>*]:row-start-1">
                         {(unused || (ruleOrder === "use" && usage?.has(rule.id))) && (
                           <span
-                            className={`self-center tabular-nums text-ink-3 transition-opacity group-focus-within/rule:opacity-0 group-hover/rule:opacity-0 ${
+                            className={`self-center tabular-nums text-ink-3 transition-opacity group-focus-within/rule:pointer-events-none group-focus-within/rule:opacity-0 group-hover/rule:pointer-events-none group-hover/rule:opacity-0 ${
                               editingThis ? "opacity-0" : ""
                             }`}
                             title={unused
