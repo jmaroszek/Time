@@ -17,7 +17,7 @@ import { getDb } from "./db";
 import type { Session } from "./metrics";
 import { assertSupportedSchemaVersion } from "./schema";
 import { invalidateHistory } from "./historyInvalidation";
-import { withLifecycleBusy } from "../state/lifecycleBusy";
+import { withLifecycleBusy } from "./lifecycleBusy";
 
 interface SessionColumns {
   ids: number[];
@@ -199,6 +199,12 @@ export async function runTrackingLifecycle(
  *  itself as present. */
 export async function fetchStartupIsRegistered(): Promise<boolean> {
   return invoke<boolean>("startup_is_registered");
+}
+
+/** The OS's handler for https links ("ChromeHTML", "MSEdgeHTM", ...), or null.
+ *  Used only to choose which extension store to offer. */
+export async function fetchDefaultBrowserProgId(): Promise<string | null> {
+  return invoke<string | null>("default_browser_prog_id");
 }
 
 // Mirrors fresh-install values in tracker/db.py DEFAULT_SETTINGS and the Rust

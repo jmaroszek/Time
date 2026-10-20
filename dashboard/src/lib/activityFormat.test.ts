@@ -22,13 +22,13 @@ import {
   titleMatchParts,
   updateSortState,
   visitEditLabel,
-} from "../lib/activityFormat";
-import { toggleSetValue, toggleSetValues } from "../lib/setUpdates";
-import { detailPanelBox } from "../lib/responsive";
-import { describeTitleRule } from "../lib/categoryRules";
-import { previewRule, previewTitleRule } from "../lib/titleRuleAnalysis";
-import type { Category, Rule, TitleRuleSpec } from "../lib/classify";
-import type { ActivityEntitySummary, ActivitySource } from "../lib/activity";
+} from "./activityFormat";
+import { toggleSetValue, toggleSetValues } from "./setUpdates";
+import { detailPanelBox } from "./responsive";
+import { describeTitleRule } from "./categoryRules";
+import { previewRule, previewTitleRule } from "./titleRuleAnalysis";
+import type { Category, Rule, TitleRuleSpec } from "./classify";
+import type { ActivityEntitySummary, ActivitySource } from "./activity";
 
 /** Boundaries are calendar dates, not elapsed hours: 00:30 and 23:30 on the
  *  same date are both "today", and 23:30 last night is "Yesterday" even though

@@ -3,7 +3,11 @@ import { useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "
 import { normalizeBrowserProcesses } from "../../lib/browsers";
 import { coveringMediaSite, normalizeMediaSites } from "../../lib/mediaSites";
 
-/** Keep number-field drafts within the syntax every Settings spec accepts. */
+/** Strips a numeric draft down to what a number field could ever mean here —
+ *  digits, and (only where the spec steps in fractions) a single decimal
+ *  point. Every spec's minimum is non-negative, so a minus sign is never
+ *  valid; scientific notation isn't either. Runs on every keystroke and
+ *  paste, ahead of the min/max clamp saveNumeric applies on blur. */
 export function sanitizeNumericDraft(raw: string, allowDecimal: boolean): string {
   let value = raw.replace(/[^0-9.]/g, "");
   if (!allowDecimal) return value.replace(/\./g, "");

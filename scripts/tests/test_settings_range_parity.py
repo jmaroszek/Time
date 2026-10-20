@@ -2,7 +2,7 @@
 
 Validation ranges live in two places: the clamps in `get_settings`
 (tracker/db.py), which decide what the tracker actually runs with, and `SPECS`
-(dashboard/src/tabs/SettingsTab.tsx), which decides what the reader is allowed
+(dashboard/src/lib/settingsSpecs.ts), which decides what the reader is allowed
 to type. Neither can observe the other.
 
 The failure is silent in the worst way, because the reader is looking straight
@@ -11,9 +11,8 @@ saves it, reads it back, and displays it — while the tracker quietly runs on t
 clamped one. Nothing is broken, nothing is logged, and the number on screen is a
 lie for as long as it is left there.
 
-Read both files as source. The alternative is exporting `SPECS` from a component
-module purely to be imported by a test, which changes shipping code to suit the
-guard rather than the other way round.
+Read both files as source, so the guard never depends on either runtime's
+module system.
 """
 
 import re
@@ -21,8 +20,8 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 PYTHON = (REPOSITORY / "tracker" / "db.py").read_text(encoding="utf-8")
-SETTINGS_TAB = (
-    REPOSITORY / "dashboard" / "src" / "tabs" / "SettingsTab.tsx"
+SETTINGS_SPECS = (
+    REPOSITORY / "dashboard" / "src" / "lib" / "settingsSpecs.ts"
 ).read_text(encoding="utf-8")
 
 # `_float("key", default, lo, hi)` — the tracker's clamp for one setting.
@@ -63,9 +62,9 @@ def specs():
             float(match.group("min")) * float(match.group("scale")),
             float(match.group("max")) * float(match.group("scale")),
         )
-        for match in SPEC.finditer(SETTINGS_TAB)
+        for match in SPEC.finditer(SETTINGS_SPECS)
     }
-    assert found, "no SPECS entries found in SettingsTab.tsx; the regex has rotted"
+    assert found, "no SPECS entries found in settingsSpecs.ts; the regex has rotted"
     return found
 
 

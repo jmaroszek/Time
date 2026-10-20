@@ -19,11 +19,13 @@ import {
   type DatabaseBackup,
 } from "../../lib/queries";
 import { useBanner } from "../../state/banner";
-import { useLifecycleBusy } from "../../state/lifecycleBusy";
+import { useLifecycleBusy } from "../../lib/lifecycleBusy";
 import { useMeta } from "../../state/meta";
 import { Section } from "./chrome";
 import { InlineAction, Row, TextAction, handleRadioKey, sanitizeNumericDraft } from "./fields";
 
+// A century comfortably exceeds any real retention need and keeps the cutoff
+// computation (days * 86_400 seconds) far from anything that could misbehave.
 const MAX_RETENTION_DAYS = 36_500;
 
 export default function DataSection({

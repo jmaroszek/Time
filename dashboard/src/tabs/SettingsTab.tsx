@@ -11,7 +11,6 @@ import {
   hidesRareItems,
   hidesUtilities,
   noiseModeFor,
-  type NoiseMode,
 } from "../lib/noise";
 import {
   paletteForTheme,
@@ -46,9 +45,17 @@ import {
   updateSetting,
   type TrackerStatus,
 } from "../lib/queries";
+import {
+  clockHour,
+  displayValue,
+  resolvedNoiseMode,
+  settingDraftValue,
+  SPECS,
+  type NumericSpec,
+} from "../lib/settingsSpecs";
 import { SUPPORT_EMAIL, supportEmailUrl } from "../lib/support";
 import { useBanner } from "../state/banner";
-import { useLifecycleBusy } from "../state/lifecycleBusy";
+import { useLifecycleBusy } from "../lib/lifecycleBusy";
 import { useMeta } from "../state/meta";
 import DataSection from "./settings/DataSection";
 import {
@@ -75,30 +82,6 @@ import {
   sanitizeNumericDraft,
 } from "./settings/fields";
 
-interface NumericSpec {
-  key: string;
-  min: number;
-  max: number;
-  scale: number;
-  step?: number;
-}
-
-// UI clamp ranges. The tracker separately clamps what it consumes in
-// tracker/db.py get_settings — keep the two in sight of each other.
-const SPECS = {
-  goal: { key: "weekly_goal_hours", min: 0, max: 100, scale: 1 },
-  minimum: { key: "min_app_seconds_per_day", min: 0, max: 30, scale: 60 },
-  start: { key: "day_start_hour", min: 0, max: 23, scale: 1 },
-  end: { key: "day_end_hour", min: 1, max: 24, scale: 1 },
-  idle: { key: "idle_threshold_seconds", min: 1, max: 60, scale: 60 },
-  focus: { key: "focus_chain_max_gap_seconds", min: 0, max: 30, scale: 60 },
-  noiseTime: { key: "activity_noise_max_seconds", min: 0, max: 30, scale: 60, step: 0.5 },
-  noiseSessions: { key: "activity_noise_max_sessions", min: 1, max: 20, scale: 1 },
-} satisfies Record<string, NumericSpec>;
-const SPECS_BY_KEY = new Map(
-  Object.values(SPECS).map((spec) => [spec.key, spec]),
-);
-
 const TRACKER_STATUS_POLL_MS = 2_000;
 const TRACKER_START_TIMEOUT_MS = 10_000;
 const TRACKING_SCHEDULE_DAYS = [
@@ -111,8 +94,6 @@ const TRACKING_SCHEDULE_DAYS = [
   { value: 6, short: "S", label: "Sunday" },
 ] as const;
 
-// A century comfortably exceeds any real retention need and keeps the cutoff
-// computation (days * 86_400 seconds) far from anything that could misbehave.
 function trackerHeartbeatIsLive(status: TrackerStatus): boolean {
   return status.lastHeartbeat !== null
     && status.lastHeartbeat > 0
@@ -122,47 +103,6 @@ function trackerHeartbeatIsLive(status: TrackerStatus): boolean {
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-function displayValue(spec: NumericSpec, raw: string | undefined): string {
-  const value = Number(raw);
-  return Number.isFinite(value) ? String(Math.round((value / spec.scale) * 100) / 100) : "";
-}
-
-/** Strips a numeric draft down to what a number field could ever mean here —
- *  digits, and (only where the spec steps in fractions) a single decimal
- *  point. Every spec's minimum is non-negative, so a minus sign is never
- *  valid; scientific notation isn't either. Runs on every keystroke and
- *  paste, ahead of the min/max clamp saveNumeric applies on blur. */
-function settingDraftValue(
-  key: string,
-  settings: Record<string, string>,
-): string {
-  const spec = SPECS_BY_KEY.get(key);
-  if (spec) return displayValue(spec, settings[key]);
-  if (key === "browser_processes") {
-    return displayBrowserProcesses(settings[key] ?? "");
-  }
-  return settings[key] ?? "";
-}
-
-/** Split rather than one formatted string, so the hour renders in the same
- *  bright weight as every other stepper's value and "am"/"pm" renders in the
- *  same muted weight as every other stepper's unit — matching "20 hrs" and
- *  "3 min" instead of standing out as the one all-bright value in the section. */
-function clockHour(value: number): { hour: string; meridiem: "am" | "pm" } {
-  const normalized = value % 24;
-  return { hour: String(normalized % 12 || 12), meridiem: normalized < 12 ? "am" : "pm" };
-}
-
-function resolvedNoiseMode(raw: string | undefined): NoiseMode {
-  return raw === "off"
-    || raw === "one_off"
-    || raw === "utilities_only"
-    || raw === "utilities"
-    ? raw
-    : "utilities";
-}
-
 
 type SaveOutcome = "idle" | "saved" | "failed";
 

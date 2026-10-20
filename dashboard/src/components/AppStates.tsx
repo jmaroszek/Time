@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
 
 import {
   PUBLISHED_TIME_EXTENSION_LISTINGS,
@@ -13,6 +12,7 @@ import {
 import { getDbPath } from "../lib/db";
 import {
   deleteCategory,
+  fetchDefaultBrowserProgId,
   runTrackingLifecycle,
   updateSetting,
 } from "../lib/queries";
@@ -23,7 +23,7 @@ import {
 } from "../lib/trackerHealth";
 import { formatScheduleResume } from "../lib/trackingSchedule";
 import { useBanner } from "../state/banner";
-import { useLifecycleBusy } from "../state/lifecycleBusy";
+import { useLifecycleBusy } from "../lib/lifecycleBusy";
 import { useMeta } from "../state/meta";
 import { Button, Checkbox } from "./ui";
 
@@ -45,7 +45,7 @@ export function PrivacyOnboarding() {
 
   useEffect(() => {
     let cancelled = false;
-    void invoke<string | null>("default_browser_prog_id")
+    void fetchDefaultBrowserProgId()
       .catch(() => null)
       .then((progId) => {
         if (cancelled) return;

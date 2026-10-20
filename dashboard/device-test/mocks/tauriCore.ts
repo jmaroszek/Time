@@ -758,6 +758,35 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
     case "backup_database":
       result = "C:\\DeviceFixture\\Backups\\backup_manual_fixed.db";
       break;
+    // Settings' Data section. Without these a spec reaching the retention
+    // delete or Restore from file would end in a missing-command error.
+    case "delete_history_before": {
+      // Native deletes by effective end; the fixture records no corrections.
+      const cutoff = Math.floor(Number(args?.cutoffSec));
+      const before = sessions.length;
+      sessions = sessions.filter((session) => !(session.end < cutoff));
+      result = before - sessions.length;
+      break;
+    }
+    case "choose_database_backup_file":
+      // The native file picker, answered as a reader who cancels it.
+      result = null;
+      break;
+    case "inspect_database_backup": {
+      const path = String(args?.backupPath ?? "");
+      result = {
+        path,
+        name: path.split("\\").pop() ?? path,
+        kind: "manual",
+        modifiedSec: now - 7_200,
+        bytes: 2_400_000,
+        schemaVersion: 5,
+        compatible: true,
+        issue: null,
+        legacyLocation: false,
+      };
+      break;
+    }
     case "reveal_database":
       result = null;
       break;

@@ -6,6 +6,10 @@ the other. A command the renderer calls but the host never registered fails
 only when a reader reaches it, and a registered command nothing calls is
 surface the webview can still reach with no code left that means to.
 
+The device suite's mock answers the renderer's calls by hand. A command
+missing from it fails only when some spec happens to reach that control, which
+is how three went unnoticed until this check existed.
+
 Read the source, the way test_installer_hooks.py does: the alternative is a
 build of both halves.
 """
@@ -16,6 +20,7 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[2]
 DASHBOARD = REPOSITORY / "dashboard"
 LIB = (DASHBOARD / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
+MOCK = (DASHBOARD / "device-test" / "mocks" / "tauriCore.ts").read_text(encoding="utf-8")
 
 # `invoke("name"` and `invoke<Type>("name"`, the only two shapes the renderer
 # uses; the generic may itself contain angle brackets.
@@ -44,6 +49,16 @@ def invoked_commands():
     return names
 
 
+def mocked_commands():
+    start = MOCK.index("export async function invoke")
+    body = MOCK[start : MOCK.index("\n}\n", start)]
+    # The command switch's own cases; nested switches (lifecycle actions) sit
+    # deeper.
+    names = set(re.findall(r'^    case "([a-z_]+)":', body, re.M))
+    assert names, "the mock's command switch is not where this test looks"
+    return names
+
+
 def test_every_renderer_call_reaches_a_registered_command():
     missing = invoked_commands() - registered_commands()
     assert not missing, f"invoked but never registered: {sorted(missing)}"
@@ -52,3 +67,13 @@ def test_every_renderer_call_reaches_a_registered_command():
 def test_every_registered_command_has_a_caller():
     unused = registered_commands() - invoked_commands()
     assert not unused, f"registered but never invoked: {sorted(unused)}"
+
+
+def test_the_device_mock_answers_every_renderer_call():
+    missing = invoked_commands() - mocked_commands()
+    assert not missing, f"invoked but not mocked for the device suite: {sorted(missing)}"
+
+
+def test_the_device_mock_answers_nothing_the_renderer_never_asks():
+    stale = mocked_commands() - invoked_commands()
+    assert not stale, f"mocked but never invoked: {sorted(stale)}"

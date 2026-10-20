@@ -21,7 +21,7 @@ import {
   historyDays,
   type FeedbackPlan,
 } from "../lib/feedbackPrompt";
-import { fetchActiveDayCount } from "../lib/queries";
+import { fetchActiveDayCount, fetchDefaultBrowserProgId } from "../lib/queries";
 
 export interface FeedbackPromptInput {
   /** False whenever something louder is on screen, or the app is not ready.
@@ -78,12 +78,11 @@ export function useFeedbackPrompt(input: FeedbackPromptInput): FeedbackPromptSta
   useEffect(() => {
     if (!worthAsking || listingAsked.current) return;
     listingAsked.current = true;
-    // Imported lazily so a renderer running outside Tauri — the device fixture,
-    // a plain vite dev server — never loads the bridge at all.
-    void import("@tauri-apps/api/core")
-      .then(({ invoke }) => invoke<string | null>("default_browser_prog_id"))
+    void fetchDefaultBrowserProgId()
       .then((progId) => setListing(listingForProgId(progId)))
       .catch(() => {});
+    // Imported lazily so a renderer running outside Tauri — the device fixture,
+    // a plain vite dev server — never loads the bridge at all.
     void import("@tauri-apps/api/app")
       .then(({ getVersion }) => getVersion())
       .then(setAppVersion)

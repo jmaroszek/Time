@@ -1,7 +1,7 @@
-// Keyboard movement for the custom listbox in components/ui.tsx. It lives here,
-// apart from the component, because the dashboard suite runs without a DOM and
-// this is the part worth testing: replacing a native <select> gives up keyboard
-// behavior that used to be free.
+// Keyboard movement for the custom listbox in components/ui/MenuSelect.tsx. It
+// lives here, apart from the component, because the dashboard suite runs
+// without a DOM and this is the part worth testing: replacing a native <select>
+// gives up keyboard behavior that used to be free.
 
 /** Arrow/Home/End movement. Clamps at both ends — the ARIA listbox pattern
  *  does not wrap, and a wrapping list makes "am I at the bottom?" unanswerable

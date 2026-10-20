@@ -103,8 +103,8 @@ others produces a failure on a user's machine rather than at build time.
   `dashboard/src/lib/schema.ts`.
 - **Setting defaults and setting ranges are separate contracts.** Defaults are
   mirrored by `DEFAULT_SETTINGS` in `tracker/db.py` and `BOOTSTRAP_SQL` in
-  `database/schema.rs`. Ranges are mirrored by `get_settings` in `tracker/db.py` and
-  `SPECS` in `dashboard/src/tabs/SettingsTab.tsx`.
+  `database/schema.rs`. Ranges are mirrored by `get_settings` in
+  `tracker/db.py` and `SPECS` in `dashboard/src/lib/settingsSpecs.ts`.
 - **Operating-system calls live behind one boundary per runtime.** The tracker
   reaches Windows only through `tracker/platforms/`, which
   `tracker/tests/test_platform_boundary.py` enforces, and the Rust host only
