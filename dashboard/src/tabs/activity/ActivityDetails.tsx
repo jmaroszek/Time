@@ -557,10 +557,9 @@ export function WindowPanel({
         </div>
       </PanelSection>
 
-      {/* No line of facts: the strip shows the days, the first visit row the
-          last one, and the total is the one figure bars cannot be summed for
-          by eye, so it takes the caption. The busiest day is in the tooltips. */}
-      <UsageStrip buckets={usage} caption={`${fmtDuration(group.seconds)} in range`} />
+      {/* No line of facts: the strip shows the days and its caption the
+          total, and the first visit row says when it was last seen. */}
+      <UsageStrip buckets={usage} seconds={group.seconds} />
 
       <section className="mt-8">
         <div className="flex flex-wrap items-center gap-2">
@@ -740,12 +739,13 @@ function usageStripPeak(buckets: ActivityDayBucket[]): number | null {
 function UsageStrip({
   buckets,
   right,
-  caption,
+  seconds,
 }: {
   buckets: ActivityDayBucket[];
   right?: ReactNode;
-  /** Replaces the busiest-day figure between the end dates. */
-  caption?: ReactNode;
+  /** Total time in range, for the caption. Nobody can sum the bars by eye,
+   *  while the busiest column is the tallest one and its tooltip says it. */
+  seconds: number;
 }) {
   const peak = usageStripPeak(buckets);
   if (peak === null) return null;
@@ -782,7 +782,7 @@ function UsageStrip({
       </div>
       <div className="mt-1 flex justify-between text-xs tabular-nums text-ink-3">
         <span>{formatCompactDate(buckets[0].startSec)}</span>
-        <span>{caption ?? `${fmtDuration(peak)} on the busiest ${buckets[0].days === 1 ? "day" : "column"}`}</span>
+        <span>{fmtDuration(seconds)} in range</span>
         <span>{formatCompactDate(buckets[buckets.length - 1].endSec - 1)}</span>
       </div>
     </section>
@@ -1115,7 +1115,7 @@ export function EntityPanel({
           there reads as its "more". A single day draws no strip, and the link
           keeps the strip's place on its own. */}
       {usageStripPeak(usage) !== null ? (
-        <UsageStrip buckets={usage} right={insightsLink} caption={`${fmtDuration(entity.seconds)} in range`} />
+        <UsageStrip buckets={usage} right={insightsLink} seconds={entity.seconds} />
       ) : insightsLink && (
         <div className="mt-8 flex justify-end">{insightsLink}</div>
       )}
