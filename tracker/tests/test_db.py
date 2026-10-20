@@ -552,19 +552,19 @@ def test_tray_uses_frozen_icon(monkeypatch, tmp_path):
 
 
 def test_tray_finds_dashboard_beside_packaged_tracker(monkeypatch, tmp_path):
-    from tracker import tray
+    from tracker.platforms.windows import launch
 
     tracker_exe = tmp_path / "time-tracker.exe"
     dashboard_exe = tmp_path / "Time.exe"
     dashboard_exe.write_bytes(b"dashboard")
     monkeypatch.delenv("TIME_DASHBOARD_PATH", raising=False)
-    monkeypatch.setattr(tray.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(tray.sys, "executable", str(tracker_exe))
-    assert tray._dashboard_path() == dashboard_exe
+    monkeypatch.setattr(launch.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launch.sys, "executable", str(tracker_exe))
+    assert launch.dashboard_path() == dashboard_exe
 
 
 def test_packaged_tracker_ignores_dashboard_path_override(monkeypatch, tmp_path):
-    from tracker import tray
+    from tracker.platforms.windows import launch
 
     tracker_exe = tmp_path / "time-tracker.exe"
     dashboard_exe = tmp_path / "Time.exe"
@@ -572,9 +572,9 @@ def test_packaged_tracker_ignores_dashboard_path_override(monkeypatch, tmp_path)
     dashboard_exe.write_bytes(b"dashboard")
     override.write_bytes(b"override")
     monkeypatch.setenv("TIME_DASHBOARD_PATH", str(override))
-    monkeypatch.setattr(tray.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(tray.sys, "executable", str(tracker_exe))
-    assert tray._dashboard_path() == dashboard_exe
+    monkeypatch.setattr(launch.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launch.sys, "executable", str(tracker_exe))
+    assert launch.dashboard_path() == dashboard_exe
 
 
 def test_packaged_tracker_ignores_data_directory_override(monkeypatch, tmp_path):

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from tracker.media_playback import (
+from tracker.media_sites import is_media_domain
+from tracker.platforms.windows.media_playback import (
     MediaPlaybackMonitor,
-    is_media_domain,
     source_matches_foreground,
 )
 

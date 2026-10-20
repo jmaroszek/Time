@@ -203,7 +203,7 @@ def test_unhandled_startup_error_logs_a_traceback_and_exits_nonzero(
     info_log, monkeypatch
 ):
     monkeypatch.setattr(tracker, "set_up_logging", lambda: None)
-    monkeypatch.setattr(tracker, "acquire_single_instance", lambda: True)
+    monkeypatch.setattr(tracker.platforms, "acquire_single_instance", lambda: True)
 
     def _boom() -> None:
         raise RuntimeError("disk went away")
@@ -218,7 +218,7 @@ def test_unhandled_startup_error_logs_a_traceback_and_exits_nonzero(
 
 def test_schema_too_new_is_reported_without_a_stack(info_log, monkeypatch):
     monkeypatch.setattr(tracker, "set_up_logging", lambda: None)
-    monkeypatch.setattr(tracker, "acquire_single_instance", lambda: True)
+    monkeypatch.setattr(tracker.platforms, "acquire_single_instance", lambda: True)
 
     def _too_new() -> None:
         raise db.SchemaTooNewError("database schema 3 is newer than tracker schema 2")
@@ -231,7 +231,7 @@ def test_schema_too_new_is_reported_without_a_stack(info_log, monkeypatch):
 
 def test_second_instance_logs_and_exits_zero(info_log, monkeypatch):
     monkeypatch.setattr(tracker, "set_up_logging", lambda: None)
-    monkeypatch.setattr(tracker, "acquire_single_instance", lambda: False)
+    monkeypatch.setattr(tracker.platforms, "acquire_single_instance", lambda: False)
     assert tracker.main() == 0
     assert "already running" in info_log.text
 

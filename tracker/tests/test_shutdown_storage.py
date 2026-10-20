@@ -8,6 +8,7 @@ import uuid
 from types import SimpleNamespace
 
 from tracker import db, tracker
+from tracker.platforms.windows import instance
 from tracker.session_manager import SessionManager, Settings, Snapshot
 import pytest
 
@@ -40,12 +41,12 @@ def test_callback_shutdown_flushes_on_database_owner(tmp_path, monkeypatch, capl
 def test_mutex_failure_cannot_start_an_unprotected_recorder(monkeypatch):
     def create_mutex(*_):
         return None
-    monkeypatch.setattr(tracker.ctypes, "WinDLL", lambda *_a, **_k:
+    monkeypatch.setattr(instance.ctypes, "WinDLL", lambda *_a, **_k:
                         SimpleNamespace(CreateMutexW=create_mutex))
     # ERROR_NO_SYSTEM_RESOURCES: ownership is genuinely unknown.
-    monkeypatch.setattr(tracker.ctypes, "get_last_error", lambda: 1450)
+    monkeypatch.setattr(instance.ctypes, "get_last_error", lambda: 1450)
     with pytest.raises(OSError):
-        tracker.acquire_single_instance()
+        instance.acquire_single_instance()
     monkeypatch.setattr(tracker, "set_up_logging", lambda: None)
     monkeypatch.setattr(tracker, "log_startup_environment", lambda: None)
     monkeypatch.setattr(tracker, "run", lambda: pytest.fail("must not start without ownership"))
@@ -55,9 +56,9 @@ def test_mutex_failure_cannot_start_an_unprotected_recorder(monkeypatch):
 def test_real_mutex_excludes_second_process_and_releases_on_exit():
     name = "Local\\TimeTrackerTest-" + uuid.uuid4().hex
     code = (
-        "import sys; from tracker import tracker, config; "
+        "import sys; from tracker import config, platforms; "
         "config.MUTEX_NAME=sys.argv[1]; "
-        "print(tracker.acquire_single_instance(),flush=True); sys.stdin.readline()"
+        "print(platforms.acquire_single_instance(),flush=True); sys.stdin.readline()"
     )
     first = subprocess.Popen([sys.executable, "-c", code, name], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -90,9 +91,9 @@ def test_mutex_held_by_another_windows_account_does_not_block_recording():
         "print('held', flush=True); sys.stdin.readline()"
     )
     contender = (
-        "import sys; from tracker import tracker, config; "
+        "import sys; from tracker import config, platforms; "
         "config.MUTEX_NAME=sys.argv[1]; "
-        "print(tracker.acquire_single_instance(), flush=True)"
+        "print(platforms.acquire_single_instance(), flush=True)"
     )
     first = subprocess.Popen([sys.executable, "-c", owner, name], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

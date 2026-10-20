@@ -1,4 +1,4 @@
-from tracker import win32_probe
+from tracker.platforms.windows import probe as win32_probe
 
 
 def _set_last_input(monkeypatch, *, now_ms: int, last_ms: int) -> None:

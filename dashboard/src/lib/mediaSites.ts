@@ -3,7 +3,7 @@
 // them, and the arithmetic that keeps the settings field honest about which of
 // the two an entry lands in.
 //
-// BUILT_IN_MEDIA_SITES mirrors _MEDIA_DOMAINS in tracker/media_playback.py,
+// BUILT_IN_MEDIA_SITES mirrors _MEDIA_DOMAINS in tracker/media_sites.py,
 // which is the half that actually gates AFK — nothing here changes tracking.
 // The copy exists so the field can say "Time already recognizes youtube.com"
 // instead of accepting a redundant entry; mediaSites.test.ts compares it

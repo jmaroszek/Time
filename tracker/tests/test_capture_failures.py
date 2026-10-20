@@ -17,9 +17,9 @@ def drive_loop(tmp_path, monkeypatch, snapshots, *, input_monitor=None, media_mo
     conn.close()
     monkeypatch.setattr(tracker.config, "DB_PATH", path)
     monkeypatch.delenv("TIME_MIGRATE_ONLY", raising=False)
-    monkeypatch.setattr(tracker.human_input, "start_human_input_monitor", lambda: input_monitor)
-    monkeypatch.setattr(tracker.media_playback, "start_media_playback_monitor", lambda: media_monitor)
-    monkeypatch.setattr(tracker.power_events, "start_power_event_monitor", lambda: None)
+    monkeypatch.setattr(tracker.platforms, "start_human_input_monitor", lambda: input_monitor)
+    monkeypatch.setattr(tracker.platforms, "start_media_playback_monitor", lambda: media_monitor)
+    monkeypatch.setattr(tracker.platforms, "start_power_event_monitor", lambda: None)
     monkeypatch.setitem(sys.modules, "win32api", SimpleNamespace(SetConsoleCtrlHandler=lambda *_: None))
     step = 0
     health = []
@@ -45,7 +45,7 @@ def drive_loop(tmp_path, monkeypatch, snapshots, *, input_monitor=None, media_mo
         if isinstance(value, Exception):
             raise value
         return Snapshot(now, value[1], value[0], "")
-    monkeypatch.setattr(tracker.win32_probe, "snapshot", probe)
+    monkeypatch.setattr(tracker.platforms, "snapshot", probe)
     tracker.run()
     with sqlite3.connect(path) as check:
         rows = check.execute("SELECT start_ts,end_ts,process FROM sessions ORDER BY id").fetchall()

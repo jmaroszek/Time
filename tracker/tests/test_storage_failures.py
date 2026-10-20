@@ -9,7 +9,7 @@ import sys
 import pytest
 
 from tracker import db
-from tracker.power_events import PowerEvent
+from tracker.platforms import PowerEvent
 from tracker.session_manager import SessionManager, Settings, Snapshot
 from tracker.tracker import LoopContinuity
 

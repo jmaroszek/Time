@@ -12,15 +12,14 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
-import os
 import sqlite3
-import subprocess
 import sys
 import threading
 import time as _time
 from pathlib import Path
 from urllib.parse import quote
 
+from tracker import platforms
 from tracker.db import is_paused, pause_until, set_settings
 from tracker.tracking_schedule import ScheduleState, schedule_state
 
@@ -60,34 +59,6 @@ def _icon_path() -> Path:
         if frozen_icon.is_file():
             return frozen_icon
     return _DEV_ICON_PATH
-
-
-def _dashboard_path() -> Path | None:
-    """Return the installed dashboard beside the packaged tracker, if present."""
-    override = None if getattr(sys, "frozen", False) else os.environ.get("TIME_DASHBOARD_PATH")
-    if override:
-        candidate = Path(override)
-    elif getattr(sys, "frozen", False):
-        candidate = Path(sys.executable).resolve().with_name("Time.exe")
-    else:
-        candidate = (
-            Path(__file__).resolve().parent.parent
-            / "dashboard"
-            / "src-tauri"
-            / "target"
-            / "release"
-            / "Time.exe"
-        )
-    return candidate if candidate.is_file() else None
-
-
-def _dashboard_process_kwargs(path: Path) -> dict[str, object]:
-    """Build portable launch options without flashing a Windows console."""
-    kwargs: dict[str, object] = {"cwd": str(path.parent), "close_fds": True}
-    create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", None)
-    if create_no_window is not None:
-        kwargs["creationflags"] = create_no_window
-    return kwargs
 
 
 def _write_pause(db_path: str | Path, paused: str, until: float) -> None:
@@ -178,11 +149,11 @@ class _TrayActions:
         self._refresh_icon_title(icon)
 
     def open_dashboard(self, _icon, _item) -> None:
-        path = _dashboard_path()
+        path = platforms.dashboard_path()
         if path is None:
             return
         try:
-            subprocess.Popen([str(path)], **_dashboard_process_kwargs(path))
+            platforms.open_dashboard(path)
         except OSError:
             logging.exception("Could not open the Time dashboard")
 
@@ -198,7 +169,7 @@ class _TrayActions:
         try:
             # The shell's own handler for the scheme; no command line is built
             # here and nothing from the database reaches the URL.
-            os.startfile(_support_mailto())
+            platforms.open_url(_support_mailto())
         except OSError:
             logging.exception("Could not open an email to Time support")
 
@@ -258,7 +229,7 @@ def _build_menu(pystray, actions: _TrayActions):
             "Open dashboard",
             actions.open_dashboard,
             default=True,
-            visible=lambda _item: _dashboard_path() is not None,
+            visible=lambda _item: platforms.dashboard_path() is not None,
         ),
         pystray.MenuItem(
             "Pause tracking",

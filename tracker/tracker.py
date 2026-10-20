@@ -3,13 +3,13 @@
 Run with:  pythonw tracker/tracker.py   (or python, for a console)
 
 Responsibilities: single-instance guard, logging, supervised 1s loop, settings
-refresh, graceful shutdown. All session logic lives in session_manager.
+refresh, graceful shutdown. All session logic lives in session_manager, and
+everything asked of the operating system goes through tracker.platforms.
 """
 
 from __future__ import annotations
 
 import atexit
-import ctypes
 import logging
 import os
 import platform
@@ -24,14 +24,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tracker import config, db, human_input, media_playback, power_events, tray, win32_probe
+from tracker import config, db, platforms, tray
 from tracker.domains import parse_domain
 from tracker.session_manager import LOCK_PROCESS, SessionManager, is_idle
 from tracker.tracking_schedule import schedule_state
-
-_ERROR_ACCESS_DENIED = 5
-_ERROR_ALREADY_EXISTS = 183
-_mutex_handle = None  # keep a module-level reference so the handle lives forever
 
 # Seven daily files: long enough to cover "it broke sometime last week", short
 # enough that the log directory stays a bounded, disposable support artifact.
@@ -53,27 +49,6 @@ TRAY_ACTIVE_KEY = "tracker_tray_active"
 # lost as the machine freezes — and an interval no one watched must stay a gap
 # rather than become an AFK block the user never sat through.
 UNOBSERVED_GAP_SECONDS = 60.0
-
-
-def acquire_single_instance() -> bool:
-    global _mutex_handle
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
-    kernel32.CreateMutexW.restype = ctypes.c_void_p
-    # Global\ so a second logon session (RDP, fast user switching) of the same
-    # user cannot run a second tracker against the same database.
-    _mutex_handle = kernel32.CreateMutexW(None, False, config.MUTEX_NAME)
-    if not _mutex_handle:
-        error = ctypes.get_last_error()
-        if error == _ERROR_ACCESS_DENIED:
-            # The name is machine-wide, but its default DACL admits only the
-            # account that created it. Denial means another Windows account's
-            # tracker holds it, and that account records into its own
-            # per-user database, so this one may record too. 1.2.0 allowed it.
-            logging.info("Tracker mutex is held by another Windows account; continuing.")
-            return True
-        raise ctypes.WinError(error)
-    return ctypes.get_last_error() != _ERROR_ALREADY_EXISTS
 
 
 def set_up_logging() -> None:
@@ -231,16 +206,16 @@ class LoopContinuity:
     def __init__(self, gap_seconds: float = UNOBSERVED_GAP_SECONDS):
         self._gap_seconds = gap_seconds
         self._last_seen = 0.0
-        self._pending: deque[power_events.PowerEvent] = deque()
+        self._pending: deque[platforms.PowerEvent] = deque()
 
     def apply_boundaries(
-        self, manager: SessionManager, events: list[power_events.PowerEvent], now: float,
+        self, manager: SessionManager, events: list[platforms.PowerEvent], now: float,
     ) -> None:
         """Acknowledge boundaries only after their session writes succeed."""
         self._pending.extend(events)
         missed = self.gap_before(now)
         if missed and not self._pending:
-            self._pending.append(power_events.PowerEvent("resume", now, False))
+            self._pending.append(platforms.PowerEvent("resume", now, False))
             logging.info(
                 "Loop did not run for %.0fs with no power boundary"
                 " announced; that interval stays a gap.", missed,
@@ -393,9 +368,9 @@ def run() -> None:
         store=db.SqliteStore(conn), settings=db.get_settings(conn),
         recording_floor=db.startup_recording_floor(conn, time.time()),
     )
-    human_input_monitor = human_input.start_human_input_monitor()
-    media_monitor = media_playback.start_media_playback_monitor()
-    power_monitor = power_events.start_power_event_monitor()
+    human_input_monitor = platforms.start_human_input_monitor()
+    media_monitor = platforms.start_media_playback_monitor()
+    power_monitor = platforms.start_power_event_monitor()
     stop_event = threading.Event()
     tray_controller = tray.create_tray_controller(config.DB_PATH, stop_event)
     tray_visible = _sync_tray(tray_controller, raw_settings)
@@ -410,12 +385,7 @@ def run() -> None:
     )
 
     atexit.register(shutdown)
-    try:
-        import win32api
-
-        win32api.SetConsoleCtrlHandler(shutdown, True)
-    except Exception:
-        pass  # pythonw has no console; atexit still covers normal interpreter exit
+    platforms.install_console_shutdown_handler(shutdown)
 
     logging.info(
         "Tracker started | tray_available=%s | tray_visible=%s |"
@@ -465,7 +435,7 @@ def run() -> None:
                         idle_seconds = human_input_monitor.idle_seconds()
                     except Exception as exc:
                         failures.record("human input failed; using Windows idle", exc, time.monotonic())
-                snap = win32_probe.snapshot(now, idle_seconds=idle_seconds)
+                snap = platforms.snapshot(now, idle_seconds=idle_seconds)
                 if (
                     media_monitor is not None
                     and snap.process != LOCK_PROCESS
@@ -532,7 +502,7 @@ def main() -> int:
 
     log_startup_environment()
     try:
-        if not acquire_single_instance():
+        if not platforms.acquire_single_instance():
             logging.error("Another tracker instance is already running; exiting.")
             return 0
     except OSError:

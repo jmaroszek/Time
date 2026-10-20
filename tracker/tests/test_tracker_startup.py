@@ -31,17 +31,17 @@ def _forbid_background_components(monkeypatch) -> None:
         raise AssertionError("maintenance startup launched a background component")
 
     monkeypatch.setattr(
-        tracker.media_playback,
+        tracker.platforms,
         "start_media_playback_monitor",
         unexpected,
     )
     monkeypatch.setattr(
-        tracker.power_events,
+        tracker.platforms,
         "start_power_event_monitor",
         unexpected,
     )
     monkeypatch.setattr(
-        tracker.human_input,
+        tracker.platforms,
         "start_human_input_monitor",
         unexpected,
     )
@@ -175,9 +175,9 @@ def test_loop_applies_privacy_and_recording_gates_after_clock_setback(
     monkeypatch.delenv("TIME_MIGRATE_ONLY", raising=False)
     monkeypatch.setattr(db, "open_db", lambda _: conn)
     for component, function in [
-        (tracker.human_input, "start_human_input_monitor"),
-        (tracker.media_playback, "start_media_playback_monitor"),
-        (tracker.power_events, "start_power_event_monitor"),
+        (tracker.platforms, "start_human_input_monitor"),
+        (tracker.platforms, "start_media_playback_monitor"),
+        (tracker.platforms, "start_power_event_monitor"),
     ]:
         monkeypatch.setattr(component, function, lambda: None)
     stop = []
@@ -200,7 +200,7 @@ def test_loop_applies_privacy_and_recording_gates_after_clock_setback(
         time=lambda: [10000, 6400, 6401][min(step, 2)],
         monotonic=lambda: float(step), sleep=sleep,
     ))
-    monkeypatch.setattr(tracker.win32_probe, "snapshot", lambda now, **_: Snapshot(
+    monkeypatch.setattr(tracker.platforms, "snapshot", lambda now, **_: Snapshot(
         now, 0, "before.exe" if step == 0 else "private.exe", "PRIVATE CONTENT",
     ))
     try:

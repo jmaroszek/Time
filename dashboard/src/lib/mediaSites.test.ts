@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 // ?raw for the same reason schema.test.ts uses it: the tracker is the half that
 // actually gates AFK, so the check has to read its source rather than a second
 // hand-maintained copy of it.
-import pythonSource from "../../../tracker/media_playback.py?raw";
+import pythonSource from "../../../tracker/media_sites.py?raw";
 import {
   BUILT_IN_MEDIA_SITES,
   coveringMediaSite,
@@ -19,7 +19,7 @@ import {
  * settings panel just said.
  */
 describe("built-in media sites agree with the tracker", () => {
-  it("matches _MEDIA_DOMAINS in tracker/media_playback.py", () => {
+  it("matches _MEDIA_DOMAINS in tracker/media_sites.py", () => {
     const block = /_MEDIA_DOMAINS = frozenset\(\s*\{([\s\S]*?)\}\s*\)/.exec(pythonSource);
     const python = [...(block?.[1].match(/"[^"]*"/g) ?? [])].map((entry) =>
       entry.slice(1, -1),

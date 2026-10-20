@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from tracker.power_events import (
+from tracker.platforms import PowerEvent
+from tracker.platforms.windows.power_events import (
     PBT_APMRESUMEAUTOMATIC,
     PBT_APMRESUMESUSPEND,
     PBT_APMSUSPEND,
-    PowerEvent,
     PowerEventMonitor,
 )
 

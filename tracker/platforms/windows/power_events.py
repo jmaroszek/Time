@@ -11,11 +11,11 @@ from collections import deque
 from collections.abc import Callable
 import ctypes
 from ctypes import wintypes
-from dataclasses import dataclass
 import logging
 import threading
 import time
-from typing import Literal
+
+from tracker.platforms.interface import PowerEvent
 
 
 DEVICE_NOTIFY_CALLBACK = 2
@@ -37,16 +37,6 @@ class _DeviceNotifySubscribeParameters(ctypes.Structure):
         ("Callback", _CALLBACK_ROUTINE),
         ("Context", wintypes.LPVOID),
     ]
-
-
-@dataclass(frozen=True)
-class PowerEvent:
-    kind: Literal["suspend", "resume"]
-    at: float
-    # False means Windows delivered resume without this registration observing
-    # the matching suspend. The session manager then ends the old row at its
-    # last real observation instead of stretching it across the unknown gap.
-    suspend_observed: bool = True
 
 
 class PowerEventMonitor:

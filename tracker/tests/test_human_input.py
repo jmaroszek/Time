@@ -1,4 +1,4 @@
-from tracker import human_input
+from tracker.platforms.windows import human_input
 
 
 def test_initial_idle_uses_windows_last_input_tick():

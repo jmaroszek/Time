@@ -5,6 +5,7 @@ import pystray
 import pytest
 
 from tracker import db, tray
+from tracker.platforms.windows import launch
 from tracker.tracking_schedule import schedule_state
 
 
@@ -95,7 +96,7 @@ def test_tray_menu_uses_default_dashboard_and_one_state_action(tmp_path, monkeyp
     conn.close()
     dashboard = tmp_path / "Time.exe"
     dashboard.touch()
-    monkeypatch.setattr(tray, "_dashboard_path", lambda: dashboard)
+    monkeypatch.setattr(tray.platforms, "dashboard_path", lambda: dashboard)
     actions = tray._TrayActions(path, threading.Event())
 
     menu = tray._build_menu(pystray, actions)
@@ -159,9 +160,9 @@ def test_tray_open_dashboard_and_quit_callbacks(tmp_path, monkeypatch):
     dashboard = tmp_path / "Time.exe"
     dashboard.touch()
     calls = []
-    monkeypatch.setattr(tray, "_dashboard_path", lambda: dashboard)
+    monkeypatch.setattr(tray.platforms, "dashboard_path", lambda: dashboard)
     monkeypatch.setattr(
-        tray.subprocess,
+        launch.subprocess,
         "Popen",
         lambda args, **kwargs: calls.append((args, kwargs)),
     )
@@ -170,8 +171,8 @@ def test_tray_open_dashboard_and_quit_callbacks(tmp_path, monkeypatch):
 
     actions.open_dashboard(None, None)
     expected_kwargs = {"cwd": str(dashboard.parent), "close_fds": True}
-    if hasattr(tray.subprocess, "CREATE_NO_WINDOW"):
-        expected_kwargs["creationflags"] = tray.subprocess.CREATE_NO_WINDOW
+    if hasattr(launch.subprocess, "CREATE_NO_WINDOW"):
+        expected_kwargs["creationflags"] = launch.subprocess.CREATE_NO_WINDOW
     assert calls == [
         (
             [str(dashboard)],
@@ -280,7 +281,7 @@ def test_tray_controller_hides_and_recreates_without_stopping_tracker(
 
 def test_tray_send_feedback_opens_a_support_draft(tmp_path, monkeypatch):
     opened = []
-    monkeypatch.setattr(tray.os, "startfile", opened.append, raising=False)
+    monkeypatch.setattr(launch.os, "startfile", opened.append, raising=False)
     actions = tray._TrayActions(tmp_path / "unused.db", threading.Event())
 
     actions.send_feedback(None, None)
@@ -299,7 +300,7 @@ def test_tray_send_feedback_survives_a_machine_with_no_mail_client(tmp_path, mon
     def explode(_url):
         raise OSError("no handler registered")
 
-    monkeypatch.setattr(tray.os, "startfile", explode, raising=False)
+    monkeypatch.setattr(launch.os, "startfile", explode, raising=False)
     actions = tray._TrayActions(tmp_path / "unused.db", threading.Event())
 
     # No handler is a dead menu item, not a dead tracker.

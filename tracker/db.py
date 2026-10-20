@@ -189,7 +189,7 @@ DEFAULT_SETTINGS = {
     ),
     "min_app_seconds_per_day": "0",
     # Sites the reader added to the built-in media list in
-    # tracker/media_playback.py, which stays in the code because it is product
+    # tracker/media_sites.py, which stays in the code because it is product
     # knowledge. Empty on a fresh install: the built-ins already cover the
     # mainstream services, so this holds only what Time did not know about.
     "media_domains": "",

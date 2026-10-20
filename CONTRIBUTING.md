@@ -105,6 +105,11 @@ others produces a failure on a user's machine rather than at build time.
   mirrored by `DEFAULT_SETTINGS` in `tracker/db.py` and `BOOTSTRAP_SQL` in
   `database/schema.rs`. Ranges are mirrored by `get_settings` in `tracker/db.py` and
   `SPECS` in `dashboard/src/tabs/SettingsTab.tsx`.
+- **Operating-system calls live behind one boundary per runtime.** The tracker
+  reaches Windows only through `tracker/platforms/`, which
+  `tracker/tests/test_platform_boundary.py` enforces, and the Rust host only
+  through `dashboard/src-tauri/src/platform/`. Put a new OS call there, not
+  beside the logic that needs it.
 - **Window titles and browser domains must never reach INFO logs.**
   `tracker/tests/test_logging.py` verifies this against real writes.
 - **Chart colors come from mirrored tokens** in
