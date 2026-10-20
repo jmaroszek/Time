@@ -827,7 +827,6 @@ export function EntityPanel({
   onDeleteWindows,
   onAssign,
   onSaveAlias,
-  onRemoveExactRule,
   onViewInInsights,
   titlesStored,
   onStoreTitles,
@@ -869,7 +868,6 @@ export function EntityPanel({
   onDeleteWindows: () => void;
   onAssign: (categoryId: number) => Promise<void>;
   onSaveAlias: (alias: string) => Promise<void>;
-  onRemoveExactRule: () => Promise<void>;
   /** Opens Insights narrowed to this entity. */
   onViewInInsights?: () => void;
   /** Whether "Store window titles" is on now. Distinct from hasStoredTitles,
@@ -884,14 +882,12 @@ export function EntityPanel({
   const savedAlias = aliases[entity.key.toLowerCase()] ?? "";
   const [aliasDraft, setAliasDraft] = useState(savedAlias);
   const [renaming, setRenaming] = useState(false);
-  const [confirmingRuleRemoval, setConfirmingRuleRemoval] = useState(false);
   const cancelAlias = useRef(false);
   useEffect(() => setAliasDraft(savedAlias), [savedAlias, entity.key]);
-  // Both are about the entity in front of the reader, and the arrow keys can
+  // A rename is about the entity in front of the reader, and the arrow keys can
   // change that without anything being clicked.
   useEffect(() => {
     setRenaming(false);
-    setConfirmingRuleRemoval(false);
   }, [entity.id]);
   const commitAlias = () => {
     setRenaming(false);
@@ -1062,52 +1058,15 @@ export function EntityPanel({
               is narrow: this is the line that says why, and cut short it said
               nothing. */}
           {/* Overridden, the list below names the default and every rule over
-              it, so nothing is left to say here. Nor is Remove offered: it
-              would only uncategorize the time the default holds. */}
+              it, so nothing is left to say here. */}
           {!overridden && (
             <p className="min-w-[12rem] flex-1 text-xs leading-snug text-ink-3">
               <span>
                 {exactRule ? summary.detail : `${summary.label} · ${summary.detail}`}
               </span>
-              {/* A word, not a ✕: beside a category name a bare cross read as
-                  "clear this category", when what it removes is the rule. */}
-              {exactRule && !confirmingRuleRemoval && (
-                <>
-                  <span aria-hidden="true"> · </span>
-                  <button
-                    type="button"
-                    disabled={actionsDisabled}
-                    onClick={() => setConfirmingRuleRemoval(true)}
-                    aria-label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
-                    className="shrink-0 rounded-sm underline-offset-2 outline-none transition-colors hover:text-bad hover:underline focus-visible:text-bad focus-visible:underline disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    Remove
-                  </button>
-                </>
-              )}
             </p>
           )}
         </div>
-        {exactRule && confirmingRuleRemoval && (
-          // Confirm removal because existing activity may become uncategorized.
-          <div className="mt-3 rounded-lg border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-xs leading-snug text-ink-2">
-            <p>
-              Remove the {entity.kind === "website" ? "Website" : "App"} rule
-              {" "}<span className="font-mono">{exactRule.pattern}</span>? Time it decided becomes
-              uncategorized unless another rule matches. Manual corrections are kept.
-            </p>
-            <div className="mt-2.5 flex justify-end gap-2">
-              <Button onClick={() => setConfirmingRuleRemoval(false)}>Cancel</Button>
-              <Button
-                variant="danger"
-                disabled={actionsDisabled}
-                onClick={() => { setConfirmingRuleRemoval(false); void onRemoveExactRule(); }}
-              >
-                Remove rule
-              </Button>
-            </div>
-          </div>
-        )}
         <ClassificationBreakdown entity={entity} />
       </PanelSection>
 

@@ -375,12 +375,6 @@ export async function undoEntityRules(changes: EntityRuleChange[]): Promise<void
   await invoke("undo_entity_rules", { changes });
 }
 
-export async function removeEntityRules(matchType: "process" | "domain", pattern: string): Promise<void> {
-  const normalized = normalizedRuleWrite(matchType, pattern);
-  const db = await getDb();
-  await db.execute("DELETE FROM rules WHERE match_type=$1 AND lower(pattern)=$2", [matchType, normalized.pattern]);
-}
-
 export async function updateRule(
   ruleId: number,
   matchType: MatchType,

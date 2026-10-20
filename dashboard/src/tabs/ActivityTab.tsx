@@ -649,7 +649,7 @@ export default function ActivityTab({
       setDismissingDomainHint(false);
     }
   };
-  const { applySuggestions, assignEntity, assignFromTriage, removeExactRules } =
+  const { applySuggestions, assignEntity, assignFromTriage } =
     useEntityRuleWrites({
       triageCount: result?.triage.total ?? 0,
       residualSeconds: result?.triage.residual.seconds ?? 0,
@@ -1012,9 +1012,6 @@ export default function ActivityTab({
         : Promise.resolve()}
       onSaveAlias={(alias) => currentResult?.selectedEntity?.id === result.selectedEntity!.id
         ? saveAlias(result.selectedEntity!.key, alias)
-        : Promise.resolve()}
-      onRemoveExactRule={() => currentResult?.selectedEntity?.id === result.selectedEntity!.id
-        ? removeExactRules(result.selectedEntity!)
         : Promise.resolve()}
       titlesStored={meta.settings.record_window_titles === "1"}
       onStoreTitles={onOpenSettings ? () => onOpenSettings("Privacy & recording") : undefined}
