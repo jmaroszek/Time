@@ -650,7 +650,7 @@ export default function CategoriesAndRules({
               className="overflow-hidden rounded-[11px] border border-edge bg-group"
             >
               <div
-                className={`group/header flex items-center gap-2.5 px-3 py-3 text-xs ${rowToggles ? "cursor-pointer" : ""}`}
+                className={`flex items-center gap-2.5 px-3 py-3 text-xs ${rowToggles ? "cursor-pointer" : ""}`}
                 onClick={rowToggles ? toggleFromRow : undefined}
               >
                 {normalizedRuleSearch !== "" ? (
@@ -676,40 +676,24 @@ export default function CategoriesAndRules({
                     });
                   }}
                 />
-                {/* Double-click renames, and so does the pencil that appears
-                    beside the name while the row is hovered or focused — a
-                    double-click is invisible to anyone working from the
-                    keyboard. Same pattern as the app panel's title. */}
+                {/* Double-click renames as a shortcut. The row's actions menu
+                    carries Rename too, since a double-click is invisible to
+                    anyone working from the keyboard. */}
                 {renaming === category.id ? (
                   <input autoFocus value={renameDraft} aria-label={`Rename ${category.name}`} onChange={(event) => setRenameDraft(event.target.value)} onBlur={() => void saveRename(category)} onKeyDown={(event) => { if (event.key === "Enter") void saveRename(category); else if (event.key === "Escape") setRenaming(null); }} className="w-44 rounded-md border border-control-edge bg-control px-1.5 py-0.5 text-xs font-semibold outline-none focus:border-accent/60" />
                 ) : (
-                  <span className="flex min-w-0 items-center gap-0.5">
-                    <span
-                      className={`truncate font-semibold ${locked ? "" : "cursor-text"}`}
-                      // Opted out of the row toggle only where it is a rename
-                      // target. The cursor draws the same line the click does:
-                      // a text caret over the name, the pointer everywhere the
-                      // bar opens the category — including this name on the one
-                      // category that cannot be renamed.
-                      data-row-toggle={locked ? undefined : "off"}
-                      title={locked ? "The built-in Ignored category cannot be renamed" : "Double-click to rename"}
-                      onDoubleClick={locked ? undefined : beginRename}
-                    >
-                      {category.name}
-                    </span>
-                    {!locked && (
-                      <button
-                        type="button"
-                        onClick={beginRename}
-                        title="Rename"
-                        aria-label={`Rename ${category.name}`}
-                        className="shrink-0 rounded p-1 text-ink-3 opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover/header:opacity-100"
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                        </svg>
-                      </button>
-                    )}
+                  <span
+                    className={`min-w-0 truncate font-semibold ${locked ? "" : "cursor-text"}`}
+                    // Opted out of the row toggle only where it is a rename
+                    // target. The cursor draws the same line the click does:
+                    // a text caret over the name, the pointer everywhere the
+                    // bar opens the category — including this name on the one
+                    // category that cannot be renamed.
+                    data-row-toggle={locked ? undefined : "off"}
+                    title={locked ? "The built-in Ignored category cannot be renamed" : "Double-click to rename"}
+                    onDoubleClick={locked ? undefined : beginRename}
+                  >
+                    {category.name}
                   </span>
                 )}
                 <span className="flex-1" />
@@ -940,17 +924,19 @@ export default function CategoriesAndRules({
                   )}
                 </div>
                 ) : !searching && (
+                  // A hairline separates the rules that exist from the offer
+                  // to add one. The + sits in the rules' glyph column and the
+                  // words where the patterns start.
+                  <div className="mt-2 border-t border-edge/50 pt-1">
                   <button
                     type="button"
                     onClick={() => setComposerOpen((current) => new Set(current).add(category.id))}
-                    // The + sits in the rules' glyph column and the words where
-                    // the patterns start; the extra top margin separates what
-                    // exists from the offer to add to it.
-                    className="-mx-2 mt-3 inline-flex items-center gap-2 rounded-lg px-2 py-1 pr-3 text-left text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
+                    className="-mx-2 mt-1 inline-flex items-center gap-2 rounded-lg px-2 py-1 pr-3 text-left text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
                   >
                     <span aria-hidden="true" className="flex w-4 justify-center">+</span>
                     Add rule
                   </button>
+                  </div>
                 )}
               </Collapsible>
             </div>
