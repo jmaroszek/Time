@@ -636,53 +636,88 @@ export function WindowPanel({
  * while manual corrections account for the rest.
  */
 /**
- * How an entity's time divides, drawn as well as listed.
+ * How an entity's time divides, and what divided it: one row per rule, plus
+ * manual corrections and uncategorized time, so the rows always sum to the
+ * whole. A per-category legend beside a separate rule list said the same split
+ * twice.
  *
- * Category colors distinguish the proportions represented by each slice.
+ * Rows of one category sit together, so its segments join into one run of
+ * color in the bar and its share still reads at a glance.
  */
-function CategorySplit({ entity }: { entity: ActivityEntitySummary }) {
+function ClassificationBreakdown({ entity }: { entity: ActivityEntitySummary }) {
   const { theme } = useMeta();
-  const slices = [
-    ...entity.categories.map((category) => ({
-      key: `category:${category.categoryId}`,
-      name: category.name,
-      color: category.color,
-      seconds: category.seconds,
-    })),
-    ...(entity.uncategorizedSeconds > 0
-      ? [{
-          key: "uncategorized",
-          name: "Uncategorized",
-          color: uncategorizedMark(theme),
-          seconds: entity.uncategorizedSeconds,
+  const defaultLabel = entity.kind === "website" ? "Website default" : "App default";
+  const ruleSecondsByCategory = new Map<number, number>();
+  for (const rule of entity.rules) {
+    ruleSecondsByCategory.set(rule.categoryId, (ruleSecondsByCategory.get(rule.categoryId) ?? 0) + rule.seconds);
+  }
+  const rows = entity.categories.flatMap((category) => {
+    const ruleRows = entity.rules
+      .filter((rule) => rule.categoryId === category.categoryId)
+      .map((rule) => ({
+        key: `rule:${rule.ruleId}`,
+        category: category.name,
+        color: category.color,
+        source: rule.ruleId === entity.exactRuleId ? defaultLabel : RULE_LABELS[rule.matchType],
+        pattern: rule.ruleId === entity.exactRuleId ? null : rule.pattern,
+        seconds: rule.seconds,
+      }));
+    // Whatever a category holds beyond its rules came from corrections.
+    const corrected = category.seconds - (ruleSecondsByCategory.get(category.categoryId) ?? 0);
+    return corrected > 1
+      ? [...ruleRows, {
+          key: `corrected:${category.categoryId}`,
+          category: category.name,
+          color: category.color,
+          source: "Manual corrections",
+          pattern: null,
+          seconds: corrected,
         }]
-      : []),
-  ];
-  const total = slices.reduce((sum, slice) => sum + slice.seconds, 0);
-  // One slice is not a division. Drawing a full-width bar and a row reading
-  // "100%" only restates the label directly above it.
-  if (total <= 0 || slices.length < 2) return null;
+      : ruleRows;
+  });
+  if (entity.uncategorizedSeconds > 0) {
+    rows.push({
+      key: "uncategorized",
+      category: "Uncategorized",
+      color: uncategorizedMark(theme),
+      source: "",
+      pattern: null,
+      seconds: entity.uncategorizedSeconds,
+    });
+  }
+  const total = rows.reduce((sum, row) => sum + row.seconds, 0);
+  // One row is not a division. Drawing a full-width bar and a row reading
+  // "100%" only restates the line directly above it.
+  if (total <= 0 || rows.length < 2) return null;
   const share = (seconds: number) => {
     const percent = (seconds / total) * 100;
     return percent < 1 ? "<1%" : `${Math.round(percent)}%`;
   };
   return (
     <>
-      <span aria-hidden="true" className="mt-3 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
-        {slices.map((slice) => (
+      <span aria-hidden="true" className="mt-3 flex h-1.5 w-full gap-px overflow-hidden rounded-full bg-surface-2">
+        {rows.map((row) => (
           <span
-            key={slice.key}
-            style={{ width: `${(slice.seconds / total) * 100}%`, backgroundColor: slice.color }}
+            key={row.key}
+            style={{ width: `${(row.seconds / total) * 100}%`, backgroundColor: row.color }}
           />
         ))}
       </span>
       <div className="mt-3 flex flex-col gap-2">
-        {slices.map((slice) => (
-          <div key={slice.key} className="flex items-center gap-2 text-xs">
-            <CategoryDot color={slice.color} />
-            <span className="min-w-0 flex-1 truncate">{slice.name}</span>
-            <span className="tabular-nums text-ink-3">{fmtDuration(slice.seconds)}</span>
-            <span className="w-9 shrink-0 text-right tabular-nums text-ink-3">{share(slice.seconds)}</span>
+        {rows.map((row) => (
+          <div key={row.key} className="flex items-center gap-2 text-xs">
+            <CategoryDot color={row.color} />
+            <span className="min-w-0 flex-1 truncate">
+              {row.category}
+              {row.source && (
+                <span className="text-ink-3">
+                  {" · "}{row.source}
+                  {row.pattern && <> <span className="font-mono" title={row.pattern}>{row.pattern}</span></>}
+                </span>
+              )}
+            </span>
+            <span className="tabular-nums text-ink-3">{fmtDuration(row.seconds)}</span>
+            <span className="w-9 shrink-0 text-right tabular-nums text-ink-3">{share(row.seconds)}</span>
           </div>
         ))}
       </div>
@@ -887,6 +922,19 @@ export function EntityPanel({
     ? rules.find((rule) => rule.id === entity.exactRuleId) ?? null
     : null;
   const summary = entityClassification(entity);
+  // Split by other rules, the exact rule is a default rather than the answer,
+  // and the menu showing its category says only half of that.
+  const overridden = exactRule !== null && entity.status === "mixed";
+  const exactDetail = (() => {
+    if (!overridden) return summary.detail;
+    const defaultLabel = entity.kind === "website" ? "Website default" : "App default";
+    const overrides = entity.rules.filter((rule) => rule.ruleId !== entity.exactRuleId);
+    if (overrides.length === 0) return `${defaultLabel} · manual corrections override it`;
+    const noun = new Set(overrides.map((rule) => rule.matchType)).size === 1
+      ? `${RULE_LABELS[overrides[0].matchType]} rule`
+      : "other rule";
+    return `${defaultLabel} · ${countNoun(overrides.length, noun)} ${overrides.length === 1 ? "overrides" : "override"} it`;
+  })();
   const insightsLink = onViewInInsights && (
     <button
       type="button"
@@ -1040,7 +1088,7 @@ export function EntityPanel({
               nothing. */}
           <p className="min-w-[12rem] flex-1 text-xs leading-snug text-ink-3">
             <span>
-              {exactRule ? summary.detail : `${summary.label} · ${summary.detail}`}
+              {exactRule ? exactDetail : `${summary.label} · ${summary.detail}`}
             </span>
             {/* A word, not a ✕: beside a category name a bare cross read as
                 "clear this category", when what it removes is the rule. */}
@@ -1054,7 +1102,9 @@ export function EntityPanel({
                   aria-label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
                   className="shrink-0 rounded-sm underline-offset-2 outline-none transition-colors hover:text-bad hover:underline focus-visible:text-bad focus-visible:underline disabled:pointer-events-none disabled:opacity-50"
                 >
-                  Remove
+                  {/* Beside a count of other rules, a bare "Remove" read as
+                      removing all of them. */}
+                  {overridden ? "Remove default" : "Remove"}
                 </button>
               </>
             )}
@@ -1080,29 +1130,7 @@ export function EntityPanel({
             </div>
           </div>
         )}
-        {entity.status === "mixed" && (
-          <p className="mt-2 text-xs text-ink-3">Website and Window rules can override an App default.</p>
-        )}
-        <CategorySplit entity={entity} />
-        {/* Only when there is something to compare. A single rule is already
-            named in the line above, and repeating it in a bordered box read as
-            two different facts about the same thing. */}
-        {entity.rules.length > 1 && (
-          <div className="mt-4 rounded-lg border border-edge/70 bg-surface-2 px-3 py-2.5">
-            <p className="mb-2 text-xs font-medium text-ink-2">Rules in use</p>
-            <div className="flex flex-col gap-2">
-              {entity.rules.map((rule) => (
-                <div key={rule.ruleId} className="flex items-center gap-2 text-xs">
-                  <span className="w-14 shrink-0 text-ink-3">{RULE_LABELS[rule.matchType]}</span>
-                  <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
-                  <CategoryDot color={rule.categoryColor} />
-                  <span className="truncate text-ink-2">{rule.categoryName}</span>
-                  <span className="shrink-0 tabular-nums text-ink-3">{rule.sessions} · {fmtDuration(rule.seconds)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <ClassificationBreakdown entity={entity} />
       </PanelSection>
 
       {/* The strip is a glance at what Insights draws in full, so the way
