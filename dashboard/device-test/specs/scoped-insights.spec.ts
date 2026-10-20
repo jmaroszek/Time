@@ -89,7 +89,8 @@ test("@workflow a top window opens in Activity, and the panels count runs as Ins
 
   const window = page.getByRole("complementary", { name: "Window details: Product Design — Time — Slack" });
   await expect(window).toBeVisible();
-  await expect(tile(window, "Typical run")).toHaveText("54m");
+  // One line rather than a tile: the label and its figure share a parent.
+  await expect(window.getByLabel(/^Typical run\./).locator("xpath=..")).toHaveText("Typical run 54m");
 
   // Opened inside its app, so Back reaches the app rather than closing.
   await window.getByRole("button", { name: "Back to Slack details" }).click();

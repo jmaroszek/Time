@@ -51,6 +51,18 @@ import { RowTag } from "./ActivityTables";
 import { categoryDestinationOptions } from "./menuOptions";
 import { AUTOMATIC_CLASSIFICATION, RULE_LABELS } from "./ruleComposer";
 
+/** Hidden until its row is pointed at or focused, or a selection exists — the
+ *  Windows list's rule, for the same reason: a column of empty boxes down every
+ *  visit was the loudest thing in a list most people only read. */
+function revealBox(group: "day" | "visit", selectionActive: boolean, actionsDisabled: boolean) {
+  const reveal = group === "day"
+    ? "opacity-0 group-hover/day:opacity-100 group-focus-within/day:opacity-100"
+    : "opacity-0 group-hover/visit:opacity-100 group-focus-within/visit:opacity-100";
+  return `shrink-0 transition-opacity ${selectionActive ? "" : reveal} ${
+    actionsDisabled ? "pointer-events-none opacity-50" : ""
+  }`;
+}
+
 function GroupSessions({
   group,
   selected,
@@ -68,33 +80,42 @@ function GroupSessions({
   onEdit: (id: number) => void;
   onLoadMore: () => void;
 }) {
+  const selectionActive = selected.size > 0;
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col">
       {/* The date is shown once per day; each visit row carries its time. */}
       {groupVisitsByDay(group.sessions).map((day) => {
         const dayIds = day.visits.map((visit) => visit.id);
         const wholeDay = dayIds.every((id) => selected.has(id));
         return (
-        <div key={day.key} className="mt-4 flex flex-col gap-1 first:mt-0">
-          {/* This checkbox covers only the visits loaded for this day. */}
-          <Checkbox
-            checked={wholeDay}
-            indeterminate={dayIds.some((id) => selected.has(id))}
-            onChange={actionsDisabled ? () => undefined : () => onToggleMany(dayIds)}
-            label={`Select the ${countNoun(dayIds.length, "visit")} shown on ${formatVisitDay(day.visits[0].start)}`}
-            className={`text-micro uppercase tracking-[.04em] text-ink-3 ${actionsDisabled ? "pointer-events-none opacity-50" : ""}`}
-          >
-            {formatVisitDay(day.visits[0].start)}
-          </Checkbox>
+        <div key={day.key} className="mt-4 flex flex-col first:mt-0">
+          {/* The box and the date are separate so hiding one leaves the other.
+              This checkbox covers only the visits loaded for this day. */}
+          <div className="group/day flex items-center gap-2 px-1.5 pb-1 text-micro uppercase tracking-[.04em] text-ink-3">
+            <Checkbox
+              checked={wholeDay}
+              indeterminate={dayIds.some((id) => selected.has(id))}
+              onChange={actionsDisabled ? () => undefined : () => onToggleMany(dayIds)}
+              label={`Select the ${countNoun(dayIds.length, "visit")} shown on ${formatVisitDay(day.visits[0].start)}`}
+              className={revealBox("day", selectionActive, actionsDisabled)}
+            />
+            <span>{formatVisitDay(day.visits[0].start)}</span>
+          </div>
           {day.visits.map((session) => {
             const edited = visitEditLabel(session);
+            const ticked = selected.has(session.id);
             return (
-            <div key={session.id} className="flex items-center gap-2 text-xs">
+            <div
+              key={session.id}
+              className={`group/visit flex items-center gap-2 rounded-md px-1.5 py-1 text-xs transition-colors ${
+                ticked ? "bg-accent/[.09]" : "hover:bg-hover"
+              }`}
+            >
               <Checkbox
-                checked={selected.has(session.id)}
+                checked={ticked}
                 onChange={actionsDisabled ? () => undefined : () => onToggle(session.id)}
                 label={`Select the visit starting ${formatDateTime(session.start)}`}
-                className={actionsDisabled ? "pointer-events-none opacity-50" : ""}
+                className={revealBox("visit", selectionActive, actionsDisabled)}
               />
               <span className="w-[62px] shrink-0 tabular-nums text-ink-2">
                 {new Date(session.start * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
@@ -490,7 +511,7 @@ export function WindowPanel({
           >
             {group.displayName}
           </button>
-          {" · "}{group.entityKind === "website" ? "Website" : "App"} · <span className="font-mono">{group.entityKey}</span>
+          {" · "}<span className="font-mono">{group.entityKey}</span>
         </p>
       }
       onBack={onBack}
@@ -498,36 +519,50 @@ export function WindowPanel({
       onClose={onClose}
       closeLabel="Close Window details"
     >
-      <DetailMetricGrid>
-        <DetailMetric
-          label="Time in range"
-          value={fmtDuration(group.seconds)}
-          hint={`Every visit to this window across the ${countNoun(rangeDays, "day")} shown, added up.`}
-        />
-        <TypicalRunMetric runs={runs} />
-        <DetailMetric
-          label="Days seen"
-          value={String(group.daysSeen)}
-          hint={`Out of ${countNoun(rangeDays, "day")} in this range.`}
-        />
-        <DetailMetric label="Last seen" value={formatLastSeen(group.lastSeen)} />
-      </DetailMetricGrid>
+      {/* Opened from the Windows table, docked, the row beside the panel
+          already states time, days seen and last seen, so only the run length
+          is new. Opened from an app's panel, or undocked, no such row is on
+          screen and the line carries all of it. */}
+      <PanelFacts
+        seconds={group.seconds}
+        daysSeen={group.daysSeen}
+        lastSeen={group.lastSeen}
+        rangeDays={rangeDays}
+        runs={runs}
+        rowVisible={dock !== null && !onBack}
+      />
 
-      <UsageStrip buckets={usage} />
-
+      {/* First in the body, as in the app panel: the one standing decision. */}
       <PanelSection
         title="Classification"
+        className="mt-6"
         right={<span className="shrink-0"><Button disabled={actionsDisabled} onClick={() => onMakeRule(group)}>Create Window rule</Button></span>}
       >
         {/* Keep both the category and its source visible in this panel. */}
         <p className="mt-2 text-xs text-ink-2">{classification.label}</p>
         <p className="mt-0.5 text-xs leading-snug text-ink-3">{classification.detail}</p>
       </PanelSection>
+
+      <UsageStrip buckets={usage} />
+
       <section className="mt-8">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-sm font-semibold">Visits</h3>
-          {/* Keep the reversible selection control at the right edge; batch
-              actions appear before it when a selection exists. */}
+          {/* The same header the app panel's Windows list has: one box for the
+              whole list, the count beside the heading, batch actions only once
+              something is ticked. */}
+          <Checkbox
+            checked={allSelected}
+            indeterminate={selectedSessionIds.size > 0}
+            onChange={actionsDisabled ? () => undefined : () => onToggleAllSessions(group.sessionIds)}
+            label={allSelected ? "Clear the visit selection" : `Select all ${countNoun(group.sessionCount, "visit")}`}
+            className={actionsDisabled ? "pointer-events-none opacity-50" : ""}
+          />
+          <h3 className="text-sm font-semibold">Visits</h3>
+          <span className="mr-auto min-w-0 truncate text-xs tabular-nums text-ink-3">
+            {selectedSessionIds.size > 0
+              ? `${selectedSessionIds.size} selected`
+              : countNoun(group.sessionCount, "visit")}
+          </span>
           {selectedSessionIds.size > 0 && (
             <>
               <Button variant="danger" disabled={actionsDisabled} onClick={onDeleteSelected}>Delete selected</Button>
@@ -556,11 +591,9 @@ export function WindowPanel({
               />
             </>
           )}
-          <Button disabled={actionsDisabled} onClick={() => onToggleAllSessions(group.sessionIds)}>
-            {allSelected ? "Clear selection" : `Select all ${group.sessionCount} visits`}
-          </Button>
         </div>
-        <div className="mt-3 rounded-lg border border-edge/60 bg-surface-2/30 px-3 py-2.5">
+        {/* No bordered well: inside the bordered panel it was a box in a box. */}
+        <div className="mt-3">
           <GroupSessions
             group={group}
             selected={selectedSessionIds}
@@ -944,7 +977,14 @@ export function EntityPanel({
     >
       {/* Undocked, the panel replaces the table, and with it the row that
           states these. Docked, that row is beside the panel and says them. */}
-      {dock === null && <EntityFacts entity={entity} rangeDays={rangeDays} />}
+      {dock === null && (
+        <PanelFacts
+          seconds={entity.seconds}
+          daysSeen={entity.daysSeen}
+          lastSeen={entity.lastSeen}
+          rangeDays={rangeDays}
+        />
+      )}
 
       {/* First in the body: the panel's one standing decision. Not pinned in
           the header, which it made taller than the name it sits under. */}
@@ -1249,69 +1289,38 @@ export function EntityPanel({
 }
 
 /**
- * The four summary tiles at the top of a detail panel.
+ * What the table row says about an app or window, for when the row is not on
+ * screen, on one line instead of a grid of tiles.
  *
- * Two across or four, decided by the panel's own width rather than the window's
- * — the panel is the one surface here whose width runs *against* the viewport's.
- * Below WIDE_DETAIL_MIN it is the card's drill-in face and grows with the page;
- * at and above it the panel shrinks into the right margin and caps at
- * PANEL_MAX_WIDTH. A media query would therefore flip these to a row of four at
- * exactly the width where they stop fitting, so the breakpoint is a container
- * query on the block itself.
- *
- * 45rem is where a quarter of the block reaches 171px, which is the width the
- * Insights tiles have at the `md:` breakpoint that turns *them* into a row. The
- * two sets are the same tiles, so they earn four across at the same size rather
- * than at the same window width — and at 171px the widest value any of these
- * carries, an all-two-digit "Today, 12:34 PM" last-seen at 115px, has 30px of
- * air. That margin is the whole reason the threshold is not lower: truncating
- * the last-seen tile is what kept this block at two across to begin with.
- *
- * The docked panel's content box tops out near 36rem, so the outboard layout
- * never reaches the threshold and stays 2x2 — which is correct for it.
+ * Undocked, the panel replaces the table; opened from an app's panel, a window
+ * has no row of its own in view. Docked beside its row, the row says these and
+ * they are left out. Run length is the one figure no row carries, so a window
+ * panel always has it — an app's is Insights' to answer, one link away.
  */
-function DetailMetricGrid({ children }: { children: ReactNode }) {
-  return (
-    <div className="@container">
-      <div className="grid grid-cols-2 gap-3 @[45rem]:grid-cols-4">{children}</div>
-    </div>
-  );
-}
-
-/**
- * How long this was used for at a stretch, measured the way Insights measures a
- * subject it is narrowed to — so an app's panel here and its page there give
- * the same answer about the same history.
- *
- * It replaces an average of recorded rows, which the tracker splits on every
- * title change: an hour in one editor could average out to ninety seconds.
- */
-function TypicalRunMetric({ runs }: { runs: RunStats | null }) {
-  return (
-    <DetailMetric
-      label="Typical run"
-      value={runs?.typicalSeconds ? fmtDuration(runs.typicalSeconds) : "—"}
-      hint={runs && runs.runs > 0
-        ? `Half of this time came in runs at least this long. ${countNoun(runs.runs, "run")} in range, the longest ${fmtDuration(runs.longestSeconds ?? 0)}. ${RUN_DEFINITION}`
-        : RUN_DEFINITION}
-    />
-  );
-}
-
-/**
- * What the table row says about an app, for when the row is not on screen.
- *
- * Undocked, the panel replaces the table, so time, days seen and last seen
- * would otherwise be nowhere. Docked, the row sits beside the panel and this
- * is not drawn. Run length and share of the range are Insights' to answer.
- */
-function EntityFacts({ entity, rangeDays }: { entity: ActivityEntitySummary; rangeDays: number }) {
+function PanelFacts({
+  seconds,
+  daysSeen,
+  lastSeen,
+  rangeDays,
+  runs,
+  rowVisible = false,
+}: {
+  seconds: number;
+  daysSeen: number;
+  lastSeen: number;
+  rangeDays: number;
+  /** Undefined leaves run length out; null is "not measured yet". */
+  runs?: RunStats | null;
+  rowVisible?: boolean;
+}) {
   const value = (text: string) => <span className="tabular-nums text-ink-2">{text}</span>;
-  const facts: { key: string; node: ReactNode }[] = [
-    { key: "time", node: <>{value(fmtDuration(entity.seconds))} in range</> },
-    { key: "days", node: <>{value(String(entity.daysSeen))} of {countNoun(rangeDays, "day")}</> },
-    { key: "last", node: <>Last seen {value(formatLastSeen(entity.lastSeen))}</> },
+  const facts: { key: string; node: ReactNode }[] = rowVisible ? [] : [
+    { key: "time", node: <>{value(fmtDuration(seconds))} in range</> },
+    { key: "days", node: <>{value(String(daysSeen))} of {countNoun(rangeDays, "day")}</> },
+    { key: "last", node: <>Last seen {value(formatLastSeen(lastSeen))}</> },
   ];
+  if (runs !== undefined) facts.push({ key: "run", node: <TypicalRunFact runs={runs} /> });
+  if (facts.length === 0) return null;
   return (
     <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-ink-3">
       {facts.map((fact, i) => (
@@ -1324,39 +1333,30 @@ function EntityFacts({ entity, rangeDays }: { entity: ActivityEntitySummary; ran
   );
 }
 
-function DetailMetric({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  /** Explains the measure on hover or focus, the way the Insights tiles do.
-   *  Anything that would otherwise become a second line under the value
-   *  belongs here — four tiles in a grid only read as a set while they are
-   *  the same height. */
-  hint?: string;
-}) {
+/**
+ * How long this was used for at a stretch, measured the way Insights measures a
+ * subject it is narrowed to — so a window's panel here and its app's page there
+ * count runs the same way.
+ *
+ * It replaces an average of recorded rows, which the tracker splits on every
+ * title change: an hour in one editor could average out to ninety seconds.
+ */
+function TypicalRunFact({ runs }: { runs: RunStats | null }) {
+  const hint = runs && runs.runs > 0
+    ? `Half of this time came in runs at least this long. ${countNoun(runs.runs, "run")} in range, the longest ${fmtDuration(runs.longestSeconds ?? 0)}. ${RUN_DEFINITION}`
+    : RUN_DEFINITION;
   return (
-    <div className="rounded-lg border border-edge bg-surface-2 p-3">
-      {/* -raised, not plain ink-3: the tile's fill is above the page, and ink-3
-          is pinned to the page. See the token pair in index.css. */}
-      <p className="text-xs text-ink-3-raised">
-        {hint ? (
-          // The label joins the *accessible* name only. A screen reader has no
-          // layout telling it the tooltip belongs to the label above it, so it
-          // needs both; the visible tooltip already sits under that label and
-          // printing it again there was restating the tile to its own reader.
-          <FloatingTooltip
-            text={hint}
-            ariaLabel={`${label}. ${hint}`}
-            className="cursor-help outline-none"
-          >
-            {label}
-          </FloatingTooltip>
-        ) : label}
-      </p>
-      <p className="mt-1 truncate text-sm font-semibold tabular-nums" title={value}>{value}</p>
-    </div>
+    <>
+      <FloatingTooltip
+        text={hint}
+        ariaLabel={`Typical run. ${hint}`}
+        className="cursor-help underline decoration-dotted decoration-ink-3/60 underline-offset-2 outline-none"
+      >
+        Typical run
+      </FloatingTooltip>{" "}
+      <span className="tabular-nums text-ink-2">
+        {runs?.typicalSeconds ? fmtDuration(runs.typicalSeconds) : "—"}
+      </span>
+    </>
   );
 }
