@@ -309,6 +309,8 @@ export interface MenuOption {
    *  never on the trigger. For marking an entry in place: the alternative is
    *  moving it, and a list whose order answers to state cannot be learned. */
   hint?: string;
+  /** A destructive entry in an action menu: drawn in the warning colour. */
+  danger?: boolean;
 }
 
 export const MENU_VIEWPORT_MARGIN = 8;
@@ -617,7 +619,9 @@ export function MenuSelect({
                 onClick={() => commit(i)}
                 onMouseEnter={() => setActive(i)}
                 className={`flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
-                  i === active ? "bg-selected-strong text-ink" : "text-ink-2-raised"
+                  option.danger
+                    ? i === active ? "bg-bad/10 text-bad" : "text-bad"
+                    : i === active ? "bg-selected-strong text-ink" : "text-ink-2-raised"
                 }`}
               >
                 <span className="flex min-w-0 items-center gap-2">

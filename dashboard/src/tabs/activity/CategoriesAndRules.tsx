@@ -46,6 +46,7 @@ import {
 } from "../../lib/queries";
 import { useBanner } from "../../state/banner";
 import { useMeta } from "../../state/meta";
+import Chevron from "./Chevron";
 import ClearableInput from "./ClearableInput";
 import Collapsible from "./Collapsible";
 import RuleKindGlyph from "./RuleKindGlyph";
@@ -66,10 +67,6 @@ import {
 
 const SWATCH_MENU_WIDTH = 136;
 
-/** A category-level action as plain text: it acts on the whole category, and
- *  bordered buttons under every open category outweighed the rules above. */
-const TEXT_ACTION =
-  "rounded-md px-2 py-1 text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-3";
 
 const CATEGORY_ORDER_STORAGE_KEY = "time.categories-and-rules.category-order";
 const RULE_ORDER_STORAGE_KEY = "time.categories-and-rules.rule-order";
@@ -650,7 +647,7 @@ export default function CategoriesAndRules({
           return (
             <div
               key={category.id}
-              className="overflow-hidden rounded-[11px] border border-edge bg-surface-2"
+              className="overflow-hidden rounded-[11px] border border-edge bg-group"
             >
               <div
                 className={`group/header flex items-center gap-2.5 px-3 py-3 text-xs ${rowToggles ? "cursor-pointer" : ""}`}
@@ -658,10 +655,10 @@ export default function CategoriesAndRules({
               >
                 {normalizedRuleSearch !== "" ? (
                   <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center text-xs text-ink-3">
-                    <span className="rotate-90">▶</span>
+                    <span className="rotate-90"><Chevron open={false} /></span>
                   </span>
                 ) : (
-                  <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-xs text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span></button>
+                  <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-xs text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`flex transition-transform duration-200 ${open ? "rotate-90" : ""}`}><Chevron open={false} /></span></button>
                 )}
                 <button
                   type="button"
@@ -743,6 +740,43 @@ export default function CategoriesAndRules({
                         label: stateLabel(option),
                         dot: stateColorMap[option],
                       }))}
+                    />
+                  </span>
+                )}
+                {/* The category's own actions, in one menu at the row's end
+                    rather than under its rules, so an open category shows only
+                    what it contains. Delete keeps words rather than an icon:
+                    it cascades over the rules, and destructive weight should
+                    scale with blast radius. The built-in Ignored category can
+                    do none of these. */}
+                {!locked && (
+                  <span className="shrink-0">
+                    <MenuSelect
+                      variant="bare"
+                      size="compact"
+                      align="end"
+                      value=""
+                      label={`Actions for ${category.name}`}
+                      title="Category actions"
+                      placeholder={
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="my-px">
+                          <circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" />
+                        </svg>
+                      }
+                      onChange={(action) => {
+                        if (action === "insights") onViewInInsights?.(category);
+                        else if (action === "rename") beginRename();
+                        else if (action === "delete") setPendingDelete({ category, ruleCount: allRules.length });
+                      }}
+                      options={[
+                        // Insights does not count ignored time, so a category
+                        // still carrying the old ignored state has no view.
+                        ...(onViewInInsights && !category.isIgnored
+                          ? [{ value: "insights", label: "View in Insights" }]
+                          : []),
+                        { value: "rename", label: "Rename" },
+                        { value: "delete", label: "Delete category…", divider: true, danger: true },
+                      ]}
                     />
                   </span>
                 )}
@@ -909,39 +943,14 @@ export default function CategoriesAndRules({
                   <button
                     type="button"
                     onClick={() => setComposerOpen((current) => new Set(current).add(category.id))}
-                    className="-mx-2 mt-1.5 rounded-lg px-2 py-1 text-left text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
+                    // The + sits in the rules' glyph column and the words where
+                    // the patterns start; the extra top margin separates what
+                    // exists from the offer to add to it.
+                    className="-mx-2 mt-3 inline-flex items-center gap-2 rounded-lg px-2 py-1 pr-3 text-left text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
                   >
-                    + Add rule
+                    <span aria-hidden="true" className="flex w-4 justify-center">+</span>
+                    Add rule
                   </button>
-                )}
-                {/* Plain text actions, not bordered buttons: they act on the
-                    category as a whole and should not outweigh its rules.
-                    Delete keeps words rather than an icon because it cascades
-                    over the rules — destructive weight should scale with blast
-                    radius. The built-in Ignored category can do neither. */}
-                {!searching && !locked && (
-                  <div className="-ml-2 mt-2 flex items-center justify-between gap-2">
-                    {onViewInInsights ? (
-                      <button
-                        type="button"
-                        disabled={category.isIgnored}
-                        title={category.isIgnored
-                          ? "Insights does not count ignored time"
-                          : `See ${category.name} on its own in Insights`}
-                        onClick={() => onViewInInsights(category)}
-                        className={TEXT_ACTION}
-                      >
-                        View in Insights
-                      </button>
-                    ) : <span />}
-                    <button
-                      type="button"
-                      onClick={() => setPendingDelete({ category, ruleCount: allRules.length })}
-                      className={`${TEXT_ACTION} hover:bg-bad/10 hover:text-bad`}
-                    >
-                      Delete category
-                    </button>
-                  </div>
                 )}
               </Collapsible>
             </div>
@@ -983,9 +992,10 @@ export default function CategoriesAndRules({
         <button
           type="button"
           onClick={() => setAddingCategory(true)}
-          className="mt-2 self-start rounded-lg px-3 py-1.5 text-left text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
+          className="mt-2 flex items-center gap-2.5 self-start rounded-lg py-1.5 pl-3 pr-3 text-left text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
         >
-          + New category
+          <span aria-hidden="true" className="flex w-6 justify-center">+</span>
+          New category
         </button>
       )}
       {colorMenu !== null && createPortal(

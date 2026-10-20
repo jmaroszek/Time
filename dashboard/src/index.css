@@ -19,6 +19,13 @@
      existing raised surface on dark, while light gives controls a white fill
      that no longer groups them with gray record rows. */
   --color-control: #1d2026;
+  /* A bordered group of rows inside a card, such as a category in Categories
+     & Rules. On dark it takes the raised fill, the same fill as the fields
+     above it, so groups and controls read as one family. Light cannot do
+     that: its raised fill is darker than both the card and the controls, so
+     filled groups outweighed the fields and stacked into gray slabs. There
+     the border alone draws the group. */
+  --color-group: #1d2026;
   --color-edge: #2a2e36;
   --color-edge-2: #353b45;
   --color-control-edge: #2a2e36;
@@ -124,6 +131,7 @@
      control-vs-card ratio exactly, while staying clear of --color-surface-2
      and --color-bg. themeTokens.test.ts holds this. */
   --color-control: #f3f5f8;
+  --color-group: #ffffff;
   /* A step darker than the values the theme was drawn with (#d9dce3 / #bbc0cb).
      A contrast ratio is a bad model for a hairline near white: the same 1.2:1
      that reads as a lit edge against a near-black card is at the floor of what
