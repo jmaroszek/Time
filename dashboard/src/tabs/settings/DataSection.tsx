@@ -245,7 +245,7 @@ export default function DataSection({
       />
       <Row
         label="Erase all recorded history"
-        help="Turns recording off. Categories, rules, and backups are kept."
+        help="Erases all history and turns recording off. Categories, rules, and backups are kept."
         control={
           <TextAction
             danger

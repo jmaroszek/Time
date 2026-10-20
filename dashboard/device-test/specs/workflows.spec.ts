@@ -272,7 +272,7 @@ test("@workflow scheduling restores sign-in startup and saves an overnight windo
   await startup.click();
   await expect.poll(async () => (await fixtureSettings(page)).launch_at_login).toBe("0");
 
-  await page.getByRole("switch", { name: "Only record on a schedule" }).click();
+  await page.getByRole("switch", { name: "Record on a schedule" }).click();
   await expect.poll(async () => (await fixtureSettings(page)).tracking_schedule_enabled).toBe("1");
   await expect.poll(async () => (await fixtureSettings(page)).launch_at_login).toBe("1");
   await expect(startup).toBeDisabled();
@@ -306,7 +306,7 @@ test("@workflow lifecycle busy state gates dependent settings and data mutations
   // Every dependent control, including Data actions owned by child sections,
   // stays disabled until that one lifecycle promise settles.
   await expect(page.getByRole("switch", { name: "Start at Windows sign-in" })).toBeDisabled();
-  await expect(page.getByRole("switch", { name: "Only record on a schedule" })).toBeDisabled();
+  await expect(page.getByRole("switch", { name: "Record on a schedule" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Restore defaults", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Back up now" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Erase all" })).toBeDisabled();

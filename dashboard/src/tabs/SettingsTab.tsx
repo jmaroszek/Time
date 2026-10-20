@@ -69,7 +69,6 @@ import {
   Row,
   ScheduleTimeInput,
   Segmented,
-  InlineAction,
   SettingGroup,
   TextAction,
   handleRadioKey,
@@ -774,7 +773,7 @@ export default function SettingsTab({
             version is waiting. */}
         <Row
           label="Check for updates"
-          help="Check for updates each time you open Time. Time will not install a new version without your consent."
+          help="Check for updates each time you open Time."
           control={
             <PrivacyToggle
               label="Check for updates"
@@ -810,7 +809,7 @@ export default function SettingsTab({
             help text, which is where a nuance that fine belongs. */}
         <Row
           label="Record websites"
-          help="Stores the site a browser was on, so browser time splits by website. Turning this off records browser time without saying where it went. Needs Time Web Extension, below."
+          help="Splits browser time by website. Requires Time Web Extension, below."
           control={
             <PrivacyToggle
               label="Record websites"
@@ -908,11 +907,11 @@ export default function SettingsTab({
           }
         />
         <Row
-          label="Only record on a schedule"
-          help="Keep the tracker running, but record only during the selected local work hours."
+          label="Record on a schedule"
+          help="Record only during selected hours."
           control={
             <PrivacyToggle
-              label="Only record on a schedule"
+              label="Record on a schedule"
               enabled={scheduleEnabled}
               disabled={lifecycleBusy || !trackingEnabled || savingKeys.has("tracking_schedule_enabled")}
               onChange={(enabled) => void setScheduleEnabled(enabled)}
@@ -995,7 +994,7 @@ export default function SettingsTab({
               compact
               stacked
               label="Media sites"
-              help="Video or audio playing on these sites keeps you from being marked AFK. Time already recognizes the major streaming and music services — add any it misses. Apps need no entry here."
+              help="Video or audio playing on these sites keeps you from being marked AFK. Major streaming and music sites are built in."
               control={
                 <MediaSiteEditor
                   value={drafts.media_domains ?? ""}
@@ -1008,7 +1007,7 @@ export default function SettingsTab({
           <Row
             bare
             label="AFK idle threshold"
-            help="No human keyboard or mouse input for this long marks you Away From Keyboard (AFK). Software-generated input, including Caffeine, does not keep you active. AFK time is not classified and does not count towards computer use."
+            help="No keyboard or mouse input for this long marks you AFK. Software-generated input doesn’t count."
             control={numberControl(SPECS.idle, "AFK idle threshold", "min")}
           />
         </SettingGroup>
@@ -1040,14 +1039,14 @@ export default function SettingsTab({
           one section that changes nothing but how the app looks. */}
       <Section
         title="Hidden items"
-        intro="Keep low-signal items out of the lists you read. Nothing here changes a total — the time is still recorded and still counted — and categorized items always remain visible."
+        intro="Keeps low-signal items out of your lists. Filtered items still count towards totals."
       >
         {/* The stored key is still min_app_seconds_per_day: it was app-only
             before Insights ranked websites, and renaming a settings key costs a
             migration to buy nothing the label cannot say. */}
         <Row
           label="Minimum daily time"
-          help="Hides apps and websites averaging less than this per tracked day from the Insights panel that ranks them. Whichever list is on screen reports how many rows it held back."
+          help="Hides apps and websites averaging less than this per tracked day from the Insights panel that ranks them."
           control={numberControl(SPECS.minimum, "Minimum daily time", "min")}
         />
         {/* Utilities are recognized by name alone, so this switch stands on its
@@ -1108,7 +1107,7 @@ export default function SettingsTab({
       <Section title="Appearance">
         <Row
           label="Theme"
-          help="Follow system uses your Windows light or dark setting, and follows it when it changes."
+          help="Follow system matches your operating system theme."
           control={
             <Segmented
               label="Theme"
@@ -1191,11 +1190,11 @@ export default function SettingsTab({
       </Section>
 
       <Section title="Advanced">
-        <Row label="Heartbeat interval" help="How often data is saved to the database." control={numberControl(SPECS.heartbeat, "Heartbeat interval", "s")} />
+        <Row label="Heartbeat interval" help="How often data is saved to the database. You probably shouldn't change this." control={numberControl(SPECS.heartbeat, "Heartbeat interval", "s")} />
         <Row
           stacked
           label="Browser processes"
-          help="Processes treated as browsers for Record websites and Website or Window rules."
+          help="Programs Time treats as web browsers."
           control={
             <BrowserProcessEditor
               value={drafts.browser_processes ?? ""}
@@ -1277,23 +1276,12 @@ function HelpAndFeedbackSection({
   trackerVersion: string | undefined;
 }) {
   const banner = useBanner();
-  const [copied, setCopied] = useState(false);
 
   const emailSupport = async () => {
     try {
       await openUrl(supportEmailUrl({ dashboardVersion: appVersion, trackerVersion }));
     } catch (error) {
       banner.report(error, "opening an email to Time support");
-    }
-  };
-
-  const copyAddress = async () => {
-    try {
-      await navigator.clipboard.writeText(SUPPORT_EMAIL);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1_500);
-    } catch (error) {
-      banner.report(error, "copying the Time support address");
     }
   };
 
@@ -1304,10 +1292,7 @@ function HelpAndFeedbackSection({
         help={
           <>
             Questions, bugs, or ideas? Write to{" "}
-            <span className="font-medium text-ink-2">{SUPPORT_EMAIL}</span>.{" "}
-            <InlineAction onClick={() => void copyAddress()}>
-              {copied ? "Copied" : "Copy address"}
-            </InlineAction>
+            <span className="font-medium text-ink-2">{SUPPORT_EMAIL}</span>.
           </>
         }
         control={<TextAction onClick={() => void emailSupport()}>Email support</TextAction>}
@@ -1367,7 +1352,7 @@ function RestoreDefaultsSection({
       )}
       <Row
         label="Restore default settings"
-        help="Resets every setting on this page without changing recorded history or organization."
+        help="Resets every setting on this page without changing recorded history."
         control={
           <TextAction
             disabled={disabled || restoring}
