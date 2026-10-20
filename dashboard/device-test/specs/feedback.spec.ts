@@ -81,7 +81,7 @@ test("@workflow Don't ask again silences every question, not just this one", asy
   await expect(page.getByText(ASK)).toHaveCount(0);
 
   const settings = await fixtureSettings(page);
-  // The switch Settings shows, so the decision stays visible and reversible.
+  // One shared switch, so no other question slips through afterwards.
   expect(settings.feedback_prompts_enabled).toBe("0");
   expect(settings.app_feedback_prompt_state).toBe("");
 });
@@ -116,14 +116,13 @@ test("@workflow a stopped tracker outranks the ask entirely", async ({ page }) =
   await expect(page.getByText(ASK)).toHaveCount(0);
 });
 
-test("@workflow the Settings switch reports what Don't ask again turned off", async ({ page }) => {
-  await page.goto("/?feedback=app");
-  await page.getByRole("button", { name: "Don't ask again", exact: true }).click();
+test("@workflow Settings offers no switch to turn feedback asks off", async ({ page }) => {
+  // Deliberate: the asks are rare and one-time, and "Don't ask again" on the
+  // prompt itself is the only way to stop them.
+  await page.goto("/");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-
-  const toggle = page.getByRole("switch", { name: "Ask for feedback occasionally" });
-  await expect(toggle).toBeVisible();
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByRole("button", { name: "Email support" })).toBeVisible();
+  await expect(page.getByRole("switch", { name: "Ask for feedback occasionally" })).toHaveCount(0);
 });
 
 

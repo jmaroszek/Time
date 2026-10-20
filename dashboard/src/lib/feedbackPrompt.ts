@@ -70,8 +70,8 @@ export const PROMPT_ANSWERED = "done";
  * asked, so it clears FEEDBACK_PROMPTS_ENABLED_KEY and silences every question
  * at once. Retiring only the current one would answer a reader who said stop
  * with a different question six weeks later, which is the same refusal ignored.
- * That switch is the one in Settings, so the decision stays visible and
- * reversible rather than vanishing into a row nobody can find.
+ * Settings deliberately has no toggle for this switch: the asks are rare and
+ * one-time, so the prompt's own "Don't ask again" is the only way to set it.
  */
 export type PromptState =
   | { kind: "unasked" }

@@ -84,8 +84,8 @@ export function FeedbackPanel({
   };
 
   /** "Don't ask again" is about being asked, not about this question, so it
-   *  clears the shared switch. Settings shows the same one, which is where a
-   *  reader who changes their mind can find it. */
+   *  clears the shared switch. There is no Settings toggle for it: the asks
+   *  are rare and one-time, and this button is the only way to say stop. */
   const silence = async () => {
     if (busy) return;
     setBusy(true);
