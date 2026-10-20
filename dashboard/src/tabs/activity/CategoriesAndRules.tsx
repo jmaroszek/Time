@@ -71,6 +71,17 @@ const SWATCH_MENU_WIDTH = 136;
 const CATEGORY_ORDER_STORAGE_KEY = "time.categories-and-rules.category-order";
 const RULE_ORDER_STORAGE_KEY = "time.categories-and-rules.rule-order";
 
+/** Menu order is the order each list reads in the Sort menu. */
+const CATEGORY_ORDER_LABELS: Record<CategoryListOrder, string> = {
+  productivity: "Productivity",
+  name: "Name",
+};
+const RULE_ORDER_LABELS: Record<RuleListOrder, string> = {
+  use: "Use",
+  "type-name": "Type",
+  name: "Name",
+};
+
 function readCategoryListOrder(): CategoryListOrder {
   if (typeof window === "undefined") return "productivity";
   try {
@@ -222,7 +233,7 @@ export default function CategoriesAndRules({
 
   const draftFor = (id: number): CategoryRuleDraft =>
     drafts[id] ?? {
-      type: "domain" as const,
+      type: "process" as const,
       pattern: "",
       scopeKind: "process",
       scopeValue: "",
@@ -525,11 +536,12 @@ export default function CategoriesAndRules({
 
   return (
     // Scrolls itself rather than the page once enough categories are open. The
-    // -mr-2/pr-2 keeps the scrollbar off the rows. The smaller left pair gives
-    // outside focus outlines room inside the scroll clip; the negative margin
-    // preserves the alignment of every field and row. Bottom padding keeps the
+    // -mr-2/pr-2 keeps the scrollbar off the rows. The smaller left and top
+    // pairs give outside focus outlines room inside the scroll clip — the
+    // search field sits flush against the top edge; the negative margins
+    // preserve the alignment of every field and row. Bottom padding keeps the
     // final input's outline inside the scrollable area at its maximum position.
-    <div className="scroll-well -ml-1 -mr-2 flex min-h-0 flex-col overflow-y-auto pb-1 pl-1 pr-2">
+    <div className="scroll-well -ml-1 -mr-2 -mt-1 flex min-h-0 flex-col overflow-y-auto pb-1 pl-1 pr-2 pt-1">
       {colorMenu !== null && <button type="button" aria-label="Close menu" className="fixed inset-0 z-40 cursor-default" onClick={() => setColorMenu(null)} />}
       {showResetNotice && (
         <div className="mb-3 flex items-start gap-3 rounded-lg border border-accent/25 bg-accent/[.055] px-3 py-2.5 text-xs leading-relaxed text-ink-2">
@@ -562,38 +574,51 @@ export default function CategoriesAndRules({
       {/* No standing explainer: precedence resolves clashes sensibly on its
           own, a classification's source can be inspected from its row, and
           the rule model is documented on the website. */}
-      <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2">
+      <div className="mb-3 flex shrink-0 items-center gap-2">
         <ClearableInput
           value={ruleSearch}
           onChange={setRuleSearch}
           label="Search rules"
           placeholder="Search rules, types, and categories…"
           leadingIcon
-          className="min-w-0 basis-full sm:min-w-[240px] sm:basis-auto sm:flex-1"
+          className="min-w-0 flex-1"
         />
+        {/* Both orders behind one trigger. Two labelled menus took as much
+            of the row as the search field did, for settings that change
+            rarely; the current orders are the checked rows inside. */}
         <MenuSelect
           size="field"
           variant="resting"
-          label="Category order"
-          className="min-w-0 flex-1 sm:flex-none"
-          value={categoryOrder}
-          onChange={(value) => chooseCategoryOrder(value as CategoryListOrder)}
+          align="end"
+          label="Sort categories and rules"
+          className="cursor-pointer"
+          value=""
+          placeholder={
+            <>
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
+                <path d="M4 6h10M4 12h7M4 18h4" /><path d="M18 5v14M15 16l3 3 3-3" />
+              </svg>
+              <span>Sort</span>
+            </>
+          }
+          onChange={(value) => {
+            const [group, order] = value.split(":");
+            if (group === "category") chooseCategoryOrder(order as CategoryListOrder);
+            else chooseRuleOrder(order as RuleListOrder);
+          }}
           options={[
-            { value: "productivity", label: "Productivity", triggerLabel: "Categories by Productivity" },
-            { value: "name", label: "Name", triggerLabel: "Categories by Name" },
-          ]}
-        />
-        <MenuSelect
-          size="field"
-          variant="resting"
-          label="Rule order"
-          className="min-w-0 flex-1 sm:flex-none"
-          value={ruleOrder}
-          onChange={(value) => chooseRuleOrder(value as RuleListOrder)}
-          options={[
-            { value: "use", label: "Use", triggerLabel: "Rules by Use" },
-            { value: "type-name", label: "Type", triggerLabel: "Rules by Type" },
-            { value: "name", label: "Name", triggerLabel: "Rules by Name" },
+            ...(Object.keys(CATEGORY_ORDER_LABELS) as CategoryListOrder[]).map((order, i) => ({
+              value: `category:${order}`,
+              label: CATEGORY_ORDER_LABELS[order],
+              section: i === 0 ? "Categories" : undefined,
+              checked: categoryOrder === order,
+            })),
+            ...(Object.keys(RULE_ORDER_LABELS) as RuleListOrder[]).map((order, i) => ({
+              value: `rule:${order}`,
+              label: RULE_ORDER_LABELS[order],
+              section: i === 0 ? "Rules" : undefined,
+              checked: ruleOrder === order,
+            })),
           ]}
         />
       </div>
@@ -655,10 +680,10 @@ export default function CategoriesAndRules({
               >
                 {normalizedRuleSearch !== "" ? (
                   <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center text-xs text-ink-3">
-                    <span className="rotate-90"><Chevron open={false} /></span>
+                    <span className="rotate-90"><Chevron open={false} bold /></span>
                   </span>
                 ) : (
-                  <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-xs text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`flex transition-transform duration-200 ${open ? "rotate-90" : ""}`}><Chevron open={false} /></span></button>
+                  <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-xs text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`flex transition-transform duration-200 ${open ? "rotate-90" : ""}`}><Chevron open={false} bold /></span></button>
                 )}
                 <button
                   type="button"
@@ -705,7 +730,7 @@ export default function CategoriesAndRules({
                       variant="bare"
                       size="compact"
                       align="end"
-                      className="capitalize"
+                      className="cursor-pointer capitalize"
                       value={state}
                       onChange={(option) => void setCategoryState(category, option as Productivity)}
                       title={`Set the productivity of ${category.name}`}
@@ -740,6 +765,7 @@ export default function CategoriesAndRules({
                       size="compact"
                       align="end"
                       value=""
+                      className="cursor-pointer"
                       label={`Actions for ${category.name}`}
                       title="Category actions"
                       placeholder={
@@ -773,10 +799,28 @@ export default function CategoriesAndRules({
                 {/* A category with thirty rules should not push the ones
                     below it off the screen: past a few rows the list becomes
                     its own quiet scroll well. */}
-                <div className="scroll-well flex max-h-[220px] flex-col gap-1.5 overflow-y-auto pr-2">
+                {/* A scroll container clips both axes, so the rows' -mx-2
+                    hover fill lost its left corners at the well's edge. The
+                    well reaches out by the same 8px and pads it back, leaving
+                    the rows where they were with room to draw into. */}
+                <div className="scroll-well -ml-2 flex max-h-[220px] flex-col gap-1.5 overflow-y-auto pl-2 pr-2">
                   {visibleRules.map((rule) => {
                     const editingThis = activeEdit?.ruleId === rule.id;
                     const unused = usage !== null && !usage.has(rule.id);
+                    const windowQualifier = rule.matchType === "title"
+                      ? `${describeTitleRule({
+                          titleMatchMode: rule.titleMatchMode ?? "phrase",
+                          titleAnchor: rule.titleAnchor ?? "any",
+                        })} · ${titleRuleScopeLabel(rule)}`
+                      : null;
+                    // Counted over every rule in the category, not only the
+                    // ones a search left showing: a twin hidden by the search
+                    // still makes this row ambiguous once the search clears.
+                    const sharesPattern = windowQualifier !== null && allRules.some(
+                      (other) => other.id !== rule.id
+                        && other.matchType === "title"
+                        && other.pattern === rule.pattern,
+                    );
                     return (
                     <div
                       key={rule.id}
@@ -801,28 +845,20 @@ export default function CategoriesAndRules({
                         <RuleKindGlyph matchType={rule.matchType} />
                         <span className="sr-only">{RULE_LABELS[rule.matchType]}</span>
                       </span>
+                      {/* A Window rule's mode and scope live in the pattern's
+                          tooltip and in the editor, so a Window row weighs the
+                          same as an App or Website row. They come back onto
+                          the row only when another Window rule here shares the
+                          pattern — then they are what tells the two apart. */}
                       <span
                         className="min-w-0 shrink cursor-text truncate font-mono"
+                        title={windowQualifier ?? undefined}
                       >
                         {rule.pattern}
                       </span>
-                      {/* A Window rule's mode and scope as plain text after
-                          its pattern, not pills: they qualify the pattern
-                          rather than tag the row. */}
-                      {rule.matchType === "title" && (
-                        <span
-                          className="min-w-0 max-w-[45%] shrink-[2] truncate text-ink-3"
-                          title={`${describeTitleRule({
-                            titleMatchMode: rule.titleMatchMode ?? "phrase",
-                            titleAnchor: rule.titleAnchor ?? "any",
-                          })}; only matches ${titleRuleScopeLabel(rule)}.`}
-                        >
-                          {describeTitleRule({
-                            titleMatchMode: rule.titleMatchMode ?? "phrase",
-                            titleAnchor: rule.titleAnchor ?? "any",
-                          })}
-                          {" · "}
-                          {titleRuleScopeLabel(rule)}
+                      {sharesPattern && (
+                        <span className="min-w-0 max-w-[45%] shrink-[2] truncate text-ink-3">
+                          {windowQualifier}
                         </span>
                       )}
                       <span className="flex-1" />

@@ -100,7 +100,7 @@ export type { ActivityView } from "./activity/ActivityTables";
 
 /** Categories & Rules' column. Shared with whatever sits above the card, so a
  *  notice there ends where the card does. */
-const RULES_COLUMN_WIDTH = "mr-auto w-full max-w-[800px]";
+const RULES_COLUMN_WIDTH = "mr-auto w-full max-w-[700px]";
 
 const ENTITY_PAGE = 50;
 const WINDOW_PAGE = 50;
@@ -1078,8 +1078,8 @@ export default function ActivityTab({
             // Categories & Rules is a settings surface, not a data surface: a
             // name, a state and a count, with half a screen of air between them
             // at full width. The floor is the Window-rule composer — its
-            // "Applies to" row plus a scope input, inside the rule indent. An
-            // 800px cap keeps that row flat without stretching the folded list.
+            // "Applies to" row plus a scope input, inside the rule indent. A
+            // 660px cap keeps that row flat without stretching the folded list.
             // mr-auto, not mx-auto: centring would slide the view switcher out
             // from under the cursor that just clicked it.
             : RULES_COLUMN_WIDTH

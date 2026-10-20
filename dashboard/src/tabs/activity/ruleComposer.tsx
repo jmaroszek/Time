@@ -12,6 +12,7 @@ import { showBroadMatchWarning } from "../../lib/activityFormat";
 import {
   ANY_APP,
   BROWSER_SCOPE,
+  normalizeRulePattern,
   type MatchType,
   type Productivity,
   type Rule,
@@ -204,7 +205,7 @@ function RuleTypeSelector({
           style={{ width: pill.width, transform: `translateX(${pill.left}px)`, left: 0 }}
         />
       )}
-      {(["domain", "title", "process"] as MatchType[]).map((type) => (
+      {(["process", "domain", "title"] as MatchType[]).map((type) => (
         <button
           key={type}
           ref={(node) => {
@@ -251,13 +252,13 @@ function RuleDraftPreview({
   draft: CategoryRuleDraft;
   replacingRuleId?: number;
 }) {
-  // Null while counting, "unusable" when the pattern normalizes to nothing —
-  // the same rejection addRule would raise, said before the button is pressed.
-  const [result, setResult] = useState<TitleRulePreview | "unusable" | null>(null);
+  // Null only until the first count lands. A recount keeps the previous
+  // figure on screen rather than blanking to "Counting…", which otherwise
+  // flashed on every keystroke while a pattern matched nothing yet.
+  const [result, setResult] = useState<TitleRulePreview | null>(null);
   const deferred = useDeferredValue(draft);
 
   useEffect(() => {
-    setResult(null);
     if (!source) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
@@ -268,7 +269,9 @@ function RuleDraftPreview({
         deferred.type === "title" ? deferred : {},
         replacingRuleId,
       );
-      if (!cancelled) setResult(next ?? "unusable");
+      // The form only mounts this preview for a usable pattern, so null here
+      // is a draft that went unusable mid-count; it says nothing.
+      if (!cancelled) setResult(next);
     }, 0);
     return () => {
       cancelled = true;
@@ -276,17 +279,11 @@ function RuleDraftPreview({
     };
   }, [source, deferred, replacingRuleId]);
 
-  if (result !== null && result !== "unusable" && result.sessions === 0) {
-    return null;
-  }
+  if (result !== null && result.sessions === 0) return null;
 
   return (
-    <p className="mt-2 text-xs leading-snug text-ink-3">
-      {result === "unusable"
-        ? deferred.type === "domain"
-          ? "That is not a usable website domain — enter one like example.com."
-          : "Enter text this rule should match."
-        : <RulePreviewText preview={result} />}
+    <p className="mt-3 text-xs leading-relaxed text-ink-3">
+      <RulePreviewText preview={result} />
     </p>
   );
 }
@@ -315,19 +312,34 @@ export function CategoryRuleForm({
   replacingRuleId?: number;
 }) {
   const ready = draft.pattern.trim() !== "" && ruleDraftReady(draft);
+  // A pattern that normalizes to nothing is the one addRule would reject. It
+  // is only called out once Add has been tried: judging a half-typed domain
+  // on every keystroke tells someone they are wrong before they could be done.
+  // After that first try the line tracks the field, so it leaves once fixed.
+  const usable = normalizeRulePattern(draft.type, draft.pattern) !== null;
+  const [attempted, setAttempted] = useState(false);
+  const submit = () => {
+    if (!ready) return;
+    if (!usable) return setAttempted(true);
+    onSubmit();
+  };
   return (
     <>
       <div className="flex items-center gap-2">
         <RuleTypeSelector
           value={draft.type}
-          onChange={(type) => onChange({ type })}
+          onChange={(type) => {
+            setAttempted(false);
+            onChange({ type });
+          }}
         />
         <input
           autoFocus={autoFocus}
           value={draft.pattern}
+          aria-invalid={attempted && ready && !usable}
           onChange={(event) => onChange({ pattern: event.target.value })}
           onKeyDown={(event) => {
-            if (event.key === "Enter") onSubmit();
+            if (event.key === "Enter") submit();
             else if (event.key === "Escape") onCancel?.();
           }}
           placeholder={draft.type === "domain"
@@ -335,21 +347,34 @@ export function CategoryRuleForm({
             : draft.type === "title" ? "words to match…" : "example.exe"}
           className="min-w-0 flex-1 rounded-lg border border-control-edge bg-control px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
         />
-        {onCancel && <Button onClick={onCancel}>Cancel</Button>}
+        {/* Borderless, as the rest of the app's inline actions now are: the
+            field beside them is the only outlined thing in this row. */}
+        {onCancel && <Button variant="text" onClick={onCancel}>Cancel</Button>}
         {/* Primary only once there is something to submit: a disabled
             primary rests as a faded blue ghost that reads as broken. */}
         <Button
-          variant={ready ? "primary" : "default"}
+          variant={ready ? "primary-fill" : "text"}
           disabled={!ready}
-          onClick={onSubmit}
+          onClick={submit}
         >
           {submitLabel}
         </Button>
       </div>
+      {attempted && ready && !usable && (
+        <p className="mt-2 text-xs leading-snug text-bad">
+          {draft.type === "domain"
+            ? "That is not a usable website domain — enter one like example.com."
+            : "Enter text this rule should match."}
+        </p>
+      )}
+      {/* The options sit in a label column and a control column, and every
+          line of help beneath them starts in the control column too, so the
+          explanations read as belonging to the choices above them instead of
+          as a third block of text. */}
       {draft.type === "title" && (
-        <div className="mt-2.5">
-          <div className="flex items-center gap-2">
-            <span className="w-[64px] shrink-0 text-xs text-ink-3">Match</span>
+        <div className="mt-4 flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <span className="w-[68px] shrink-0 text-xs text-ink-3">Match</span>
             <SegmentedPills
               label="Window title match mode"
               value={draft.titleMatchMode}
@@ -360,8 +385,8 @@ export function CategoryRuleForm({
               })}
             />
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 sm:flex-nowrap">
-            <span className="w-[64px] shrink-0 text-xs text-ink-3">Applies to</span>
+          <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
+            <span className="w-[68px] shrink-0 text-xs text-ink-3">Applies to</span>
             <SegmentedPills
               label="Window rule scope"
               value={draft.scopeKind}
@@ -392,21 +417,21 @@ export function CategoryRuleForm({
               />
             )}
           </div>
+          {/* Website and App rules need no help line: the placeholder shows
+              the format. A Window rule's line explains the mode just chosen. */}
+          <div className="flex flex-col gap-1.5 sm:pl-[80px]">
+            <p className="text-xs leading-relaxed text-ink-3">
+              {titleMatchModeHelp(draft.titleMatchMode)}
+              {!windowTitleCaptureEnabled
+                && " Future window title capture is off; existing stored titles can still match."}
+            </p>
+            {showBroadMatchWarning(draft) && (
+              <BroadMatchWarning className="leading-relaxed" />
+            )}
+          </div>
         </div>
       )}
-      {/* Website and App rules need no help line: the placeholder shows the
-          format. A Window rule's line explains the match mode just chosen. */}
-      {draft.type === "title" && (
-        <p className="mt-2 text-xs text-ink-3">
-          {titleMatchModeHelp(draft.titleMatchMode)}
-          {!windowTitleCaptureEnabled
-            && " Future window title capture is off; existing stored titles can still match."}
-        </p>
-      )}
-      {draft.type === "title" && showBroadMatchWarning(draft) && (
-        <BroadMatchWarning className="mt-1.5" />
-      )}
-      {ready && (
+      {ready && usable && (
         <RuleDraftPreview
           source={source}
           draft={draft}

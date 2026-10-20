@@ -158,7 +158,7 @@ export function Button({
 }: {
   children: ReactNode;
   onClick?: () => void;
-  variant?: "default" | "danger" | "quiet-danger" | "primary" | "text" | "text-danger";
+  variant?: "default" | "danger" | "quiet-danger" | "primary" | "primary-fill" | "text" | "text-danger";
   disabled?: boolean;
   title?: string;
 }) {
@@ -181,6 +181,9 @@ export function Button({
   const styles = {
     default: "border-edge bg-surface-2 text-ink-2 hover:border-edge-2 hover:text-ink",
     primary: "border-edge bg-accent/10 text-accent hover:border-accent/40 hover:bg-accent/[.18]",
+    // The primary's fill without its outline, to sit beside `text` actions:
+    // the tint alone marks it as the one that commits.
+    "primary-fill": "border-transparent bg-accent/10 text-accent hover:bg-accent/[.18]",
     danger: "border-edge bg-bad/10 text-bad hover:border-bad/40 hover:bg-bad/[.18]",
     // For a button that *opens* a destructive flow rather than performing one.
     // It rests exactly as an ordinary control does and takes the warning colour
@@ -315,6 +318,13 @@ export interface MenuOption {
   hint?: string;
   /** A destructive entry in an action menu: drawn in the warning colour. */
   danger?: boolean;
+  /** Starts a labelled group at this entry, drawn as the Insights scope
+   *  picker draws its sections. The label is not an option, so arrow keys
+   *  and typeahead pass over it. */
+  section?: string;
+  /** Overrides the single-value check, for a menu holding several independent
+   *  choices — one per section — behind one trigger. */
+  checked?: boolean;
 }
 
 export const MENU_VIEWPORT_MARGIN = 8;
@@ -615,14 +625,26 @@ export function MenuSelect({
             <p className="px-2.5 py-1.5 text-xs leading-snug text-ink-3-raised">{header}</p>
           )}
           <div id={`${id}-list`} role="listbox" aria-label={label}>
-          {options.map((option, i) => (
+          {options.map((option, i) => {
+            const checked = option.checked ?? i === selected;
+            return (
             <div key={option.value}>
               {option.divider && <div className="mx-1.5 my-1 h-px bg-edge" />}
+              {option.section && (
+                <p
+                  role="presentation"
+                  className={`px-2.5 pb-1 pt-2.5 text-micro font-medium uppercase tracking-[0.08em] text-ink-3-raised ${
+                    i > 0 ? "mt-1.5 border-t border-raised-edge" : "pt-1.5"
+                  }`}
+                >
+                  {option.section}
+                </p>
+              )}
               <button
                 type="button"
                 id={`${id}-opt-${i}`}
                 role="option"
-                aria-selected={i === selected}
+                aria-selected={checked}
                 onClick={() => commit(i)}
                 onMouseEnter={() => setActive(i)}
                 className={`flex w-full items-center justify-between gap-4 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
@@ -639,10 +661,11 @@ export function MenuSelect({
                 {/* Held on every row, not just the chosen one: the menu sizes
                     itself to its content, so a check that came and went would
                     resize the whole menu as the selection moved. */}
-                <span className={i === selected ? "text-accent" : "invisible"} aria-hidden="true">✓</span>
+                <span className={checked ? "text-accent" : "invisible"} aria-hidden="true">✓</span>
               </button>
             </div>
-          ))}
+            );
+          })}
           </div>
         </div>,
         document.body,

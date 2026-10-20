@@ -228,16 +228,17 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   await page.getByRole("button", { name: "Categories & Rules", exact: true }).click();
   await expect(page.getByRole("button", { name: "New category", exact: true })).toBeVisible();
   if (width < 640) {
-    const categoryOrder = page.getByRole("combobox", { name: "Category order" });
-    const ruleOrder = page.getByRole("combobox", { name: "Rule order" });
-    const [categoryBox, ruleBox] = await Promise.all([
-      categoryOrder.boundingBox(),
-      ruleOrder.boundingBox(),
+    const search = page.getByPlaceholder("Search rules, types, and categories…");
+    const sort = page.getByRole("combobox", { name: "Sort categories and rules" });
+    const [searchBox, sortBox] = await Promise.all([
+      search.boundingBox(),
+      sort.boundingBox(),
     ]);
-    expect(categoryBox).not.toBeNull();
-    expect(ruleBox).not.toBeNull();
-    expect(Math.abs(categoryBox!.y - ruleBox!.y)).toBeLessThanOrEqual(2);
-    expect(Math.abs(categoryBox!.width - ruleBox!.width)).toBeLessThanOrEqual(2);
+    expect(searchBox).not.toBeNull();
+    expect(sortBox).not.toBeNull();
+    // One row at phone width too: the field keeps a usable width beside Sort.
+    expect(Math.abs(searchBox!.y - sortBox!.y)).toBeLessThanOrEqual(2);
+    expect(searchBox!.width).toBeGreaterThan(160);
 
   }
   await page.getByRole("button", { name: "New category", exact: true }).click();

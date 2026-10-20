@@ -375,44 +375,52 @@ export function LibraryControls({
   const searching = classificationFilter !== "excluded";
   return (
     <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 border-b border-edge/50 pb-4">
-      {searching ? (
-        <>
-          <ClearableInput
-            value={search}
-            onChange={onSearch}
-            label="Search activity"
-            placeholder="Search apps, websites, and windows…"
-            leadingIcon
-            className="min-w-0 basis-full sm:min-w-[240px] sm:max-w-[360px] sm:basis-auto sm:flex-1"
-          />
-          <MenuSelect
-            size="field"
-            variant={typeFilter === "all" ? "resting" : "engaged"}
-            label="Activity type"
-            className="min-w-0 flex-1 sm:flex-none"
-            value={typeFilter}
-            onChange={(value) => onTypeFilter(value as ActivityTypeFilter)}
-            options={[
-              { value: "all", label: "All types" },
-              { value: "app", label: "Apps" },
-              { value: "website", label: "Websites" },
-            ]}
-          />
-        </>
-      ) : (
-        <span className="min-w-0 basis-full text-xs text-ink-3 sm:min-w-[240px] sm:basis-auto sm:flex-1">
-          Apps and websites Time is not allowed to record.
-        </span>
-      )}
-      <MenuSelect
-        size="field"
-        variant={classificationFilter === "all" ? "resting" : "engaged"}
-        label="Classification filter"
-        className="min-w-0 flex-1 sm:flex-none"
-        value={classificationFilter}
-        onChange={(value) => onClassificationFilter(value as LibraryFilter)}
-        options={classificationOptions(categories, uncategorizedCount)}
-      />
+      {/* From md up, where the table shows all five columns, the filters end
+          where the Time column does, so the toolbar reads as the header of the
+          columns it narrows instead of a short stub over a wide table. Time's
+          right edge is 73% of the table (Name 27 + bar 37 + Time 9), and the
+          table is narrower than this row by its region's 16px gutter and 6px
+          scrollbar — hence the subtraction before scaling. */}
+      <div className="flex min-w-0 basis-full flex-wrap items-center gap-2 sm:flex-1 sm:basis-auto md:w-[calc((100%-22px)*0.73)] md:flex-none">
+        {searching ? (
+          <>
+            <ClearableInput
+              value={search}
+              onChange={onSearch}
+              label="Search activity"
+              placeholder="Search apps, websites, and windows…"
+              leadingIcon
+              className="min-w-0 basis-full sm:min-w-[240px] sm:max-w-[360px] sm:basis-auto sm:flex-1 md:max-w-none"
+            />
+            <MenuSelect
+              size="field"
+              variant={typeFilter === "all" ? "resting" : "engaged"}
+              label="Activity type"
+              className="min-w-0 flex-1 sm:flex-none"
+              value={typeFilter}
+              onChange={(value) => onTypeFilter(value as ActivityTypeFilter)}
+              options={[
+                { value: "all", label: "All types" },
+                { value: "app", label: "Apps" },
+                { value: "website", label: "Websites" },
+              ]}
+            />
+          </>
+        ) : (
+          <span className="min-w-0 basis-full text-xs text-ink-3 sm:min-w-[240px] sm:basis-auto sm:flex-1">
+            Apps and websites Time is not allowed to record.
+          </span>
+        )}
+        <MenuSelect
+          size="field"
+          variant={classificationFilter === "all" ? "resting" : "engaged"}
+          label="Classification filter"
+          className="min-w-0 flex-1 sm:flex-none"
+          value={classificationFilter}
+          onChange={(value) => onClassificationFilter(value as LibraryFilter)}
+          options={classificationOptions(categories, uncategorizedCount)}
+        />
+      </div>
       {/* Muted, not accent: this is about rows nobody asked to see, and it was
           the loudest thing in the card header while being the least
           consequential. It sits with the filters because it is one — the row of
