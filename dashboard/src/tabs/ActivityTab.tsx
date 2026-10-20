@@ -930,8 +930,6 @@ export default function ActivityTab({
       dock={detailMode === "outboard" ? panelStyle : null}
       group={currentWindow}
       usage={result?.selectedWindowUsage ?? []}
-      runs={result?.selectedWindowRuns ?? null}
-      rangeDays={calendarDays(range)}
       onLoadMoreVisits={() => setWindowVisitLimit((limit) => limit + WINDOW_VISIT_MORE)}
       actionsDisabled={!analyzed.current}
       selectedSessionIds={panelSessionIds}

@@ -80,7 +80,7 @@ test("@workflow an app opened from a category stays inside that category", async
   await expect(tile(page, "Time in range")).toContainText("7h 49m");
 });
 
-test("@workflow a top window opens in Activity, and the panels count runs as Insights does", async ({
+test("@workflow a top window opens in Activity, and neither panel restates run length", async ({
   page,
 }) => {
   await page.goto("/");
@@ -89,8 +89,9 @@ test("@workflow a top window opens in Activity, and the panels count runs as Ins
 
   const window = page.getByRole("complementary", { name: "Window details: Product Design — Time — Slack" });
   await expect(window).toBeVisible();
-  // One line rather than a tile: the label and its figure share a parent.
-  await expect(window.getByLabel(/^Typical run\./).locator("xpath=..")).toHaveText("Typical run 54m");
+  // The total rides in the Timeline caption; run length is Insights' to answer.
+  await expect(window.getByText("6h 18m in range", { exact: true })).toBeVisible();
+  await expect(window.getByLabel(/^Typical run\./)).toHaveCount(0);
 
   // Opened inside its app, so Back reaches the app rather than closing.
   await window.getByRole("button", { name: "Back to Slack details" }).click();

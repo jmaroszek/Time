@@ -11,7 +11,6 @@ import {
   Button,
   CategoryDot,
   Checkbox,
-  FloatingTooltip,
   MenuSelect,
 } from "../../components/ui";
 import {
@@ -40,7 +39,6 @@ import {
 import { type Category, type Rule } from "../../lib/classify";
 import { uncategorizedMark } from "../../lib/chartTheme";
 import { fmtDuration } from "../../lib/format";
-import { RUN_DEFINITION, type RunStats } from "../../lib/runs";
 import { useMeta } from "../../state/meta";
 import { LoadMore } from "./ActivityFeedback";
 import Chevron from "./Chevron";
@@ -131,13 +129,19 @@ function GroupSessions({
                     {edited}
                   </span>
                 )}
+                {/* Hidden until the row is pointed at or focused: a word on all
+                    of a hundred rows read as part of every row's data. */}
                 <button
                   type="button"
                   onClick={() => onEdit(session.id)}
                   disabled={actionsDisabled}
-                  className="rounded px-1.5 py-0.5 text-xs text-ink-3 hover:bg-accent/10 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Edit visit"
+                  aria-label={`Edit the visit starting ${formatDateTime(session.start)}`}
+                  className="flex h-5 w-5 items-center justify-center rounded text-ink-3 opacity-0 transition-opacity hover:bg-hover-2 hover:text-accent focus-visible:opacity-100 group-hover/visit:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Edit
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
                 </button>
               </span>
             </div>
@@ -438,12 +442,22 @@ function PanelWindowRow({
   );
 }
 
+/** The window's classification as one line: the category with its dot, then
+ *  what decided it. Mixed has no single color to show, so it gets no dot. */
+function windowClassificationLine(group: ActivityTitleGroup, uncategorizedColor: string) {
+  const { label, detail } = windowGroupClassification(group);
+  const color = group.mixed
+    ? null
+    : group.categoryName === null && !group.allIgnored
+      ? uncategorizedColor
+      : group.categoryColor;
+  return { label, detail, color };
+}
+
 export function WindowPanel({
   dock,
   group,
   usage,
-  runs,
-  rangeDays,
   onLoadMoreVisits,
   selectedSessionIds,
   onToggleSession,
@@ -461,9 +475,6 @@ export function WindowPanel({
   dock: CSSProperties | null;
   group: ActivityTitleGroup;
   usage: ActivityDayBucket[];
-  runs: RunStats | null;
-  /** Calendar days the range spans, so "days seen" has a denominator. */
-  rangeDays: number;
   onLoadMoreVisits: () => void;
   selectedSessionIds: Set<number>;
   onToggleSession: (id: number) => void;
@@ -480,7 +491,8 @@ export function WindowPanel({
   /** The result is stale while a replacement worker query is in flight. */
   actionsDisabled?: boolean;
 }) {
-  const classification = windowGroupClassification(group);
+  const { theme } = useMeta();
+  const classification = windowClassificationLine(group, uncategorizedMark(theme));
   const allSelected = group.sessionIds.every((id) => selectedSessionIds.has(id));
   return (
     <DetailPanel
@@ -519,31 +531,37 @@ export function WindowPanel({
       onClose={onClose}
       closeLabel="Close Window details"
     >
-      {/* Opened from the Windows table, docked, the row beside the panel
-          already states time, days seen and last seen, so only the run length
-          is new. Opened from an app's panel, or undocked, no such row is on
-          screen and the line carries all of it. */}
-      <PanelFacts
-        seconds={group.seconds}
-        daysSeen={group.daysSeen}
-        lastSeen={group.lastSeen}
-        rangeDays={rangeDays}
-        runs={runs}
-        rowVisible={dock !== null && !onBack}
-      />
-
-      {/* First in the body, as in the app panel: the one standing decision. */}
-      <PanelSection
-        title="Classification"
-        className="mt-6"
-        right={<span className="shrink-0"><Button disabled={actionsDisabled} onClick={() => onMakeRule(group)}>Create Window rule</Button></span>}
-      >
-        {/* Keep both the category and its source visible in this panel. */}
-        <p className="mt-2 text-xs text-ink-2">{classification.label}</p>
-        <p className="mt-0.5 text-xs leading-snug text-ink-3">{classification.detail}</p>
+      {/* First in the body, as in the app panel: the one standing decision.
+          The category reads as a value, its dot the one the rest of the app
+          gives it, and what decided it trails in the muted line's place. The
+          rule action sits on the same row as borderless text rather than a
+          bordered button pinned to the heading. */}
+      <PanelSection title="Classification" className="">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className="flex min-w-0 flex-1 items-center gap-2 text-xs">
+            {classification.color && <CategoryDot color={classification.color} />}
+            <span className="shrink-0 font-medium text-ink">{classification.label}</span>
+            <span className="min-w-0 truncate text-ink-3" title={classification.detail}>
+              <span aria-hidden="true">· </span>{classification.detail}
+            </span>
+          </p>
+          <span className="-mr-3 shrink-0">
+            <Button
+              variant="text"
+              disabled={actionsDisabled}
+              onClick={() => onMakeRule(group)}
+              title="Classify this window, and every window titled like it, with a standing rule."
+            >
+              Create Window rule
+            </Button>
+          </span>
+        </div>
       </PanelSection>
 
-      <UsageStrip buckets={usage} />
+      {/* No line of facts: the strip shows the days, the first visit row the
+          last one, and the total is the one figure bars cannot be summed for
+          by eye, so it takes the caption. The busiest day is in the tooltips. */}
+      <UsageStrip buckets={usage} caption={`${fmtDuration(group.seconds)} in range`} />
 
       <section className="mt-8">
         <div className="flex flex-wrap items-center gap-2">
@@ -565,11 +583,11 @@ export function WindowPanel({
           </span>
           {selectedSessionIds.size > 0 && (
             <>
-              <Button variant="danger" disabled={actionsDisabled} onClick={onDeleteSelected}>Delete selected</Button>
+              <Button variant="text-danger" disabled={actionsDisabled} onClick={onDeleteSelected}>Delete selected</Button>
               {/* This action writes an override on each selected visit, not a
                   standing rule. */}
               <MenuSelect
-                variant="action"
+                variant="text-action"
                 size="control"
                 align="end"
                 value=""
@@ -592,8 +610,10 @@ export function WindowPanel({
             </>
           )}
         </div>
-        {/* No bordered well: inside the bordered panel it was a box in a box. */}
-        <div className="mt-3">
+        {/* No bordered well: inside the bordered panel it was a box in a box.
+            Pulled out by the rows' own padding, so their boxes sit under the
+            header's and only the hover tint reaches past it. */}
+        <div className="-mx-1.5 mt-3">
           <GroupSessions
             group={group}
             selected={selectedSessionIds}
@@ -683,7 +703,16 @@ function usageStripPeak(buckets: ActivityDayBucket[]): number | null {
   return buckets.length < 2 || peak <= 0 ? null : peak;
 }
 
-function UsageStrip({ buckets, right }: { buckets: ActivityDayBucket[]; right?: ReactNode }) {
+function UsageStrip({
+  buckets,
+  right,
+  caption,
+}: {
+  buckets: ActivityDayBucket[];
+  right?: ReactNode;
+  /** Replaces the busiest-day figure between the end dates. */
+  caption?: ReactNode;
+}) {
   const peak = usageStripPeak(buckets);
   if (peak === null) return null;
   const spanLabel = (bucket: ActivityDayBucket) => (bucket.days === 1
@@ -719,7 +748,7 @@ function UsageStrip({ buckets, right }: { buckets: ActivityDayBucket[]; right?: 
       </div>
       <div className="mt-1 flex justify-between text-xs tabular-nums text-ink-3">
         <span>{formatCompactDate(buckets[0].startSec)}</span>
-        <span>{fmtDuration(peak)} on the busiest {buckets[0].days === 1 ? "day" : "column"}</span>
+        <span>{caption ?? `${fmtDuration(peak)} on the busiest ${buckets[0].days === 1 ? "day" : "column"}`}</span>
         <span>{formatCompactDate(buckets[buckets.length - 1].endSec - 1)}</span>
       </div>
     </section>
@@ -1131,9 +1160,9 @@ export function EntityPanel({
               current selection. */}
           {windowsExpanded && titlesReadable && (selectedWindowCount > 0 ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              <Button variant="danger" disabled={actionsDisabled} onClick={onDeleteWindows}>Delete selected</Button>
+              <Button variant="text-danger" disabled={actionsDisabled} onClick={onDeleteWindows}>Delete selected</Button>
               <MenuSelect
-                variant="action"
+                variant="text-action"
                 size="control"
                 value=""
                 placeholder={`Classify ${countNoun(selectedWindowCount, "window")}…`}
@@ -1289,38 +1318,26 @@ export function EntityPanel({
 }
 
 /**
- * What the table row says about an app or window, for when the row is not on
- * screen, on one line instead of a grid of tiles.
- *
- * Undocked, the panel replaces the table; opened from an app's panel, a window
- * has no row of its own in view. Docked beside its row, the row says these and
- * they are left out. Run length is the one figure no row carries, so a window
- * panel always has it — an app's is Insights' to answer, one link away.
+ * What the table row says about an app, for when the panel is undocked and has
+ * replaced the table, on one line instead of a grid of tiles.
  */
 function PanelFacts({
   seconds,
   daysSeen,
   lastSeen,
   rangeDays,
-  runs,
-  rowVisible = false,
 }: {
   seconds: number;
   daysSeen: number;
   lastSeen: number;
   rangeDays: number;
-  /** Undefined leaves run length out; null is "not measured yet". */
-  runs?: RunStats | null;
-  rowVisible?: boolean;
 }) {
   const value = (text: string) => <span className="tabular-nums text-ink-2">{text}</span>;
-  const facts: { key: string; node: ReactNode }[] = rowVisible ? [] : [
+  const facts: { key: string; node: ReactNode }[] = [
     { key: "time", node: <>{value(fmtDuration(seconds))} in range</> },
     { key: "days", node: <>{value(String(daysSeen))} of {countNoun(rangeDays, "day")}</> },
     { key: "last", node: <>Last seen {value(formatLastSeen(lastSeen))}</> },
   ];
-  if (runs !== undefined) facts.push({ key: "run", node: <TypicalRunFact runs={runs} /> });
-  if (facts.length === 0) return null;
   return (
     <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-ink-3">
       {facts.map((fact, i) => (
@@ -1330,33 +1347,5 @@ function PanelFacts({
         </Fragment>
       ))}
     </p>
-  );
-}
-
-/**
- * How long this was used for at a stretch, measured the way Insights measures a
- * subject it is narrowed to — so a window's panel here and its app's page there
- * count runs the same way.
- *
- * It replaces an average of recorded rows, which the tracker splits on every
- * title change: an hour in one editor could average out to ninety seconds.
- */
-function TypicalRunFact({ runs }: { runs: RunStats | null }) {
-  const hint = runs && runs.runs > 0
-    ? `Half of this time came in runs at least this long. ${countNoun(runs.runs, "run")} in range, the longest ${fmtDuration(runs.longestSeconds ?? 0)}. ${RUN_DEFINITION}`
-    : RUN_DEFINITION;
-  return (
-    <>
-      <FloatingTooltip
-        text={hint}
-        ariaLabel={`Typical run. ${hint}`}
-        className="cursor-help underline decoration-dotted decoration-ink-3/60 underline-offset-2 outline-none"
-      >
-        Typical run
-      </FloatingTooltip>{" "}
-      <span className="tabular-nums text-ink-2">
-        {runs?.typicalSeconds ? fmtDuration(runs.typicalSeconds) : "—"}
-      </span>
-    </>
   );
 }
