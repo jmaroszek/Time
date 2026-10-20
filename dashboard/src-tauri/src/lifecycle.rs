@@ -81,23 +81,23 @@ pub(crate) struct RealTrackingSystem;
 
 impl TrackingSystem for RealTrackingSystem {
     fn start(&self) -> Result<(), String> {
-        crate::system_start_tracker()
+        crate::platform::start_tracker()
     }
 
     fn stop(&self) -> Result<(), String> {
-        crate::system_stop_tracker()
+        crate::platform::stop_tracker()
     }
 
     fn set_startup(&self, enabled: bool) -> Result<(), String> {
-        crate::system_set_launch_at_login(enabled)
+        crate::platform::set_launch_at_login(enabled)
     }
 
     fn startup_is_registered(&self) -> Result<bool, String> {
-        crate::system_startup_is_registered()
+        crate::platform::startup_is_registered()
     }
 
     fn is_running(&self) -> Result<bool, String> {
-        crate::system_tracker_is_running()
+        crate::platform::tracker_is_running()
     }
 }
 

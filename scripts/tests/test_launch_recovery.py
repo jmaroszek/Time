@@ -55,7 +55,7 @@ def test_the_migrating_open_actually_runs_the_tracker():
     """The tracker is the sole migration owner, so the helper above is only
     worth routing through if it still calls it."""
     body = function_body(RESTORE, MIGRATING_OPEN)
-    assert "system_run_tracker_migration" in body, (
+    assert "platform::run_tracker_migration" in body, (
         f"{MIGRATING_OPEN} no longer runs the tracker, so it repairs nothing"
     )
     assert "is_older_schema_error" in body, (

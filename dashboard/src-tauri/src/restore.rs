@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::database::{is_older_schema_error, RestoreNotice, TimeDatabase, SCHEMA_VERSION};
-use crate::{system_run_tracker_migration, system_set_launch_at_login, system_start_tracker};
+use crate::platform;
 
 /// Open the live database, letting the tracker migrate it first if it predates
 /// this release.
@@ -29,7 +29,7 @@ fn open_current_database(path: PathBuf) -> Result<TimeDatabase, String> {
             // error says why it could not run, and the original says what the
             // database needed, which is the pair somebody debugging a machine
             // that will not start has to see together.
-            system_run_tracker_migration().map_err(|cause| format!("{error}; {cause}"))?;
+            platform::run_tracker_migration().map_err(|cause| format!("{error}; {cause}"))?;
             tauri::async_runtime::block_on(TimeDatabase::open(path))
         }
         result => result,
@@ -80,7 +80,7 @@ pub(crate) fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDa
     let restored = swap.pending.clone();
     let opened = (|| {
         if restored.schema_version < SCHEMA_VERSION {
-            system_run_tracker_migration()?;
+            platform::run_tracker_migration()?;
         }
         tauri::async_runtime::block_on(TimeDatabase::open(path.clone()))
     })();
@@ -104,12 +104,12 @@ pub(crate) fn open_database_with_pending_restore(path: PathBuf) -> Result<TimeDa
 
     let mut warnings = Vec::new();
     if let Err(error) =
-        system_set_launch_at_login(restored.recording_consent && restored.launch_at_login)
+        platform::set_launch_at_login(restored.recording_consent && restored.launch_at_login)
     {
         warnings.push(format!("Windows startup could not be updated: {error}"));
     }
     if restored.recording_consent {
-        if let Err(error) = system_start_tracker() {
+        if let Err(error) = platform::start_tracker() {
             warnings.push(format!("the tracker could not be restarted: {error}"));
         }
     }

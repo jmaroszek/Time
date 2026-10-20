@@ -1,20 +1,14 @@
 use serde::Serialize;
-use std::{fs, path::PathBuf, process::Command};
+use std::{fs, path::PathBuf};
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
-#[cfg(windows)]
-use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
-};
-#[cfg(windows)]
-use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-
 mod database;
 mod install_id;
 mod lifecycle;
+mod platform;
 mod restore;
 mod window_state;
 
@@ -33,40 +27,6 @@ use lifecycle::{
     execute_tracking_lifecycle, prepare_restore_for_restart, reconcile_startup_registration,
     LifecycleCoordinator, LifecycleResult, RealTrackingSystem, TrackingLifecycleAction,
 };
-
-#[cfg(windows)]
-const fn colorref(red: u8, green: u8, blue: u8) -> u32 {
-    red as u32 | ((green as u32) << 8) | ((blue as u32) << 16)
-}
-
-#[cfg(windows)]
-fn style_windows_frame<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
-    let Ok(hwnd) = window.hwnd() else {
-        return;
-    };
-
-    // The undecorated window keeps DWM's shadow and rounded Windows 11 frame.
-    // Darkening its system border prevents that retained frame from becoming a
-    // bright seam around Time's otherwise continuous background.
-    let dark_mode = 1i32;
-    let border_color = colorref(0x2a, 0x2e, 0x36);
-    unsafe {
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_USE_IMMERSIVE_DARK_MODE,
-            std::ptr::from_ref(&dark_mode).cast(),
-            std::mem::size_of_val(&dark_mode) as u32,
-        );
-        // Custom border colors were added in Windows 11. Ignore an unsupported
-        // result so older Windows versions retain their native shadow frame.
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_BORDER_COLOR,
-            std::ptr::from_ref(&border_color).cast(),
-            std::mem::size_of_val(&border_color) as u32,
-        );
-    }
-}
 
 /// Resolve the shared SQLite path (%LOCALAPPDATA%\Time\Data\database.db) and ensure
 /// the directory exists. The tracker derives the same location in
@@ -132,7 +92,7 @@ async fn run_tracking_lifecycle(
 /// looking at this switch is exactly when they should be told.
 #[tauri::command]
 fn startup_is_registered() -> Result<bool, String> {
-    system_startup_is_registered()
+    platform::startup_is_registered()
 }
 
 #[tauri::command]
@@ -367,195 +327,7 @@ fn save_activity_export(
 #[tauri::command]
 fn reveal_database(app: tauri::AppHandle) -> Result<(), String> {
     let base = app.path().local_data_dir().map_err(|e| e.to_string())?;
-    let path = database_path(&base);
-    let mut command = Command::new("explorer.exe");
-    // Explorer parses /select itself and needs the quotes around the path
-    // only, so the argument is written raw rather than quoted whole.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.raw_arg(format!("/select,\"{}\"", path.display()));
-    }
-    #[cfg(not(windows))]
-    command.arg(path.parent().unwrap_or(&path));
-    command.spawn().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn tracker_path() -> Result<PathBuf, String> {
-    std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .map(|dir| dir.join("time-tracker.exe"))
-        .ok_or_else(|| "Time executable has no parent directory".into())
-}
-
-/// Keep native children invisible when launched from the GUI host. Windows
-/// console utilities such as `tasklist` and `taskkill` otherwise briefly open
-/// a terminal during lifecycle actions; applying the flag to every child also
-/// keeps this invariant intact if the packaged tracker's subsystem changes.
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-#[cfg(windows)]
-fn hide_native_console(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn hide_native_console(_command: &mut Command) {}
-
-pub(crate) fn system_start_tracker() -> Result<(), String> {
-    let path = tracker_path()?;
-    if !path.is_file() {
-        return Err(format!(
-            "Packaged tracker was not found at {}",
-            path.display()
-        ));
-    }
-    let mut command = Command::new(&path);
-    command.current_dir(path.parent().ok_or("tracker path has no parent")?);
-    hide_native_console(&mut command);
-    command.spawn().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-pub(crate) fn system_stop_tracker() -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        let mut command = Command::new("taskkill");
-        command.args(["/IM", "time-tracker.exe", "/T", "/F"]);
-        hide_native_console(&mut command);
-        let status = command.status().map_err(|e| e.to_string())?;
-        // taskkill returns 128 when no matching process exists; both states are
-        // safe for a privacy erase because no tracker can write afterward.
-        if status.success() || status.code() == Some(128) {
-            return Ok(());
-        }
-        return Err(format!("Could not stop tracker (taskkill exit {status})"));
-    }
-    #[cfg(not(windows))]
-    Err("Stopping the tracker is supported only on Windows".into())
-}
-
-/// Where Windows startup registration lives, and under what name.
-///
-/// `dashboard/src-tauri/windows/installer-hooks.nsh` names the same key and the
-/// same value, so that the uninstaller can remove the registration Time made.
-/// Neither side can observe the other's spelling, so a change to one is only
-/// ever correct alongside the same change to the other.
-pub(crate) const STARTUP_RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-pub(crate) const STARTUP_RUN_VALUE: &str = "Time Tracker";
-
-/// The Run value this installation writes: the packaged tracker's path, quoted
-/// the way Windows expects a command that may contain spaces.
-#[cfg(windows)]
-fn startup_command() -> Result<String, String> {
-    let path = tracker_path()?;
-    if !path.is_file() {
-        return Err(format!(
-            "Packaged tracker was not found at {}",
-            path.display()
-        ));
-    }
-    Ok(format!("\"{}\"", path.display()))
-}
-
-pub(crate) fn system_set_launch_at_login(enabled: bool) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        let (run, _) = hkcu
-            .create_subkey(STARTUP_RUN_KEY)
-            .map_err(|e| e.to_string())?;
-        if enabled {
-            run.set_value(STARTUP_RUN_VALUE, &startup_command()?)
-                .map_err(|e| e.to_string())?;
-        } else {
-            match run.delete_value(STARTUP_RUN_VALUE) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error.to_string()),
-            }
-        }
-        return Ok(());
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = enabled;
-        Err("Start at login is supported only on Windows".into())
-    }
-}
-
-/// Whether Windows would start *this* installation's tracker at sign-in.
-///
-/// A value naming a different path counts as not registered rather than as
-/// registered. That is what an install into another directory leaves behind,
-/// and Windows would launch nothing from it, so rewriting is the only repair.
-pub(crate) fn system_startup_is_registered() -> Result<bool, String> {
-    #[cfg(windows)]
-    {
-        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        // Opened read-only, and absence is an answer rather than a failure: the
-        // Run key itself does not exist on a profile that has never held one.
-        let run = match hkcu.open_subkey(STARTUP_RUN_KEY) {
-            Ok(run) => run,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error.to_string()),
-        };
-        let registered: String = match run.get_value(STARTUP_RUN_VALUE) {
-            Ok(value) => value,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error.to_string()),
-        };
-        return Ok(registered == startup_command()?);
-    }
-    #[cfg(not(windows))]
-    Err("Start at login is supported only on Windows".into())
-}
-
-fn system_run_tracker_migration() -> Result<(), String> {
-    let path = tracker_path()?;
-    if !path.is_file() {
-        return Err(format!(
-            "Packaged tracker was not found at {}; an older backup cannot be migrated",
-            path.display()
-        ));
-    }
-    let mut command = Command::new(&path);
-    command.current_dir(path.parent().ok_or("tracker path has no parent")?);
-    command.env("TIME_MIGRATE_ONLY", "1");
-    hide_native_console(&mut command);
-    let status = command.status().map_err(|error| error.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Tracker could not migrate the restored database (exit {status})"
-        ))
-    }
-}
-
-pub(crate) fn system_tracker_is_running() -> Result<bool, String> {
-    #[cfg(windows)]
-    {
-        let mut command = Command::new("tasklist");
-        command.args(["/FI", "IMAGENAME eq time-tracker.exe", "/NH"]);
-        hide_native_console(&mut command);
-        let output = command.output().map_err(|error| error.to_string())?;
-        if !output.status.success() {
-            return Err(format!(
-                "Could not query tracker status ({})",
-                output.status
-            ));
-        }
-        let text = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-        return Ok(text.contains("time-tracker.exe"));
-    }
-    #[cfg(not(windows))]
-    Ok(false)
+    platform::reveal_in_file_manager(&database_path(&base))
 }
 
 /// The ProgId Windows records as the handler for https — "ChromeHTML",
@@ -569,19 +341,7 @@ pub(crate) fn system_tracker_is_running() -> Result<bool, String> {
 /// that serves most browsers, and the reader can always decline.
 #[tauri::command]
 fn default_browser_prog_id() -> Option<String> {
-    #[cfg(windows)]
-    {
-        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        return hkcu
-            .open_subkey(
-                "Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice",
-            )
-            .ok()?
-            .get_value::<String, _>("ProgId")
-            .ok();
-    }
-    #[cfg(not(windows))]
-    None
+    platform::default_browser_prog_id()
 }
 
 /// Progress channel for the one long operation Time performs over the network.
@@ -783,41 +543,6 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Say why Time is not opening, on the one path where nothing else can.
-///
-/// A failure out of `setup()` ends the launch before there is a window for the
-/// frontend to draw an error in, and the release binary is built
-/// `windows_subsystem = "windows"`, so the panic that follows has no console to
-/// print to either. What the reader gets is a shortcut that does nothing —
-/// indistinguishable from a broken install, a bad shortcut, or a machine that
-/// needs restarting, and impossible to report usefully. A launch failure that
-/// cannot name itself gets attributed to whatever the reader was already
-/// suspicious of, which is how a real one goes unfixed.
-///
-/// Win32 directly rather than the dialog plugin: `blocking_show` must not be
-/// called from the main thread, which is where `setup` runs, and the
-/// non-blocking form would be torn down with the process before it painted.
-/// `MessageBoxW` owns its own message loop and needs no application.
-#[cfg(windows)]
-fn report_fatal_launch_failure(error: &str) {
-    use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
-
-    let text = HSTRING::from(format!(
-        "Time could not open its database and has to close.\n\n{error}\n\n\
-         Your recorded history has not been changed."
-    ));
-    let caption = HSTRING::from("Time could not start");
-    // SAFETY: both strings outlive the call, and a null owner window is what
-    // this needs — there is no application window at this point.
-    unsafe {
-        MessageBoxW(None, &text, &caption, MB_OK | MB_ICONERROR);
-    }
-}
-
-#[cfg(not(windows))]
-fn report_fatal_launch_failure(_error: &str) {}
-
 /// How long the window may stay hidden while the frontend loads. Generous:
 /// this is a last resort, not a race with a cold start.
 const FRONTEND_SHOW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(12);
@@ -880,7 +605,7 @@ pub fn run() {
         .setup(|app| {
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
-                style_windows_frame(&window);
+                platform::style_window_frame(&window);
                 // The window-state plugin has already restored while the
                 // window is hidden. Validate the result before React shows it.
                 window_state::validate_restored_window(&window)?;
@@ -905,7 +630,7 @@ pub fn run() {
             let database = match restore::open_database_with_pending_restore(path) {
                 Ok(database) => database,
                 Err(error) => {
-                    report_fatal_launch_failure(&error);
+                    platform::report_fatal_launch_failure(&error);
                     return Err(std::io::Error::other(error).into());
                 }
             };

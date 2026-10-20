@@ -20,7 +20,9 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 HOOKS = (
     REPOSITORY / "dashboard" / "src-tauri" / "windows" / "installer-hooks.nsh"
 ).read_text(encoding="utf-8")
-RUST = (REPOSITORY / "dashboard" / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
+RUST = (
+    REPOSITORY / "dashboard" / "src-tauri" / "src" / "platform" / "windows.rs"
+).read_text(encoding="utf-8")
 
 # The variable the hooks use to mean "an installer is driving this uninstall".
 UPGRADE_STEP = "$UninstallIsUpgradeStep"
