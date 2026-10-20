@@ -654,11 +654,12 @@ async fn cancel_restore_after_failure(
 
 /// Stage and prepare a restore up to the point where the app must restart.
 ///
-/// The restart itself belongs to `lib.rs`, but all pre-restart side effects
-/// live here so tests can inject startup/process failures without invoking
-/// Windows registry or process APIs. Cancellation restores the exact
-/// lifecycle snapshot, including both pause values, and reconciles the
-/// external startup/tracker state with what existed before staging began.
+/// The restart itself belongs to the `restore_database` command, but all
+/// pre-restart side effects live here so tests can inject startup/process
+/// failures without invoking Windows registry or process APIs. Cancellation
+/// restores the exact lifecycle snapshot, including both pause values, and
+/// reconciles the external startup/tracker state with what existed before
+/// staging began.
 pub(crate) async fn prepare_restore_for_restart(
     database: &TimeDatabase,
     backup_path: PathBuf,

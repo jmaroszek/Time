@@ -1,6 +1,6 @@
 // Time's one outbound request, and the rules around when it is allowed to
 // happen. The request itself is made in Rust (see check_for_update in
-// src-tauri/src/lib.rs) so the WebView never reaches the network and the
+// src-tauri/src/update.rs) so the WebView never reaches the network and the
 // content-security policy stays shut; this module decides *whether* to ask and
 // turns the answer into something the header control can render.
 
