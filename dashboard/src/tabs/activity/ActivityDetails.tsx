@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useEffect,
   useRef,
   useState,
@@ -695,7 +694,7 @@ function ClassificationBreakdown({ entity }: { entity: ActivityEntitySummary }) 
   };
   return (
     <>
-      <span aria-hidden="true" className="mt-3 flex h-1.5 w-full gap-px overflow-hidden rounded-full bg-surface-2">
+      <span aria-hidden="true" className="mt-5 flex h-1.5 w-full gap-px overflow-hidden rounded-full bg-surface-2">
         {rows.map((row) => (
           <span
             key={row.key}
@@ -804,7 +803,6 @@ export function EntityPanel({
   entity,
   groups,
   usage,
-  rangeDays,
   hasStoredTitles,
   detailSearch,
   onDetailSearch,
@@ -839,8 +837,6 @@ export function EntityPanel({
   entity: ActivityEntitySummary;
   groups: ActivityTitleGroupPage;
   usage: ActivityDayBucket[];
-  /** Calendar days the range spans, so "days seen" has a denominator. */
-  rangeDays: number;
   hasStoredTitles: boolean;
   detailSearch: string;
   onDetailSearch: (value: string) => void;
@@ -923,18 +919,8 @@ export function EntityPanel({
     : null;
   const summary = entityClassification(entity);
   // Split by other rules, the exact rule is a default rather than the answer,
-  // and the menu showing its category says only half of that.
+  // and the breakdown under the menu says so row by row.
   const overridden = exactRule !== null && entity.status === "mixed";
-  const exactDetail = (() => {
-    if (!overridden) return summary.detail;
-    const defaultLabel = entity.kind === "website" ? "Website default" : "App default";
-    const overrides = entity.rules.filter((rule) => rule.ruleId !== entity.exactRuleId);
-    if (overrides.length === 0) return `${defaultLabel} · manual corrections override it`;
-    const noun = new Set(overrides.map((rule) => rule.matchType)).size === 1
-      ? `${RULE_LABELS[overrides[0].matchType]} rule`
-      : "other rule";
-    return `${defaultLabel} · ${countNoun(overrides.length, noun)} ${overrides.length === 1 ? "overrides" : "override"} it`;
-  })();
   const insightsLink = onViewInInsights && (
     <button
       type="button"
@@ -1052,20 +1038,9 @@ export function EntityPanel({
       onClose={onClose}
       closeLabel="Close activity details"
     >
-      {/* Undocked, the panel replaces the table, and with it the row that
-          states these. Docked, that row is beside the panel and says them. */}
-      {dock === null && (
-        <PanelFacts
-          seconds={entity.seconds}
-          daysSeen={entity.daysSeen}
-          lastSeen={entity.lastSeen}
-          rangeDays={rangeDays}
-        />
-      )}
-
       {/* First in the body: the panel's one standing decision. Not pinned in
           the header, which it made taller than the name it sits under. */}
-      <PanelSection title="Classification" className={dock === null ? "mt-6" : ""}>
+      <PanelSection title="Classification">
         <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span className="shrink-0">
             <MenuSelect
@@ -1086,29 +1061,32 @@ export function EntityPanel({
               rather than truncating, and drops under the control when the panel
               is narrow: this is the line that says why, and cut short it said
               nothing. */}
-          <p className="min-w-[12rem] flex-1 text-xs leading-snug text-ink-3">
-            <span>
-              {exactRule ? exactDetail : `${summary.label} · ${summary.detail}`}
-            </span>
-            {/* A word, not a ✕: beside a category name a bare cross read as
-                "clear this category", when what it removes is the rule. */}
-            {exactRule && !confirmingRuleRemoval && (
-              <>
-                <span aria-hidden="true"> · </span>
-                <button
-                  type="button"
-                  disabled={actionsDisabled}
-                  onClick={() => setConfirmingRuleRemoval(true)}
-                  aria-label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
-                  className="shrink-0 rounded-sm underline-offset-2 outline-none transition-colors hover:text-bad hover:underline focus-visible:text-bad focus-visible:underline disabled:pointer-events-none disabled:opacity-50"
-                >
-                  {/* Beside a count of other rules, a bare "Remove" read as
-                      removing all of them. */}
-                  {overridden ? "Remove default" : "Remove"}
-                </button>
-              </>
-            )}
-          </p>
+          {/* Overridden, the list below names the default and every rule over
+              it, so nothing is left to say here. Nor is Remove offered: it
+              would only uncategorize the time the default holds. */}
+          {!overridden && (
+            <p className="min-w-[12rem] flex-1 text-xs leading-snug text-ink-3">
+              <span>
+                {exactRule ? summary.detail : `${summary.label} · ${summary.detail}`}
+              </span>
+              {/* A word, not a ✕: beside a category name a bare cross read as
+                  "clear this category", when what it removes is the rule. */}
+              {exactRule && !confirmingRuleRemoval && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <button
+                    type="button"
+                    disabled={actionsDisabled}
+                    onClick={() => setConfirmingRuleRemoval(true)}
+                    aria-label={`Remove the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}`}
+                    className="shrink-0 rounded-sm underline-offset-2 outline-none transition-colors hover:text-bad hover:underline focus-visible:text-bad focus-visible:underline disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                </>
+              )}
+            </p>
+          )}
         </div>
         {exactRule && confirmingRuleRemoval && (
           // Confirm removal because existing activity may become uncategorized.
@@ -1137,7 +1115,7 @@ export function EntityPanel({
           there reads as its "more". A single day draws no strip, and the link
           keeps the strip's place on its own. */}
       {usageStripPeak(usage) !== null ? (
-        <UsageStrip buckets={usage} right={insightsLink} />
+        <UsageStrip buckets={usage} right={insightsLink} caption={`${fmtDuration(entity.seconds)} in range`} />
       ) : insightsLink && (
         <div className="mt-8 flex justify-end">{insightsLink}</div>
       )}
@@ -1345,35 +1323,3 @@ export function EntityPanel({
   );
 }
 
-/**
- * What the table row says about an app, for when the panel is undocked and has
- * replaced the table, on one line instead of a grid of tiles.
- */
-function PanelFacts({
-  seconds,
-  daysSeen,
-  lastSeen,
-  rangeDays,
-}: {
-  seconds: number;
-  daysSeen: number;
-  lastSeen: number;
-  rangeDays: number;
-}) {
-  const value = (text: string) => <span className="tabular-nums text-ink-2">{text}</span>;
-  const facts: { key: string; node: ReactNode }[] = [
-    { key: "time", node: <>{value(fmtDuration(seconds))} in range</> },
-    { key: "days", node: <>{value(String(daysSeen))} of {countNoun(rangeDays, "day")}</> },
-    { key: "last", node: <>Last seen {value(formatLastSeen(lastSeen))}</> },
-  ];
-  return (
-    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-ink-3">
-      {facts.map((fact, i) => (
-        <Fragment key={fact.key}>
-          {i > 0 && <span aria-hidden="true">·</span>}
-          <span>{fact.node}</span>
-        </Fragment>
-      ))}
-    </p>
-  );
-}

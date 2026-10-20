@@ -66,7 +66,7 @@ import {
   type SessionClassification,
   type TrackingExclusionKind,
 } from "../lib/queries";
-import { allTimeRange, calendarDays, type Range } from "../lib/time";
+import { allTimeRange, type Range } from "../lib/time";
 import { useBanner } from "../state/banner";
 import { useActivityModel } from "../state/useActivityModel";
 import { useMeta } from "../state/meta";
@@ -953,7 +953,6 @@ export default function ActivityTab({
       actionsDisabled={!analyzed.current}
       groups={result.detailGroups}
       usage={result.selectedEntityUsage}
-      rangeDays={calendarDays(range)}
       hasStoredTitles={result.hasStoredTitles}
       detailSearch={detailSearch}
       onDetailSearch={setDetailSearch}
