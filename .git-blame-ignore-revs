@@ -1,0 +1,23 @@
+# Commits that only move or split code. GitHub's blame view skips them within
+# a file's own history, as does local blame once configured with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# For code these commits moved into a new file, follow it across files with:
+#   git blame -w -C -C -C <file>
+
+# Move the Rust host's OS calls into a platform module
+1dcebf0e03ada6e82fd3ffb568ad0fd6ce00707a
+
+# Split lib.rs into the IPC surface, the updater, and app setup
+871201d13f8142f558eb606e0eb9e1e30e69e810
+
+# Split database.rs into a module per concern
+07d30d6c7bdc6eedeb6128b4f51f550c6f3b0187
+
+# Put the tracker's Windows code behind tracker/platforms
+d8286ce2acb89f5fb5d837d55e9ce2c67049b0a5
+
+# Tidy the frontend's boundaries without moving its layout
+054b507c1709e0c4667119fb3a0e385b9d994b04
+
+# Move standalone components out of SettingsTab and App
+2abbc76789f07ed5bb6f0e8dfd4806af4427cb40

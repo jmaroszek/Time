@@ -43,6 +43,7 @@ storage, and how to report a vulnerability privately.
 tracker/    Python, always on. Win32 foreground/human-input probe -> session rows.
 dashboard/  Tauri 2 + React + ECharts, launched on demand. Reads sessions;
             owns categories, rules, and settings.
+contracts/  Shared expectations each half's tests check itself against.
 scripts/    Build, demo-data, and database-health tooling.
 ```
 
