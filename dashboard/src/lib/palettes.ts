@@ -269,6 +269,15 @@ function swatchIndex(blocks: ReturnType<typeof swatchBlocks>, hex: string): numb
   return -1;
 }
 
+/** The palette as Settings shows it: the first six colors, in the order new
+ *  categories receive them. Not hue-sorted like previewSwatches — sorting is
+ *  what made every palette open orange, olive, green, teal, blue, violet and
+ *  look like the same row five times. Six, because the neutrals at the end of
+ *  each list are the same in every palette and say nothing about the choice. */
+export function paletteStrip(palette: Palette): string[] {
+  return palette.swatches.slice(0, 6);
+}
+
 /** Display order only. Palette array order still owns new-category assignment. */
 export function previewSwatches(palette: Palette): string[] {
   return [

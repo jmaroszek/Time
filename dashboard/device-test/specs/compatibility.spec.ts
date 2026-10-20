@@ -371,7 +371,7 @@ test("@minimum onboarding and restore dialog fit the minimum viewport", async ({
   expect(dayStartControlWidth).toBeLessThan(140);
   expect(weekStartWidth).toBeLessThan(180);
 
-  await page.getByRole("button", { name: "Restore backup…" }).click();
+  await page.getByRole("button", { name: "Restore a backup…" }).click();
   const dialog = page.getByRole("dialog", { name: "Restore backup" });
   await expect(dialog).toBeVisible();
   await assertNoHorizontalOverflow(page);

@@ -360,6 +360,28 @@ fn save_activity_export(
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
+/// Open Explorer on the folder holding the database, with the file selected.
+/// Settings shows where the data lives this way rather than printing a path
+/// most readers have no use for. The path is derived here, never taken from
+/// the page, so the command can open nothing else.
+#[tauri::command]
+fn reveal_database(app: tauri::AppHandle) -> Result<(), String> {
+    let base = app.path().local_data_dir().map_err(|e| e.to_string())?;
+    let path = database_path(&base);
+    let mut command = Command::new("explorer.exe");
+    // Explorer parses /select itself and needs the quotes around the path
+    // only, so the argument is written raw rather than quoted whole.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.raw_arg(format!("/select,\"{}\"", path.display()));
+    }
+    #[cfg(not(windows))]
+    command.arg(path.parent().unwrap_or(&path));
+    command.spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn tracker_path() -> Result<PathBuf, String> {
     std::env::current_exe()
         .map_err(|e| e.to_string())?
@@ -931,6 +953,7 @@ pub fn run() {
             reset_session_correction,
             classify_sessions,
             save_activity_export,
+            reveal_database,
             default_browser_prog_id,
             check_for_update,
             install_update

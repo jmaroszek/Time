@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Button, ConfirmDialog, DialogShell, TrashButton } from "../../components/ui";
+import { Button, ConfirmDialog, DialogShell } from "../../components/ui";
 import { BackupNameDialog } from "../../components/BackupNameDialog";
+import { buildActivityExport } from "../../lib/activityExport";
 import { getDbPath } from "../../lib/db";
 import { explainDbError } from "../../lib/dbErrors";
 import {
@@ -9,16 +10,19 @@ import {
   countSessionsOlderThan,
   deleteHistoryBefore,
   eraseAllHistory,
+  fetchSessions,
   inspectDatabaseBackup,
   listDatabaseBackups,
   restoreDatabase,
+  revealDatabase,
+  saveActivityExport,
   type DatabaseBackup,
 } from "../../lib/queries";
 import { useBanner } from "../../state/banner";
 import { useLifecycleBusy } from "../../state/lifecycleBusy";
 import { useMeta } from "../../state/meta";
 import { Section } from "./chrome";
-import { NumberStepper, Row, handleRadioKey, sanitizeNumericDraft } from "./fields";
+import { InlineAction, Row, TextAction, handleRadioKey, sanitizeNumericDraft } from "./fields";
 
 const MAX_RETENTION_DAYS = 36_500;
 
@@ -33,7 +37,7 @@ export default function DataSection({
   const mutationsBusy = settingsBusy || lifecycleBusy;
   const [olderDays, setOlderDays] = useState("365");
   const [message, setMessage] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [backupNameOpen, setBackupNameOpen] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
   // The retention delete carries its own counted scope, so it is held as a
@@ -60,16 +64,48 @@ export default function DataSection({
     const clamped = Math.min(Math.max(Number.isFinite(parsed) ? parsed : 365, 1), MAX_RETENTION_DAYS);
     setOlderDays(String(clamped));
   };
-  const stepOlderDays = (direction: -1 | 1) => {
-    const parsed = Math.floor(Number(olderDays));
-    const current = Number.isFinite(parsed) ? parsed : 365;
-    setOlderDays(String(Math.min(Math.max(current + direction, 1), MAX_RETENTION_DAYS)));
+
+  const showInFolder = async () => {
+    try {
+      await revealDatabase();
+    } catch (e) {
+      banner.report(e, "opening the data folder");
+    }
   };
 
-  const copyPath = () => void navigator.clipboard.writeText(getDbPath()).then(() => {
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  });
+  // Every recorded session, through the same builder as Activity's range
+  // export. Window titles stay out: Activity offers them behind an explicit
+  // checkbox, and an all-time file is the last place to include them silently.
+  const exportAll = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      // Through the end of today, so the file is named for today rather than
+      // for whatever day the cutoff lands in.
+      const endOfToday = new Date();
+      endOfToday.setHours(24, 0, 0, 0);
+      const endSec = endOfToday.getTime() / 1000;
+      const sessions = await fetchSessions(0, endSec);
+      if (sessions.length === 0) {
+        setMessage("There is no recorded activity to export yet.");
+        return;
+      }
+      const startSec = Math.min(...sessions.map((session) => session.start));
+      const file = buildActivityExport("sessions", {
+        sessions,
+        categories: meta.categories,
+        rules: meta.rules,
+        browserProcesses: [...meta.browserSet].sort(),
+        aliases: meta.aliases,
+      }, startSec, endSec);
+      const path = await saveActivityExport(file.suggestedName, file.contents);
+      if (path) banner.show(`Export saved to ${path}`);
+    } catch (e) {
+      banner.report(e, "export");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const closeRestore = () => {
     setRestoreOpen(false);
@@ -133,86 +169,94 @@ export default function DataSection({
 
   return (
     <Section title="Data management">
-      <div className="overflow-hidden rounded-[13px] border border-card-edge bg-surface-dim">
-        <div className="p-4">
-          <p className="mb-[9px] text-xs text-ink-3">Database path</p>
-          <div className="flex items-center gap-2 rounded-[10px] border border-edge bg-surface-2 p-[9px] pl-[13px]">
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2" title={getDbPath()}>{getDbPath()}</span>
-            <button
-              type="button"
-              className="rounded-[7px] border border-edge px-2.5 py-[5px] text-xs text-ink-2 transition-colors hover:border-edge-2 hover:text-ink"
-              onClick={copyPath}
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <button
-              type="button"
+      {/* One action per row, and every action a word rather than a box. This
+          card used to open on the database path in a monospace field — a
+          developer's detail, and the most prominent thing in the section —
+          under two large buttons and above a stepper beside a trash can. The
+          path is still one hover away on "Show in folder". */}
+      <Row
+        label="Your data"
+        help="Stored only on this computer. Nothing is uploaded."
+        control={
+          <TextAction title={getDbPath()} onClick={() => void showInFolder()}>
+            Show in folder
+          </TextAction>
+        }
+      />
+      <Row
+        label="Backups"
+        help={
+          <>
+            Saved next to your data.{" "}
+            <InlineAction
+              buttonRef={restoreButtonRef}
               disabled={mutationsBusy}
-              onClick={() => setBackupNameOpen(true)}
-              className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-accent/30 bg-gradient-to-b from-accent/15 to-accent/[.08] py-[11px] text-xs font-semibold text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.05)] transition-colors hover:from-accent/25 hover:to-accent/15"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 3v11" /><path d="M7 9l5 5 5-5" /><path d="M4 20h16" />
-              </svg>
-              Back up now
-            </button>
-            <button
-              ref={restoreButtonRef}
-              type="button"
-              disabled={mutationsBusy}
-              title={mutationsBusy ? "Wait for settings to finish saving" : undefined}
               onClick={() => setRestoreOpen(true)}
-              className="flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-edge bg-surface-2 py-[11px] text-xs font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:bg-surface-3 hover:text-ink disabled:cursor-wait disabled:opacity-50"
             >
-              Restore backup…
-            </button>
-          </div>
-          <p className="mt-3 text-xs leading-snug text-ink-3">
-            Backups are stored in a Backups folder beside this database. Everything stays on your machine.
-          </p>
-        </div>
-        <Row
-          label="Delete history older than"
-          help="Removes everything recorded before the cutoff. Categories and rules are kept."
-          control={
-            <span className="flex flex-wrap items-center gap-2">
-              <NumberStepper
-                label="Days of history to keep"
-                value={olderDays}
-                unit="days"
-                min={1}
-                max={MAX_RETENTION_DAYS}
-                step={1}
-                disabled={mutationsBusy || busyAction !== null}
-                onChange={(value) => setOlderDays(sanitizeNumericDraft(value, false))}
-                onBlur={normalizeOlderDays}
-                onMinus={() => stepOlderDays(-1)}
-                onPlus={() => stepOlderDays(1)}
-              />
-              <TrashButton
-                label="Delete older history"
-                disabled={mutationsBusy || busyAction !== null}
-                onClick={() => void deleteOlder()}
-              />
-            </span>
-          }
-        />
-        <div className="flex flex-col items-start gap-2 border-t border-surface-2 bg-bad/[.03] px-4 py-[13px] sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-          <p className="text-xs text-ink-3">Securely erase all recorded history</p>
-          <button
-            type="button"
+              Restore a backup…
+            </InlineAction>
+          </>
+        }
+        control={
+          <TextAction disabled={mutationsBusy} onClick={() => setBackupNameOpen(true)}>
+            Back up now
+          </TextAction>
+        }
+      />
+      <Row
+        label="Export activity"
+        help="All recorded history as a CSV file."
+        control={
+          <TextAction disabled={exporting} onClick={() => void exportAll()}>
+            {exporting ? "Preparing…" : "Export CSV"}
+          </TextAction>
+        }
+      />
+      <Row
+        label={
+          <>
+            Delete history older than
+            <input
+              type="text"
+              inputMode="numeric"
+              aria-label="Days of history to keep"
+              value={olderDays}
+              disabled={mutationsBusy || busyAction !== null}
+              onChange={(event) => setOlderDays(sanitizeNumericDraft(event.target.value, false))}
+              onBlur={normalizeOlderDays}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+              }}
+              className="mx-1 w-[2.8em] border-0 border-b border-dashed border-ink-3 bg-transparent pb-px text-center font-semibold tabular-nums text-ink outline-none focus:border-solid focus:border-accent disabled:opacity-50"
+            />
+            days
+          </>
+        }
+        help="Categories and rules are kept."
+        control={
+          <TextAction
+            danger
             disabled={mutationsBusy || busyAction !== null}
-            className="shrink-0 text-xs font-semibold text-bad transition-colors hover:text-bad/80"
+            onClick={() => void deleteOlder()}
+          >
+            Delete…
+          </TextAction>
+        }
+      />
+      <Row
+        label="Erase all recorded history"
+        help="Turns recording off. Categories, rules, and backups are kept."
+        control={
+          <TextAction
+            danger
+            disabled={mutationsBusy || busyAction !== null}
             onClick={() => setEraseOpen(true)}
           >
-            Erase all
-          </button>
-        </div>
-        {message && <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-2">{message}</p>}
-      </div>
+            Erase all…
+          </TextAction>
+        }
+      />
+      {message && <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-2">{message}</p>}
       {restoreOpen && (
         <RestoreBackupDialog
           disabled={mutationsBusy}

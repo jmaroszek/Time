@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 
 import { normalizeBrowserProcesses } from "../../lib/browsers";
 import { coveringMediaSite, normalizeMediaSites } from "../../lib/mediaSites";
@@ -129,8 +129,8 @@ export function Row({
   stacked = false,
   footer,
 }: {
-  label: string;
-  help: string;
+  label: ReactNode;
+  help: ReactNode;
   control: ReactNode;
   /** Drop the card chrome — the caller is already providing it. */
   bare?: boolean;
@@ -457,7 +457,7 @@ export function NumberStepper({
   );
 }
 
-export function Segmented({ label, options, value, onChange, labels }: { label: string; options: string[]; value: string; onChange: (value: string) => void; labels?: Record<string, string> }) {
+export function Segmented({ label, options, value, onChange, labels }: { label: string; options: string[]; value: string; onChange: (value: string) => void; labels?: Record<string, ReactNode> }) {
   return (
     <div className="inline-flex rounded-[10px] border border-edge bg-surface-2 p-[3px]" role="radiogroup" aria-label={label}>
       {options.map((option, index) => (
@@ -467,7 +467,7 @@ export function Segmented({ label, options, value, onChange, labels }: { label: 
           role="radio"
           aria-checked={value === option}
           tabIndex={value === option ? 0 : -1}
-          className={`rounded-[7px] px-[13px] py-1.5 text-xs transition-colors ${value === option ? "bg-accent/15 font-semibold text-accent" : "text-ink-3 hover:text-ink-2"}`}
+          className={`inline-flex items-center gap-1.5 rounded-[7px] px-[13px] py-1.5 text-xs transition-colors ${value === option ? "bg-accent/15 font-semibold text-accent" : "text-ink-3 hover:text-ink-2"}`}
           onClick={() => onChange(option)}
           onKeyDown={(event) => handleRadioKey(event, options, index, onChange)}
         >
@@ -475,5 +475,73 @@ export function Segmented({ label, options, value, onChange, labels }: { label: 
         </button>
       ))}
     </div>
+  );
+}
+
+/** The one shape every Settings action takes: a word in the control rail, with
+ *  no border and no fill at rest. Rows used to carry bordered, filled buttons —
+ *  often two of them, or a stepper beside a trash can — and the right edge of
+ *  the column read as a wall of boxes louder than the settings themselves.
+ *
+ *  Gray at rest and blue on hover, so it still reads as pressable. `danger` is
+ *  for the actions that remove recorded history, and only those. The negative
+ *  right margin puts the word, not its hover box, on the rail the toggles sit
+ *  on. */
+export function TextAction({
+  children,
+  onClick,
+  danger = false,
+  disabled = false,
+  title,
+  buttonRef,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+  title?: string;
+  buttonRef?: Ref<HTMLButtonElement>;
+}) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={`-mr-2.5 whitespace-nowrap rounded-[7px] px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 max-sm:-ml-2.5 max-sm:mr-0 ${
+        danger
+          ? "text-bad hover:bg-bad/10"
+          : "text-ink-2 hover:bg-hover-2 hover:text-accent"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** A text action set inside a help line ("Restore a backup…"), for the second,
+ *  rarer action a row would otherwise need a second button for. */
+export function InlineAction({
+  children,
+  onClick,
+  disabled = false,
+  buttonRef,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  buttonRef?: Ref<HTMLButtonElement>;
+}) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="text-ink-2 underline decoration-ink-3/60 underline-offset-2 transition-colors hover:text-accent hover:decoration-accent disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
   );
 }

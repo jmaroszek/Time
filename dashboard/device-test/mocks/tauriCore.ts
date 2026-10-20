@@ -758,6 +758,12 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
     case "backup_database":
       result = "C:\\DeviceFixture\\Backups\\backup_manual_fixed.db";
       break;
+    case "reveal_database":
+      result = null;
+      break;
+    case "save_activity_export":
+      result = `C:\\DeviceFixture\\Exports\\${String(args?.suggestedName ?? "export.csv")}`;
+      break;
     case "preview_activity_delete": {
       const selected = sessions.filter((session) => session.process === "explorer.exe");
       result = {

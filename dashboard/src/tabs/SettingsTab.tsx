@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-import { Button, ConfirmDialog, Spinner } from "../components/ui";
+import { ConfirmDialog, Spinner } from "../components/ui";
 import { ExtensionLinks } from "../components/ExtensionLinks";
 import { displayBrowserProcesses, normalizeBrowserProcesses } from "../lib/browsers";
 import { fmtDuration } from "../lib/format";
@@ -16,7 +16,7 @@ import {
 import {
   paletteForTheme,
   PALETTES,
-  previewSwatches,
+  paletteStrip,
   PRODUCTIVITY_OPTIONS,
   type ProductivityOption,
 } from "../lib/palettes";
@@ -69,7 +69,9 @@ import {
   Row,
   ScheduleTimeInput,
   Segmented,
+  InlineAction,
   SettingGroup,
+  TextAction,
   handleRadioKey,
   sanitizeNumericDraft,
 } from "./settings/fields";
@@ -645,6 +647,9 @@ export default function SettingsTab({
 
   const themedChoice = (choice: ProductivityOption) =>
     meta.theme === "light" ? choice.light : choice;
+  const selectedPalette = PALETTES.find(
+    (palette) => palette.id === (drafts.color_palette ?? meta.palette.id),
+  ) ?? meta.palette;
 
   const numberControl = (spec: NumericSpec, label: string, unit?: string, hour = false) => {
     const clock = hour ? clockHour(Number(drafts[spec.key]) || 0) : null;
@@ -716,13 +721,12 @@ export default function SettingsTab({
           </div>
           {trackerRecording.kind === "paused" ? (
             <div className="basis-full sm:ml-auto sm:basis-auto">
-              <Button
-                variant="primary"
+              <TextAction
                 disabled={resumingTracker || lifecycleBusy}
                 onClick={() => void resumeTracking()}
               >
                 {resumingTracker ? "Resuming…" : "Resume now"}
-              </Button>
+              </TextAction>
             </div>
           ) : !trackingEnabled || trackerLive ? (
             heartbeatAge !== null && (
@@ -732,13 +736,12 @@ export default function SettingsTab({
             )
           ) : (
             <div className="basis-full sm:ml-auto sm:basis-auto">
-              <Button
-                variant="primary"
+              <TextAction
                 disabled={startingTracker || lifecycleBusy}
                 onClick={() => void startTracker()}
               >
                 {startingTracker ? "Starting…" : "Start tracker"}
-              </Button>
+              </TextAction>
             </div>
           )}
         </div>
@@ -1096,10 +1099,13 @@ export default function SettingsTab({
         </SettingGroup>
       </Section>
 
-      <Section
-        title="Appearance"
-        intro="The app's theme, and the category and productivity colors used across every chart. Switching palettes changes the swatches offered for new categories, but does not change their existing colors."
-      >
+      {/* Five palettes as one row of tiles rather than five stacked cards. The
+          cards drew fifty saturated squares down the middle of the page, and —
+          hue-sorted — made every palette look like the same row repeated. A
+          tile carries only what the choice needs: the colors new categories
+          receive, in that order, and the name. The selected palette's
+          description is said once, under the row. */}
+      <Section title="Appearance">
         <Row
           label="Theme"
           help="Follow system uses your Windows light or dark setting, and follows it when it changes."
@@ -1113,13 +1119,17 @@ export default function SettingsTab({
             />
           }
         />
-        <div className="border-t border-surface-2 px-4 pb-4 pt-4">
-          <p id="category-palette-label" className="mb-2 text-micro font-semibold uppercase tracking-wide text-ink-3">
+        <div className="border-t border-surface-2 px-4 py-4">
+          <p id="category-palette-label" className="mb-3 text-row font-medium text-ink">
             Category palette
           </p>
-          <div className="flex flex-col gap-2" role="radiogroup" aria-labelledby="category-palette-label">
+          <div
+            className="grid grid-cols-5 gap-2 max-sm:grid-cols-3"
+            role="radiogroup"
+            aria-labelledby="category-palette-label"
+          >
             {PALETTES.map((option, index) => {
-              const selected = (drafts.color_palette ?? meta.palette.id) === option.id;
+              const selected = selectedPalette.id === option.id;
               return (
                 <button
                   key={option.id}
@@ -1132,73 +1142,51 @@ export default function SettingsTab({
                     handleRadioKey(event, PALETTES.map((palette) => palette.id), index, (value) =>
                       selectSetting("color_palette", value),
                     )}
-                  className={`flex items-center gap-3 rounded-[11px] border px-3 py-2.5 text-left transition-colors ${selected ? "border-accent/70 bg-selected-strong" : "border-card-edge bg-raised hover:bg-selected-strong"}`}
+                  className={`flex min-w-0 flex-col gap-2 rounded-[10px] border p-2.5 text-left transition-colors ${
+                    selected
+                      ? "border-accent/70 bg-selected-strong"
+                      : "border-card-edge bg-raised hover:bg-selected-strong"
+                  }`}
                 >
-                  <span className="flex shrink-0 gap-1" aria-hidden="true">
-                    {previewSwatches(paletteForTheme(option, meta.theme)).map((swatch) => (
-                      <span key={swatch} className="h-4 w-4 rounded" style={{ backgroundColor: swatch }} />
+                  <span className="flex h-2.5 overflow-hidden rounded-full" aria-hidden="true">
+                    {paletteStrip(paletteForTheme(option, meta.theme)).map((swatch) => (
+                      <span key={swatch} className="flex-1" style={{ backgroundColor: swatch }} />
                     ))}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-row font-semibold text-ink">{option.label}</span>
-                    <span className="block text-xs leading-snug text-ink-3">{option.description}</span>
-                  </span>
-                  <span className={`ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${selected ? "border-accent" : "border-edge-2"}`}>
-                    {selected && <span className="h-2 w-2 rounded-full bg-accent" />}
-                  </span>
+                  <span className="truncate text-xs font-semibold text-ink">{option.label}</span>
                 </button>
               );
             })}
           </div>
+          <p className="mt-2.5 text-meta leading-snug text-ink-3">{selectedPalette.description}</p>
         </div>
-        <div className="border-t border-surface-2 px-4 py-4">
-          <p id="productivity-colors-label" className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">
-            Productivity colors
-          </p>
-          <div className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="productivity-colors-label">
-            {PRODUCTIVITY_OPTIONS.map((choice, index) => {
-              const selected = (drafts.productivity_style ?? meta.settings.productivity_style ?? "vivid") === choice.id;
-              return (
-                <button
-                  key={choice.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  tabIndex={selected ? 0 : -1}
-                  onClick={() => selectSetting("productivity_style", choice.id)}
-                  onKeyDown={(event) =>
-                    handleRadioKey(
-                      event,
-                      PRODUCTIVITY_OPTIONS.map((option) => option.id),
-                      index,
-                      (value) => selectSetting("productivity_style", value),
-                    )}
-                  className={`flex items-center gap-2 rounded-[10px] border px-2.5 py-1.5 transition-colors ${selected ? "border-accent/70 bg-selected-strong" : "border-card-edge bg-raised hover:bg-selected-strong"}`}
-                >
-                  <span className="flex gap-1" aria-hidden="true">
-                    <span className="h-4 w-4 rounded" style={{ backgroundColor: themedChoice(choice).productive }} />
-                    <span className="h-4 w-4 rounded" style={{ backgroundColor: themedChoice(choice).unproductive }} />
+        <Row
+          label="Productivity colors"
+          help="Colorblind swaps green for blue."
+          control={
+            <Segmented
+              label="Productivity colors"
+              options={PRODUCTIVITY_OPTIONS.map((choice) => choice.id)}
+              labels={Object.fromEntries(PRODUCTIVITY_OPTIONS.map((choice) => [
+                choice.id,
+                <>
+                  <span className="flex gap-[3px]" aria-hidden="true">
+                    <span className="h-[9px] w-[9px] rounded-[3px]" style={{ backgroundColor: themedChoice(choice).productive }} />
+                    <span className="h-[9px] w-[9px] rounded-[3px]" style={{ backgroundColor: themedChoice(choice).unproductive }} />
                   </span>
-                  <span className="text-xs font-medium text-ink">{choice.label}</span>
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-2 text-xs leading-snug text-ink-3">
-            Colorblind uses blue and red to distinguish the states for common red–green color vision differences.
-          </p>
-        </div>
+                  {choice.label}
+                </>,
+              ]))}
+              value={drafts.productivity_style ?? meta.settings.productivity_style ?? "vivid"}
+              onChange={(value) => selectSetting("productivity_style", value)}
+            />
+          }
+        />
         <div className="flex flex-col items-start gap-2 border-t border-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-          <p className="text-xs leading-snug text-ink-3">
+          <p className="text-meta leading-snug text-ink-3">
             Existing categories keep their saved colors.
           </p>
-          <button
-            type="button"
-            onClick={onManageCategories}
-            className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink-2"
-          >
-            Open Categories &amp; Rules
-          </button>
+          <TextAction onClick={onManageCategories}>Open Categories &amp; Rules</TextAction>
         </div>
       </Section>
 
@@ -1271,13 +1259,7 @@ function ExclusionSummary({ onManage }: { onManage: () => void }) {
           : `${parts.join(" and ")} are never tracked.`}
       </p>
       {total > 0 && (
-        <button
-          type="button"
-          onClick={onManage}
-          className="shrink-0 text-xs font-semibold text-accent transition-colors hover:text-accent/80"
-        >
-          View and manage
-        </button>
+        <TextAction onClick={onManage}>View and manage</TextAction>
       )}
     </div>
   );
@@ -1317,23 +1299,19 @@ function HelpAndFeedbackSection({
 
   return (
     <Section title="Help & feedback">
-      <div className="flex flex-col items-start gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <p className="max-w-[420px] text-meta leading-snug text-ink-3">
-          Questions, bugs, or ideas? Email{" "}
-          <span className="font-medium text-ink">{SUPPORT_EMAIL}</span>. Clicking
-          “Email support” opens your email client and helps you draft a message. If
-          that doesn't work, hit “Copy address” and send one the way you
-          normally do.
-        </p>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <Button variant="primary" onClick={() => void emailSupport()}>
-            Email support
-          </Button>
-          <Button onClick={() => void copyAddress()}>
-            {copied ? "Copied" : "Copy address"}
-          </Button>
-        </div>
-      </div>
+      <Row
+        label="Contact support"
+        help={
+          <>
+            Questions, bugs, or ideas? Write to{" "}
+            <span className="font-medium text-ink-2">{SUPPORT_EMAIL}</span>.{" "}
+            <InlineAction onClick={() => void copyAddress()}>
+              {copied ? "Copied" : "Copy address"}
+            </InlineAction>
+          </>
+        }
+        control={<TextAction onClick={() => void emailSupport()}>Email support</TextAction>}
+      />
     </Section>
   );
 }
@@ -1391,15 +1369,13 @@ function RestoreDefaultsSection({
         label="Restore default settings"
         help="Resets every setting on this page without changing recorded history or organization."
         control={
-          <button
-            type="button"
+          <TextAction
             disabled={disabled || restoring}
             title={disabled ? "Wait for settings to finish saving" : undefined}
             onClick={() => setConfirming(true)}
-            className="rounded-[8px] border border-edge px-3 py-1.5 text-xs font-semibold text-ink-2 transition-colors hover:border-edge-2 hover:text-ink disabled:cursor-wait disabled:opacity-50"
           >
             {restoring ? "Restoring…" : restored ? "Defaults restored" : "Restore defaults"}
-          </button>
+          </TextAction>
         }
       />
     </Section>

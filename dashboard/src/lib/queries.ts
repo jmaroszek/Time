@@ -670,6 +670,11 @@ export async function saveActivityExport(
   return invoke<string | null>("save_activity_export", { suggestedName, contents });
 }
 
+/** Opens Explorer on the database's folder with the file selected. */
+export async function revealDatabase(): Promise<void> {
+  await invoke("reveal_database");
+}
+
 /** Sessions that ended before `cutoffSec` (unix seconds). */
 export async function countSessionsOlderThan(cutoffSec: number): Promise<number> {
   const db = await getDb();
