@@ -1,6 +1,7 @@
 import { MetricCard } from "../../components/ui";
 import { appSuffixNames, trimAppSuffix } from "../../lib/activityFormat";
 import { fmtDuration, fmtPct } from "../../lib/format";
+import { RUN_DEFINITION } from "../../lib/runs";
 import {
   type InsightsScope,
   type ScopeSummary,
@@ -69,7 +70,7 @@ export function ScopeTiles({
       <MetricCard
         label="Runs per day"
         value={perDay === null ? "—" : fmtRate(perDay)}
-        hint={`Average number of separate sittings in ${scope.name} on the days you used it. A sitting ends when you go idle or switch away for a while.`}
+        hint={`Average number of separate sittings in ${scope.name} on the days you used it. ${RUN_DEFINITION}`}
       />
       <MetricCard
         label="Typical run"

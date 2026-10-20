@@ -13,39 +13,45 @@
  */
 
 /**
- * How long nothing at all may be recorded inside a run before it counts as two.
+ * How long a run may be away — elsewhere, or with nothing recorded — and still
+ * be one sitting.
  *
- * Live sessions abut, so this mostly absorbs seams: a probe tick at a boundary,
- * a moment in an app Time is told not to record. It also spans the empty
- * heartbeat-length gap the legacy tracker left between consecutive rows of one
- * window, which would otherwise cut every migrated hour of a game into
- * fifteen-second-separated pieces. And it bounds a string of glances: however
- * short each one was, a reader gone for longer than this has left.
+ * Alt-tabbing to answer a message, check a process, or change a mouse profile
+ * and coming back is part of the run it interrupted. Fifteen seconds was too
+ * tight for that: in a real history most splits of an evening's game were
+ * trips of twenty seconds to a minute and a half, which described the
+ * reader's taskbar rather than their attention. Time away adds up across
+ * consecutive stops, so a string of short ones cannot stretch a run either.
+ *
+ * It also spans seams: a probe tick at a boundary, a moment in an app Time is
+ * told not to record, and the heartbeat-length gap the legacy tracker left
+ * between consecutive rows of one window.
  */
-export const RUN_GAP_TOLERANCE_SECONDS = 30;
+export const RUN_AWAY_SECONDS = 120;
 
 /**
- * The longest stop elsewhere that is still a glance rather than a switch.
+ * How much idle time a run may span before it counts as two.
  *
- * Alt-tabbing to answer a message or skip a song and coming straight back is
- * part of the run it interrupted. Counting it as a break cut a working
- * afternoon into dozens of runs a few minutes long, which described the
- * reader's taskbar rather than their attention. Fifteen seconds is also the
- * legacy tracker's heartbeat, the smallest stop its migrated rows can record.
+ * Idle under a few minutes is usually not leaving: a controller set down for a
+ * cutscene, a video watched to the end, reading a long page. Ending a run at
+ * any idle split those into separate sittings whenever the pause crossed the
+ * AFK threshold, which is the reader's own setting and often short. The idle
+ * itself stays out of the run's time; this only decides whether what comes
+ * after it is the same sitting.
  */
-export const RUN_GLANCE_SECONDS = 15;
+export const RUN_IDLE_SECONDS = 600;
 
 /** What ends a run, in the words every surface that counts runs uses. */
 export const RUN_DEFINITION =
-  `A run ends when you go idle, or switch away for more than ${RUN_GLANCE_SECONDS} seconds at a time or ${RUN_GAP_TOLERANCE_SECONDS} in all.`;
+  `A run ends when you switch to something else for more than ${RUN_AWAY_SECONDS / 60} minutes, or go idle for more than ${RUN_IDLE_SECONDS / 60}.`;
 
 /** What one recorded row is to the subject whose runs are being traced. */
 export type RunRowKind =
   /** The subject itself. */
   | "in"
-  /** Something else in the foreground. Ends a run unless it was a glance. */
+  /** Something else in the foreground. Counts toward RUN_AWAY_SECONDS. */
   | "other"
-  /** Idle time, which always ends a run, however short. */
+  /** Idle time. Counts toward RUN_IDLE_SECONDS, not toward time away. */
   | "idle"
   /** Treated exactly as if nothing had been recorded — ignored activity. */
   | "unrecorded";
@@ -53,8 +59,8 @@ export type RunRowKind =
 export interface RunSpan {
   start: number;
   end: number;
-  /** Time in the subject. Less than `end - start` by any glances and seams the
-   *  run spans, so the runs of a subject always add up to its total. */
+  /** Time in the subject. Less than `end - start` by any time away and idle
+   *  the run spans, so the runs of a subject always add up to its total. */
   seconds: number;
   /** Indices, into the ordered rows, of the run's first and last rows. */
   first: number;
@@ -77,10 +83,10 @@ export function orderedByStart<T extends { start: number; id: number }>(
  * The subject's runs within [startSec, endSec), from rows already ordered by
  * start (see `orderedByStart`).
  *
- * A run continues across a glance — a stop elsewhere of up to
- * RUN_GLANCE_SECONDS — and across a short stretch with nothing recorded, as
- * long as the subject is back within RUN_GAP_TOLERANCE_SECONDS of where it left
- * off. Anything longer elsewhere ends it, and so does going idle at all.
+ * A run continues while the subject comes back with no more than
+ * RUN_IDLE_SECONDS of idle and RUN_AWAY_SECONDS of anything else — another
+ * subject, or nothing recorded — since it left. The two budgets are separate:
+ * idle is a pause in the sitting, and time elsewhere is a departure from it.
  */
 export function collectRuns<T extends { start: number; end: number }>(
   rows: readonly T[],
@@ -90,6 +96,14 @@ export function collectRuns<T extends { start: number; end: number }>(
 ): RunSpan[] {
   const runs: RunSpan[] = [];
   let run: RunSpan | null = null;
+  // Idle since the run's last row in the subject. Time away is everything
+  // else since then, which spans unrecorded seams without listing them.
+  let idle = 0;
+  const close = () => {
+    if (run) runs.push(run);
+    run = null;
+    idle = 0;
+  };
   for (let index = 0; index < rows.length; index++) {
     const row = rows[index];
     const start = Math.max(row.start, startSec);
@@ -98,20 +112,23 @@ export function collectRuns<T extends { start: number; end: number }>(
     const kind = kindOf(row);
     if (kind === "unrecorded") continue;
     if (kind === "in") {
-      if (run && start - run.end <= RUN_GAP_TOLERANCE_SECONDS) {
+      if (run && start - run.end - idle <= RUN_AWAY_SECONDS) {
         run.end = Math.max(run.end, end);
         run.seconds += end - start;
         run.last = index;
+        idle = 0;
       } else {
-        if (run) runs.push(run);
+        close();
         run = { start, end, seconds: end - start, first: index, last: index };
       }
-    } else if (run && (kind === "idle" || end - start > RUN_GLANCE_SECONDS)) {
-      runs.push(run);
-      run = null;
+    } else if (run) {
+      if (kind === "idle") idle += end - start;
+      // Closing as soon as either budget is spent is what bounds idle: the
+      // check on return subtracts idle and looks only at time away.
+      if (idle > RUN_IDLE_SECONDS || end - run.end - idle > RUN_AWAY_SECONDS) close();
     }
   }
-  if (run) runs.push(run);
+  close();
   return runs;
 }
 

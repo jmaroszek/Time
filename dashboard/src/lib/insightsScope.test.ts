@@ -148,17 +148,22 @@ describe("scopeRuns", () => {
   it("ends a run at a real switch", () => {
     expect(runs([
       make(at(2, 9), at(2, 9, 10), "code.exe"),
-      make(at(2, 9, 10), at(2, 9, 11), "video.exe"),
-      make(at(2, 9, 11), at(2, 9, 20), "code.exe"),
-    ])).toEqual([600, 540]);
+      make(at(2, 9, 10), at(2, 9, 13), "video.exe"),
+      make(at(2, 9, 13), at(2, 9, 20), "code.exe"),
+    ])).toEqual([600, 420]);
   });
 
-  it("ends a run when the reader goes idle", () => {
+  it("carries a run across a short pause, but ends it when the reader goes idle", () => {
     expect(runs([
       make(at(2, 9), at(2, 9, 10), "code.exe"),
-      make(at(2, 9, 10), at(2, 9, 10, 5), "afk", { isAfk: true }),
-      make(at(2, 9, 10, 5), at(2, 9, 20), "code.exe"),
-    ])).toEqual([600, 595]);
+      make(at(2, 9, 10), at(2, 9, 14), "afk", { isAfk: true }),
+      make(at(2, 9, 14), at(2, 9, 20), "code.exe"),
+    ])).toEqual([960]);
+    expect(runs([
+      make(at(2, 9), at(2, 9, 10), "code.exe"),
+      make(at(2, 9, 10), at(2, 9, 21), "afk", { isAfk: true }),
+      make(at(2, 9, 21), at(2, 9, 30), "code.exe"),
+    ])).toEqual([600, 540]);
   });
 
   it("treats ignored activity as unrecorded, even when it would belong to the scope", () => {
@@ -169,9 +174,9 @@ describe("scopeRuns", () => {
     ])).toEqual([1180]);
     expect(runs([
       make(at(2, 9), at(2, 9, 10), "code.exe"),
-      make(at(2, 9, 10), at(2, 9, 12), "hidden.exe"),
-      make(at(2, 9, 12), at(2, 9, 20), "code.exe"),
-    ])).toEqual([600, 480]);
+      make(at(2, 9, 10), at(2, 9, 13), "hidden.exe"),
+      make(at(2, 9, 13), at(2, 9, 20), "code.exe"),
+    ])).toEqual([600, 420]);
     const hidden = inScopeOf("app", "hidden");
     expect(runs([make(at(2, 9), at(2, 10), "hidden.exe")], hidden)).toEqual([]);
   });

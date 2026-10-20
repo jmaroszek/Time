@@ -1178,9 +1178,9 @@ describe("runs in the entity and window panels", () => {
       // Ignored time reads as unrecorded: twenty seconds of it is a seam.
       { id: 4, start: 1200, end: 1220, process: "shell.exe", title: "", domain: null, isAfk: false },
       { id: 5, start: 1220, end: 1800, process: "code.exe", title: "a.ts", domain: null, isAfk: false },
-      // Idle time ends a run however short it is.
-      { id: 6, start: 1800, end: 1805, process: "code.exe", title: "", domain: null, isAfk: true },
-      { id: 7, start: 1805, end: 2105, process: "code.exe", title: "a.ts", domain: null, isAfk: false },
+      // Idle longer than a pause ends a run.
+      { id: 6, start: 1800, end: 2500, process: "code.exe", title: "", domain: null, isAfk: true },
+      { id: 7, start: 2500, end: 2800, process: "code.exe", title: "a.ts", domain: null, isAfk: false },
     ],
   };
   const query = { ...baseQuery, endSec: 3000 };
