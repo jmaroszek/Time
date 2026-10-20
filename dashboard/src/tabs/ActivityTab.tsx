@@ -1104,7 +1104,10 @@ export default function ActivityTab({
           // shapes the table, not the card, and it was landing one line above a
           // different "Show" that meant something else entirely. The header
           // keeps what acts on the card as a whole.
-          <span className="flex flex-wrap items-center gap-3 text-xs text-ink-3">
+          // Both faces' right slots hold the export button's 28px height, so
+          // the header — and the search row under it — sits in the same place
+          // whichever face is up, and whether or not this face has a count.
+          <span className="flex h-7 flex-wrap items-center gap-3 text-xs text-ink-3">
             {source && result && (
               <ActivityExportMenu
                 source={source}
@@ -1114,7 +1117,7 @@ export default function ActivityTab({
             )}
           </span>
         ) : (
-          <span className="flex flex-wrap items-baseline gap-x-1.5 text-xs text-ink-3">
+          <span className="flex h-7 flex-wrap items-center gap-x-1.5 text-xs text-ink-3">
             {/* The backlog's only route out of this face. The tab's mark cannot
                 serve it: both faces share a tab, so while this one is up the
                 mark is on the tab already being read. Text in the header rather

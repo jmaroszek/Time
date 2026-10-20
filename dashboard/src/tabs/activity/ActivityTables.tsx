@@ -374,7 +374,7 @@ export function LibraryControls({
   // recorded activity, so leaving them enabled there would be a lie.
   const searching = classificationFilter !== "excluded";
   return (
-    <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 border-b border-edge/50 pb-4">
+    <div className="mb-5 flex shrink-0 flex-wrap items-center gap-2">
       {/* From md up, where the table shows all five columns, the filters end
           where the Time column does, so the toolbar reads as the header of the
           columns it narrows instead of a short stub over a wide table. Time's
