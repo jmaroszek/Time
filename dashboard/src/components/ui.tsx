@@ -366,6 +366,7 @@ export function MenuSelect({
   header,
   disabled = false,
   title,
+  triggerDot = true,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -403,6 +404,9 @@ export function MenuSelect({
   header?: string;
   disabled?: boolean;
   title?: string;
+  /** False keeps the option dots in the menu but leaves them off the
+   *  trigger, for a row that already carries a colored mark of its own. */
+  triggerDot?: boolean;
 }) {
   const id = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -555,7 +559,7 @@ export function MenuSelect({
         >
           {current ? (
             <>
-              {current.dot && <CategoryDot color={current.dot} />}
+              {triggerDot && current.dot && <CategoryDot color={current.dot} />}
               <span className="truncate">{current.triggerLabel ?? current.label}</span>
             </>
           ) : placeholder}

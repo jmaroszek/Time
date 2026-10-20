@@ -46,12 +46,6 @@ export const RULE_LABELS: Record<MatchType, string> = {
  *  an option sharing it would render permanently checked. */
 export const AUTOMATIC_CLASSIFICATION = "auto";
 
-const RULE_HELP: Record<MatchType, string> = {
-  domain: "Matches a website such as youtube.com. Page paths and searches are not stored.",
-  title: "Matches normalized text in a stored window title, inside the scope you choose.",
-  process: "Matches time spent in an app, such as Spotify (spotify.exe).",
-};
-
 /** A broad scope and substring comparison are separate decisions. The stable
  *  mode help always explains inside-word matching; this caution can therefore
  *  retire once the rule is limited to one app or website. */
@@ -287,7 +281,7 @@ function RuleDraftPreview({
   }
 
   return (
-    <p className="mt-2 rounded-lg border border-edge/60 bg-surface/45 px-3 py-2 text-xs leading-snug text-ink-3">
+    <p className="mt-2 text-xs leading-snug text-ink-3">
       {result === "unusable"
         ? deferred.type === "domain"
           ? "That is not a usable website domain — enter one like example.com."
@@ -320,6 +314,7 @@ export function CategoryRuleForm({
   autoFocus?: boolean;
   replacingRuleId?: number;
 }) {
+  const ready = draft.pattern.trim() !== "" && ruleDraftReady(draft);
   return (
     <>
       <div className="flex items-center gap-2">
@@ -341,16 +336,18 @@ export function CategoryRuleForm({
           className="min-w-0 flex-1 rounded-lg border border-control-edge bg-control px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
         />
         {onCancel && <Button onClick={onCancel}>Cancel</Button>}
+        {/* Primary only once there is something to submit: a disabled
+            primary rests as a faded blue ghost that reads as broken. */}
         <Button
-          variant="primary"
-          disabled={!draft.pattern.trim() || !ruleDraftReady(draft)}
+          variant={ready ? "primary" : "default"}
+          disabled={!ready}
           onClick={onSubmit}
         >
           {submitLabel}
         </Button>
       </div>
       {draft.type === "title" && (
-        <div className="mt-2 rounded-lg border border-edge/60 bg-surface/45 p-2.5">
+        <div className="mt-2.5">
           <div className="flex items-center gap-2">
             <span className="w-[64px] shrink-0 text-xs text-ink-3">Match</span>
             <SegmentedPills
@@ -397,19 +394,19 @@ export function CategoryRuleForm({
           </div>
         </div>
       )}
-      <p className="mt-2 text-xs text-ink-3">
-        {draft.type === "title"
-          ? titleMatchModeHelp(draft.titleMatchMode)
-          : RULE_HELP[draft.type]}
-        {draft.type === "domain"
-          && " Website rules require a supported browser and detected website information."}
-        {draft.type === "title" && !windowTitleCaptureEnabled
-          && " Future window title capture is off; existing stored titles can still match."}
-      </p>
+      {/* Website and App rules need no help line: the placeholder shows the
+          format. A Window rule's line explains the match mode just chosen. */}
+      {draft.type === "title" && (
+        <p className="mt-2 text-xs text-ink-3">
+          {titleMatchModeHelp(draft.titleMatchMode)}
+          {!windowTitleCaptureEnabled
+            && " Future window title capture is off; existing stored titles can still match."}
+        </p>
+      )}
       {draft.type === "title" && showBroadMatchWarning(draft) && (
         <BroadMatchWarning className="mt-1.5" />
       )}
-      {draft.pattern.trim() !== "" && ruleDraftReady(draft) && (
+      {ready && (
         <RuleDraftPreview
           source={source}
           draft={draft}
