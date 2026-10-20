@@ -236,7 +236,8 @@ test("@matrix primary screens remain usable at the effective viewport contract",
     ]);
     expect(searchBox).not.toBeNull();
     expect(sortBox).not.toBeNull();
-    // One row at phone width too: the field keeps a usable width beside Sort.
+    // One row even at the 500px minimum window: the field keeps a usable
+    // width beside Sort.
     expect(Math.abs(searchBox!.y - sortBox!.y)).toBeLessThanOrEqual(2);
     expect(searchBox!.width).toBeGreaterThan(160);
 
