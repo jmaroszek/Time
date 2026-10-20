@@ -21,7 +21,7 @@ import {
   windowGroupClassification,
 } from "../../lib/activityFormat";
 import { type Category } from "../../lib/classify";
-import { fmtDuration } from "../../lib/format";
+import { fmtDuration, fmtDurationTitle } from "../../lib/format";
 import {
   activityRowAccessibleLabel,
   activitySummaryColumns,
@@ -309,7 +309,7 @@ function TriageRow({
           {item.kind === "website" ? "Website" : "App"}
         </span>
       </span>
-      <span className="shrink-0 text-xs tabular-nums text-ink-2">{fmtDuration(item.seconds)}</span>
+      <span className="shrink-0 text-xs tabular-nums text-ink-2" title={fmtDurationTitle(item.seconds)}>{fmtDuration(item.seconds)}</span>
       {/* A placeholder trigger, not a value: every row here is uncategorized, so
           showing that as the current selection would print the same word five
           times and call it information. The verb is what the control does — and
@@ -652,7 +652,7 @@ function SummaryTable({
                 <ShareBar seconds={row.seconds} maxSeconds={scale.maxSeconds} totalSeconds={scale.totalSeconds} />
               </td>
             )}
-            <td className="py-2.5 text-right tabular-nums text-ink-2">{fmtDuration(row.seconds)}</td>
+            <td className="py-2.5 text-right tabular-nums text-ink-2" title={fmtDurationTitle(row.seconds)}>{fmtDuration(row.seconds)}</td>
             {!compactColumns && (
               <td className="py-2.5 pl-8 text-center tabular-nums text-ink-3">{row.daysSeen}</td>
             )}

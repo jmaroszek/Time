@@ -1,6 +1,6 @@
 import { MetricCard } from "../../components/ui";
 import { appSuffixNames, trimAppSuffix } from "../../lib/activityFormat";
-import { fmtDuration, fmtPct } from "../../lib/format";
+import { fmtDuration, fmtDurationTitle, fmtPct } from "../../lib/format";
 import { RUN_DEFINITION } from "../../lib/runs";
 import {
   type InsightsScope,
@@ -46,7 +46,7 @@ export function ScopeTiles({
       <MetricCard
         label="Time in range"
         value={(
-          <span className="flex items-baseline gap-1.5 tabular-nums">
+          <span className="flex items-baseline gap-1.5 tabular-nums" title={fmtDurationTitle(summary.seconds)}>
             {fmtDuration(summary.seconds)}
             {change && (
               <span className="text-xs font-normal tracking-normal text-ink-3">{change}</span>
@@ -192,7 +192,7 @@ export function TopWindowList({
                   {shown}
                 </span>
               )}
-              <span className="w-14 shrink-0 text-right tabular-nums text-ink-2">
+              <span className="w-14 shrink-0 text-right tabular-nums text-ink-2" title={fmtDurationTitle(row.seconds)}>
                 {fmtDuration(row.seconds)}
               </span>
             </div>

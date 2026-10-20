@@ -3,7 +3,7 @@
 
 import type { AppDelta, WebsiteDelta } from "../lib/metrics";
 import type { BrowserDomainCoverage } from "../lib/domainCoverage";
-import { fmtDuration } from "../lib/format";
+import { fmtDuration, fmtDurationTitle } from "../lib/format";
 import { uncategorizedMark } from "../lib/chartTheme";
 import { useMeta } from "../state/meta";
 import { CategoryDot, FloatingTooltip } from "./ui";
@@ -121,7 +121,10 @@ export default function TopUsageList({
                   style={{ width: `${Math.max((item.seconds / max) * 100, 1.5)}%` }}
                 />
               </div>
-              <span className="top-app-duration col-start-2 row-start-1 w-14 shrink-0 text-right text-ink-2">
+              <span
+                className="top-app-duration col-start-2 row-start-1 w-14 shrink-0 text-right text-ink-2"
+                title={fmtDurationTitle(item.seconds)}
+              >
                 {fmtDuration(item.seconds)}
               </span>
               <DeltaBadge

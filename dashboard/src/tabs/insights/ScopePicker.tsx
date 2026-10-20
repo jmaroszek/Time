@@ -6,7 +6,7 @@ import {
   StateDot,
 } from "../../components/ui";
 import type { Category, Productivity } from "../../lib/classify";
-import { fmtDuration } from "../../lib/format";
+import { fmtDuration, fmtDurationTitle } from "../../lib/format";
 import {
   parentScope,
   scopeDescriptor,
@@ -231,7 +231,7 @@ export default function ScopePicker({
           {option.label}
           {option.matched && <span className="ml-1.5 text-ink-3-raised">{option.matched}</span>}
         </span>
-        <span className="shrink-0 tabular-nums text-ink-3-raised">{fmtDuration(option.seconds)}</span>
+        <span className="shrink-0 tabular-nums text-ink-3-raised" title={fmtDurationTitle(option.seconds)}>{fmtDuration(option.seconds)}</span>
         <span className={`w-3 shrink-0 text-center ${selected ? "text-accent" : "invisible"}`} aria-hidden="true">✓</span>
       </button>
     );

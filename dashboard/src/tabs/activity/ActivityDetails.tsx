@@ -38,7 +38,7 @@ import {
 } from "../../lib/activityFormat";
 import { type Category, type Rule } from "../../lib/classify";
 import { uncategorizedMark } from "../../lib/chartTheme";
-import { fmtDuration } from "../../lib/format";
+import { fmtDuration, fmtDurationTitle } from "../../lib/format";
 import { useMeta } from "../../state/meta";
 import { LoadMore } from "./ActivityFeedback";
 import Chevron from "./Chevron";
@@ -426,7 +426,7 @@ function PanelWindowRow({
           {category !== null && (
             <span className="max-w-[40%] shrink-0 truncate text-ink-3">{category}</span>
           )}
-          <span className="shrink-0 tabular-nums text-ink-3">{fmtDuration(group.seconds)}</span>
+          <span className="shrink-0 tabular-nums text-ink-3" title={fmtDurationTitle(group.seconds)}>{fmtDuration(group.seconds)}</span>
           {/* The row opens something. Without this it read as a static summary,
               and the only hint otherwise was the cursor. */}
           <Chevron open={false} />
@@ -681,7 +681,7 @@ function CategorySplit({ entity }: { entity: ActivityEntitySummary }) {
           <div key={slice.key} className="flex items-center gap-2 text-xs">
             <CategoryDot color={slice.color} />
             <span className="min-w-0 flex-1 truncate">{slice.name}</span>
-            <span className="tabular-nums text-ink-3">{fmtDuration(slice.seconds)}</span>
+            <span className="tabular-nums text-ink-3" title={fmtDurationTitle(slice.seconds)}>{fmtDuration(slice.seconds)}</span>
             <span className="w-9 shrink-0 text-right tabular-nums text-ink-3">{share(slice.seconds)}</span>
           </div>
         ))}
@@ -1097,7 +1097,7 @@ export function EntityPanel({
                   <span className="min-w-0 flex-1 truncate font-mono" title={rule.pattern}>{rule.pattern}</span>
                   <CategoryDot color={rule.categoryColor} />
                   <span className="truncate text-ink-2">{rule.categoryName}</span>
-                  <span className="shrink-0 tabular-nums text-ink-3">{rule.sessions} · {fmtDuration(rule.seconds)}</span>
+                  <span className="shrink-0 tabular-nums text-ink-3" title={fmtDurationTitle(rule.seconds)}>{rule.sessions} · {fmtDuration(rule.seconds)}</span>
                 </div>
               ))}
             </div>

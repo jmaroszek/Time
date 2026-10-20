@@ -506,7 +506,8 @@ describe("categorySeries", () => {
 
 describe("formatHoursTooltipValue", () => {
   it("formats finite durations and omits missing rolling-average values", () => {
-    expect(formatHoursTooltipValue(1.25)).toBe("1.3h");
+    expect(formatHoursTooltipValue(1.25)).toBe("1h 15m");
+    expect(formatHoursTooltipValue(812.25)).toBe("812h");
     expect(formatHoursTooltipValue("-")).toBeNull();
     expect(formatHoursTooltipValue(null)).toBeNull();
     expect(formatHoursTooltipValue(Number.NaN)).toBeNull();

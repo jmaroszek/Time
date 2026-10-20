@@ -9,7 +9,7 @@ import TimelineChart from "../components/TimelineChart";
 import TopUsageList from "../components/TopUsageList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
 import { Card, MenuSelect, MetricCard, Spinner } from "../components/ui";
-import { fmtDuration, fmtPct } from "../lib/format";
+import { fmtDuration, fmtPct, fmtWholeHours } from "../lib/format";
 import type { ActivityWindowTarget } from "../lib/activity";
 import type { InsightsRequest } from "../lib/insights";
 import {
@@ -413,11 +413,11 @@ export default function OverviewTab({
             label="Goal pace"
             value={goalConfigured && emptyReason ? emptyReason : goalConfigured ? (
               <span className="flex items-baseline gap-1.5 tabular-nums">
-                {`${pace.doneHours.toFixed(0)}h`}
+                {fmtWholeHours(pace.doneHours)}
                 {/* tracking-normal resets the tile's -.02em, which is drawn for
                     24px and too tight at 12. */}
                 <span className="text-xs font-normal tracking-normal text-ink-3">
-                  {`of ${pace.targetHours.toFixed(0)}h`}
+                  {`of ${fmtWholeHours(pace.targetHours)}`}
                 </span>
               </span>
             ) : (

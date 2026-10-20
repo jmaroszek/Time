@@ -82,20 +82,21 @@ describe("formatHoursTooltipRow", () => {
     expect(formatHoursTooltipRow({ marker: "●", seriesName: "Unproductive", value: 0 }, "7-day productive avg")).toEqual([]);
   });
 
-  it("omits a stack segment that rounds to 0.0h even though it isn't a true zero", () => {
-    // Stack values are rounded to hundredths (e.g. 0.03), one digit finer than
-    // the tooltip's toFixed(1) display, so this must be caught too.
-    expect(formatHoursTooltipRow({ marker: "●", seriesName: "Media", value: 0.03 }, "7-day productive avg")).toEqual([]);
+  it("omits a stack segment under a minute even though it isn't a true zero", () => {
+    // Stack values are rounded to hundredths of an hour; 0.01h is 36 seconds.
+    expect(formatHoursTooltipRow({ marker: "●", seriesName: "Media", value: 0.01 }, "7-day productive avg")).toEqual([]);
+    expect(formatHoursTooltipRow({ marker: "●", seriesName: "Media", value: 0.03 }, "7-day productive avg"))
+      .toEqual(["●Media: <b>1m</b>"]);
   });
 
   it("keeps a non-zero stack segment", () => {
     expect(formatHoursTooltipRow({ marker: "●", seriesName: "Productive", value: 6 }, "7-day productive avg"))
-      .toEqual(["●Productive: <b>6.0h</b>"]);
+      .toEqual(["●Productive: <b>6h 0m</b>"]);
   });
 
   it("shows the average line even when it's zero", () => {
     expect(formatHoursTooltipRow({ marker: "●", seriesName: "7-day productive avg", value: 0 }, "7-day productive avg"))
-      .toEqual(["●7-day productive avg: <b>0.0h</b>"]);
+      .toEqual(["●7-day productive avg: <b>0s</b>"]);
   });
 
   it("still omits the average line when it's missing", () => {
@@ -107,7 +108,7 @@ describe("formatHoursTooltipRow", () => {
       marker: '<span class="marker">●</span>',
       seriesName: 'R&D <script>alert("x")</script> & more',
       value: 1,
-    }, "7-day productive avg")).toEqual(['<span class="marker">●</span>R&amp;D &lt;script&gt;alert("x")&lt;/script&gt; &amp; more: <b>1.0h</b>']);
+    }, "7-day productive avg")).toEqual(['<span class="marker">●</span>R&amp;D &lt;script&gt;alert("x")&lt;/script&gt; &amp; more: <b>1h 0m</b>']);
   });
 });
 

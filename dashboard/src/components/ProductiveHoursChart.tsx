@@ -20,7 +20,7 @@ import {
 } from "../lib/overview";
 import { addDays, calendarDays, type Range } from "../lib/time";
 import type { WeekStart } from "../lib/time";
-import { DAY_NAMES, FULL_DAY_NAMES, MONTH_NAMES_SHORT, fmtShortDate } from "../lib/format";
+import { DAY_NAMES, FULL_DAY_NAMES, MONTH_NAMES_SHORT, fmtDuration, fmtShortDate } from "../lib/format";
 import EChart, { type EChartsOption } from "./EChart";
 import type { ThemeName } from "../lib/theme";
 import { useMeta } from "../state/meta";
@@ -560,10 +560,11 @@ function legendDataLabels(data: Array<string | { name: string }>): string[] {
   return data.map((entry) => (typeof entry === "string" ? entry : entry.name));
 }
 
+/** A series value (hours) in the same form every other duration in the app uses. */
 export function formatHoursTooltipValue(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
   const hours = Number(value);
-  return Number.isFinite(hours) ? `${hours.toFixed(1)}h` : null;
+  return Number.isFinite(hours) ? fmtDuration(hours * 3600) : null;
 }
 
 /**
@@ -577,10 +578,10 @@ export function formatHoursTooltipRow(
   averageName: string,
 ): string[] {
   const value = formatHoursTooltipValue(p.value);
-  // Stack values are rounded to hundredths, one digit finer than the tooltip's
-  // toFixed(1) display, so compare against the DISPLAYED zero ("0.0h") rather
-  // than the raw number — a value like 0.03 must still show, not just >0.
-  if (value === null || (p.seriesName !== averageName && value === "0.0h")) return [];
+  // Stack values are rounded to hundredths of an hour (36 seconds), so a
+  // segment can be non-zero yet under a minute. Those are dropped like zeros;
+  // seconds beside hours-scale bars are noise.
+  if (value === null || (p.seriesName !== averageName && Number(p.value) * 60 < 1)) return [];
   return [tooltipRow(p.marker, p.seriesName, `<b>${value}</b>`)];
 }
 

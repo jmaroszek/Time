@@ -1,10 +1,56 @@
+/**
+ * From here a duration drops its minutes. A minute is under 0.02% of 100 hours,
+ * and totals this large only come from long ranges or all of history, where
+ * "812h 14m" reads as more precise than anyone needs. Hours stay the largest
+ * unit: tracked time is effort, and a "day" of it would read as 24 hours.
+ */
+const WHOLE_HOURS_FROM_SECONDS = 100 * 3600;
+
 export function fmtDuration(seconds: number): string {
+  const s = Math.round(seconds);
+  if (s >= WHOLE_HOURS_FROM_SECONDS) return fmtWholeHours(s / 3600);
+  return fmtExactDuration(s);
+}
+
+/** Hours rounded to a whole number, grouped: `32h`, `1,431h`. */
+export function fmtWholeHours(hours: number): string {
+  return `${groupThousands(Math.round(hours))}h`;
+}
+
+/** Hours and minutes at any size, for the hover text behind a compact value. */
+export function fmtExactDuration(seconds: number): string {
   const s = Math.round(seconds);
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${groupThousands(h)}h ${m}m`;
   if (m > 0) return `${m}m`;
   return `${s}s`;
+}
+
+/**
+ * Hover text for a value shown with `fmtDuration`: the exact duration when the
+ * shown one dropped its minutes, otherwise nothing, since repeating the visible
+ * text on hover adds nothing.
+ */
+export function fmtDurationTitle(seconds: number): string | undefined {
+  const exact = fmtExactDuration(seconds);
+  return exact === fmtDuration(seconds) ? undefined : exact;
+}
+
+/**
+ * How long ago something happened, as opposed to how much time was spent. Past
+ * a day this counts whole calendar-length days, which `fmtDuration` must not.
+ */
+export function fmtElapsed(seconds: number): string {
+  const days = Math.floor(Math.max(seconds, 0) / 86400);
+  if (days === 0) return fmtDuration(Math.max(seconds, 0));
+  return `${groupThousands(days)} ${days === 1 ? "day" : "days"}`;
+}
+
+// Grouped by hand, like the date tables below, so the output doesn't follow
+// the host locale.
+function groupThousands(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 /**

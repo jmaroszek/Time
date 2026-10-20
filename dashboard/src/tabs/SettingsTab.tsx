@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "../components/ui";
 import { ExtensionLinks } from "../components/ExtensionLinks";
 import { displayBrowserProcesses, normalizeBrowserProcesses } from "../lib/browsers";
-import { fmtDuration } from "../lib/format";
+import { fmtElapsed } from "../lib/format";
 import { KeyedSerialQueue } from "../lib/keyedSerialQueue";
 import { normalizeMediaSites } from "../lib/mediaSites";
 import {
@@ -430,7 +430,7 @@ export default function SettingsTab({
           ? "Collecting activity in real time"
           : heartbeatAge === null
             ? "Waiting for a tracker health signal"
-            : `No tracker heartbeat for ${fmtDuration(Math.max(heartbeatAge, 0))}`;
+            : `No tracker heartbeat for ${fmtElapsed(heartbeatAge)}`;
   const trackerDot = trackerOff
     ? "bg-ink-3"
     : trackerRecording.kind === "paused" || trackerRecording.kind === "off_schedule"
@@ -667,7 +667,7 @@ export default function SettingsTab({
           ) : !trackingEnabled || trackerLive ? (
             heartbeatAge !== null && (
               <span className="basis-full text-xs tabular-nums text-ink-3 sm:ml-auto sm:basis-auto">
-                last heartbeat {fmtDuration(Math.max(heartbeatAge, 0))} ago
+                last heartbeat {fmtElapsed(heartbeatAge)} ago
               </span>
             )
           ) : (

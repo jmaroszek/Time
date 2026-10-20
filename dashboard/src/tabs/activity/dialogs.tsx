@@ -32,7 +32,7 @@ import {
   explainTitleMatchAgainstTitle,
   TITLE_MATCH_MODE_OPTIONS,
 } from "../../lib/categoryRules";
-import { fmtDuration } from "../../lib/format";
+import { fmtDuration, fmtDurationTitle } from "../../lib/format";
 import {
   addRule,
   addTrackingExclusion,
@@ -145,7 +145,7 @@ export function StarterSuggestionDialog({
                     <span className="truncate text-xs font-medium text-ink">
                       {item.displayName}
                     </span>
-                    <span className="text-micro text-ink-3">
+                    <span className="text-micro text-ink-3" title={fmtDurationTitle(item.seconds)}>
                       {fmtDuration(item.seconds)}
                     </span>
                   </span>
