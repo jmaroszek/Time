@@ -336,7 +336,7 @@ if (requested("activity-apps-websites-week")) {
 
 if (requested("activity-categories-rules-work-expanded")) {
   await page.getByRole("button", { name: "Categories & Rules", exact: true }).click();
-  await page.getByText("Rules classify matching historical and future activity.").waitFor();
+  await page.getByPlaceholder("Search rules, types, and categories…").waitFor();
 
   // Make this deterministic if the debug session had retained expansion state:
   // close every category first, then open only Work.

@@ -226,7 +226,7 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   await expect(rowTrigger).toBeFocused();
 
   await page.getByRole("button", { name: "Categories & Rules", exact: true }).click();
-  await expect(page.getByRole("button", { name: "+ Add category", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New category", exact: true })).toBeVisible();
   if (width < 640) {
     const categoryOrder = page.getByRole("combobox", { name: "Category order" });
     const ruleOrder = page.getByRole("combobox", { name: "Rule order" });
@@ -240,8 +240,9 @@ test("@matrix primary screens remain usable at the effective viewport contract",
     expect(Math.abs(categoryBox!.width - ruleBox!.width)).toBeLessThanOrEqual(2);
 
   }
+  await page.getByRole("button", { name: "New category", exact: true }).click();
   const newCategory = page.getByPlaceholder("New category name");
-  const addCategory = page.getByRole("button", { name: "+ Add category", exact: true });
+  const addCategory = page.getByRole("button", { name: "Add category", exact: true });
   await newCategory.scrollIntoViewIfNeeded();
   const [newCategoryBox, addCategoryBox] = await Promise.all([
     newCategory.boundingBox(),
@@ -263,6 +264,7 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   await expect.poll(() => focusRules.evaluate((node) => node.getBoundingClientRect().height))
     .toBeGreaterThan(40);
   if (width < 640) {
+    await focusRules.getByRole("button", { name: "Add rule", exact: true }).click();
     const ruleType = page.getByRole("group", { name: "Rule type" }).first();
     await ruleType.getByRole("button", { name: "Window", exact: true }).click();
     const appliesTo = page.getByText("Applies to", { exact: true }).last();

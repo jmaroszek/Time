@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 
 import {
   Button,
-  CategoryDot,
   ConfirmDialog,
   MenuSelect,
   RemoveButton,
@@ -47,6 +46,7 @@ import {
 } from "../../lib/queries";
 import { useBanner } from "../../state/banner";
 import { useMeta } from "../../state/meta";
+import Chevron from "./Chevron";
 import ClearableInput from "./ClearableInput";
 import Collapsible from "./Collapsible";
 import RuleKindGlyph from "./RuleKindGlyph";
@@ -66,6 +66,7 @@ import {
 } from "./ruleComposer";
 
 const SWATCH_MENU_WIDTH = 136;
+
 
 const CATEGORY_ORDER_STORAGE_KEY = "time.categories-and-rules.category-order";
 const RULE_ORDER_STORAGE_KEY = "time.categories-and-rules.rule-order";
@@ -198,6 +199,12 @@ export default function CategoriesAndRules({
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [newName, setNewName] = useState("");
+  // The new-category field stays folded behind one line until asked for.
+  const [addingCategory, setAddingCategory] = useState(false);
+  // Categories whose add-rule form has been opened. Reading a category's rules
+  // is far more common than adding one, so the form waits behind "+ Add rule"
+  // everywhere except in a category with no rules yet.
+  const [composerOpen, setComposerOpen] = useState<Set<number>>(() => new Set<number>());
   const [ruleSearch, setRuleSearch] = useState("");
   const deferredRuleSearch = useDeferredValue(ruleSearch.trim());
   const [categoryOrder, setCategoryOrder] = useState<CategoryListOrder>(
@@ -350,6 +357,7 @@ export default function CategoriesAndRules({
     try {
       const id = await addCategory(newName, color, NEW_CATEGORY_DEFAULT_STATE);
       setNewName("");
+      setAddingCategory(false);
       setExpanded((current) => new Set(current).add(id));
       await onChanged();
     } catch (error) {
@@ -491,6 +499,7 @@ export default function CategoriesAndRules({
     storeListOrder(RULE_ORDER_STORAGE_KEY, next);
   };
   const normalizedRuleSearch = deferredRuleSearch.toLocaleLowerCase();
+  const searching = normalizedRuleSearch !== "";
   const orderedCategories = sortCategoriesForRules(
     meta.categories,
     categoryOrder,
@@ -512,10 +521,6 @@ export default function CategoriesAndRules({
     normalizedRuleSearch === ""
     || visibleRules.length > 0
     || category.name.toLocaleLowerCase().includes(normalizedRuleSearch)
-  );
-  const matchingRuleCount = categoryRows.reduce(
-    (count, { visibleRules }) => count + visibleRules.length,
-    0,
   );
 
   return (
@@ -554,12 +559,10 @@ export default function CategoriesAndRules({
           onDismiss={() => void dismissConsolidation(consolidation)}
         />
       )}
-      <p className="mb-3 text-xs leading-relaxed text-ink-3">
-        Rules classify matching historical and future activity. Website rules normally
-        take priority over Window rules, and Window rules take priority over App rules. A
-        Window rule scoped to one website can refine that website.
-      </p>
-      <div className="mb-4 flex shrink-0 flex-wrap items-center gap-2 border-b border-edge/50 pb-4">
+      {/* No standing explainer: precedence resolves clashes sensibly on its
+          own, a classification's source can be inspected from its row, and
+          the rule model is documented on the website. */}
+      <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2">
         <ClearableInput
           value={ruleSearch}
           onChange={setRuleSearch}
@@ -593,11 +596,6 @@ export default function CategoriesAndRules({
             { value: "name", label: "Name", triggerLabel: "Rules by Name" },
           ]}
         />
-        {normalizedRuleSearch !== "" && (
-          <span className="shrink-0 text-xs text-ink-3">
-            {matchingRuleCount} matching {matchingRuleCount === 1 ? "rule" : "rules"}
-          </span>
-        )}
       </div>
       <div className="flex flex-col gap-2">
         {categoryRows.map(({ category, allRules, visibleRules }) => {
@@ -609,6 +607,23 @@ export default function CategoriesAndRules({
           const activeEdit =
             editingRule?.categoryId === category.id ? editingRule : null;
           const beginRename = () => { setRenaming(category.id); setRenameDraft(category.name); };
+          // The add-rule form is open while a rule is being edited, once asked
+          // for, and from the start in a category that has no rules to read.
+          // A search shows only what matched, so it folds the form away.
+          const showComposer =
+            activeEdit !== null
+            || (!searching && (allRules.length === 0 || composerOpen.has(category.id)));
+          const closeComposer = allRules.length > 0
+            ? () => {
+                setComposerOpen((current) => {
+                  const next = new Set(current);
+                  next.delete(category.id);
+                  return next;
+                });
+                setDraft(category.id, { pattern: "" });
+                setRuleConflict(null);
+              }
+            : undefined;
           // The header is a wide bar with one small chevron at the far left,
           // so the whole width acts as the hit target — but only as a mouse
           // convenience. The chevron stays the keyboard and screen-reader
@@ -632,18 +647,18 @@ export default function CategoriesAndRules({
           return (
             <div
               key={category.id}
-              className="overflow-hidden rounded-[11px] border border-edge bg-surface-2"
+              className="overflow-hidden rounded-[11px] border border-edge bg-group"
             >
               <div
-                className={`flex flex-wrap items-center gap-2.5 px-3 py-3 text-xs ${rowToggles ? "cursor-pointer" : ""}`}
+                className={`flex items-center gap-2.5 px-3 py-3 text-xs ${rowToggles ? "cursor-pointer" : ""}`}
                 onClick={rowToggles ? toggleFromRow : undefined}
               >
                 {normalizedRuleSearch !== "" ? (
                   <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center text-xs text-ink-3">
-                    <span className="rotate-90">▶</span>
+                    <span className="rotate-90"><Chevron open={false} /></span>
                   </span>
                 ) : (
-                  <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-xs text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span></button>
+                  <button type="button" aria-expanded={open} aria-controls={`category-rules-${category.id}`} aria-label={`${open ? "Collapse" : "Expand"} ${category.name} rules`} onClick={() => toggle(category.id)} className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-xs text-ink-3 hover:bg-surface-3 hover:text-ink-2"><span className={`flex transition-transform duration-200 ${open ? "rotate-90" : ""}`}><Chevron open={false} /></span></button>
                 )}
                 <button
                   type="button"
@@ -661,14 +676,14 @@ export default function CategoriesAndRules({
                     });
                   }}
                 />
-                {/* Double-click renames; the expanded footer keeps a labeled
-                    Rename button, because a double-click is invisible to anyone
-                    working from the keyboard. */}
+                {/* Double-click renames as a shortcut. The row's actions menu
+                    carries Rename too, since a double-click is invisible to
+                    anyone working from the keyboard. */}
                 {renaming === category.id ? (
                   <input autoFocus value={renameDraft} aria-label={`Rename ${category.name}`} onChange={(event) => setRenameDraft(event.target.value)} onBlur={() => void saveRename(category)} onKeyDown={(event) => { if (event.key === "Enter") void saveRename(category); else if (event.key === "Escape") setRenaming(null); }} className="w-44 rounded-md border border-control-edge bg-control px-1.5 py-0.5 text-xs font-semibold outline-none focus:border-accent/60" />
                 ) : (
                   <span
-                    className={`font-semibold ${locked ? "" : "cursor-text"}`}
+                    className={`min-w-0 truncate font-semibold ${locked ? "" : "cursor-text"}`}
                     // Opted out of the row toggle only where it is a rename
                     // target. The cursor draws the same line the click does:
                     // a text caret over the name, the pointer everywhere the
@@ -682,37 +697,73 @@ export default function CategoriesAndRules({
                   </span>
                 )}
                 <span className="flex-1" />
-                <span className="w-[112px] shrink-0 max-sm:ml-[46px]">
-                  <MenuSelect
-                    variant="bare"
-                    size="compact"
-                    align="end"
-                    className="w-full capitalize"
-                    value={state}
-                    onChange={(option) => void setCategoryState(category, option as Productivity)}
-                    disabled={locked}
-                    title={locked ? "The built-in Ignored category is the one ignore mechanism" : `Set the productivity of ${category.name}`}
-                    label={`Productivity of ${category.name}`}
-                    // A category left over from when "ignored" was a state here
-                    // keeps showing it, via the placeholder, until one of the
-                    // three assignable states is chosen.
-                    placeholder={<><CategoryDot color={stateColorMap[state]} />{state}</>}
-                    header={state === "ignored" ? "Ignored is no longer a category state. Pick one to bring this category back into Insights." : undefined}
-                    options={ASSIGNABLE_STATES.map((option) => ({
-                      value: option,
-                      label: stateLabel(option),
-                      dot: stateColorMap[option],
-                    }))}
-                  />
-                </span>
-                <span className="w-[76px] text-right text-xs text-ink-3">
-                  {normalizedRuleSearch !== "" && visibleRules.length !== allRules.length
-                    ? `${visibleRules.length} of ${allRules.length}`
-                    : allRules.length}{" "}
-                  {(normalizedRuleSearch !== "" ? visibleRules.length : allRules.length) === 1
-                    ? "rule"
-                    : "rules"}
-                </span>
+                {/* The built-in Ignored category has no state to show: its only
+                    possible one is its own name, and it cannot be changed. */}
+                {!locked && (
+                  <span className="shrink-0">
+                    <MenuSelect
+                      variant="bare"
+                      size="compact"
+                      align="end"
+                      className="capitalize"
+                      value={state}
+                      onChange={(option) => void setCategoryState(category, option as Productivity)}
+                      title={`Set the productivity of ${category.name}`}
+                      label={`Productivity of ${category.name}`}
+                      // The category's own swatch is the row's colored mark;
+                      // a state dot beside it competed for the same job. The
+                      // menu keeps its dots.
+                      triggerDot={false}
+                      // A category left over from when "ignored" was a state here
+                      // keeps showing it, via the placeholder, until one of the
+                      // three assignable states is chosen.
+                      placeholder={state}
+                      header={state === "ignored" ? "Ignored is no longer a category state. Pick one to bring this category back into Insights." : undefined}
+                      options={ASSIGNABLE_STATES.map((option) => ({
+                        value: option,
+                        label: stateLabel(option),
+                        dot: stateColorMap[option],
+                      }))}
+                    />
+                  </span>
+                )}
+                {/* The category's own actions, in one menu at the row's end
+                    rather than under its rules, so an open category shows only
+                    what it contains. Delete keeps words rather than an icon:
+                    it cascades over the rules, and destructive weight should
+                    scale with blast radius. The built-in Ignored category can
+                    do none of these. */}
+                {!locked && (
+                  <span className="shrink-0">
+                    <MenuSelect
+                      variant="bare"
+                      size="compact"
+                      align="end"
+                      value=""
+                      label={`Actions for ${category.name}`}
+                      title="Category actions"
+                      placeholder={
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="my-px">
+                          <circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" />
+                        </svg>
+                      }
+                      onChange={(action) => {
+                        if (action === "insights") onViewInInsights?.(category);
+                        else if (action === "rename") beginRename();
+                        else if (action === "delete") setPendingDelete({ category, ruleCount: allRules.length });
+                      }}
+                      options={[
+                        // Insights does not count ignored time, so a category
+                        // still carrying the old ignored state has no view.
+                        ...(onViewInInsights && !category.isIgnored
+                          ? [{ value: "insights", label: "View in Insights" }]
+                          : []),
+                        { value: "rename", label: "Rename" },
+                        { value: "delete", label: "Delete category…", divider: true, danger: true },
+                      ]}
+                    />
+                  </span>
+                )}
               </div>
               <Collapsible
                 open={open}
@@ -723,81 +774,95 @@ export default function CategoriesAndRules({
                     below it off the screen: past a few rows the list becomes
                     its own quiet scroll well. */}
                 <div className="scroll-well flex max-h-[220px] flex-col gap-1.5 overflow-y-auto pr-2">
-                  {visibleRules.map((rule) => (
+                  {visibleRules.map((rule) => {
+                    const editingThis = activeEdit?.ruleId === rule.id;
+                    const unused = usage !== null && !usage.has(rule.id);
+                    return (
                     <div
                       key={rule.id}
                       onDoubleClick={(event) => {
                         if (
-                          activeEdit?.ruleId === rule.id
+                          editingThis
                           || (event.target as HTMLElement).closest("button")
                         ) return;
                         event.preventDefault();
                         beginRuleEdit(rule);
                       }}
-                      className={`group/rule -mx-2 flex flex-wrap items-center gap-2 rounded-lg px-2 py-1 text-xs ${
-                        activeEdit?.ruleId === rule.id
-                          ? "bg-accent/[.06]"
-                          : "hover:bg-hover"
+                      className={`group/rule -mx-2 flex items-center gap-2 rounded-lg px-2 py-1 text-xs ${
+                        editingThis ? "bg-accent/[.06]" : "hover:bg-hover"
                       }`}
                     >
-                      <span className="flex w-[74px] shrink-0 items-center gap-1.5 text-xs text-ink-3">
+                      {/* The kind as a glyph alone; the word is its tooltip
+                          and its accessible name. */}
+                      <span
+                        className="flex w-4 shrink-0 items-center justify-center text-ink-3"
+                        title={`${RULE_LABELS[rule.matchType]} rule`}
+                      >
                         <RuleKindGlyph matchType={rule.matchType} />
-                        {RULE_LABELS[rule.matchType]}
+                        <span className="sr-only">{RULE_LABELS[rule.matchType]}</span>
                       </span>
                       <span
-                        className="min-w-0 flex-1 cursor-text truncate font-mono"
+                        className="min-w-0 shrink cursor-text truncate font-mono"
                         title="Double-click to edit"
                       >
                         {rule.pattern}
                       </span>
+                      {/* A Window rule's mode and scope as plain text after
+                          its pattern, not pills: they qualify the pattern
+                          rather than tag the row. */}
                       {rule.matchType === "title" && (
-                        <>
-                          <span
-                            className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-xs text-ink-3"
-                            title="How the text is compared with a normalized window title."
-                          >
-                            {describeTitleRule({
-                              titleMatchMode: rule.titleMatchMode ?? "phrase",
-                              titleAnchor: rule.titleAnchor ?? "any",
-                            })}
-                          </span>
-                          <span
-                            className="max-w-[118px] shrink-0 truncate rounded-full bg-surface-3 px-1.5 py-[1px] text-xs text-ink-3"
-                            title={`Only matches ${titleRuleScopeLabel(rule)}.`}
-                          >
-                            {titleRuleScopeLabel(rule)}
-                          </span>
-                        </>
-                      )}
-                      {usage !== null && !usage.has(rule.id) && <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-[1px] text-xs text-ink-3" title="This rule has not been the winning rule for any stored activity.">unused</span>}
-                      {/* Only in the order that sorts by it. A sort by a
-                          quantity the rows do not show is unreadable, but
-                          the row is already dense enough that carrying the
-                          figure in the other two orders is not worth it. An
-                          unused rule prints its tag instead, so no row shows
-                          both and none of them says "0s". */}
-                      {ruleOrder === "use" && usage?.has(rule.id) && (
                         <span
-                          className="shrink-0 tabular-nums text-ink-3"
-                          title="Time this rule decided across all of your history. A rule outranked by a more specific one counts nothing here."
+                          className="min-w-0 max-w-[45%] shrink-[2] truncate text-ink-3"
+                          title={`${describeTitleRule({
+                            titleMatchMode: rule.titleMatchMode ?? "phrase",
+                            titleAnchor: rule.titleAnchor ?? "any",
+                          })}; only matches ${titleRuleScopeLabel(rule)}.`}
                         >
-                          {fmtDuration(usage.get(rule.id) ?? 0)}
+                          {describeTitleRule({
+                            titleMatchMode: rule.titleMatchMode ?? "phrase",
+                            titleAnchor: rule.titleAnchor ?? "any",
+                          })}
+                          {" · "}
+                          {titleRuleScopeLabel(rule)}
                         </span>
                       )}
-                      {/* Hidden until the row is hovered or focused, so a
-                          long list reads as rules rather than as a column of
-                          buttons. Opacity, not display, so the row does not
-                          reflow and the buttons stay reachable by keyboard. */}
-                      <span
-                        className={`flex shrink-0 items-center gap-0.5 transition-opacity focus-within:opacity-100 group-hover/rule:opacity-100 ${
-                          activeEdit?.ruleId === rule.id ? "opacity-100" : "opacity-0"
-                        }`}
-                      >
-                        <EditRuleButton rule={rule} onClick={() => beginRuleEdit(rule)} />
-                        <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
+                      <span className="flex-1" />
+                      {/* The figure and the row's actions share one slot at
+                          the right edge: the actions fade in over it on hover
+                          or focus, so the figures line up with the edge
+                          instead of stopping short of two invisible buttons.
+                          Opacity, not display, so nothing reflows and the
+                          buttons stay reachable by keyboard.
+
+                          The time only shows in the order that sorts by it —
+                          a sort by a quantity the rows do not show is
+                          unreadable. "unused" shows in every order, in the
+                          same place, so no row says "0s". */}
+                      <span className="grid shrink-0 justify-items-end [&>*]:col-start-1 [&>*]:row-start-1">
+                        {(unused || (ruleOrder === "use" && usage?.has(rule.id))) && (
+                          <span
+                            className={`self-center tabular-nums text-ink-3 transition-opacity group-focus-within/rule:opacity-0 group-hover/rule:opacity-0 ${
+                              editingThis ? "opacity-0" : ""
+                            }`}
+                            title={unused
+                              ? "This rule has not been the winning rule for any stored activity."
+                              : "Time this rule decided across all of your history. A rule outranked by a more specific one counts nothing here."}
+                          >
+                            {unused ? "unused" : fmtDuration(usage?.get(rule.id) ?? 0)}
+                          </span>
+                        )}
+                        <span
+                          className={`flex items-center gap-0.5 transition-opacity group-focus-within/rule:opacity-100 group-hover/rule:opacity-100 ${
+                            editingThis ? "opacity-100" : "opacity-0"
+                          }`}
+                        >
+                          <EditRuleButton rule={rule} onClick={() => beginRuleEdit(rule)} />
+                          <RemoveButton label={`Delete ${RULE_LABELS[rule.matchType]} rule ${rule.pattern}`} onClick={() => void removeRule(rule.id)} />
+                        </span>
                       </span>
                     </div>
-                  ))}
+                    );
+                  })}
                   {visibleRules.length === 0 && (
                     <p className="py-1 text-xs italic text-ink-3">
                       {normalizedRuleSearch === ""
@@ -806,12 +871,13 @@ export default function CategoriesAndRules({
                     </p>
                   )}
                 </div>
+                {showComposer ? (
                 <div
                   ref={(node) => {
                     if (node) categoryEditorRefs.current.set(category.id, node);
                     else categoryEditorRefs.current.delete(category.id);
                   }}
-                  className="mt-3 border-t border-edge/40 pt-3"
+                  className="mt-3"
                 >
                   <CategoryRuleForm
                     key={activeEdit ? `edit-${activeEdit.ruleId}` : "add"}
@@ -823,12 +889,12 @@ export default function CategoriesAndRules({
                       ? () => void saveRuleEdit()
                       : () => void submitRule(category.id)}
                     submitLabel={activeEdit ? "Save" : "Add rule"}
-                    onCancel={activeEdit ? () => setEditingRule(null) : undefined}
+                    onCancel={activeEdit ? () => setEditingRule(null) : closeComposer}
                     source={source}
                     windowTitleCaptureEnabled={
                       meta.settings.record_window_titles === "1"
                     }
-                    autoFocus={activeEdit !== null}
+                    autoFocus={activeEdit !== null || composerOpen.has(category.id)}
                     replacingRuleId={activeEdit?.ruleId}
                   />
                   {activeEdit?.conflict && (
@@ -857,39 +923,21 @@ export default function CategoriesAndRules({
                     </div>
                   )}
                 </div>
-                {/* Deleting a category cascades over its rules, so it gets
-                    words rather than an icon — destructive weight should
-                    scale with blast radius. */}
-                <div className="mt-3 flex justify-end gap-2 border-t border-edge/40 pt-3">
-                  {onViewInInsights && (
-                    <span className="mr-auto">
-                      <Button
-                        disabled={category.isIgnored}
-                        title={category.isIgnored
-                          ? "Insights does not count ignored time"
-                          : `See ${category.name} on its own in Insights`}
-                        onClick={() => onViewInInsights(category)}
-                      >
-                        View in Insights
-                      </Button>
-                    </span>
-                  )}
-                  <Button
-                    disabled={locked}
-                    title={locked ? "The built-in Ignored category cannot be renamed" : undefined}
-                    onClick={beginRename}
+                ) : !searching && (
+                  // A hairline separates the rules that exist from the offer
+                  // to add one. The + sits in the rules' glyph column and the
+                  // words where the patterns start.
+                  <div className="mt-2 border-t border-edge/50 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setComposerOpen((current) => new Set(current).add(category.id))}
+                    className="-mx-2 mt-1 inline-flex items-center gap-2 rounded-lg px-2 py-1 pr-3 text-left text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
                   >
-                    Rename
-                  </Button>
-                  <Button
-                    variant="quiet-danger"
-                    disabled={locked}
-                    title={locked ? "The built-in Ignored category cannot be deleted" : undefined}
-                    onClick={() => setPendingDelete({ category, ruleCount: allRules.length })}
-                  >
-                    Delete category
-                  </Button>
-                </div>
+                    <span aria-hidden="true" className="flex w-4 justify-center">+</span>
+                    Add rule
+                  </button>
+                  </div>
+                )}
               </Collapsible>
             </div>
           );
@@ -900,24 +948,42 @@ export default function CategoriesAndRules({
           </p>
         )}
       </div>
-      <div className="mt-4 flex items-center gap-2 border-t border-edge/50 pt-4">
-        <input
-          value={newName}
-          onChange={(event) => setNewName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") void submitCategory();
-          }}
-          placeholder="New category name"
-          className="min-w-0 w-56 max-w-full shrink rounded-lg border border-control-edge bg-control px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
-        />
-        <Button
-          variant="primary"
-          disabled={!newName.trim()}
-          onClick={() => void submitCategory()}
+      {/* One quiet line at the end of the list until a name is wanted. */}
+      {addingCategory ? (
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            autoFocus
+            value={newName}
+            aria-label="New category name"
+            onChange={(event) => setNewName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void submitCategory();
+              else if (event.key === "Escape") { setNewName(""); setAddingCategory(false); }
+            }}
+            placeholder="New category name"
+            className="min-w-0 w-56 max-w-full shrink rounded-lg border border-control-edge bg-control px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
+          />
+          <Button
+            variant={newName.trim() ? "primary" : "default"}
+            disabled={!newName.trim()}
+            onClick={() => void submitCategory()}
+          >
+            Add category
+          </Button>
+          <Button onClick={() => { setNewName(""); setAddingCategory(false); }}>
+            Cancel
+          </Button>
+        </div>
+      ) : !searching && (
+        <button
+          type="button"
+          onClick={() => setAddingCategory(true)}
+          className="mt-2 flex items-center gap-2.5 self-start rounded-lg py-1.5 pl-3 pr-3 text-left text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
         >
-          + Add category
-        </Button>
-      </div>
+          <span aria-hidden="true" className="flex w-6 justify-center">+</span>
+          New category
+        </button>
+      )}
       {colorMenu !== null && createPortal(
         <span
           style={{ left: colorMenu.left, top: colorMenu.top, width: SWATCH_MENU_WIDTH }}

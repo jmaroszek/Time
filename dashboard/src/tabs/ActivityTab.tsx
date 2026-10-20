@@ -1117,7 +1117,6 @@ export default function ActivityTab({
           </span>
         ) : (
           <span className="flex flex-wrap items-baseline gap-x-1.5 text-xs text-ink-3">
-            <span>{meta.categories.length} categories · {meta.rules.length} rules</span>
             {/* The backlog's only route out of this face. The tab's mark cannot
                 serve it: both faces share a tab, so while this one is up the
                 mark is on the tab already being read. Text in the header rather
@@ -1128,7 +1127,6 @@ export default function ActivityTab({
                 because it interrupts a different tab, and this does not. */}
             {pendingTriage > 0 && (
               <>
-                <span aria-hidden="true">·</span>
                 <button
                   type="button"
                   onClick={() => switchView("library")}
