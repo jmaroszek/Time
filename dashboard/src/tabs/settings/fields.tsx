@@ -238,7 +238,7 @@ function ChipEditor({
   return (
     <div>
       <div
-        className="flex min-h-[42px] flex-wrap items-center gap-2 rounded-[10px] border border-control-edge bg-control px-2.5 py-2 transition-colors focus-within:border-accent/60"
+        className="flex min-h-[42px] flex-wrap items-center gap-2 rounded-[10px] border border-control-edge bg-transparent px-2.5 py-2 transition-colors focus-within:border-accent/60"
         role="group"
         aria-label={groupLabel}
         aria-describedby={instructionsId}

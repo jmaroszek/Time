@@ -92,7 +92,6 @@ const SPECS = {
   end: { key: "day_end_hour", min: 1, max: 24, scale: 1 },
   idle: { key: "idle_threshold_seconds", min: 1, max: 60, scale: 60 },
   focus: { key: "focus_chain_max_gap_seconds", min: 0, max: 30, scale: 60 },
-  heartbeat: { key: "heartbeat_seconds", min: 5, max: 300, scale: 1, step: 5 },
   noiseTime: { key: "activity_noise_max_seconds", min: 0, max: 30, scale: 60, step: 0.5 },
   noiseSessions: { key: "activity_noise_max_sessions", min: 1, max: 20, scale: 1 },
 } satisfies Record<string, NumericSpec>;
@@ -773,7 +772,7 @@ export default function SettingsTab({
             version is waiting. */}
         <Row
           label="Check for updates"
-          help="Check for updates each time you open Time."
+          help="Check for updates when you open Time."
           control={
             <PrivacyToggle
               label="Check for updates"
@@ -809,7 +808,7 @@ export default function SettingsTab({
             help text, which is where a nuance that fine belongs. */}
         <Row
           label="Record websites"
-          help="Splits browser time by website. Requires Time Web Extension, below."
+          help="Splits browser time by website. Requires the Time Web Extension."
           control={
             <PrivacyToggle
               label="Record websites"
@@ -1007,7 +1006,7 @@ export default function SettingsTab({
           <Row
             bare
             label="AFK idle threshold"
-            help="No keyboard or mouse input for this long marks you AFK. Software-generated input doesn’t count."
+            help="No keyboard or mouse input for this long marks you AFK. Software-generated input doesn’t count. AFK time does not count towards your totals."
             control={numberControl(SPECS.idle, "AFK idle threshold", "min")}
           />
         </SettingGroup>
@@ -1027,8 +1026,8 @@ export default function SettingsTab({
           control={<Segmented label="Week starts on" options={["Sunday", "Monday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
         />
         <Row label="Weekly productivity goal" help="Set to 0 hours to leave your goal unset." control={numberControl(SPECS.goal, "Weekly productivity goal", "hrs")} />
-        <Row label="Day starts at" help="First hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.start, "Day starts at", undefined, true)} />
-        <Row label="Day ends at" help="Last hour shown in Timeline and Rhythm. Activity outside this window still counts toward totals." control={numberControl(SPECS.end, "Day ends at", undefined, true)} />
+        <Row label="Day starts at" help="First hour shown in the Timeline and Rhythm visualizations. Activity before still counts towards your totals." control={numberControl(SPECS.start, "Day starts at", undefined, true)} />
+        <Row label="Day ends at" help="Last hour shown in the Timeline and Rhythm visualizations. Activity after still counts towards your totals." control={numberControl(SPECS.end, "Day ends at", undefined, true)} />
       </Section>
 
       {/* Every way to hide something, in one place. The minimum-app-time rate
@@ -1046,7 +1045,7 @@ export default function SettingsTab({
             migration to buy nothing the label cannot say. */}
         <Row
           label="Minimum daily time"
-          help="Hides apps and websites averaging less than this per tracked day from the Insights panel that ranks them."
+          help="Hides apps and websites averaging less than this per tracked day from the Insights panel."
           control={numberControl(SPECS.minimum, "Minimum daily time", "min")}
         />
         {/* Utilities are recognized by name alone, so this switch stands on its
@@ -1107,7 +1106,7 @@ export default function SettingsTab({
       <Section title="Appearance">
         <Row
           label="Theme"
-          help="Follow system matches your operating system theme."
+          help="Follow system matches your operating system's theme."
           control={
             <Segmented
               label="Theme"
@@ -1190,7 +1189,6 @@ export default function SettingsTab({
       </Section>
 
       <Section title="Advanced">
-        <Row label="Heartbeat interval" help="How often data is saved to the database. You probably shouldn't change this." control={numberControl(SPECS.heartbeat, "Heartbeat interval", "s")} />
         <Row
           stacked
           label="Browser processes"

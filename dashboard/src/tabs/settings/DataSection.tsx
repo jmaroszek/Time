@@ -176,7 +176,7 @@ export default function DataSection({
           path is still one hover away on "Show in folder". */}
       <Row
         label="Your data"
-        help="Stored only on this computer. Nothing is uploaded."
+        help="Your activity is stored only on this computer. Nothing is uploaded."
         control={
           <TextAction title={getDbPath()} onClick={() => void showInFolder()}>
             Show in folder
@@ -187,7 +187,7 @@ export default function DataSection({
         label="Backups"
         help={
           <>
-            Saved next to your data.{" "}
+            Backups are saved in the same folder as your data.{" "}
             <InlineAction
               buttonRef={restoreButtonRef}
               disabled={mutationsBusy}
@@ -205,7 +205,7 @@ export default function DataSection({
       />
       <Row
         label="Export activity"
-        help="All recorded history as a CSV file."
+        help="Exports all recorded history as a CSV file."
         control={
           <TextAction disabled={exporting} onClick={() => void exportAll()}>
             {exporting ? "Preparing…" : "Export CSV"}
@@ -227,7 +227,7 @@ export default function DataSection({
               onKeyDown={(event) => {
                 if (event.key === "Enter") event.currentTarget.blur();
               }}
-              className="mx-1 w-[2.8em] border-0 border-b border-dashed border-ink-3 bg-transparent pb-px text-center font-semibold tabular-nums text-ink outline-none focus:border-solid focus:border-accent disabled:opacity-50"
+              className="mx-1 w-[2.8em] border-0 border-b border-ink-3 bg-transparent pb-px text-center font-semibold tabular-nums text-ink outline-none focus:border-accent disabled:opacity-50"
             />
             days
           </>
