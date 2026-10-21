@@ -461,35 +461,28 @@ function RestoreBackupDialog({
           )}
         </div>
 
-        <button
-          type="button"
-          disabled={disabled || restoring}
-          onClick={() => void chooseAnother()}
-          className="mt-3 text-xs font-semibold text-accent hover:text-accent/80 disabled:opacity-40"
-        >
-          Choose another file…
-        </button>
+        <div className="mt-2">
+          <Button
+            disabled={disabled || restoring}
+            onClick={() => void chooseAnother()}
+            className="-ml-3"
+          >
+            Choose another file…
+          </Button>
+        </div>
 
         <div className="mt-4 rounded-[10px] border border-bad/25 bg-bad/[.035] px-3 py-2.5 text-xs leading-relaxed text-ink-3">
           Activity recorded after the selected backup will no longer appear. The automatic safety backup lets you restore the current state again if needed.
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            disabled={restoring}
-            onClick={onClose}
-            className="rounded-[8px] border border-edge px-3 py-1.5 text-xs font-semibold text-ink-2 hover:border-edge-2 hover:text-ink disabled:opacity-40"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
+          <Button disabled={restoring} onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
             disabled={disabled || !selected?.compatible || restoring}
             onClick={() => void restore()}
-            className="rounded-[8px] border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {restoring ? "Restoring…" : "Restore and restart"}
-          </button>
+          </Button>
         </div>
     </DialogShell>
   );

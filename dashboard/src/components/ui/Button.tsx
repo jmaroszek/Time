@@ -1,90 +1,56 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 export function Button({
   children,
   onClick,
-  variant = "default",
+  variant = "text",
   disabled = false,
   title,
+  className = "",
+  buttonRef,
 }: {
   children: ReactNode;
   onClick?: () => void;
-  variant?: "default" | "danger" | "quiet-danger" | "primary" | "primary-fill" | "text" | "text-danger";
+  variant?: "text" | "text-danger" | "primary" | "danger";
   disabled?: boolean;
   title?: string;
+  /** Placement only, such as the negative margin that sets a text action's
+   *  word on a column's rail. The look belongs to the variant. */
+  className?: string;
+  buttonRef?: Ref<HTMLButtonElement>;
 }) {
   /**
-   * One resting shape for every variant — `border-edge` over a fill — with hue
-   * carried by the fill and the text alone.
+   * No variant draws an outline. A border in this app says "this holds a
+   * value" — a field, a menu trigger, the selected tile in a picker — and a
+   * button holds none. Buttons used to carry one anyway, so a dialog footer or
+   * a panel's row of actions read as a wall of boxes louder than the content
+   * they act on, and the same Cancel looked different depending on which screen
+   * it was on.
    *
-   * Two things were wrong before. The border was `edge-2`, the brightest edge
-   * the app has and the only place it appeared at rest; MenuSelect reserves
-   * that same value for *hover*, so a button sat permanently as bright as a
-   * dropdown under the pointer. And with no fill, that border carried the
-   * entire signal.
+   * Two weights instead. Text, the Settings shape, for every action: gray at
+   * rest and blue on hover so it still reads as pressable. A tint for the one
+   * button in a group that commits, so it is found without an outline. Red in
+   * either shape only where recorded history is removed.
    *
-   * Adopting MenuSelect's `border-edge + bg-surface-2` makes buttons and
-   * dropdowns one family. Keeping the border neutral on the tinted variants
-   * matters as much: a red border *and* a red fill made the danger button
-   * differ from its neighbours on two axes at once, which is what made it
-   * shout. Now only the hue changes, and `edge-2` means hover again.
+   * The transparent border is not decoration. It keeps a button the same height
+   * as a MenuSelect trigger, which has a border, wherever the two share a row.
    */
   const styles = {
-    default: "border-edge bg-surface-2 text-ink-2 hover:border-edge-2 hover:text-ink",
-    primary: "border-edge bg-accent/10 text-accent hover:border-accent/40 hover:bg-accent/[.18]",
-    // The primary's fill without its outline, to sit beside `text` actions:
-    // the tint alone marks it as the one that commits.
-    "primary-fill": "border-transparent bg-accent/10 text-accent hover:bg-accent/[.18]",
-    danger: "border-edge bg-bad/10 text-bad hover:border-bad/40 hover:bg-bad/[.18]",
-    // For a button that *opens* a destructive flow rather than performing one.
-    // It rests exactly as an ordinary control does and takes the warning colour
-    // only once the pointer is on it — the dialog it raises does the shouting.
-    // Reserve the plain `danger` for the button that actually commits.
-    "quiet-danger": "border-edge bg-surface-2 text-ink-2 hover:border-bad/40 hover:bg-bad/10 hover:text-bad",
-    // Borderless, as Settings' text actions are: gray at rest, blue on hover,
-    // red only for the one that removes history.
-    text: "border-transparent font-semibold text-ink-2 hover:bg-hover-2 hover:text-accent",
-    "text-danger": "border-transparent font-semibold text-bad hover:bg-bad/10",
+    text: "text-ink-2 hover:bg-hover-2 hover:text-accent",
+    "text-danger": "text-bad hover:bg-bad/10",
+    primary: "bg-accent/10 text-accent hover:bg-accent/[.18]",
+    danger: "bg-bad/10 text-bad hover:bg-bad/[.18]",
   }[variant];
   return (
     <button
+      ref={buttonRef}
       type="button"
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${styles}`}
+      className={`whitespace-nowrap rounded-lg border border-transparent px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${styles} ${className}`}
     >
       {children}
-    </button>
-  );
-}
-
-export function TrashButton({
-  label,
-  disabled = false,
-  compact = false,
-  onClick,
-}: {
-  label: string;
-  disabled?: boolean;
-  compact?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={`flex items-center justify-center rounded-[9px] border border-bad/30 text-bad transition-colors hover:border-bad/50 hover:bg-bad/5 disabled:cursor-not-allowed disabled:opacity-35 ${compact ? "h-7 w-7" : "h-8 w-8"}`}
-    >
-      <svg width={compact ? 13 : 15} height={compact ? 13 : 15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M3 6h18" />
-        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-        <path d="M10 11v6M14 11v6" />
-      </svg>
     </button>
   );
 }

@@ -3,7 +3,7 @@
 
 export { Card, MetricCard } from "./Card";
 export { FloatingTooltip } from "./FloatingTooltip";
-export { Button, RemoveButton, TrashButton } from "./Button";
+export { Button, RemoveButton } from "./Button";
 export { TextInput } from "./TextInput";
 export { MENU_SIZES, MENU_VARIANTS, MENU_VIEWPORT_MARGIN, type MenuOption, MenuSelect } from "./MenuSelect";
 export { CategoryDot, StateDot } from "./Dots";

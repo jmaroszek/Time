@@ -998,15 +998,18 @@ export default function CategoriesAndRules({
             placeholder="New category name"
             className="min-w-0 w-56 max-w-full shrink rounded-lg border border-control-edge bg-control px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-3 focus:border-accent/60"
           />
+          {/* The rule composer's order and shapes, so the two inline forms on
+              this screen read alike: Cancel first, and the submit tinted only
+              once there is a name to submit. */}
+          <Button onClick={() => { setNewName(""); setAddingCategory(false); }}>
+            Cancel
+          </Button>
           <Button
-            variant={newName.trim() ? "primary" : "default"}
+            variant={newName.trim() ? "primary" : "text"}
             disabled={!newName.trim()}
             onClick={() => void submitCategory()}
           >
             Add category
-          </Button>
-          <Button onClick={() => { setNewName(""); setAddingCategory(false); }}>
-            Cancel
           </Button>
         </div>
       ) : !searching && (

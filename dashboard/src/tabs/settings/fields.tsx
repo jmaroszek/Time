@@ -1,5 +1,6 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 
+import { Button } from "../../components/ui";
 import { normalizeBrowserProcesses } from "../../lib/browsers";
 import { coveringMediaSite, normalizeMediaSites } from "../../lib/mediaSites";
 
@@ -487,10 +488,10 @@ export function Segmented({ label, options, value, onChange, labels }: { label: 
  *  often two of them, or a stepper beside a trash can — and the right edge of
  *  the column read as a wall of boxes louder than the settings themselves.
  *
- *  Gray at rest and blue on hover, so it still reads as pressable. `danger` is
- *  for the actions that remove recorded history, and only those. The negative
- *  right margin puts the word, not its hover box, on the rail the toggles sit
- *  on. */
+ *  This is Button's `text` shape, which the rest of the app took from here; all
+ *  this adds is placement. `danger` is for the actions that remove recorded
+ *  history, and only those. The negative right margin puts the word, not its
+ *  hover box, on the rail the toggles sit on. */
 export function TextAction({
   children,
   onClick,
@@ -507,20 +508,16 @@ export function TextAction({
   buttonRef?: Ref<HTMLButtonElement>;
 }) {
   return (
-    <button
-      ref={buttonRef}
-      type="button"
+    <Button
+      buttonRef={buttonRef}
+      variant={danger ? "text-danger" : "text"}
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`-mr-2.5 whitespace-nowrap rounded-[7px] px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 max-sm:-ml-2.5 max-sm:mr-0 ${
-        danger
-          ? "text-bad hover:bg-bad/10"
-          : "text-ink-2 hover:bg-hover-2 hover:text-accent"
-      }`}
+      className="-mr-3 max-sm:-ml-3 max-sm:mr-0"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

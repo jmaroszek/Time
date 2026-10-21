@@ -98,7 +98,9 @@ export function BannerProvider({ children }: { children: ReactNode }) {
             {banner.action && (
               <button
                 type="button"
-                className="shrink-0 rounded-md border border-edge-2 px-2 py-1 text-ink transition-colors hover:bg-hover-2"
+                // Borderless, as every other button is, but accent at rest: in
+                // a toast, a gray word reads as more of the message.
+                className="shrink-0 rounded-md px-2 py-1 font-semibold text-accent transition-colors hover:bg-accent/10"
                 onClick={() => {
                   const run = banner.action?.run;
                   setBanner(null);

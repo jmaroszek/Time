@@ -175,7 +175,7 @@ export function PrivacyOnboarding() {
             type="button"
             disabled={saving || lifecycleBusy}
             onClick={() => void complete(false)}
-            className="rounded-lg border border-edge-2 px-4 py-2 text-sm text-ink-2 hover:text-ink disabled:opacity-50"
+            className="rounded-lg px-4 py-2 text-sm font-semibold text-ink-2 transition-colors hover:bg-hover-2 hover:text-accent disabled:opacity-50"
           >
             Not now
           </button>
@@ -722,9 +722,8 @@ export function DbErrorScreen({ error }: { error: string }) {
         first run. Otherwise the file below may be locked or unreadable.
       </p>
       <DbPathFooter />
-      <button
-        type="button"
-        className="mt-4 rounded-lg border border-edge-2 px-3 py-1.5 text-xs text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink"
+      <Button
+        className="-ml-3 mt-4"
         onClick={() =>
           void navigator.clipboard.writeText(error).then(() => {
             setCopied(true);
@@ -733,7 +732,7 @@ export function DbErrorScreen({ error }: { error: string }) {
         }
       >
         {copied ? "Copied" : "Copy error details"}
-      </button>
+      </Button>
       {import.meta.env.DEV && (
         <p className="mt-4 max-w-xl break-all text-xs text-ink-3">
           {error} — check TIME_DB_PATH / src/lib/db.ts (debug-only hint).

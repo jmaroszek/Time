@@ -789,7 +789,7 @@ export function SessionCorrectionDialog({
                 </>
               )}
             </div>
-            <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="danger" disabled={saving} onClick={() => void reset()}>Reset edits</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</Button></span></div>
+            <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="text-danger" disabled={saving} onClick={() => void reset()}>Reset edits</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</Button></span></div>
           </>
         )}
     </DialogShell>

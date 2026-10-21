@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Button, Checkbox } from "../../components/ui";
+import { Checkbox } from "../../components/ui";
 import type { ActivitySource } from "../../lib/activity";
 import { buildActivityExport, type ActivityExportKind } from "../../lib/activityExport";
 import { saveActivityExport } from "../../lib/queries";
@@ -78,9 +78,21 @@ export default function ActivityExportMenu({
       </summary>
       <div className="absolute right-0 top-9 z-30 w-64 rounded-xl border border-edge bg-surface p-3 shadow-xl">
         <p className="text-xs leading-snug text-ink-3">Uses the selected date range. Search and library filters do not remove rows.</p>
-        <div className="mt-3 flex flex-col gap-2">
-          <Button disabled={exporting !== null} onClick={() => void run("summary")}>{exporting === "summary" ? "Preparing…" : "Activity summary CSV"}</Button>
-          <Button disabled={exporting !== null} onClick={() => void run("sessions")}>{exporting === "sessions" ? "Preparing…" : "Session details CSV"}</Button>
+        {/* Menu rows, the way MenuSelect draws its options, rather than two
+            stacked buttons: this is a popover of things to pick from. The
+            negative margin sets the words under the line above. */}
+        <div className="-mx-2.5 mt-2 flex flex-col">
+          {(["summary", "sessions"] as const).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              disabled={exporting !== null}
+              onClick={() => void run(kind)}
+              className="rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {exporting === kind ? "Preparing…" : kind === "summary" ? "Activity summary CSV" : "Session details CSV"}
+            </button>
+          ))}
         </div>
         {hasStoredTitles && (
           <Checkbox

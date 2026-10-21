@@ -1250,9 +1250,14 @@ export function EntityPanel({
       <section className="mt-8 border-t border-edge/60 pt-6">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-row font-semibold text-ink-2">Manage this {kindLabel}</h3>
-          {/* Keep the actions together when the panel narrows. */}
-          <span className="flex items-center gap-2">
-            {/* Actions read left to right as rename, stop recording, delete. */}
+          {/* Keep the actions together when the panel narrows. Text actions,
+              as Settings' are: three bordered boxes here outweighed every
+              heading in the panel. The hover boxes touch, so no gap, and the
+              negative margin sets the last word on the panel's edge. */}
+          <span className="-mr-3 flex items-center">
+            {/* Actions read left to right as rename, stop recording, delete.
+                Delete is red at rest, the rule Settings uses for every action
+                that removes recorded history. */}
             <Button
               onClick={beginRename}
               disabled={actionsDisabled}
@@ -1268,7 +1273,7 @@ export function EntityPanel({
               Do not track
             </Button>
             <Button
-              variant="quiet-danger"
+              variant="text-danger"
               onClick={onDeleteEntity}
               disabled={actionsDisabled}
               title="Removes recorded visits. Categories, rules, and aliases are kept."
