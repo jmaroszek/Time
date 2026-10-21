@@ -47,6 +47,10 @@ winreg = "0.55"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
+    # Finding the tracker by its full path, so a dev build never stops the
+    # installed one. See tracker_pids_at in src/platform/windows.rs.
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
     # MessageBoxW, for the one failure that happens before there is a window or
     # a console to report it in. See report_fatal_launch_failure in src/platform/windows.rs.
     "Win32_UI_WindowsAndMessaging",
