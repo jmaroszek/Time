@@ -277,11 +277,11 @@ function DetailPanel({
       {/* The top padding belongs to the content, not the scroll box. A sticky
           heading with `top: 0` pins to the scroll container's *content* box, so
           a padded container parks it that far down the scrollport and leaves a
-          band above it — exactly 20px of it — through which the rows below
+          band above it — exactly 16px of it — through which the rows below
           scrolled in full view. Horizontal padding is unaffected and stays
           here, where the sticky headings' -mx-5 bleed still relies on it. */}
       <div className="scroll-well min-h-0 flex-1 overflow-y-auto px-4 pb-5 sm:px-5">
-        <div className="pt-5">{children}</div>
+        <div className="pt-4">{children}</div>
       </div>
     </aside>
   );
@@ -1036,7 +1036,7 @@ export function EntityPanel({
     >
       {/* First in the body: the panel's one standing decision. Not pinned in
           the header, which it made taller than the name it sits under. */}
-      <PanelSection title="Classification">
+      <PanelSection title="Classification" className="">
         <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span className="shrink-0">
             <MenuSelect
