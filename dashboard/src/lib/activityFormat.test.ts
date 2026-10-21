@@ -6,6 +6,7 @@ import {
   describeCorrectionWindow,
   formatCompactDate,
   trimAppSuffix,
+  windowGroupTitle,
   countNoun,
   entityRowDomId,
   entityRowTriggerDomId,
@@ -136,6 +137,25 @@ describe("trimAppSuffix", () => {
     // A hyphen inside a word is not a separator.
     expect(trimAppSuffix("Re-read-Obsidian", obsidian)).toBe("Re-read-Obsidian");
     expect(trimAppSuffix("Anything - Obsidian", [])).toBe("Anything - Obsidian");
+  });
+});
+
+describe("windowGroupTitle", () => {
+  it("gives every version of one app's window the same title", () => {
+    const older = windowGroupTitle("Time Tracker App - Obsidian - Obsidian 1.12.7", "Obsidian.exe", "obsidian.exe");
+    const newer = windowGroupTitle("Time Tracker App - Obsidian - Obsidian 1.13.7", "Obsidian.exe", "obsidian.exe");
+    expect(older).toBe(newer);
+    expect(older).toBe(windowGroupTitle("Time Tracker App", "obsidian.exe", "obsidian.exe"));
+  });
+
+  it("trims a browser's suffix from a website's window", () => {
+    expect(windowGroupTitle("Inbox - Gmail - Google Chrome", "chrome.exe", "mail.google.com"))
+      .toBe(windowGroupTitle("Inbox - Gmail", "chrome.exe", "mail.google.com"));
+  });
+
+  it("keeps a conflict copy apart from its note", () => {
+    expect(windowGroupTitle("Time Tracker App-1 - Obsidian 1.13.7", "obsidian.exe", "obsidian.exe"))
+      .not.toBe(windowGroupTitle("Time Tracker App - Obsidian 1.13.7", "obsidian.exe", "obsidian.exe"));
   });
 });
 

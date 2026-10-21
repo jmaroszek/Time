@@ -636,6 +636,19 @@ describe("Activity index", () => {
     ]);
   });
 
+  it("keeps one window across the versions an app names in its title", () => {
+    const result = queryActivityIndex(buildActivityIndex({
+      ...source,
+      sessions: [
+        { id: 1, start: 10, end: 40, process: "obsidian.exe", title: "Plan - Obsidian - Obsidian 1.12.7", domain: null, isAfk: false },
+        { id: 2, start: 50, end: 110, process: "obsidian.exe", title: "Plan - Obsidian - Obsidian 1.13.7", domain: null, isAfk: false },
+      ],
+    }), { ...baseQuery, selectedEntityId: "app:obsidian.exe" });
+    expect(result.detailGroups.rows.map((group) => [group.title, group.seconds, group.sessionIds])).toEqual([
+      ["Plan - Obsidian - Obsidian 1.13.7", 90, [2, 1]],
+    ]);
+  });
+
   it("groups cosmetic title variants within an entity while preserving meaningful boundaries", () => {
     const index = buildActivityIndex({
       categories,

@@ -16,7 +16,7 @@ import {
   type RunStats,
 } from "./runs";
 import { dayKey } from "./time";
-import { normalizeWindowTitle } from "./titleRules";
+import { windowGroupTitle } from "./activityFormat";
 
 export type ActivityEntityKind = "app" | "website";
 export type ActivityStatus = "uncategorized" | "partial" | "mixed" | "single" | "ignored";
@@ -98,8 +98,8 @@ export interface ActivitySessionRow {
   winningRulePattern: string | null;
   classificationSource: "rule" | "session_override" | "none";
   isCorrected: boolean;
-  /** The title reduced to its matchable form, computed once while indexing.
-   *  Grouping and every window sort compare on it, and re-deriving it there
+  /** The title reduced to its matchable form without its app's own suffix,
+   *  computed once while indexing. Grouping and every window sort compare on it, and re-deriving it there
    *  cost more than the rest of a query put together. */
   normalizedTitle: string;
 }
@@ -837,6 +837,9 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
   const runRows: ActivityRunRow[] = [];
   const ruleSeconds = new Map<number, number>();
   let hasStoredTitles = false;
+  // A window's visits repeat one title thousands of times, and trimming it
+  // per visit added half again to the build.
+  const groupTitles = new Map<string, string>();
 
   for (const session of source.sessions) {
     if (session.end <= session.start) continue;
@@ -847,6 +850,12 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
     const identity = entityIdentity(session, browserProcesses);
     const explanation = explain(session);
     const seconds = session.end - session.start;
+    const groupTitleKey = `${session.process}\u0000${identity.key}\u0000${session.title}`;
+    let groupTitle = groupTitles.get(groupTitleKey);
+    if (groupTitle === undefined) {
+      groupTitle = windowGroupTitle(session.title, session.process, identity.key);
+      groupTitles.set(groupTitleKey, groupTitle);
+    }
     if (session.title) hasStoredTitles = true;
     if (explanation.winningRule) {
       const ruleId = explanation.winningRule.id;
@@ -874,7 +883,7 @@ export function buildActivityIndex(source: ActivitySource): ActivityIndex {
       winningRulePattern: explanation.winningRule?.pattern ?? null,
       classificationSource: explanation.source,
       isCorrected: session.isCorrected ?? false,
-      normalizedTitle: normalizeWindowTitle(session.title),
+      normalizedTitle: groupTitle,
     };
     indexed.push(row);
     runRows.push(row);
