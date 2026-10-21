@@ -1339,6 +1339,7 @@ export default function ActivityTab({
         <SessionCorrectionDialog
           sessionId={editingSessionId}
           categories={meta.categories}
+          aliases={meta.aliases}
           onClose={() => setEditingSessionId(null)}
         />
       )}

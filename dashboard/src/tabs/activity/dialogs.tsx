@@ -17,8 +17,10 @@ import type {
 import {
   defaultRulePattern,
   describeCorrectionWindow,
+  formatVisitDay,
   localInputValue,
   showBroadMatchWarning,
+  visitEditLabel,
 } from "../../lib/activityFormat";
 import {
   ANY_APP,
@@ -32,7 +34,12 @@ import {
   explainTitleMatchAgainstTitle,
   TITLE_MATCH_MODE_OPTIONS,
 } from "../../lib/categoryRules";
-import { fmtDuration, fmtDurationTitle } from "../../lib/format";
+import {
+  cleanDomainName,
+  cleanProcessName,
+  fmtDuration,
+  fmtDurationTitle,
+} from "../../lib/format";
 import {
   addRule,
   addTrackingExclusion,
@@ -653,13 +660,25 @@ function ruleSpecFromCandidate(candidate: TitleRuleCandidate): TitleRuleSpec {
   };
 }
 
+/** A visit's clock time as its row shows it; seconds where two edited times
+ *  could otherwise read the same. */
+function visitClock(seconds: number, withSeconds = false): string {
+  return new Date(seconds * 1000).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    second: withSeconds ? "2-digit" : undefined,
+  });
+}
+
 export function SessionCorrectionDialog({
   sessionId,
   categories,
+  aliases,
   onClose,
 }: {
   sessionId: number;
   categories: Category[];
+  aliases: Record<string, string>;
   onClose: () => void;
 }) {
   const banner = useBanner();
@@ -716,11 +735,21 @@ export function SessionCorrectionDialog({
       setSaving(false);
     }
   };
+  const locked = session !== null && (session.isLive || session.isAfk);
+  const timesEdited = session !== null
+    && (session.start !== session.originalStart || session.end !== session.originalEnd);
+  // A category on the correction row is a session override, which is what the
+  // row's "Reclassified" tag is drawn from.
+  const editLabel = session && visitEditLabel({
+    isCorrected: session.isCorrected,
+    classificationSource: session.categoryId == null ? "none" : "session_override",
+  });
   return (
     <DialogShell
       onClose={onClose}
       busy={saving}
       labelledBy="correction-title"
+      describedBy="correction-intro"
       className="max-w-lg"
     >
         {/* "Correct" named the rare half of this dialog and misnamed the
@@ -731,10 +760,38 @@ export function SessionCorrectionDialog({
             tracker's storage unit, and every list this dialog is opened from
             counts visits. */}
         <h2 id="correction-title" className="text-sm font-semibold">Edit visit</h2>
+        <p id="correction-intro" className="mt-2 text-xs leading-relaxed text-ink-3">
+          Changes apply to this visit only. Your rules stay as they are.
+        </p>
         {!session ? <div className="py-10"><Spinner /></div> : (
           <>
-            <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs"><p className="font-medium">{session.domain ?? session.process}</p>{session.title && <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>}</div>
-            {(session.isLive || session.isAfk) && <p className="mt-3 rounded-lg border border-bad/30 bg-bad/[.04] px-3 py-2 text-xs text-bad">{session.isLive ? "The visit in progress cannot be edited." : "Away time cannot be edited."}</p>}
+            {/* The same anatomy as the Window rule dialog's card, and the same
+                name and tag the row it was opened from shows. A raw process
+                name and no time left the reader to work out which visit this
+                was, when the row they clicked is identified by its time. */}
+            <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs">
+              <p className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate font-medium">
+                  {session.domain ? cleanDomainName(session.domain, aliases) : cleanProcessName(session.process, aliases)}
+                </span>
+                {editLabel && (
+                  <span className="shrink-0 rounded-full bg-accent/10 px-1.5 py-[1px] text-xs text-accent">
+                    {editLabel}
+                  </span>
+                )}
+              </p>
+              <p className="mt-1 tabular-nums text-ink-3">
+                {formatVisitDay(session.start)} · {visitClock(session.start)}–{visitClock(session.end)} · {fmtDuration(Math.max(0, session.end - session.start))}
+              </p>
+              {session.title && <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>}
+            </div>
+            {/* A state, not a failure: the warn tone the app's notices use. */}
+            {locked && (
+              <p className="mt-3 flex items-center gap-2 rounded-lg border border-warn/30 bg-warn/[.08] px-3 py-2 text-xs text-ink-2">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-warn" />
+                {session.isLive ? "The visit in progress cannot be edited." : "Away time cannot be edited."}
+              </p>
+            )}
             {/* Category leads: it is why this dialog is normally opened, it
                 always succeeds, and it is the app's actual subject. */}
             <div className="mt-4 text-xs text-ink-3">
@@ -745,51 +802,90 @@ export function SessionCorrectionDialog({
                 value={categoryId}
                 onChange={setCategoryId}
                 label="Category"
+                disabled={locked}
                 options={[
-                  // Falling back to the rules is a different kind of answer
-                  // from naming one category, so the rule marks the seam.
                   { value: "", label: "Use automatic classification" },
-                  ...categories.map((category, i) => ({
-                    value: String(category.id),
-                    label: category.name,
-                    divider: i === 0,
-                  })),
+                  ...categoryDestinationOptions(categories, null, { dividerOffset: 1 }),
                 ]}
               />
             </div>
 
-            <div className="mt-4 border-t border-edge/60 pt-3">
-              <button
-                type="button"
-                onClick={() => setEditingTimes((open) => !open)}
-                aria-expanded={editingTimes}
-                className="flex w-full items-center gap-1.5 rounded-sm text-left text-xs text-ink-3 outline-none hover:text-ink-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
-              >
-                <Chevron open={editingTimes} />
-                Adjust recorded times
-                <span className="ml-auto tabular-nums">
-                  {fmtDuration(Math.max(0, session.end - session.start))}
-                </span>
-              </button>
-              {editingTimes && (
-                <>
-                  {/* Stated before the edit rather than after it fails. The
-                      tracker records continuously, so the gap around a session
-                      is usually the session itself — meaning it can be
-                      shortened but almost never extended, which is worth
-                      knowing before typing a time. */}
-                  <p className="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs leading-snug text-ink-3">
-                    {describeCorrectionWindow(session)}
+            {/* Set in a control's ink, as the Window rule dialog's Advanced
+                toggle is: in the labels' grey it read as a third heading. */}
+            <button
+              type="button"
+              onClick={() => setEditingTimes((open) => !open)}
+              aria-expanded={editingTimes}
+              disabled={locked}
+              className="mt-4 flex items-center gap-1.5 rounded-md text-xs text-ink-2 transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Chevron open={editingTimes} />
+              Adjust recorded times
+            </button>
+            {editingTimes && !locked && (
+              <div className="mt-2 rounded-lg border border-edge bg-surface-2 p-3">
+                {/* Stated before the edit rather than after it fails. The
+                    tracker records continuously, so the gap around a session
+                    is usually the session itself — meaning it can be
+                    shortened but almost never extended, which is worth
+                    knowing before typing a time. */}
+                <p className="text-xs leading-snug text-ink-3">
+                  {describeCorrectionWindow(session)} Times use your local timezone and cannot end in the future.
+                </p>
+                {/* What Reset edits would restore. */}
+                {timesEdited && (
+                  <p className="mt-1.5 text-xs leading-snug tabular-nums text-ink-3">
+                    Originally recorded {visitClock(session.originalStart, true)}–{visitClock(session.originalEnd, true)}.
                   </p>
-                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <label className="text-xs text-ink-3">Start<input type="datetime-local" step="1" value={start} min={session.earliestStart == null ? undefined : localInputValue(session.earliestStart)} max={end} onChange={(event) => setStart(event.target.value)} className="mt-1 block w-full rounded-lg border border-control-edge bg-control px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
-                    <label className="text-xs text-ink-3">End<input type="datetime-local" step="1" value={end} min={start} max={session.latestEnd == null ? undefined : localInputValue(session.latestEnd)} onChange={(event) => setEnd(event.target.value)} className="mt-1 block w-full rounded-lg border border-control-edge bg-control px-2.5 py-2 text-xs text-ink outline-none focus:border-accent/60" /></label>
-                  </div>
-                  <p className="mt-2 text-xs leading-snug text-ink-3">Times use your local timezone and cannot end in the future.</p>
-                </>
+                )}
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="text-xs text-ink-3">
+                    Start
+                    <input
+                      type="datetime-local"
+                      step="1"
+                      value={start}
+                      min={session.earliestStart == null ? undefined : localInputValue(session.earliestStart)}
+                      max={end}
+                      onChange={(event) => setStart(event.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-control-edge bg-control px-2.5 py-2 text-xs tabular-nums text-ink outline-none focus:border-accent/60"
+                    />
+                  </label>
+                  <label className="text-xs text-ink-3">
+                    End
+                    <input
+                      type="datetime-local"
+                      step="1"
+                      value={end}
+                      min={start}
+                      max={session.latestEnd == null ? undefined : localInputValue(session.latestEnd)}
+                      onChange={(event) => setEnd(event.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-control-edge bg-control px-2.5 py-2 text-xs tabular-nums text-ink outline-none focus:border-accent/60"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Reset reverts this dialog's own edits and destroys nothing
+                recorded, so it takes Settings' text action rather than the
+                red reserved for the button that deletes. */}
+            <div className="mt-5 flex items-center gap-2">
+              {session.isCorrected && (
+                <Button variant="text" disabled={saving} onClick={() => void reset()}>
+                  Reset edits
+                </Button>
               )}
+              <span className="flex-1" />
+              <Button disabled={saving} onClick={onClose}>Cancel</Button>
+              <Button
+                variant="primary"
+                disabled={saving || locked || !start || !end}
+                onClick={() => void save()}
+              >
+                {saving ? "Saving…" : "Save"}
+              </Button>
             </div>
-            <div className="mt-5 flex items-center justify-between"><span>{session.isCorrected && <Button variant="danger" disabled={saving} onClick={() => void reset()}>Reset edits</Button>}</span><span className="flex gap-2"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={saving || session.isLive || session.isAfk || !start || !end} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</Button></span></div>
           </>
         )}
     </DialogShell>
