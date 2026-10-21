@@ -298,12 +298,30 @@ describe("topScopeWindows", () => {
       everything,
       10,
     );
-    expect(list.rows.map(({ key, title, seconds }) => ({ key, title, seconds }))).toEqual([
-      { key: "trailer", title: "Trailer", seconds: 1200 },
-      { key: "lecture 4", title: "LECTURE 4", seconds: 900 },
+    expect(list.rows.map(({ title, seconds }) => ({ title, seconds }))).toEqual([
+      { title: "Trailer", seconds: 1200 },
+      { title: "LECTURE 4", seconds: 900 },
     ]);
     expect(list.total).toBe(2);
     expect(list.untitledSeconds).toBe(60);
+  });
+
+  it("keeps one window across app versions, but not across apps", () => {
+    const list = topScopeWindows(
+      [
+        make(at(2, 9), at(2, 9, 10), "notes.exe", { title: "Plan - Notes 1.12.7" }),
+        make(at(2, 10), at(2, 10, 20), "notes.exe", { title: "Plan - Notes 1.13.7" }),
+        make(at(2, 11), at(2, 11, 5), "code.exe", { title: "Plan - Code" }),
+      ],
+      (session) => session.process !== "video.exe",
+      context,
+      everything,
+      10,
+    );
+    expect(list.rows.map(({ title, seconds, activityKey }) => ({ title, seconds, activityKey }))).toEqual([
+      { title: "Plan - Notes 1.13.7", seconds: 1800, activityKey: windowGroupKey("app:notes.exe", "plan") },
+      { title: "Plan - Code", seconds: 300, activityKey: windowGroupKey("app:code.exe", "plan") },
+    ]);
   });
 
   it("names the Activity window each row opens", () => {

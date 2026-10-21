@@ -13,7 +13,7 @@ import {
   type RunRowKind,
   type RunSpan,
 } from "./runs";
-import { normalizeWindowTitle } from "./titleRules";
+import { windowGroupTitle } from "./activityFormat";
 import { dayKey } from "./time";
 
 /** The category an app or website was opened from, which it then stays inside. */
@@ -209,7 +209,7 @@ export function summarizeScope(
 }
 
 export interface ScopeWindow {
-  /** The normalized title, which is what groups the rows. */
+  /** The app group and grouped title, which is what groups the rows. */
   key: string;
   /** The newest original spelling among the grouped sessions. */
   title: string;
@@ -240,6 +240,7 @@ export function topScopeWindows(
 ): ScopeWindowList {
   const windows = new Map<string, {
     key: string;
+    groupTitle: string;
     title: string;
     seconds: number;
     newest: number;
@@ -251,14 +252,19 @@ export function topScopeWindows(
     const start = Math.max(session.start, range.startSec);
     const end = Math.min(session.end, range.endSec);
     if (end <= start) continue;
-    const key = session.title ? normalizeWindowTitle(session.title) : "";
-    if (!key) {
+    const entity = entityIdentity(session, context.browserProcesses);
+    const title = session.title ? windowGroupTitle(session.title, session.process, entity.key) : "";
+    if (!title) {
       untitledSeconds += end - start;
       continue;
     }
+    // By app as well: with the app's suffix gone, "Inbox" in a mail client and
+    // "Inbox" in a browser would otherwise be one window. An alias's processes
+    // share an app group, so they still meet in one row.
+    const key = `${appGroupKey(session.process, context.aliases)}\u0000${title}`;
     let row = windows.get(key);
     if (!row) {
-      row = { key, title: session.title, seconds: 0, newest: session.start, entities: new Map() };
+      row = { key, groupTitle: title, title: session.title, seconds: 0, newest: session.start, entities: new Map() };
       windows.set(key, row);
     }
     row.seconds += end - start;
@@ -266,13 +272,12 @@ export function topScopeWindows(
       row.newest = session.start;
       row.title = session.title;
     }
-    const entity = entityIdentity(session, context.browserProcesses).id;
-    row.entities.set(entity, (row.entities.get(entity) ?? 0) + end - start);
+    row.entities.set(entity.id, (row.entities.get(entity.id) ?? 0) + end - start);
   }
   const rows = [...windows.values()]
     .sort((left, right) => right.seconds - left.seconds || left.key.localeCompare(right.key))
     .slice(0, limit)
-    .map(({ key, title, seconds, entities }) => {
+    .map(({ key, groupTitle, title, seconds, entities }) => {
       let entityId = "";
       let most = -1;
       for (const [candidate, entitySeconds] of entities) {
@@ -281,7 +286,7 @@ export function topScopeWindows(
           entityId = candidate;
         }
       }
-      return { key, title, seconds, entityId, activityKey: windowGroupKey(entityId, key) };
+      return { key, title, seconds, entityId, activityKey: windowGroupKey(entityId, groupTitle) };
     });
   return { rows, total: windows.size, untitledSeconds };
 }

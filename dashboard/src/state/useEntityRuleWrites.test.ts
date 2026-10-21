@@ -4,7 +4,7 @@ import type { EntityRuleChange } from "../lib/queries";
 
 const mocks = vi.hoisted(() => ({
   assignEntityRule: vi.fn(), assignEntityRules: vi.fn(), undoEntityRules: vi.fn(),
-  removeEntityRules: vi.fn(), refresh: vi.fn(), show: vi.fn(), report: vi.fn(),
+  refresh: vi.fn(), show: vi.fn(), report: vi.fn(),
 }));
 vi.mock("../lib/queries", () => mocks);
 vi.mock("./meta", () => ({ useMeta: () => ({
@@ -33,7 +33,6 @@ it("Undo sends the original committed change rather than looking up current rule
   undo();
   await vi.waitFor(() => expect(mocks.report).toHaveBeenCalled());
   expect(mocks.undoEntityRules).toHaveBeenCalledWith([change]);
-  expect(mocks.removeEntityRules).not.toHaveBeenCalled();
 });
 
 it("submits the complete suggestion batch once and reports a failed batch without success", async () => {

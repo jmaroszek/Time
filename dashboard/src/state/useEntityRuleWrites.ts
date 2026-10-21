@@ -2,7 +2,7 @@ import {
   type ActivityEntitySummary,
   type ActivityTriageItem,
 } from "../lib/activity";
-import { assignEntityRule, assignEntityRules, undoEntityRules, removeEntityRules, type EntityRuleChange } from "../lib/queries";
+import { assignEntityRule, assignEntityRules, undoEntityRules, type EntityRuleChange } from "../lib/queries";
 import { KeyedSerialQueue } from "../lib/keyedSerialQueue";
 import { type StarterSuggestion } from "../lib/starterSuggestions";
 import { useBanner } from "./banner";
@@ -118,17 +118,5 @@ export function useEntityRuleWrites(pending: PendingClassification) {
     }
   };
 
-  const removeExactRules = async (entity: ActivityEntitySummary) => {
-    try {
-      await writes.run("rules", async () => {
-        await removeEntityRules(entity.kind === "website" ? "domain" : "process", entity.key);
-        await meta.refresh();
-      });
-      banner.show(`Removed the ${entity.kind === "website" ? "Website" : "App"} rule for ${entity.key}.`);
-    } catch (error) {
-      banner.report(error, "rule");
-    }
-  };
-
-  return { applySuggestions, assignEntity, assignFromTriage, removeExactRules };
+  return { applySuggestions, assignEntity, assignFromTriage };
 }

@@ -5,7 +5,7 @@ import type {
   ActivityTitleGroup,
 } from "./activity";
 import type { MatchType, TitleRuleSpec } from "./classify";
-import { fmtDuration } from "./format";
+import { cleanProcessName, fmtDuration } from "./format";
 import type { SessionCorrection } from "./queries";
 import {
   containsVersion,
@@ -148,13 +148,15 @@ export function titleMatchParts(title: string, search: string): {
  *
  * Display only: search, rules, and the Window panel keep the recorded title.
  */
+// The capture keeps each separator as its own element, so the kept part
+// rejoins with the spelling it was recorded with: segments sit at even
+// indexes, separators at odd ones. Built once: grouping runs this per visit.
+const SEPARATOR_SPLIT = new RegExp(`(${TITLE_SEPARATOR.source})`, "u");
+
 export function trimAppSuffix(title: string, names: string[]): string {
   const marks = [...new Set(names.map((name) => name.trim().toLowerCase()).filter(Boolean))];
   if (marks.length === 0) return title;
-  // The capture keeps each separator as its own element, so the kept part
-  // rejoins with the spelling it was recorded with: segments sit at even
-  // indexes, separators at odd ones.
-  const parts = title.split(new RegExp(`(${TITLE_SEPARATOR.source})`, "u"));
+  const parts = title.split(SEPARATOR_SPLIT);
   let end = parts.length;
   while (end > 1) {
     const segment = parts[end - 1].trim().toLowerCase();
@@ -170,6 +172,22 @@ export function trimAppSuffix(title: string, names: string[]): string {
  *  executable or domain it was recorded under, with and without extension. */
 export function appSuffixNames(displayName: string, entityKey: string): string[] {
   return [displayName, entityKey, entityKey.replace(/\.exe$/i, "")];
+}
+
+/**
+ * The title a visit groups under as a window: normalized, then without the
+ * suffix that only names the app it was recorded in.
+ *
+ * An app that puts its version there split one note into a window per update —
+ * "Notes - Obsidian - Obsidian 1.12.7" and "… 1.13.7" — each with part of the
+ * time, and trimmed for display they read as the same row twice. The names come
+ * from the recording rather than an alias, so renaming an app regroups nothing.
+ */
+export function windowGroupTitle(title: string, process: string, entityKey: string): string {
+  return trimAppSuffix(normalizeWindowTitle(title), [
+    ...appSuffixNames(cleanProcessName(process), process),
+    entityKey,
+  ]);
 }
 
 export function windowRowCategory(
