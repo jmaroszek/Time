@@ -546,7 +546,7 @@ export function WindowPanel({
           </p>
           <span className="-mr-3 shrink-0">
             <Button
-              variant="text"
+              variant="accent"
               disabled={actionsDisabled}
               onClick={() => onMakeRule(group)}
               title="Classify this window, and every window titled like it, with a standing rule."
@@ -1250,7 +1250,10 @@ export function EntityPanel({
       {/* Keep curation actions together at the end of the panel. */}
       <section className="mt-8 border-t border-edge/60 pt-6">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-row font-semibold text-ink-2">Manage this {kindLabel}</h3>
+          {/* The panel's section-title style, as Classification and Timeline
+              take. In gray at 13px it matched the text actions beside it
+              exactly and read as a fourth button. */}
+          <h3 className="mr-auto text-sm font-semibold">Manage this {kindLabel}</h3>
           {/* Keep the actions together when the panel narrows. Text actions,
               as Settings' are: three bordered boxes here outweighed every
               heading in the panel. The hover boxes touch, so no gap, and the
