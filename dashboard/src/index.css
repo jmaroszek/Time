@@ -56,8 +56,9 @@
   --color-ink-2-raised: #c6ccd4;
   --color-accent: #6ba0da;
   /* --color-accent is doing two jobs on dark: the interactive accent and the
-     nine-row Top Apps data fill. Identical here so dark does not move; light
-     splits them below, the same way --color-good/-good-data already do. */
+     solid fills that carry no text — the Top Apps and Activity share bars and
+     the switch track. Identical here so dark does not move; light splits them
+     below, the same way --color-good/-good-data already do. */
   --color-accent-data: #6ba0da;
   /* Text on an accent fill. Near-black is right for a light blue on dark; a
      light theme's darker accent needs white, which is why this is a token. */
@@ -119,18 +120,23 @@
 
 /* Light · Cool gray — Windows-11 neutral grays over white cards. Chosen over
    the warmer and higher-contrast candidates because it keeps the dark theme's
-   figure-ground relationship: the card is lighter than the page in both modes. */
+   figure-ground relationship: the card is lighter than the page in both modes.
+
+   The neutrals carry about half the blue tint they were drawn with. The same
+   OKLCH chroma that reads as an inky near-black on dark reads as a cold,
+   clinical cast across a near-white page, so light holds hue 262 at roughly
+   C 0.003–0.012 rather than mirroring dark's chroma. */
 :root[data-theme="light"] {
-  --color-bg: #edeff3;
+  --color-bg: #eff0f2;
   --color-surface: #ffffff;
-  --color-surface-dim: #f8f9fb;
-  --color-surface-2: #eaecf1;
-  --color-surface-3: #dfe2e9;
+  --color-surface-dim: #f9fafb;
+  --color-surface-2: #ebecef;
+  --color-surface-3: #e0e2e6;
   /* Not the white card: a control needs its own fill or it collides with the
-     card and the row fill both. #f3f5f8 reproduces dark's 1.09:1
+     card and the row fill both. #f4f5f7 reproduces dark's 1.09:1
      control-vs-card ratio exactly, while staying clear of --color-surface-2
      and --color-bg. themeTokens.test.ts holds this. */
-  --color-control: #f3f5f8;
+  --color-control: #f4f5f7;
   --color-group: #ffffff;
   /* A step darker than the values the theme was drawn with (#d9dce3 / #bbc0cb).
      A contrast ratio is a bad model for a hairline near white: the same 1.2:1
@@ -138,39 +144,51 @@
      the eye resolves on white. The controls that sit on the *page* rather than
      in a card — the date range picker, its preset menu, the chart selectors —
      were the ones that disappeared, at 1.19:1 against --color-bg where dark gets
-     1.39:1. These land the page reading at 1.43:1 and keep the edge → edge-2
+     1.39:1. These land the page reading at 1.44:1 and keep the edge → edge-2
      step the same size it is on dark. themeTokens.test.ts holds the floor. */
-  --color-edge: #c4cad5;
-  --color-edge-2: #b3b9c6;
-  --color-control-edge: #b3b9c6;
+  --color-edge: #c7cad0;
+  --color-edge-2: #b6b9c0;
+  --color-control-edge: #b6b9c0;
   /* Structural cards can keep a softer edge than controls, whose small
-     hairlines need the stronger value above. Raised content returns to white;
-     selection gets a quiet blue cast instead of looking sunken or disabled. */
-  --color-card-edge: #d9dce3;
-  --color-raised-edge: #d9dce3;
+     hairlines need the stronger value above. The card edge sits at 1.31:1 on
+     white, matching dark's 1.30:1: the card already lifts off the page and
+     carries a shadow, so a stronger border only boxed it in. Raised content
+     returns to white; selection gets a quiet blue cast instead of looking
+     sunken or disabled. */
+  --color-card-edge: #dfe1e5;
+  --color-raised-edge: #dadce0;
   --color-raised: #ffffff;
   --color-selected: #edf3f9;
   --color-selected-strong: #edf3f9;
-  --color-chart-surface: #fbfcfd;
+  --color-chart-surface: #fbfbfc;
   /* Near-black made KPI figures more forceful in light than their dark-theme
      counterparts. This keeps primary copy dark while restoring that parity. */
-  --color-ink: #24282f;
-  --color-ink-2: #515762;
+  --color-ink: #26282c;
+  /* 6.5:1 on the card, against dark's 6.74:1. At 7.3:1 secondary labels and
+     chart axes sat nearly as dark as primary copy, which flattened the
+     hierarchy dark gets from letting them recede. */
+  --color-ink-2: #5a5e64;
   /* Four steps darker than the value the theme was drawn with (#6b717c), which
      cleared 4.5:1 on the card but only reached 4.26:1 on the page — and ink-3 is
      used directly on the page by the waiting and database-error screens.
      themeTokens.test.ts measures both surfaces now, which is what caught it. */
-  --color-ink-3: #676d78;
-  --color-ink-3-raised: #5c626c;
-  --color-ink-2-raised: #3f444d;
-  --color-accent: #2a66b0;
+  --color-ink-3: #686c72;
+  --color-ink-3-raised: #60636a;
+  --color-ink-2-raised: #44484e;
+  --color-accent: #386dac;
   /* Split from --color-accent: the interactive accent needs to sit dark
-     enough on white, but the Top Apps bar fill wants to be lighter. Dark
-     keeps one value for both jobs; only light needs the split. */
-  --color-accent-data: #4683cf;
+     enough on white to pass as text, but a solid fill with nothing written on
+     it does not. Filled with the text blue, the share bars and switches were
+     the heaviest marks on the page, where dark's are its softest. Dark keeps
+     one value for both jobs; only light needs the split. Both sit at dark's
+     hue with a little less chroma than they were drawn with (#2a66b0 /
+     #4683cf): those were darker *and* more saturated than dark's accent. */
+  --color-accent-data: #528dcd;
   --color-on-accent: #ffffff;
-  --color-good: #2a7758;
-  --color-good-data: #0a855b;
+  /* Held at dark's saturation. The greens were drawn at about 0.8x dark's
+     chroma, which on white read as sage rather than as the same emerald. */
+  --color-good: #157853;
+  --color-good-data: #009663;
   --color-bad: #a94a4c;
   --color-window-close: #d72c35;
   --color-warn: #9d6504;
@@ -180,8 +198,8 @@
   /* Moved with the edges above only to preserve their order: a scroll thumb that
      is lighter than a card border reads as the less substantial of the two,
      which is backwards. */
-  --color-scroll-thumb: #bfc5d1;
-  --color-scroll-thumb-well: #adb4c2;
+  --color-scroll-thumb: #c2c5cb;
+  --color-scroll-thumb-well: #b0b4bc;
   --shadow-menu: 0 10px 28px rgba(28, 38, 56, .14);
   --shadow-panel: 0 16px 40px rgba(28, 38, 56, .16);
   --shadow-control: 0 1px 2px rgba(28, 38, 56, .07);

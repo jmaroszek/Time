@@ -18,7 +18,7 @@ export default function ShareBar({
       className="block h-1.5 w-full overflow-hidden rounded-full bg-surface-2"
     >
       <span
-        className="block h-full rounded-full bg-accent"
+        className="block h-full rounded-full bg-accent-data"
         style={{ width: `${Math.max((seconds / maxSeconds) * 100, 1.5)}%` }}
       />
     </span>

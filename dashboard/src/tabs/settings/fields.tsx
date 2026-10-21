@@ -99,7 +99,7 @@ export function PrivacyToggle({
       <span
         aria-hidden="true"
         className={`absolute left-0 top-1.5 h-6 w-11 rounded-full border transition-colors ${
-          enabled ? "border-accent bg-accent" : "border-edge-2 bg-surface-2"
+          enabled ? "border-accent-data bg-accent-data" : "border-edge-2 bg-surface-2"
         }`}
       />
       <span
