@@ -791,10 +791,13 @@ export default function CategoriesAndRules({
                   </span>
                 )}
               </div>
+              {/* No left padding: the rules' 16px glyph column centers under
+                  the header's 12px swatch (12 + 24 + 10 = 46px, less 2), and
+                  the patterns start where the category name does. */}
               <Collapsible
                 open={open}
                 id={`category-rules-${category.id}`}
-                className="ml-[46px] border-t border-edge/50 px-3 py-3"
+                className="ml-[44px] border-t border-edge/50 py-3 pr-3"
               >
                 {/* A category with thirty rules should not push the ones
                     below it off the screen: past a few rows the list becomes
@@ -803,7 +806,10 @@ export default function CategoriesAndRules({
                     hover fill lost its left corners at the well's edge. The
                     well reaches out by the same 8px and pads it back, leaving
                     the rows where they were with room to draw into. */}
-                <div className="scroll-well -ml-2 flex max-h-[220px] flex-col gap-1.5 overflow-y-auto pl-2 pr-2">
+                {/* The gutter is reserved whether or not the list scrolls, so
+                    the figures' right edge does not shift 6px between a short
+                    category and a long one. */}
+                <div className="scroll-well -ml-2 flex max-h-[220px] flex-col gap-1.5 overflow-y-auto pl-2 pr-2 [scrollbar-gutter:stable]">
                   {visibleRules.map((rule) => {
                     const editingThis = activeEdit?.ruleId === rule.id;
                     const unused = usage !== null && !usage.has(rule.id);
@@ -872,11 +878,18 @@ export default function CategoriesAndRules({
                           The time only shows in the order that sorts by it —
                           a sort by a quantity the rows do not show is
                           unreadable. "unused" shows in every order, in the
-                          same place, so no row says "0s". */}
+                          same place, so no row says "0s".
+
+                          The figure's right edge lines up with the header's
+                          productivity label: the header's actions trigger
+                          (32px), gap (10px) and the label's own padding (8px)
+                          come to 50px, less the scroll well's padding (8px)
+                          and scrollbar gutter (6px) on this side. The actions
+                          still fade in at the row's edge. */}
                       <span className="grid shrink-0 justify-items-end [&>*]:col-start-1 [&>*]:row-start-1">
                         {(unused || (ruleOrder === "use" && usage?.has(rule.id))) && (
                           <span
-                            className={`self-center tabular-nums text-ink-3 transition-opacity group-focus-within/rule:pointer-events-none group-focus-within/rule:opacity-0 group-hover/rule:pointer-events-none group-hover/rule:opacity-0 ${
+                            className={`mr-9 self-center tabular-nums text-ink-3 transition-opacity group-focus-within/rule:pointer-events-none group-focus-within/rule:opacity-0 group-hover/rule:pointer-events-none group-hover/rule:opacity-0 ${
                               editingThis ? "opacity-0" : ""
                             }`}
                             title={unused
