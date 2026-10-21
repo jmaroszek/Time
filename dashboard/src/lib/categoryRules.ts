@@ -117,12 +117,12 @@ export const TITLE_MATCH_MODE_OPTIONS: ReadonlyArray<{
  * compared or make a substring stop matching inside a longer word. */
 export function titleMatchModeHelp(mode: TitleRuleMatchMode): string {
   if (mode === "contains") {
-    return "Matches anywhere in the normalized title, including inside longer words.";
+    return "Matches anywhere in the title, including inside longer words.";
   }
   if (mode === "phrase") {
-    return "Matches the same consecutive whole words; punctuation and title separators count as word boundaries.";
+    return "Matches the same consecutive whole words. Punctuation and title separators count as word boundaries.";
   }
-  return "Matches one complete title section separated by marks such as “ — ”, “ - ”, or “ | ”.";
+  return "Matches one complete title section, the text between spaced dashes, bars, or dots.";
 }
 
 /** Explain the current rule against the concrete title that opened the dialog.
