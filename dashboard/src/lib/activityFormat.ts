@@ -235,6 +235,18 @@ export function entityClassification(entity: ActivityEntitySummary): {
   if (entity.rules.length === 0) {
     return { label, detail: "Set by manual corrections — no rule matches." };
   }
+  // The entity's own App or Website rule is the one an app or website always
+  // has, and the menu already shows its category, so there is nothing to add.
+  const ownKind = entity.kind === "website" ? "domain" : "process";
+  const [only] = entity.rules;
+  if (
+    !corrected
+    && entity.rules.length === 1
+    && only.matchType === ownKind
+    && only.pattern.toLowerCase() === entity.key.toLowerCase()
+  ) {
+    return { label, detail: "" };
+  }
   const source = entity.rules.length === 1
     ? describeRuleSource(entity.rules[0].matchType, entity.rules[0].pattern, entity.key)
     : `${entity.rules.length} rules, led by ${entity.rules[0].pattern}`;

@@ -1058,8 +1058,9 @@ export function EntityPanel({
               is narrow: this is the line that says why, and cut short it said
               nothing. */}
           {/* Overridden, the list below names the default and every rule over
-              it, so nothing is left to say here. */}
-          {!overridden && (
+              it, so nothing is left to say here. Decided by its own App or
+              Website rule alone, the detail is empty: the menu says it all. */}
+          {!overridden && summary.detail && (
             <p className="min-w-[12rem] flex-1 text-xs leading-snug text-ink-3">
               <span>
                 {exactRule ? summary.detail : `${summary.label} · ${summary.detail}`}
