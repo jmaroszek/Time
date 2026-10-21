@@ -48,12 +48,10 @@ export const MENU_VARIANTS = {
   bare: "border-transparent text-ink-3 hover:bg-surface-3 disabled:hover:bg-transparent",
   resting: "border-control-edge bg-control text-ink-3 hover:border-edge-2 hover:text-ink-2 focus-visible:border-accent/60",
   engaged: "border-accent/45 bg-accent/[.06] text-ink hover:border-accent/65 focus-visible:border-accent/60",
-  // Deliberately Button's `default` string, weight included. This trigger's
-  // neighbours are buttons rather than other fields, and a control that reads
-  // as a form input beside them looks disabled next to the verbs it belongs
+  // An action menu beside Button's `text` variant, drawn the same way. Its
+  // neighbours are buttons rather than other fields, and a control that read as
+  // a form input beside them would look disabled next to the verbs it belongs
   // with. Pair with size "control", which is the shape Button draws.
-  action: "border-edge bg-surface-2 text-ink-2 font-medium hover:border-edge-2 hover:text-ink",
-  // The action menu beside Button's `text` variant, drawn the same way.
   "text-action": "border-transparent text-ink-2 font-semibold hover:bg-hover-2 hover:text-accent",
 } as const;
 
@@ -106,11 +104,10 @@ export function MenuSelect({
    *  able to see. Pick between them at the call site, which is the only place
    *  that knows which of its values means "no filter".
    *
-   *  "action" is for a menu that fires a command and keeps no selection, sat in
-   *  a row of buttons: it borrows Button's resting style, and its placeholder —
-   *  a verb rather than an empty value — keeps full strength. "text-action" is
-   *  the same menu without a border, beside Button's `text` variant. */
-  variant?: "default" | "quiet" | "bare" | "resting" | "engaged" | "action" | "text-action";
+   *  "text-action" is for a menu that fires a command and keeps no selection,
+   *  sat in a row of buttons: it borrows Button's `text` style, and its
+   *  placeholder — a verb rather than an empty value — keeps full strength. */
+  variant?: "default" | "quiet" | "bare" | "resting" | "engaged" | "text-action";
   /** "field" matches the taller text inputs, for menus that sit in a row
    *  beside one. Passing the padding through className instead would leave
    *  which utility wins up to Tailwind's ordering rather than the call site. */
@@ -277,7 +274,7 @@ export function MenuSelect({
             state this trigger is always in. */}
         <span
           className={`flex min-w-0 items-center gap-1.5 ${
-            current || variant === "action" || variant === "text-action" ? "" : "text-ink-3"
+            current || variant === "text-action" ? "" : "text-ink-3"
           }`}
         >
           {current ? (

@@ -353,7 +353,7 @@ export function CategoryRuleForm({
         {/* Primary only once there is something to submit: a disabled
             primary rests as a faded blue ghost that reads as broken. */}
         <Button
-          variant={ready ? "primary-fill" : "text"}
+          variant={ready ? "primary" : "text"}
           disabled={!ready}
           onClick={submit}
         >
