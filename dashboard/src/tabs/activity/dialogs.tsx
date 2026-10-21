@@ -740,6 +740,11 @@ export function SessionCorrectionDialog({
     && (session.start !== session.originalStart || session.end !== session.originalEnd);
   // A category on the correction row is a session override, which is what the
   // row's "Reclassified" tag is drawn from.
+  const name = !session
+    ? ""
+    : session.domain
+      ? cleanDomainName(session.domain, aliases)
+      : cleanProcessName(session.process, aliases);
   const editLabel = session && visitEditLabel({
     isCorrected: session.isCorrected,
     classificationSource: session.categoryId == null ? "none" : "session_override",
@@ -771,9 +776,7 @@ export function SessionCorrectionDialog({
                 was, when the row they clicked is identified by its time. */}
             <div className="mt-3 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs">
               <p className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate font-medium">
-                  {session.domain ? cleanDomainName(session.domain, aliases) : cleanProcessName(session.process, aliases)}
-                </span>
+                <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
                 {editLabel && (
                   <span className="shrink-0 rounded-full bg-accent/10 px-1.5 py-[1px] text-xs text-accent">
                     {editLabel}
@@ -783,7 +786,11 @@ export function SessionCorrectionDialog({
               <p className="mt-1 tabular-nums text-ink-3">
                 {formatVisitDay(session.start)} · {visitClock(session.start)}–{visitClock(session.end)} · {fmtDuration(Math.max(0, session.end - session.start))}
               </p>
-              {session.title && <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>}
+              {/* Apps that title their window with their own name (ChatGPT,
+                  Spotify) would repeat the line above. */}
+              {session.title && session.title.trim().toLowerCase() !== name.toLowerCase() && (
+                <p className="mt-1 truncate text-ink-3" title={session.title}>{session.title}</p>
+              )}
             </div>
             {/* A state, not a failure: the warn tone the app's notices use. */}
             {locked && (
