@@ -503,12 +503,45 @@ describe("entityClassification", () => {
     ...over,
   });
 
-  it("names the kind of rule that decided it", () => {
+  it("says nothing when the entity's own rule decided it", () => {
+    // An app always has an App rule and a website a Website rule; the menu
+    // already shows the category, so "App rule" would only repeat it.
     const summary = entityClassification({ ...base, rules: [rule()] });
     expect(summary.label).toBe("Focus");
-    // Not "App rule · code.exe": the pattern is this entity's own key, which
-    // the panel prints under the title two lines above.
-    expect(summary.detail).toBe("App rule");
+    expect(summary.detail).toBe("");
+    const site = entityClassification({
+      ...base,
+      kind: "website",
+      key: "example.com",
+      rules: [rule({ matchType: "domain", pattern: "Example.com" })],
+    });
+    expect(site.detail).toBe("");
+  });
+
+  it("names a parent-domain Website rule, which reaches sibling sites too", () => {
+    const summary = entityClassification({
+      ...base,
+      kind: "website",
+      key: "docs.google.com",
+      rules: [rule({ matchType: "domain", pattern: "google.com" })],
+    });
+    expect(summary.detail).toBe("Website rule · google.com");
+  });
+
+  it("names a rule of another kind even when its pattern is the entity's key", () => {
+    const summary = entityClassification({
+      ...base,
+      rules: [rule({ matchType: "title", pattern: "code.exe" })],
+    });
+    expect(summary.detail).toBe("Window rule");
+  });
+
+  it("names the rules when more than one agrees", () => {
+    const summary = entityClassification({
+      ...base,
+      rules: [rule({ seconds: 1800 }), rule({ ruleId: 2, seconds: 1800, matchType: "title", pattern: "mail" })],
+    });
+    expect(summary.detail).toBe("2 rules, led by code.exe");
   });
 
   it("prints a pattern the header does not already show", () => {
@@ -532,7 +565,7 @@ describe("entityClassification", () => {
 
   it("does not blame a rule for a rounding remainder", () => {
     const summary = entityClassification({ ...base, rules: [rule({ seconds: 3599 })] });
-    expect(summary.detail).toBe("App rule");
+    expect(summary.detail).toBe("");
   });
 
   it("reports the absence of a rule rather than a category name", () => {
