@@ -21,8 +21,6 @@ const components = Object.entries(FILES).filter(([path]) => !path.includes(".tes
 const VALUE_CONTROLS: Record<string, number> = {
   // The select trigger, which shows the value it holds.
   "../components/ui/MenuSelect.tsx": 1,
-  // The rule-type cards in the rule dialog: the selected one is outlined.
-  "../tabs/activity/dialogs.tsx": 1,
   // The restore dialog's list of backups, a radio group.
   "../tabs/settings/DataSection.tsx": 1,
   // The browser-process and media-site chips: each is an entered value.
