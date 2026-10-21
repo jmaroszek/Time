@@ -641,6 +641,41 @@ for (const fail of [false, true]) {
   });
 }
 
+test("@workflow a Window rule is chosen in words and saved for the window's app", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.locator("tbody tr").filter({ hasText: /slack/i }).getByRole("button").first().click();
+  await page.getByRole("button", { name: /^Product Design/ }).first().click();
+  await page.getByRole("button", { name: "Create Window rule", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "New Window rule" });
+  const choices = dialog.getByRole("radiogroup", { name: "Which windows" });
+  // Every Slack visit in the fixture has this one title, so each suggestion
+  // takes the same single window: one survives, and the App rule is offered.
+  await expect(choices.getByRole("radio")).toHaveCount(2);
+  await expect(choices.getByRole("radio").first()).toBeChecked();
+  await expect(dialog.getByText(/Nothing in this title repeats/)).toBeVisible();
+
+  await choices.getByText("something else…").click();
+  await dialog.getByRole("textbox", { name: "Words in the title" }).fill("no such words");
+  await expect(dialog.getByRole("button", { name: "0 windows" })).toBeVisible();
+
+  await choices.locator("label").first().click();
+  await expect(choices.getByRole("radio").first()).toBeChecked();
+  const add = dialog.getByRole("button", { name: "Add rule", exact: true });
+  await expect(add).toBeDisabled();
+  await dialog.getByRole("combobox", { name: "Category" }).click();
+  await page.getByRole("option", { name: "Focus", exact: true }).click();
+  await add.click();
+  await expect(dialog).toHaveCount(0);
+
+  const insert = await page.evaluate(() => window.__TIME_DEVICE_TEST__.invocations
+    .find((call) => call.command === "db_execute"
+      && String(call.args?.query).toLowerCase().includes("insert into rules")));
+  const [matchType, , , , scopeKind, scopeValue] = insert?.args?.values as unknown[];
+  expect([matchType, scopeKind, scopeValue]).toEqual(["title", "process", "slack.exe"]);
+});
+
 // The update control is the whole update feature as far as a user is concerned:
 // if it does not appear, nobody updates, and if it moves the header when it
 // appears or expands, it breaks the one rule this header has — the date-range

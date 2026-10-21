@@ -1,10 +1,12 @@
 import type { ActivitySource } from "./activity";
-import { entityIdentity } from "./entityIdentity";
+import { windowGroupTitle } from "./activityFormat";
+import { entityIdentity, windowGroupKey } from "./entityIdentity";
 import { dayKeyFromSeconds } from "./time";
 import {
   buildClassifier,
   DEFAULT_RULE_PRIORITY,
   normalizeRulePattern,
+  type Category,
   type MatchType,
   type Rule,
 } from "./classify";
@@ -283,11 +285,110 @@ export function previewRule(
   rawSpec: Partial<Omit<TitleRuleSpec, "pattern">> = {},
   replaceRuleId?: number,
 ): TitleRulePreview | null {
-  const pattern = normalizeRulePattern(matchType, rawPattern);
-  if (!pattern) return null;
   const browsers = new Set(
     source.browserProcesses.map((process) => process.toLowerCase()),
   );
+  let sessions = 0;
+  let seconds = 0;
+  let reclassified = 0;
+  const days = new Set<string>();
+  const titles = new Set<string>();
+  const entities = new Set<string>();
+  const valid = forEachClaimed(source, browsers, matchType, rawPattern, rawSpec, replaceRuleId, (session, before) => {
+    sessions += 1;
+    seconds += session.end - session.start;
+    days.add(dayKeyFromSeconds(session.start));
+    // App and Website rules claim untitled sessions too, so the title count is
+    // a property of what matched rather than of every counted session.
+    if (session.title) titles.add(normalizeWindowTitle(session.title));
+    entities.add(entityIdentity(session, browsers).id);
+    if (before !== null) reclassified += 1;
+  });
+  if (!valid) return null;
+  return {
+    sessions,
+    seconds,
+    days: days.size,
+    titles: titles.size,
+    entities: entities.size,
+    reclassified,
+  };
+}
+
+/** One Activity window a rule would take: the same window the Library lists,
+ *  keyed the same way, so a count here and a row there agree. */
+export interface TitleRuleWindow {
+  key: string;
+  /** The newest original spelling. */
+  title: string;
+  seconds: number;
+  /** Where most of its claimed time sits today. Null when that is nowhere. */
+  categoryId: number | null;
+}
+
+/**
+ * The windows a Window rule would win, heaviest first.
+ *
+ * Counted like `previewRule` — precedence and visit corrections included — but
+ * kept per window, because the dialog shows which windows rather than how many
+ * visits, and has to say when one of them would leave another category.
+ */
+export function titleRuleWindows(
+  source: ActivitySource,
+  rawSpec: TitleRuleSpec,
+): TitleRuleWindow[] {
+  const browsers = new Set(
+    source.browserProcesses.map((process) => process.toLowerCase()),
+  );
+  const windows = new Map<string, TitleRuleWindow & {
+    newest: number;
+    byCategory: Map<number | null, number>;
+  }>();
+  forEachClaimed(source, browsers, "title", rawSpec.pattern, rawSpec, undefined, (session, before) => {
+    const identity = entityIdentity(session, browsers);
+    const title = session.title ?? "";
+    const key = windowGroupKey(identity.id, windowGroupTitle(title, session.process, identity.key));
+    const duration = session.end - session.start;
+    let window = windows.get(key);
+    if (!window) {
+      window = { key, title, seconds: 0, categoryId: null, newest: session.start, byCategory: new Map() };
+      windows.set(key, window);
+    }
+    window.seconds += duration;
+    if (session.start > window.newest) {
+      window.newest = session.start;
+      window.title = title;
+    }
+    const categoryId = before?.id ?? null;
+    window.byCategory.set(categoryId, (window.byCategory.get(categoryId) ?? 0) + duration);
+  });
+  return [...windows.values()]
+    .map(({ newest: _newest, byCategory, ...window }) => {
+      let categoryId: number | null = null;
+      let most = -1;
+      for (const [id, seconds] of byCategory) {
+        if (seconds > most) [categoryId, most] = [id, seconds];
+      }
+      return { ...window, categoryId };
+    })
+    .sort((left, right) => right.seconds - left.seconds);
+}
+
+/**
+ * Visit every session the candidate rule would win, with what classifies it
+ * today. False when the pattern normalizes to nothing matchable.
+ */
+function forEachClaimed(
+  source: ActivitySource,
+  browsers: Set<string>,
+  matchType: MatchType,
+  rawPattern: string,
+  rawSpec: Partial<Omit<TitleRuleSpec, "pattern">>,
+  replaceRuleId: number | undefined,
+  visit: (session: ActivitySource["sessions"][number], before: Category | null) => void,
+): boolean {
+  const pattern = normalizeRulePattern(matchType, rawPattern);
+  if (!pattern) return false;
   const spec = normalizeTitleRuleSpec({
     pattern,
     scopeKind: rawSpec.scopeKind ?? "any",
@@ -318,32 +419,12 @@ export function previewRule(
     ],
     browsers,
   );
-  let sessions = 0;
-  let seconds = 0;
-  let reclassified = 0;
-  const days = new Set<string>();
-  const titles = new Set<string>();
-  const entities = new Set<string>();
   for (const session of source.sessions) {
     if (session.isAfk || session.end <= session.start) continue;
     if (after(session)?.id !== -1) continue;
-    sessions += 1;
-    seconds += session.end - session.start;
-    days.add(dayKeyFromSeconds(session.start));
-    // App and Website rules claim untitled sessions too, so the title count is
-    // a property of what matched rather than of every counted session.
-    if (session.title) titles.add(normalizeWindowTitle(session.title));
-    entities.add(entityIdentity(session, browsers).id);
-    if (before(session) !== null) reclassified += 1;
+    visit(session, before(session));
   }
-  return {
-    sessions,
-    seconds,
-    days: days.size,
-    titles: titles.size,
-    entities: entities.size,
-    reclassified,
-  };
+  return true;
 }
 
 /** A Window rule always has a pattern once normalized, so the dialog's caller

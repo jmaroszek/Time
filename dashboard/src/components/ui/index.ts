@@ -8,5 +8,6 @@ export { TextInput } from "./TextInput";
 export { MENU_SIZES, MENU_VARIANTS, MENU_VIEWPORT_MARGIN, type MenuOption, MenuSelect } from "./MenuSelect";
 export { CategoryDot, StateDot } from "./Dots";
 export { Checkbox } from "./Checkbox";
+export { Radio } from "./Radio";
 export { ConfirmDialog, type ConfirmMetric, DialogShell } from "./Dialog";
 export { Spinner } from "./Spinner";
