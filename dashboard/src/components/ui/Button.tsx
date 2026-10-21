@@ -11,7 +11,7 @@ export function Button({
 }: {
   children: ReactNode;
   onClick?: () => void;
-  variant?: "text" | "text-danger" | "primary" | "danger";
+  variant?: "text" | "text-danger" | "accent" | "primary" | "danger";
   disabled?: boolean;
   title?: string;
   /** Placement only, such as the negative margin that sets a text action's
@@ -32,12 +32,18 @@ export function Button({
    * button in a group that commits, so it is found without an outline. Red in
    * either shape only where recorded history is removed.
    *
+   * `accent` is text in blue at rest, for a lone action that would otherwise be
+   * gray text among gray labels, with nothing beside it to read as its group —
+   * the same treatment as "View insights" and "Review suggestions". Use it
+   * sparingly: blue everywhere would stop meaning "this one".
+   *
    * The transparent border is not decoration. It keeps a button the same height
    * as a MenuSelect trigger, which has a border, wherever the two share a row.
    */
   const styles = {
     text: "text-ink-2 hover:bg-hover-2 hover:text-accent",
     "text-danger": "text-bad hover:bg-bad/10",
+    accent: "text-accent hover:bg-accent/10",
     primary: "bg-accent/10 text-accent hover:bg-accent/[.18]",
     danger: "bg-bad/10 text-bad hover:bg-bad/[.18]",
   }[variant];
