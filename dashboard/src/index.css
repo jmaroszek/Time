@@ -180,15 +180,15 @@
      enough on white to pass as text, but a solid fill with nothing written on
      it does not. Filled with the text blue, the share bars and switches were
      the heaviest marks on the page, where dark's are its softest. Dark keeps
-     one value for both jobs; only light needs the split. Both sit at dark's
-     hue with a little less chroma than they were drawn with (#2a66b0 /
-     #4683cf): those were darker *and* more saturated than dark's accent. */
-  --color-accent-data: #528dcd;
+     one value for both jobs; only light needs the split. The fill sits on
+     light's own chroma budget (see palettes.ts), not dark's. */
+  --color-accent-data: #588dc7;
   --color-on-accent: #ffffff;
-  /* Held at dark's saturation. The greens were drawn at about 0.8x dark's
-     chroma, which on white read as sage rather than as the same emerald. */
-  --color-good: #157853;
-  --color-good-data: #009663;
+  /* On light's chroma budget (~0.11, see palettes.ts) rather than dark's: on
+     white, saturation is weight, and dark's emerald became the loudest thing
+     on the page. -data is the Vivid productive fill; plain is its text tier. */
+  --color-good: #2d7956;
+  --color-good-data: #3c9467;
   --color-bad: #a94a4c;
   --color-window-close: #d72c35;
   --color-warn: #9d6504;
