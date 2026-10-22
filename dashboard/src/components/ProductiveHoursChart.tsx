@@ -582,7 +582,7 @@ export function formatHoursTooltipRow(
   // segment can be non-zero yet under a minute. Those are dropped like zeros;
   // seconds beside hours-scale bars are noise.
   if (value === null || (p.seriesName !== averageName && Number(p.value) * 60 < 1)) return [];
-  return [tooltipRow(p.marker, p.seriesName, `<b>${value}</b>`)];
+  return [tooltipRow(p.marker, p.seriesName, `<b class="tip-value">${value}</b>`)];
 }
 
 export function formatHoursBucketRange(bucket: HoursBucket): string {

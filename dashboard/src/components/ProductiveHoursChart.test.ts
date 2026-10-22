@@ -86,17 +86,17 @@ describe("formatHoursTooltipRow", () => {
     // Stack values are rounded to hundredths of an hour; 0.01h is 36 seconds.
     expect(formatHoursTooltipRow({ marker: "●", seriesName: "Media", value: 0.01 }, "7-day productive avg")).toEqual([]);
     expect(formatHoursTooltipRow({ marker: "●", seriesName: "Media", value: 0.03 }, "7-day productive avg"))
-      .toEqual(["●Media: <b>1m</b>"]);
+      .toEqual(['●Media: <b class="tip-value">1m</b>']);
   });
 
   it("keeps a non-zero stack segment", () => {
     expect(formatHoursTooltipRow({ marker: "●", seriesName: "Productive", value: 6 }, "7-day productive avg"))
-      .toEqual(["●Productive: <b>6h 0m</b>"]);
+      .toEqual(['●Productive: <b class="tip-value">6h 0m</b>']);
   });
 
   it("shows the average line even when it's zero", () => {
     expect(formatHoursTooltipRow({ marker: "●", seriesName: "7-day productive avg", value: 0 }, "7-day productive avg"))
-      .toEqual(["●7-day productive avg: <b>0s</b>"]);
+      .toEqual(['●7-day productive avg: <b class="tip-value">0s</b>']);
   });
 
   it("still omits the average line when it's missing", () => {
@@ -108,7 +108,7 @@ describe("formatHoursTooltipRow", () => {
       marker: '<span class="marker">●</span>',
       seriesName: 'R&D <script>alert("x")</script> & more',
       value: 1,
-    }, "7-day productive avg")).toEqual(['<span class="marker">●</span>R&amp;D &lt;script&gt;alert("x")&lt;/script&gt; &amp; more: <b>1h 0m</b>']);
+    }, "7-day productive avg")).toEqual(['<span class="marker">●</span>R&amp;D &lt;script&gt;alert("x")&lt;/script&gt; &amp; more: <b class="tip-value">1h 0m</b>']);
   });
 });
 

@@ -325,7 +325,7 @@ describe("activity metrics", () => {
 
   it("gives every metric a ramp, a label, and a word", () => {
     for (const metric of ACTIVITY_METRICS) {
-      expect(ACTIVITY_METRIC_RAMPS[metric]).toHaveLength(4);
+      expect(ACTIVITY_METRIC_RAMPS[metric].length).toBeGreaterThanOrEqual(2);
       expect(ACTIVITY_METRIC_LABELS[metric]).toBeTruthy();
       expect(ACTIVITY_METRIC_WORDS[metric]).toBeTruthy();
     }

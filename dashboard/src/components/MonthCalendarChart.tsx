@@ -14,7 +14,7 @@ import {
   type MonthlyActivitySummary,
 } from "../lib/overview";
 import { useMeta } from "../state/meta";
-import { metricRamps } from "../lib/palettes";
+import { clampToScale, heatmapScaleMax, metricRamps } from "../lib/palettes";
 import { CHART_FONT_FAMILY, CHART_LABEL_SIZE, chartChrome, tooltipStyle } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 
@@ -48,16 +48,19 @@ export default function MonthCalendarChart({
     const chrome = chartChrome(theme);
     const rowIndex = new Map(years.map((year, index) => [year, index]));
     const byPoint = new Map<string, MonthlyActivitySummary>();
-    const data: [number, number, number][] = [];
-    let maxHours = 0;
+    const points: [number, number, number][] = [];
     for (const month of summaries) {
       const y = rowIndex.get(month.year);
       if (y === undefined) continue;
-      const hours = metricSeconds(month, metric) / 3600;
-      maxHours = Math.max(maxHours, hours);
       byPoint.set(`${month.month},${y}`, month);
-      data.push([month.month, y, Math.round(hours * 100) / 100]);
+      points.push([month.month, y, metricSeconds(month, metric) / 3600]);
     }
+    const maxHours = heatmapScaleMax(points.map((point) => point[2]), 1);
+    const data = points.map(([x, y, hours]): [number, number, number] => [
+      x,
+      y,
+      Math.round(clampToScale(hours, maxHours) * 100) / 100,
+    ]);
 
     return {
       animation: false,
@@ -97,7 +100,7 @@ export default function MonthCalendarChart({
       visualMap: {
         show: false,
         min: 0,
-        max: Math.max(maxHours, 1),
+        max: maxHours,
         inRange: { color: metricRamps(palette, theme)[metric] },
       },
       series: [

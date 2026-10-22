@@ -188,19 +188,46 @@ export const DEFAULT_PALETTE = resolvePalette(DEFAULT_PALETTE_ID);
 const srgbToLinear = (channel: number) =>
   channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
 
-/** OKLCH hue gives unlike palettes a common visual order. The fixed 35° start
- *  begins near orange and walks through green, teal, blue, violet, and rose;
- *  muted neutrals stay in their deliberate final two slots. */
-function perceptualHue(hex: string): number {
+const linearToSrgb = (channel: number) =>
+  channel <= 0.0031308 ? 12.92 * channel : 1.055 * channel ** (1 / 2.4) - 0.055;
+
+/** A hex colour in OKLab, as [L, a, b]. */
+function hexToOklab(hex: string): [number, number, number] {
   const [r, g, b] = [1, 3, 5].map((index) =>
     srgbToLinear(parseInt(hex.slice(index, index + 2), 16) / 255),
   );
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
-  const labB = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
-  const hue = (Math.atan2(labB, a) * 180) / Math.PI;
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+/** An OKLab colour as hex, or null when it falls outside the sRGB gamut. */
+function oklabToHex(lightness: number, a: number, b: number): string | null {
+  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const linear = [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  if (!linear.every((channel) => channel >= 0 && channel <= 1)) return null;
+  return "#" + linear
+    .map((channel) => Math.round(linearToSrgb(channel) * 255).toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** OKLCH hue gives unlike palettes a common visual order. The fixed 35° start
+ *  begins near orange and walks through green, teal, blue, violet, and rose;
+ *  muted neutrals stay in their deliberate final two slots. */
+function perceptualHue(hex: string): number {
+  const [, a, b] = hexToOklab(hex);
+  const hue = (Math.atan2(b, a) * 180) / Math.PI;
   return (hue - 35 + 720) % 360;
 }
 
@@ -335,9 +362,79 @@ const TRACKED_PEAK: Record<ThemeName, string> = {
 };
 
 // Keep zero flush with the card and the maximum at the full data colour, but
-// bring typical nonzero cells forward. A linear blend left most heatmap cells
-// much quieter than the bars even though their peaks matched.
-const RAMP_BLEND_STRENGTHS = [0, 0.55, 0.82, 1];
+// bring typical nonzero cells forward: a linear blend left most cells much
+// quieter than the bars even though their peaks matched. Both themes share one
+// gamma-0.7 curve (strength = t^0.7) on five evenly spaced stops. The steeper
+// curves tried before (dark's [0, 0.55, 0.82, 1], light's [0, 0.68, 0.9, 1])
+// spent so much of the change in the bottom third that a 3.5h and a 6h day
+// landed nearly the same shade; this keeps the low-end lift with enough slope
+// left at the top to tell mid days from busy ones.
+const RAMP_BLEND_STRENGTHS = [0, 0.38, 0.62, 0.82, 1];
+
+// The plain total-time bar takes its fill from the tracked ramp, at the
+// strength the old curve's first stop had. Pinned so retuning the heatmap
+// curve does not repaint the bars.
+const TOTAL_BAR_STRENGTH = 0.55;
+
+// Light's bar colors sit at L~0.60 / C~0.11, a budget set so a bar does not
+// shout on white, which leaves a heatmap scale only 0.40 of lightness to work
+// with. Light heatmaps therefore top out slightly deeper and a little more
+// chromatic than the bars: the same hue, lower in OKLCH lightness, with chroma
+// raised as far as the sRGB gamut allows (the light red is already near the
+// edge, so it ends up slightly less chromatic than the bar; green gains). Twice this (0.08 / 1.18) made the
+// hottest days heavier than the bars beside them. Dark keeps the state colour.
+const HEATMAP_PEAK_LIGHTNESS_DROP = 0.04;
+const HEATMAP_PEAK_CHROMA_GAIN = 1.09;
+
+// Chroma is backed off in these steps until the deepened colour fits in sRGB.
+const GAMUT_CHROMA_STEP = 0.002;
+
+function deepenHeatmapPeak(hex: string): string {
+  const [lightness, a, b] = hexToOklab(hex);
+  const hue = Math.atan2(b, a);
+  const targetL = lightness - HEATMAP_PEAK_LIGHTNESS_DROP;
+  for (
+    let chroma = Math.hypot(a, b) * HEATMAP_PEAK_CHROMA_GAIN;
+    chroma >= 0;
+    chroma -= GAMUT_CHROMA_STEP
+  ) {
+    const fitted = oklabToHex(targetL, chroma * Math.cos(hue), chroma * Math.sin(hue));
+    if (fitted) return fitted;
+  }
+  return hex;
+}
+
+/** The colour a heatmap's hottest cell reaches in this theme. */
+function heatmapPeak(color: string, theme: ThemeName): string {
+  return theme === "light" ? deepenHeatmapPeak(color) : color;
+}
+
+const SCALE_PERCENTILE = 0.95;
+// Below this many non-empty cells a percentile is just the maximum with extra
+// steps (a year of months, a short range), so the plain maximum is kept.
+const SCALE_MIN_CELLS = 8;
+
+/** Where a heatmap's colour scale tops out: the 95th percentile of non-empty
+ *  cells rather than the hottest one, so one outlier day
+ *  doesn't push every ordinary day toward the pale end; cells above it simply
+ *  take the peak colour (callers clamp their values with `clampToScale`).
+ *  Empty cells are left out: they are flush with the card and say nothing about
+ *  how busy a busy cell is. */
+export function heatmapScaleMax(values: number[], floor: number): number {
+  const positive = values.filter((v) => v > 0).sort((a, b) => a - b);
+  const max = positive.length > 0 ? positive[positive.length - 1] : 0;
+  if (positive.length < SCALE_MIN_CELLS) return Math.max(max, floor);
+  const rank = (positive.length - 1) * SCALE_PERCENTILE;
+  const lo = Math.floor(rank);
+  const hi = Math.ceil(rank);
+  const value = positive[lo] + (positive[hi] - positive[lo]) * (rank - lo);
+  return Math.max(value, floor);
+}
+
+/** A cell's value as the colour scale sees it: capped at the scale's top. */
+export function clampToScale(value: number, scaleMax: number): number {
+  return Math.min(value, scaleMax);
+}
 
 function mix(from: string, to: string, t: number): string {
   const channels = [1, 3, 5].map((i) => {
@@ -348,20 +445,17 @@ function mix(from: string, to: string, t: number): string {
   return "#" + channels.map((c) => c.toString(16).padStart(2, "0")).join("");
 }
 
-/** A perceptually front-loaded 4-stop ramp from the card surface up to `color`,
- *  so empty cells recede, typical activity remains legible, and the hottest cell
- *  still reaches the palette's exact state colour. The blend strengths are
- *  theme-independent — they are perceptual, and only the surface they start from
- *  changes. */
+/** A front-loaded ramp from the card surface up to `color`, so empty cells
+ *  recede, typical activity remains legible, and the hottest cell reaches the
+ *  peak colour. */
 function rampFrom(surface: string, color: string): string[] {
   return RAMP_BLEND_STRENGTHS.map((strength) => mix(surface, color, strength));
 }
 
 /** The bar fill for a plain total-time series: the tracked heatmap's blue,
- *  dimmed to the ramp's second stop so the trend line, drawn at the full peak,
- *  is what stands out. */
+ *  dimmed so the trend line, drawn at the full peak, is what stands out. */
 export function totalBarColor(theme: ThemeName): string {
-  return rampFrom(RAMP_SURFACE[theme], TRACKED_PEAK[theme])[1];
+  return mix(RAMP_SURFACE[theme], TRACKED_PEAK[theme], TOTAL_BAR_STRENGTH);
 }
 
 /** Heatmap ramp per shaded metric, derived from the palette's state colours and
@@ -372,10 +466,10 @@ export function metricRamps(
 ): Record<ActivityMetric, string[]> {
   const surface = RAMP_SURFACE[theme];
   return {
-    tracked: rampFrom(surface, TRACKED_PEAK[theme]),
-    productive: rampFrom(surface, palette.productive),
-    unproductive: rampFrom(surface, palette.unproductive),
-    neutral: rampFrom(surface, palette.neutral),
+    tracked: rampFrom(surface, heatmapPeak(TRACKED_PEAK[theme], theme)),
+    productive: rampFrom(surface, heatmapPeak(palette.productive, theme)),
+    unproductive: rampFrom(surface, heatmapPeak(palette.unproductive, theme)),
+    neutral: rampFrom(surface, heatmapPeak(palette.neutral, theme)),
   };
 }
 

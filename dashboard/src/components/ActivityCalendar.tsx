@@ -16,7 +16,7 @@ import {
   type WeekStart,
 } from "../lib/time";
 import { useMeta } from "../state/meta";
-import { metricRamps } from "../lib/palettes";
+import { clampToScale, heatmapScaleMax, metricRamps } from "../lib/palettes";
 import { CHART_FONT_FAMILY, CHART_LABEL_SIZE, chartChrome, tooltipStyle } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 import { useElementWidth } from "../lib/responsive";
@@ -46,7 +46,7 @@ export default function ActivityCalendar({
     const shaded = (day: DailyActivitySummary) => metricSeconds(day, metric);
     // Rescaled per metric: every state is a subset of tracked, so reusing the
     // tracked scale would wash the narrower fields out.
-    const maxHours = Math.max(...summaries.map((day) => shaded(day) / 3600), 1);
+    const maxHours = heatmapScaleMax(summaries.map((day) => shaded(day) / 3600), 1);
     const ramp = metricRamps(palette, theme)[metric];
     const lastDay = addDays(range.end, -1);
     // A week-column count low enough that "auto" would stretch each cell into a
@@ -110,7 +110,10 @@ export default function ActivityCalendar({
         {
           type: "heatmap",
           coordinateSystem: "calendar",
-          data: summaries.map((day) => [day.key, Math.round((shaded(day) / 3600) * 100) / 100]),
+          data: summaries.map((day) => [
+            day.key,
+            Math.round(clampToScale(shaded(day) / 3600, maxHours) * 100) / 100,
+          ]),
         },
       ],
     };

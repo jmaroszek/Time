@@ -276,9 +276,9 @@ function DeltaBadge({
     : `${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct)}%`;
   const cls =
     !forceNeutral && item.direction === "good"
-      ? "text-good"
+      ? "text-[var(--color-delta-good)]"
       : !forceNeutral && item.direction === "bad"
-        ? "text-bad"
+        ? "text-[var(--color-delta-bad)]"
         : "text-ink-2";
   // Only the robustness gate is about one day. Gray for being small, uncategorized
   // or in a neutral category must not borrow its explanation. Browser rows are

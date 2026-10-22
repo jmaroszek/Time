@@ -24,7 +24,7 @@ import {
   type WeekdayRhythmSummary,
 } from "../lib/overview";
 import { useMeta } from "../state/meta";
-import { metricRamps } from "../lib/palettes";
+import { clampToScale, heatmapScaleMax, metricRamps } from "../lib/palettes";
 import { CHART_FONT_FAMILY, CHART_LABEL_SIZE, chartChrome, tooltipStyle } from "../lib/chartTheme";
 import EChart, { type EChartsOption } from "./EChart";
 import { rhythmHourInterval, useViewportWidth } from "../lib/responsive";
@@ -48,17 +48,21 @@ export default function RhythmChart({
     for (let h = dayStartHour; h < dayEndHour; h++) visibleHours.push(h);
 
     const cellByPoint = new Map<string, RhythmCell>();
-    let maxMinutes = 0;
-    const data: [number, number, number][] = [];
+    const points: [number, number, number][] = [];
     for (const cell of cells) {
       const count = weekdayCounts[cell.weekday];
       const avgMinutes = count > 0 ? metricSeconds(cell, metric) / count / 60 : 0;
-      maxMinutes = Math.max(maxMinutes, avgMinutes);
       const x = cell.hour - dayStartHour;
       const y = rowIndex.get(cell.weekday)!;
       cellByPoint.set(`${x},${y}`, cell);
-      data.push([x, y, Math.round(avgMinutes * 10) / 10]);
+      points.push([x, y, avgMinutes]);
     }
+    const maxMinutes = heatmapScaleMax(points.map((point) => point[2]), 1);
+    const data = points.map(([x, y, minutes]): [number, number, number] => [
+      x,
+      y,
+      Math.round(clampToScale(minutes, maxMinutes) * 10) / 10,
+    ]);
 
     return {
       animation: false,
@@ -95,7 +99,7 @@ export default function RhythmChart({
         min: 0,
         // Rescaled per metric — every state is a subset of tracked, so a shared
         // scale would render the narrower fields uniformly dim.
-        max: Math.max(maxMinutes, 1),
+        max: maxMinutes,
         inRange: { color: metricRamps(palette, theme)[metric] },
       },
       series: [

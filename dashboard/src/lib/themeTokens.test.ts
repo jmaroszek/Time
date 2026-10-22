@@ -96,6 +96,9 @@ const CONTRAST_FLOORS: Array<{ ink: string; on: string[]; floor: number }> = [
   { ink: "--color-accent", on: ["--color-bg", "--color-surface", "--color-surface-dim"], floor: 4.5 },
   { ink: "--color-bad", on: ["--color-surface", "--color-surface-dim"], floor: 4.5 },
   { ink: "--color-good", on: ["--color-surface", "--color-surface-dim"], floor: 4.5 },
+  // The percent-change text in the top-usage lists: 12px, so the text floor.
+  { ink: "--color-delta-bad", on: ["--color-surface", "--color-surface-dim"], floor: 4.5 },
+  { ink: "--color-delta-good", on: ["--color-surface", "--color-surface-dim"], floor: 4.5 },
   // 3:1, not 4.5:1, and the two-tier rule in index.css is the reason: -data is
   // the fill tier — a bar, a chart mark, the liveness dot — which WCAG holds to
   // the graphical-object floor. Text and annotation dots use plain --color-good,

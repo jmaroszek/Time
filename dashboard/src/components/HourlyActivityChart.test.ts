@@ -8,6 +8,6 @@ describe("formatHourlyTooltipRow", () => {
       marker: '<span class="marker">●</span>',
       seriesName: 'Design <img src=x onerror=alert(1)> & review',
       value: 1,
-    })).toBe('<span class="marker">●</span>Design &lt;img src=x onerror=alert(1)&gt; &amp; review: <b>1m</b>');
+    })).toBe('<span class="marker">●</span>Design &lt;img src=x onerror=alert(1)&gt; &amp; review: <b class="tip-value">1m</b>');
   });
 });

@@ -192,5 +192,5 @@ export default function HourlyActivityChart({
 export function formatHourlyTooltipRow(
   param: { marker: string; seriesName: string; value: number },
 ): string {
-  return tooltipRow(param.marker, param.seriesName, `<b>${fmtDuration(Number(param.value) * 60)}</b>`);
+  return tooltipRow(param.marker, param.seriesName, `<b class="tip-value">${fmtDuration(Number(param.value) * 60)}</b>`);
 }

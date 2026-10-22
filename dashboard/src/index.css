@@ -68,6 +68,8 @@
   --color-good: #4fb389;
   --color-good-data: #16b981;
   --color-bad: #d07d7d;
+  --color-delta-good: #4fb389;
+  --color-delta-bad: #d07d7d;
   /* Window chrome needs the unmistakable saturated red of a close target;
      content warnings keep the quieter --color-bad treatment above. */
   --color-window-close: #e5484d;
@@ -190,6 +192,11 @@
   --color-good: #2d7956;
   --color-good-data: #3c9467;
   --color-bad: #a94a4c;
+  /* Percent-change text in the Top Apps/Websites list only. The quiet pair above
+     left the deltas hard to tell from gray at 12px, so light gets a more
+     saturated pair here; dark keeps good/bad (see the base block). */
+  --color-delta-good: #137a4c;
+  --color-delta-bad: #bd2a30;
   --color-window-close: #d72c35;
   --color-warn: #9d6504;
   --color-hover: rgba(21, 24, 29, .04);
@@ -224,6 +231,12 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
+}
+
+/* Tooltip figures are bold in dark, where the weight lifts them off the dark
+   card; on light the value already reads against the label, so it stays regular. */
+:root[data-theme="light"] .tip-value {
+  font-weight: 400;
 }
 
 @keyframes menu-pop {

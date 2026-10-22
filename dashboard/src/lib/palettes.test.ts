@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalSwatch,
+  clampToScale,
   DEFAULT_PALETTE_ID,
+  heatmapScaleMax,
   metricRamps,
   paletteForTheme,
   PALETTES,
@@ -13,6 +15,7 @@ import {
   PRODUCTIVITY_OPTIONS,
   resolvePalette,
   themedSwatch,
+  totalBarColor,
   type PaletteColors,
 } from "./palettes";
 
@@ -327,27 +330,87 @@ describe("palettes", () => {
   });
 });
 
-describe("metric ramps", () => {
-  it("derives a 4-stop ramp per metric, all starting at the same surface fill", () => {
-    const ramps = metricRamps(PALETTES[0], "dark");
-    for (const ramp of Object.values(ramps)) expect(ramp).toHaveLength(4);
-    expect(new Set(Object.values(ramps).map((ramp) => ramp[0])).size).toBe(1);
+describe("heatmap scale", () => {
+  const values = [...Array.from({ length: 19 }, (_, i) => i + 1), 100];
+
+  it("tops out at the 95th percentile, not the outlier", () => {
+    const top = heatmapScaleMax(values, 1);
+    expect(top).toBeGreaterThan(19);
+    expect(top).toBeLessThan(100);
   });
 
-  it("front-loads colour while preserving the surface and exact metric peaks", () => {
-    const palette = PALETTES[0];
-    const ramps = metricRamps(palette, "dark");
-    expect(ramps.tracked[3]).toBe("#59a9ef");
-    expect(ramps.productive[3]).toBe(palette.productive);
-    expect(ramps.neutral[3]).toBe(palette.neutral);
-    expect(ramps.unproductive[3]).toBe(palette.unproductive);
+  it("keeps the plain maximum when there are too few cells for a percentile", () => {
+    expect(heatmapScaleMax([1, 2, 30], 1)).toBe(30);
+  });
 
-    for (const ramp of Object.values(ramps)) {
-      // The first nonzero stop is already closer to the peak than the surface,
-      // keeping ordinary activity from spending most of the scale near-black.
-      expect(deltaE(ramp[1], ramp[3])).toBeLessThan(deltaE(ramp[1], ramp[0]));
-      expect(deltaE(ramp[2], ramp[3])).toBeLessThan(deltaE(ramp[1], ramp[3]));
+  it("ignores empty cells and honours the floor", () => {
+    expect(heatmapScaleMax([0, 0, 0], 1)).toBe(1);
+    expect(heatmapScaleMax([0.2, 0.4], 1)).toBe(1);
+  });
+
+  it("caps values at the scale's top", () => {
+    expect(clampToScale(100, 20)).toBe(20);
+    expect(clampToScale(5, 20)).toBe(5);
+  });
+});
+
+describe("metric ramps", () => {
+  it("derives one ramp shape per metric, all starting at the same surface fill", () => {
+    for (const theme of ["dark", "light"] as const) {
+      const ramps = Object.values(metricRamps(PALETTES[0], theme));
+      expect(new Set(ramps.map((ramp) => ramp.length)).size).toBe(1);
+      expect(new Set(ramps.map((ramp) => ramp[0])).size).toBe(1);
     }
+  });
+
+  it("peaks dark at the exact metric colours and light slightly deeper", () => {
+    const palette = PALETTES[0];
+    const dark = metricRamps(palette, "dark");
+    // Callers pass the theme-resolved palette (meta.tsx), so the test does too.
+    const lightPalette = paletteForTheme(palette, "light");
+    const light = metricRamps(lightPalette, "light");
+    const peak = (ramp: string[]) => ramp[ramp.length - 1];
+    expect(peak(dark.tracked)).toBe("#59a9ef");
+    expect(peak(dark.productive)).toBe(palette.productive);
+    expect(peak(dark.neutral)).toBe(palette.neutral);
+    expect(peak(dark.unproductive)).toBe(palette.unproductive);
+    // Light: the same hue and 0.04 lower in OKLab lightness. Chroma is raised
+    // only as far as sRGB allows at that lightness: green gains, but the red
+    // hits the gamut edge and gives a little back, so the floor is "nearly as
+    // chromatic", not "more".
+    for (const metric of ["productive", "unproductive"] as const) {
+      const [stateL, stateA, stateB] = oklab(lightPalette[metric]);
+      const [peakL, peakA, peakB] = oklab(peak(light[metric]));
+      expect(stateL - peakL).toBeCloseTo(0.04, 2);
+      expect(Math.hypot(peakA, peakB)).toBeGreaterThan(Math.hypot(stateA, stateB) * 0.9);
+      const hueDegrees = (a: number, b: number) => (Math.atan2(b, a) * 180) / Math.PI;
+      expect(Math.abs(hueDegrees(peakA, peakB) - hueDegrees(stateA, stateB))).toBeLessThan(2);
+    }
+  });
+
+  it("lifts typical cells off a linear blend while every step still moves", () => {
+    for (const theme of ["dark", "light"] as const) {
+      for (const ramp of Object.values(metricRamps(PALETTES[0], theme))) {
+        const surface = ramp[0];
+        const peak = ramp[ramp.length - 1];
+        const mid = ramp[Math.floor(ramp.length / 2)];
+        // Front-loaded: the middle stop is already nearer the peak than the card.
+        expect(deltaE(mid, peak)).toBeLessThan(deltaE(mid, surface));
+        // But not so steep that the top flattens: each step is a visible move
+        // away from the card, and none is under a quarter of the largest. (The old
+        // light curve, [0, 0.68, 0.9, 1], fell to about a seventh.)
+        const steps = ramp.slice(1).map((stop, i) => deltaE(ramp[i], stop));
+        for (let i = 1; i < ramp.length; i++) {
+          expect(deltaE(ramp[i], surface)).toBeGreaterThan(deltaE(ramp[i - 1], surface));
+        }
+        expect(Math.min(...steps)).toBeGreaterThan(Math.max(...steps) / 4);
+      }
+    }
+  });
+
+  it("keeps the total-time bar fill off the heatmap curve", () => {
+    expect(totalBarColor("dark")).toBe("#3b6891");
+    expect(totalBarColor("light")).toBe("#98b6d7");
   });
 });
 
