@@ -182,13 +182,13 @@
      the heaviest marks on the page, where dark's are its softest. Dark keeps
      one value for both jobs; only light needs the split. The fill sits on
      light's own chroma budget (see palettes.ts), not dark's. */
-  --color-accent-data: #6090c4;
+  --color-accent-data: #588dc7;
   --color-on-accent: #ffffff;
-  /* On light's chroma budget (~0.095, see palettes.ts) rather than dark's: on
+  /* On light's chroma budget (~0.11, see palettes.ts) rather than dark's: on
      white, saturation is weight, and dark's emerald became the loudest thing
      on the page. -data is the Vivid productive fill; plain is its text tier. */
-  --color-good: #367858;
-  --color-good-data: #4d9872;
+  --color-good: #2d7956;
+  --color-good-data: #3c9467;
   --color-bad: #a94a4c;
   --color-window-close: #d72c35;
   --color-warn: #9d6504;
