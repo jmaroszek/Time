@@ -137,7 +137,7 @@ export function tooltipStyle(theme: ThemeName) {
  *  Palette-invariant: liveness reads the same whatever palette is selected. */
 const GOOD_DATA_BY_THEME: Record<ThemeName, string> = {
   dark: "#16b981",
-  light: "#4d9872",
+  light: "#3c9467",
 };
 export function goodData(theme: ThemeName): string {
   return GOOD_DATA_BY_THEME[theme];
