@@ -29,7 +29,7 @@
 //
 //   - Dark's hues, so a category is the same identity in both themes. Hue is
 //     the only thing light takes from dark.
-//   - One chroma budget, OKLCH ~0.11 (each hue within ±0.008). The swatches had
+//   - One chroma budget, OKLCH ~0.095 (each hue within ±0.008). The swatches had
 //     ranged 0.08–0.16, which is why some shouted and others looked dull.
 //   - No colour above 80% of the sRGB gamut at its own hue and lightness. Equal
 //     OKLCH chroma is not equal loudness: a teal or ochre at 0.11 is nearly the
@@ -40,8 +40,8 @@
 //   - Lightness, not chroma, does the rest of the separating, in dark's own
 //     alternating rhythm and keeping dark's order between neighbouring hues.
 //
-// A quieter sibling at ~0.095 was drawn alongside this one and lives on the
-// light-theme-muted branch.
+// This is the muted variant. A livelier sibling at ~0.11 ("Calm") is the
+// light theme on soften-light-theme.
 //
 // **The database stores the canonical dark hex from the palette generation in
 // which it was selected.** Theme and palette revisions are display transforms
@@ -90,7 +90,7 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#d33949",
     light: {
-      swatches: ["#706cb3", "#90712e", "#4391cc", "#ad597f", "#c36e52", "#a97bba", "#6a9445", "#3c8c88", "#5c646e", "#9a8070"],
+      swatches: ["#786fb3", "#957530", "#5795c4", "#a66181", "#c67c5c", "#af80bc", "#789b57", "#398c84", "#5c646e", "#9a8070"],
       productive: "#017b37",
       neutral: "#80878f",
       unproductive: "#ac1b18",
@@ -108,7 +108,7 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#da404e",
     light: {
-      swatches: ["#6c88d1", "#81723d", "#7c62ad", "#bd733b", "#a95576", "#af76b2", "#7e963e", "#3f918e", "#505963", "#9b7f74"],
+      swatches: ["#6f8ecc", "#8b732e", "#7a68aa", "#bf7f4d", "#a55a77", "#b179b1", "#839a50", "#3d9593", "#505963", "#9b7f74"],
       productive: "#007132",
       neutral: "#80878f",
       unproductive: "#ac1825",
@@ -129,7 +129,7 @@ export const PALETTES: Palette[] = [
       // #667b80, not the #778993 this was drawn as: that sat at OKLCH L 0.619
       // against the light `neutral` state's 0.620 — ΔE 1.30, indistinguishable.
       // Two low-chroma greys can only be separated by lightness.
-      swatches: ["#a75b89", "#408cc7", "#167784", "#9479c4", "#658733", "#6067a9", "#3b9788", "#ab6735", "#667b80", "#65616d"],
+      swatches: ["#a36187", "#5092c5", "#167784", "#9e80c4", "#698544", "#676cac", "#3f9f8f", "#a96d44", "#667b80", "#65616d"],
       productive: "#028c43",
       neutral: "#80878f",
       unproductive: "#ac1b14",
@@ -149,7 +149,7 @@ export const PALETTES: Palette[] = [
     light: {
       // #747586 for the same reason as Tide's: #7f8695 was ΔE 1.06 from the
       // light `neutral` state.
-      swatches: ["#418e89", "#478fcd", "#a95777", "#709340", "#6f6ab3", "#8c6f32", "#ab73b8", "#c36f4b", "#747586", "#6a5f69"],
+      swatches: ["#3c8d87", "#5395c9", "#aa5f7b", "#789852", "#726fb2", "#917232", "#ac7dba", "#c3795a", "#747586", "#6a5f69"],
       productive: "#078968",
       neutral: "#80878f",
       unproductive: "#ac1828",
@@ -167,7 +167,7 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#ee5e23",
     light: {
-      swatches: ["#c56a82", "#618736", "#8a7ac9", "#ad5a3c", "#9a5895", "#a68239", "#3d76b7", "#3b9189", "#8e7560", "#525b4e"],
+      swatches: ["#bb7083", "#617e38", "#8c7bc0", "#a35942", "#93588a", "#a48136", "#4077ad", "#3c908a", "#8e7560", "#525b4e"],
       productive: "#047e39",
       neutral: "#80878f",
       unproductive: "#a92501",
@@ -331,7 +331,7 @@ export function rampSurface(theme: ThemeName): string {
  *  is too pale against white to read as the top of a scale. */
 const TRACKED_PEAK: Record<ThemeName, string> = {
   dark: "#59a9ef",
-  light: "#437ab6",
+  light: "#4c7db4",
 };
 
 // Keep zero flush with the card and the maximum at the full data colour, but
@@ -398,9 +398,9 @@ export const PRODUCTIVITY_OPTIONS: ProductivityOption[] = [
   // Vivid is the default (index 0). The red is matched to the green — same-ish
   // chroma so the two states carry equal weight, a clean red hue, and lightness a
   // touch above the green so it reads vivid rather than muddy. The light pair
-  // is on light's own chroma budget (~0.11 / ~0.13) — see the header.
+  // is on light's own chroma budget (~0.095 / ~0.11) — see the header.
   { id: "vivid", label: "Vivid", productive: "#04995d", unproductive: "#dc4849",
-    light: { productive: "#3c9467", unproductive: "#c25d5c" } },
+    light: { productive: "#4d9872", unproductive: "#bd6667" } },
   // Colorblind: separates good from bad on the blue↔yellow axis (which
   // red-green CVD preserves) instead of the red↔green axis (which it destroys) —
   // a blue-teal "productive" against a red "unproductive". The two stay distinct
@@ -409,7 +409,7 @@ export const PRODUCTIVITY_OPTIONS: ProductivityOption[] = [
   // at light's budget — muted, the two drift together under CVD — so it is
   // matched in lightness instead: a steel blue against a brick red.
   { id: "cvd", label: "Colorblind", productive: "#048db3", unproductive: "#e23e49",
-    light: { productive: "#3882ae", unproductive: "#b95955" } },
+    light: { productive: "#4784ad", unproductive: "#b25e5a" } },
 ];
 
 /** Set the palette's productive/unproductive (both modes) from the selected
