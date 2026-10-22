@@ -64,11 +64,11 @@ const CHROME_BY_THEME: Record<ThemeName, ChartChrome> = {
     page: "#0f1115",
   },
   light: {
-    axisLabel: "#515762",
-    gridLine: "#eaecf1",
-    axisLine: "#d9dce3",
-    text: "#24282f",
-    page: "#edeff3",
+    axisLabel: "#5a5e64",
+    gridLine: "#ebecef",
+    axisLine: "#dfe1e5",
+    text: "#26282c",
+    page: "#eff0f2",
   },
 };
 
@@ -117,7 +117,7 @@ export function stackedBarLegend(
  * content to white instead of making it share a recessed record-row fill. */
 const TOOLTIP_BY_THEME: Record<ThemeName, { backgroundColor: string; borderColor: string }> = {
   dark: { backgroundColor: "#1d2026", borderColor: "#2a2e36" },
-  light: { backgroundColor: "#ffffff", borderColor: "#d9dce3" },
+  light: { backgroundColor: "#ffffff", borderColor: "#dadce0" },
 };
 
 /** The one tooltip look, spread into any ECharts `tooltip` option. In-chart
@@ -137,7 +137,7 @@ export function tooltipStyle(theme: ThemeName) {
  *  Palette-invariant: liveness reads the same whatever palette is selected. */
 const GOOD_DATA_BY_THEME: Record<ThemeName, string> = {
   dark: "#16b981",
-  light: "#0a855b",
+  light: "#3c9467",
 };
 export function goodData(theme: ThemeName): string {
   return GOOD_DATA_BY_THEME[theme];
@@ -148,7 +148,7 @@ export function goodData(theme: ThemeName): string {
  *  Mirrors --color-accent. */
 const ANNOTATION_BY_THEME: Record<ThemeName, string> = {
   dark: "#6ba0da",
-  light: "#2a66b0",
+  light: "#386dac",
 };
 export function annotation(theme: ThemeName): string {
   return ANNOTATION_BY_THEME[theme];
@@ -167,7 +167,7 @@ export function annotation(theme: ThemeName): string {
  */
 const NEAR_SURFACE_BY_THEME: Record<ThemeName, { bar: string; mark: string; afk: string }> = {
   dark: { bar: "#30343b", mark: "#5b616b", afk: "#33363d" },
-  light: { bar: "#dfe2e9", mark: "#858b96", afk: "#d8dce4" },
+  light: { bar: "#e0e2e6", mark: "#9498a0", afk: "#dadce0" },
 };
 
 export function uncategorizedBar(theme: ThemeName): string {

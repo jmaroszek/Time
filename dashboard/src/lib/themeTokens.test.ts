@@ -101,14 +101,16 @@ const CONTRAST_FLOORS: Array<{ ink: string; on: string[]; floor: number }> = [
   // the graphical-object floor. Text and annotation dots use plain --color-good,
   // above, and are held to the text floor there.
   { ink: "--color-good-data", on: ["--color-surface", "--color-surface-dim"], floor: 3 },
-  // The Top Apps bar fill: a graphic, held to the same 3:1 floor as -good-data
-  // and split from --color-accent for the same reason.
+  // The share-bar and switch-track fill: a graphic, held to the same 3:1 floor
+  // as -good-data and split from --color-accent for the same reason.
   { ink: "--color-accent-data", on: ["--color-surface", "--color-surface-dim"], floor: 3 },
   // A 9px status dot, so the graphical floor applies to it too.
   { ink: "--color-warn", on: ["--color-surface", "--color-surface-dim"], floor: 3 },
+  // The settings toggle's knob in its on state: --color-on-accent over the
+  // -data track it now sits on. A shape, not text, so the graphical floor.
+  { ink: "--color-on-accent", on: ["--color-accent-data"], floor: 3 },
   // The settings toggle's knob in its off state: a shape on the surface-2 track,
-  // so the graphical floor rather than a text one. On is --color-on-accent over
-  // --color-accent, covered above.
+  // so the graphical floor rather than a text one.
   { ink: "--color-ink-3", on: ["--color-surface-2"], floor: 3 },
 ];
 

@@ -21,6 +21,28 @@
 // the same time. That is why the re-stepping exists, and why it is per theme
 // rather than a tweak to the shared values.
 //
+// The hue swatches are re-stepped too, and not toward dark. On a near-black card
+// colour is the light source, so saturation glows; on white it is the heaviest
+// thing on the page, so the same saturation shouts. Light is its own palette
+// with one rule set, shared by every discretionary colour it draws — swatches,
+// productivity states, and the data blue:
+//
+//   - Dark's hues, so a category is the same identity in both themes. Hue is
+//     the only thing light takes from dark.
+//   - One chroma budget, OKLCH ~0.11 (each hue within ±0.008). The swatches had
+//     ranged 0.08–0.16, which is why some shouted and others looked dull.
+//   - No colour above 80% of the sRGB gamut at its own hue and lightness. Equal
+//     OKLCH chroma is not equal loudness: a teal or ochre at 0.11 is nearly the
+//     purest one a screen can show, where a magenta at 0.11 is half-strength.
+//     Teals and ochres therefore sit nearer 0.08. Tide's deep teal is the one
+//     exception (93%): capping it collided with Tide's slate neutral, and at
+//     L 0.52 it reads as deep rather than loud.
+//   - Lightness, not chroma, does the rest of the separating, in dark's own
+//     alternating rhythm and keeping dark's order between neighbouring hues.
+//
+// A quieter sibling at ~0.095 was drawn alongside this one and lives on the
+// light-theme-muted branch.
+//
 // **The database stores the canonical dark hex from the palette generation in
 // which it was selected.** Theme and palette revisions are display transforms
 // applied on the way out — see themedSwatch / canonicalSwatch. Legacy generations
@@ -68,7 +90,7 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#d33949",
     light: {
-      swatches: ["#6f67c3", "#8f712c", "#4e90e2", "#b44a8a", "#d26d29", "#aa71cd", "#799b2d", "#31837f", "#5c646e", "#9a8070"],
+      swatches: ["#706cb3", "#90712e", "#4391cc", "#ad597f", "#c36e52", "#a97bba", "#6a9445", "#3c8c88", "#5c646e", "#9a8070"],
       productive: "#017b37",
       neutral: "#80878f",
       unproductive: "#ac1b18",
@@ -86,7 +108,7 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#da404e",
     light: {
-      swatches: ["#516fcd", "#87752c", "#a079dd", "#ca7426", "#e0529b", "#aa49af", "#84992c", "#2d9491", "#505963", "#9b7f74"],
+      swatches: ["#6c88d1", "#81723d", "#7c62ad", "#bd733b", "#a95576", "#af76b2", "#7e963e", "#3f918e", "#505963", "#9b7f74"],
       productive: "#007132",
       neutral: "#80878f",
       unproductive: "#ac1825",
@@ -107,7 +129,7 @@ export const PALETTES: Palette[] = [
       // #667b80, not the #778993 this was drawn as: that sat at OKLCH L 0.619
       // against the light `neutral` state's 0.620 — ΔE 1.30, indistinguishable.
       // Two low-chroma greys can only be separated by lightness.
-      swatches: ["#bb5094", "#478fd0", "#117881", "#a270ec", "#638828", "#5b67cf", "#27a18d", "#c77333", "#667b80", "#65616d"],
+      swatches: ["#a75b89", "#408cc7", "#167784", "#9479c4", "#658733", "#6067a9", "#3b9788", "#ab6735", "#667b80", "#65616d"],
       productive: "#028c43",
       neutral: "#80878f",
       unproductive: "#ac1b14",
@@ -127,7 +149,7 @@ export const PALETTES: Palette[] = [
     light: {
       // #747586 for the same reason as Tide's: #7f8695 was ΔE 1.06 from the
       // light `neutral` state.
-      swatches: ["#388b86", "#488fe8", "#be408d", "#7a9b37", "#7064cf", "#8e7231", "#bc68d6", "#d27337", "#747586", "#6a5f69"],
+      swatches: ["#418e89", "#478fcd", "#a95777", "#709340", "#6f6ab3", "#8c6f32", "#ab73b8", "#c36f4b", "#747586", "#6a5f69"],
       productive: "#078968",
       neutral: "#80878f",
       unproductive: "#ac1828",
@@ -145,7 +167,7 @@ export const PALETTES: Palette[] = [
     neutral: "#6c7680",
     unproductive: "#ee5e23",
     light: {
-      swatches: ["#bc467a", "#829730", "#8460bb", "#d26f35", "#c86bbc", "#8a6400", "#5594d3", "#308d84", "#8e7560", "#525b4e"],
+      swatches: ["#c56a82", "#618736", "#8a7ac9", "#ad5a3c", "#9a5895", "#a68239", "#3d76b7", "#3b9189", "#8e7560", "#525b4e"],
       productive: "#047e39",
       neutral: "#80878f",
       unproductive: "#a92501",
@@ -309,7 +331,7 @@ export function rampSurface(theme: ThemeName): string {
  *  is too pale against white to read as the top of a scale. */
 const TRACKED_PEAK: Record<ThemeName, string> = {
   dark: "#59a9ef",
-  light: "#2a6ab5",
+  light: "#437ab6",
 };
 
 // Keep zero flush with the card and the maximum at the full data colour, but
@@ -375,16 +397,19 @@ export interface ProductivityOption {
 export const PRODUCTIVITY_OPTIONS: ProductivityOption[] = [
   // Vivid is the default (index 0). The red is matched to the green — same-ish
   // chroma so the two states carry equal weight, a clean red hue, and lightness a
-  // touch above the green so it reads vivid rather than muddy.
+  // touch above the green so it reads vivid rather than muddy. The light pair
+  // is on light's own chroma budget (~0.11 / ~0.13) — see the header.
   { id: "vivid", label: "Vivid", productive: "#04995d", unproductive: "#dc4849",
-    light: { productive: "#34895d", unproductive: "#d15c55" } },
+    light: { productive: "#3c9467", unproductive: "#c25d5c" } },
   // Colorblind: separates good from bad on the blue↔yellow axis (which
   // red-green CVD preserves) instead of the red↔green axis (which it destroys) —
   // a blue-teal "productive" against a red "unproductive". The two stay distinct
   // under protanopia/deuteranopia, where Vivid's green/red nearly merge
-  // (palettes.test.ts holds both facts).
+  // (palettes.test.ts holds both facts). The light pair cannot rest on chroma
+  // at light's budget — muted, the two drift together under CVD — so it is
+  // matched in lightness instead: a steel blue against a brick red.
   { id: "cvd", label: "Colorblind", productive: "#048db3", unproductive: "#e23e49",
-    light: { productive: "#2784a2", unproductive: "#e14d50" } },
+    light: { productive: "#3882ae", unproductive: "#b95955" } },
 ];
 
 /** Set the palette's productive/unproductive (both modes) from the selected
