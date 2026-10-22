@@ -158,6 +158,18 @@ fn startup_command() -> Result<String, String> {
     Ok(quoted_command(&path))
 }
 
+/// Whether this build may write the startup registration at all.
+///
+/// A debug build never does. Every Time build shares the one Run value, and
+/// launch-time reconciliation reads a value naming the installed tracker as
+/// "not registered" and rewrites it, so a `tauri dev` or `build:debug-app` run
+/// against the real database repointed sign-in at `target\debug`. The next
+/// login then recorded the day with a dev tracker, and that tracker held its
+/// own executable open, which broke the next debug build. Asking a debug build
+/// to enable startup only removes a registration naming its own tracker, the
+/// one place such a value can have come from.
+const REGISTERS_STARTUP: bool = !cfg!(debug_assertions);
+
 fn quoted_command(path: &Path) -> String {
     format!("\"{}\"", path.display())
 }
@@ -167,7 +179,7 @@ pub(crate) fn set_launch_at_login(enabled: bool) -> Result<(), String> {
     let (run, _) = hkcu
         .create_subkey(STARTUP_RUN_KEY)
         .map_err(|e| e.to_string())?;
-    if enabled {
+    if enabled && REGISTERS_STARTUP {
         run.set_value(STARTUP_RUN_VALUE, &startup_command()?)
             .map_err(|e| e.to_string())?;
         Ok(())
