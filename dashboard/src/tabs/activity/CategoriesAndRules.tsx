@@ -885,7 +885,8 @@ export default function CategoriesAndRules({
                           (32px), gap (10px) and the label's own padding (8px)
                           come to 50px, less the scroll well's padding (8px)
                           and scrollbar gutter (6px) on this side. The actions
-                          still fade in at the row's edge. */}
+                          take the same inset, so they end where the figure
+                          does. */}
                       <span className="grid shrink-0 justify-items-end [&>*]:col-start-1 [&>*]:row-start-1">
                         {(unused || (ruleOrder === "use" && usage?.has(rule.id))) && (
                           <span
@@ -900,7 +901,7 @@ export default function CategoriesAndRules({
                           </span>
                         )}
                         <span
-                          className={`flex items-center gap-0.5 transition-opacity group-focus-within/rule:opacity-100 group-hover/rule:opacity-100 ${
+                          className={`mr-9 flex items-center gap-0.5 transition-opacity group-focus-within/rule:opacity-100 group-hover/rule:opacity-100 ${
                             editingThis ? "opacity-100" : "opacity-0"
                           }`}
                         >
