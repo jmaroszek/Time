@@ -87,10 +87,10 @@ export default function GoalEditor({
         <p className="leading-relaxed text-ink-3">
           Goal progress is shown in Insights.
         </p>
-        <div className="-mx-1 -mb-1 flex items-center">
-          {/* Gray at rest, red only on hover: it removes something, but a
-              preference rather than recorded history, which keeps red at rest. */}
-          {goal && <Button variant="text-danger-hover" onClick={() => onSave(null)}>Remove goal</Button>}
+        <div className="-mb-1 -mr-1 flex items-center">
+          {/* The negative margin takes back the button's padding, so the word
+              starts on the same edge as the switch, the field and the note. */}
+          {goal && <Button variant="text-danger" className="-ml-[13px]" onClick={() => onSave(null)}>Remove goal</Button>}
           <span className="flex-1" />
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={!valid} onClick={save}>Save</Button>

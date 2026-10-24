@@ -762,21 +762,19 @@ export default function CategoriesAndRules({
                     {category.name}
                   </span>
                 )}
-                <span className="flex-1" />
                 {/* A goal is the category's own property, like its colour and
                     state, so it shows on the header where every goal can be
-                    read without opening a category. No goal shows nothing: new
-                    goals start from the actions menu. */}
-                {/* Fixed width, text from the left, beside a fixed-width state
-                    slot: "Productive", "Neutral" and "Unproductive" differ in
-                    length, and the labels' left edges should line up down the
-                    list rather than drift with the word after them. */}
+                    read without opening a category. Right after the name, it
+                    reads as the sentence it is: "Work at least 20h/wk". No goal
+                    shows nothing: new goals start from the actions menu. The
+                    negative margin takes back the hover box's padding, so the
+                    words sit a space from the name rather than a column away. */}
                 {!locked && !category.isIgnored && category.goal && (
                   <button
                     type="button"
                     title="Edit weekly goal"
                     aria-label={`Weekly goal for ${category.name}: ${goalSummary(category.goal)}. Edit`}
-                    className="w-[6.75rem] shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 text-left tabular-nums text-ink-3 hover:bg-hover-2 hover:text-ink-2"
+                    className="-ml-2 shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 tabular-nums text-ink-3 hover:bg-hover-2 hover:text-ink-2"
                     onClick={(event) => {
                       if (goalMenu?.id === category.id) return setGoalMenu(null);
                       openGoalEditor(category.id, event.currentTarget.getBoundingClientRect());
@@ -785,6 +783,7 @@ export default function CategoriesAndRules({
                     {goalSummary(category.goal)}
                   </button>
                 )}
+                <span className="flex-1" />
                 {/* The built-in Ignored category has no state to show: its only
                     possible one is its own name, and it cannot be changed. */}
                 {!locked && (

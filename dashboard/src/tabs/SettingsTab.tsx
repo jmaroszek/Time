@@ -1007,7 +1007,7 @@ export default function SettingsTab({
         <Row
           label="Category goals"
           help={categoryGoalList.length > 0
-            ? "Weekly goals on single categories, shown in Insights. Change one from its category."
+            ? "Weekly goals on single categories. Set in Categories & Rules."
             : "Set a category's goal from its menu in Categories & Rules."}
           control={categoryGoalList.length > 0
             ? null

@@ -9,7 +9,7 @@ import {
   type ScopeWindow,
   type ScopeWindowList,
 } from "../../lib/insightsScope";
-import { GoalMetMark } from "./GoalMetMark";
+import { GoalMark } from "./GoalMark";
 
 /**
  * The four tiles, for one subject instead of everything.
@@ -58,12 +58,12 @@ export function ScopeTiles({
         label="Time in range"
         value={(
           <span className="flex items-baseline gap-1.5 tabular-nums" title={fmtDurationTitle(summary.seconds)}>
-            <span className={goal?.over ? "text-warn" : undefined}>{fmtDuration(summary.seconds)}</span>
+            {fmtDuration(summary.seconds)}
             {goal ? (
-              <>
-                <span className="text-xs font-normal tracking-normal text-ink-3">{goalTargetLabel(goal)}</span>
-                {goal.met && <GoalMetMark />}
-              </>
+              <span className="flex items-center gap-1.5 text-xs font-normal tracking-normal text-ink-3">
+                {goalTargetLabel(goal)}
+                {(goal.met || goal.over) && <GoalMark missed={goal.over} />}
+              </span>
             ) : change && (
               <span className="text-xs font-normal tracking-normal text-ink-3">{change}</span>
             )}

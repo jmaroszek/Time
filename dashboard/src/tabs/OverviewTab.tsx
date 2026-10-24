@@ -44,7 +44,7 @@ import {
 } from "../state/useInsightsView";
 import { useSessions } from "../state/useSessions";
 import GoalsPopover from "./insights/GoalsPopover";
-import { GoalMetMark } from "./insights/GoalMetMark";
+import { GoalMark } from "./insights/GoalMark";
 import ScopePicker from "./insights/ScopePicker";
 import {
   ScopeTiles,
@@ -440,10 +440,10 @@ export default function OverviewTab({
                 {fmtWholeHours(pace.doneHours)}
                 {/* tracking-normal resets the tile's -.02em, which is drawn for
                     24px and too tight at 12. */}
-                <span className="text-xs font-normal tracking-normal text-ink-3">
+                <span className="flex items-center gap-1.5 text-xs font-normal tracking-normal text-ink-3">
                   {`of ${fmtWholeHours(pace.targetHours)}`}
+                  {pace.met && <GoalMark />}
                 </span>
-                {pace.met && <GoalMetMark />}
               </span>
             )) : categoryGoals.length > 0 ? (emptyReason ?? (
               /* Category goals alone: how many stand where they should, in the

@@ -6,7 +6,7 @@ import { goalBarParts, goalTargetLabel, type GoalProgress } from "../../lib/cate
 import type { Category, GoalKind } from "../../lib/classify";
 import { fmtDuration, fmtDurationTitle, fmtWholeHours } from "../../lib/format";
 import type { GoalPace } from "../../lib/metrics";
-import { GoalMetMark } from "./GoalMetMark";
+import { GoalMark } from "./GoalMark";
 
 const POPOVER_WIDTH = 300;
 
@@ -34,7 +34,7 @@ export default function GoalsPopover({
   onClose: () => void;
 }) {
   const popoverRef = useRef<HTMLDivElement>(null);
-  const anyMet = (overall?.met ?? false) || goals.some(({ progress }) => progress.met);
+  const anyMark = (overall?.met ?? false) || goals.some(({ progress }) => progress.met || progress.over);
   const [box, setBox] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
@@ -105,7 +105,7 @@ export default function GoalsPopover({
           doneValue={overall.doneHours}
           targetValue={overall.targetHours}
           met={overall.met}
-          markSlot={anyMet}
+          markSlot={anyMark}
           over={false}
         />
       )}
@@ -121,7 +121,7 @@ export default function GoalsPopover({
           doneValue={progress.doneSeconds}
           targetValue={progress.targetSeconds}
           met={progress.met}
-          markSlot={anyMet}
+          markSlot={anyMark}
           over={progress.over}
           onClick={() => onSelectCategory(category)}
         />
@@ -156,26 +156,30 @@ function GoalRow({
   targetValue: number;
   met: boolean;
   over: boolean;
-  /** Keep the check's width even without one, so the figures of every row
-   *  end on the same line whenever any row has a check. */
+  /** Keep the mark's width even without one, so the figures of every row
+   *  end on the same line whenever any row has a mark. */
   markSlot: boolean;
   onClick?: () => void;
 }) {
   const parts = goalBarParts(doneValue, targetValue);
   // Up to the goal: green once a target is reached, accent otherwise. Past
-  // it: a fainter green for a target exceeded, warn for a limit passed.
+  // it: a fainter green for a target exceeded, warn for a limit passed. The
+  // figures stay ink; the bar and the mark carry the verdict.
   const withinColor = kind === "at_least" && met ? "bg-good-data" : "bg-accent";
   const overColor = kind === "at_least" ? "bg-good-data opacity-45" : "bg-warn";
   const body = (
     <>
       <span className="flex items-center gap-2">
-        <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: color }} />
+        {/* Nudged down a pixel. Centred on the capitals, the swatch looked
+            high beside names that are mostly lowercase; a pixel lower sits
+            between the capitals' middle and the lowercase letters'. */}
+        <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 translate-y-px rounded-[3px]" style={{ backgroundColor: color }} />
         <span className="min-w-0 flex-1 truncate text-left">{name}</span>
-        <span className={`shrink-0 tabular-nums ${over ? "text-warn" : "text-ink"}`} title={doneTitle}>
+        <span className="shrink-0 tabular-nums text-ink" title={doneTitle}>
           {done}
         </span>
         <span className="shrink-0 tabular-nums text-ink-3-raised">{target}</span>
-        {met ? <GoalMetMark /> : markSlot && <span aria-hidden="true" className="w-[9px] shrink-0" />}
+        {met || over ? <GoalMark missed={over} /> : markSlot && <span aria-hidden="true" className="w-[9px] shrink-0" />}
       </span>
       {/* Past the goal, the bar spans the time and a gap marks where the goal
           was, so the part beyond it reads as the overrun. */}
@@ -196,7 +200,7 @@ function GoalRow({
       type="button"
       onClick={onClick}
       title={`Narrow Insights to ${name}`}
-      className="flex w-full flex-col rounded-lg px-2.5 py-2 text-xs text-ink-2-raised transition-colors hover:bg-selected-strong focus-visible:bg-selected-strong focus-visible:outline-none"
+      className="flex w-full cursor-pointer flex-col rounded-lg px-2.5 py-2 text-xs text-ink-2-raised transition-colors hover:bg-selected-strong focus-visible:bg-selected-strong focus-visible:outline-none"
     >
       {body}
     </button>

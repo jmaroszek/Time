@@ -11,7 +11,7 @@ export function Button({
 }: {
   children: ReactNode;
   onClick?: () => void;
-  variant?: "text" | "text-danger" | "text-danger-hover" | "accent" | "primary" | "danger";
+  variant?: "text" | "text-danger" | "accent" | "primary" | "danger";
   disabled?: boolean;
   title?: string;
   /** Placement only, such as the negative margin that sets a text action's
@@ -30,7 +30,7 @@ export function Button({
    * Two weights instead. Text, the Settings shape, for every action: gray at
    * rest and blue on hover so it still reads as pressable. A tint for the one
    * button in a group that commits, so it is found without an outline. Red in
-   * either shape only where recorded history is removed.
+   * either shape only where something is removed.
    *
    * `accent` is text in blue at rest, for a lone action that would otherwise be
    * gray text among gray labels, with nothing beside it to read as its group —
@@ -43,9 +43,6 @@ export function Button({
   const styles = {
     text: "text-ink-2 hover:bg-hover-2 hover:text-accent",
     "text-danger": "text-bad hover:bg-bad/10",
-    // Removes a setting rather than a record: gray like any action until
-    // pointed at, then red, so the consequence shows before the click.
-    "text-danger-hover": "text-ink-2 hover:bg-bad/10 hover:text-bad",
     accent: "text-accent hover:bg-accent/10",
     primary: "bg-accent/10 text-accent hover:bg-accent/[.18]",
     danger: "bg-bad/10 text-bad hover:bg-bad/[.18]",
