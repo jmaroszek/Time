@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { SUPPORT_EMAIL, supportEmailUrl, supportSubject, type SupportTopic } from "./support";
+import { SUPPORT_EMAIL, WEBSITE_URL, supportEmailUrl, supportSubject, type SupportTopic } from "./support";
 
 const TOPICS: SupportTopic[] = ["general", "praise", "problem", "extension"];
 
@@ -112,6 +112,10 @@ describe("opener allowlist", () => {
     const subject = encodeURIComponent(supportSubject(topic));
 
     expect(allowed).toContain(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=*`);
+  });
+
+  it("pins the website link", () => {
+    expect(allowed).toContain(WEBSITE_URL);
   });
 
   it("builds URLs the allowlist pattern actually matches", () => {

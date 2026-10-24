@@ -8,6 +8,7 @@ import {
   CHART_FONT_FAMILY,
   CHART_LABEL_SIZE,
   chartChrome,
+  NO_HIDDEN_STACKS,
   stackedBarLegend,
   STACKED_BAR_LEGEND_GEOMETRY,
   tooltipStyle,
@@ -41,12 +42,18 @@ export default function HourlyActivityChart({
   stackBy = "state",
   categories = [],
   members = null,
+  hiddenStacks = NO_HIDDEN_STACKS,
+  onToggleStack,
 }: {
   hours: HourlyActivitySummary[];
   stackBy?: ActivityStack;
   categories?: Category[];
   /** Names for the member stacks; see `memberSeries`. */
   members?: InsightsMemberTotal[] | null;
+  /** Legend entries the reader has switched off. Owned by the card so they
+   *  survive the option being rebuilt on every refresh. */
+  hiddenStacks?: ReadonlySet<string>;
+  onToggleStack?: (name: string, visible: boolean) => void;
 }) {
   const { palette, theme } = useMeta();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -143,7 +150,7 @@ export default function HourlyActivityChart({
           return [`<b>${fmtHourRange(hour)}</b>`, ...rows].join("<br/>");
         },
       },
-      legend: stackedBarLegend(chrome, stackNames),
+      legend: stackedBarLegend(chrome, stackNames, hiddenStacks),
       xAxis: {
         type: "category",
         data: hours.map((hour) => fmtCompactHour(hour.hour)),
@@ -176,13 +183,14 @@ export default function HourlyActivityChart({
         barMaxWidth: 24,
       })),
     };
-  }, [hours, palette, theme, stackBy, categories, members, chartWidth]);
+  }, [hours, palette, theme, stackBy, categories, members, chartWidth, hiddenStacks]);
 
   return (
     <div ref={wrapRef}>
       <EChart
         option={option}
         height={254}
+        onLegendToggle={onToggleStack}
         accessibleDescription={`Hourly activity for the selected day, broken down by ${STACK_WORDS[stackBy]} to show when tracked time occurred.`}
       />
     </div>

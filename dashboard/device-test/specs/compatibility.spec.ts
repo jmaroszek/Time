@@ -161,13 +161,13 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   await page.getByRole("option", { name: "Year", exact: true }).click();
   await aggregateView.click();
   await page.getByRole("option", { name: "Calendar", exact: true }).click();
-  await expect(page.getByText(/time by day$/i)).toBeVisible();
+  await expect(page.getByRole("img", { name: /time by day across/i })).toBeVisible();
   await assertChartsHaveGeometry(page);
   await assertNoHorizontalOverflow(page);
 
   await datePreset.click();
   await page.getByRole("option", { name: "All time", exact: true }).click();
-  await expect(page.getByText(/time by month$/i)).toBeVisible();
+  await expect(page.getByRole("img", { name: /time by month across/i })).toBeVisible();
   await assertChartsHaveGeometry(page);
   await assertNoHorizontalOverflow(page);
 

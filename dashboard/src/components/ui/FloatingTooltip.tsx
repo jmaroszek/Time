@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { TOOLTIP_DELAY_MS } from "../../lib/tooltipDelay";
+
 /** A delayed tooltip rendered outside scroll containers so it cannot create
  * overflow or be clipped by the content it describes. */
 export function FloatingTooltip({
@@ -42,7 +44,7 @@ export function FloatingTooltip({
   };
   const scheduleShow = () => {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(show, 500);
+    timerRef.current = window.setTimeout(show, TOOLTIP_DELAY_MS);
   };
 
   useEffect(() => () => {

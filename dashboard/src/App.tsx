@@ -697,6 +697,7 @@ function Shell() {
             }}
             highlightSection={highlightSection}
             onHighlightShown={() => setHighlightSection(null)}
+            update={update}
           />
         )}
       </main>

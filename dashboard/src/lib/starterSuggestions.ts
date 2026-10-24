@@ -109,6 +109,11 @@ export const STARTER_APPS: Readonly<Record<string, StarterRole>> = {
   "vivaldi.exe": "browsing",
   "arc.exe": "browsing",
   "chromium.exe": "browsing",
+  "thorium.exe": "browsing",
+  "floorp.exe": "browsing",
+  "librewolf.exe": "browsing",
+  "waterfox.exe": "browsing",
+  "zen.exe": "browsing",
   // Sync clients and peripheral vendor apps: ordinary Windows time nobody wants
   // to think about, under stable and unambiguous names.
   "onedrive.exe": "system",

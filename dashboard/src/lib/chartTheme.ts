@@ -1,4 +1,6 @@
+import { escapeHtml } from "./chartTooltip";
 import { DEFAULT_PALETTE, metricRamps, rampSurface } from "./palettes";
+import { TOOLTIP_DELAY_MS } from "./tooltipDelay";
 import type { ThemeName } from "./theme";
 
 // Palette-invariant chart chrome and semantic data colours. The category swatches
@@ -49,6 +51,9 @@ export interface ChartChrome {
   axisLine: string;
   /** --color-ink */
   text: string;
+  /** --color-edge-2. A legend entry the reader switched off: present enough to
+   *  click back on, quiet enough not to read as part of the chart. */
+  inactive: string;
   /** --color-bg. The heatmaps draw their cell gaps in the page colour so the
    *  grid reads as a gap rather than a drawn line — which means a literal here
    *  puts black gridlines on a light page. */
@@ -61,6 +66,7 @@ const CHROME_BY_THEME: Record<ThemeName, ChartChrome> = {
     gridLine: "#1d2026",
     axisLine: "#2a2e36",
     text: "#e8eaed",
+    inactive: "#353b45",
     page: "#0f1115",
   },
   light: {
@@ -68,6 +74,7 @@ const CHROME_BY_THEME: Record<ThemeName, ChartChrome> = {
     gridLine: "#ebecef",
     axisLine: "#dfe1e5",
     text: "#26282c",
+    inactive: "#b6b9c0",
     page: "#eff0f2",
   },
 };
@@ -92,24 +99,49 @@ export const STACKED_BAR_LEGEND_GEOMETRY = {
   itemGap: 14,
 } as const;
 
+/** Shared default, so a chart with nothing hidden keeps a stable reference and
+ *  its option is not rebuilt on every render. */
+export const NO_HIDDEN_STACKS: ReadonlySet<string> = new Set();
+
 /**
  * The `legend` option for a stacked-bar chart, given its series names. An entry
  * may be an object rather than a bare name when it needs its own icon — the
  * productive-average line is drawn dashed, so its swatch has to say so.
+ *
+ * Clicking an entry hides its series, which nothing used to suggest: the hand
+ * cursor only appears once you are already pointing at it. So each entry says
+ * what a click will do — after the app's usual pause, since this is a hint
+ * about the control rather than a reading of the data — and a hidden entry's
+ * swatch dims with its label. ECharts outlines inactive swatches in a fixed
+ * light gray by default, which on a dark card read as a lit box.
+ * `hidden` is owned by the caller rather than left to ECharts, because every
+ * refresh replaces the option wholesale and would otherwise switch hidden
+ * series back on behind the reader's back.
  */
 export function stackedBarLegend(
   chrome: ChartChrome,
   data: ReadonlyArray<string | { name: string; icon: string }>,
+  hidden: ReadonlySet<string> = NO_HIDDEN_STACKS,
 ) {
+  const names = data.map((entry) => (typeof entry === "string" ? entry : entry.name));
   return {
     show: true,
     bottom: 4,
     left: "center",
     width: "92%",
     data,
+    selected: Object.fromEntries(names.map((name) => [name, !hidden.has(name)])),
+    inactiveColor: chrome.inactive,
+    inactiveBorderColor: chrome.inactive,
     textStyle: { color: chrome.axisLabel, fontSize: CHART_LABEL_SIZE },
+    tooltip: {
+      show: true,
+      showDelay: TOOLTIP_DELAY_MS,
+      formatter: ({ name }: { name: string }) =>
+        `${hidden.has(name) ? "Click to show" : "Click to hide"} ${escapeHtml(name)}`,
+    },
     ...STACKED_BAR_LEGEND_GEOMETRY,
-  } as const;
+  };
 }
 
 /** Tooltip surface and border, mirroring --color-raised / --color-raised-edge.

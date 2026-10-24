@@ -78,6 +78,13 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
   return await invoke<AvailableUpdate | null>("check_for_update");
 }
 
+/** The check a reader asked for from Settings. Unlike the launch check it
+ *  rejects when the server could not be reached, so "up to date" is only ever
+ *  said when it is true. */
+export async function checkForUpdateNow(): Promise<AvailableUpdate | null> {
+  return await invoke<AvailableUpdate | null>("check_for_update_now");
+}
+
 /** Resolves only if the install could not be started. On success Windows exits
  *  this process from inside the installer, so nothing after the await runs. */
 export async function installUpdate(): Promise<void> {

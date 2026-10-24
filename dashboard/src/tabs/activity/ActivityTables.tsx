@@ -43,14 +43,17 @@ export type ClassifiableEntity = Pick<ActivityEntitySummary, "kind" | "key" | "d
 
 export function ViewSwitcher({ view, onView }: { view: ActivityView; onView: (view: ActivityView) => void }) {
   return (
-    <span className="flex flex-wrap items-center gap-2.5">
+    // Underlined rather than divided by a bar: two labels told apart only by
+    // brightness read as a heading and a dimmed heading, and "Categories &
+    // Rules" was not recognized as somewhere to go. A segmented control like
+    // the main tabs was tried here and competed with them.
+    <span className="flex flex-wrap items-center gap-5">
       {/* Named for what it lists, not for what it is. "Library" promised an
           archive, which made the Unclassified queue above the table read as
           somebody else's business; against "Categories & Rules" it also states
           the split the two faces actually make — the things on one side, the
           labels on the other. */}
       <ViewButton active={view === "library"} onClick={() => onView("library")}>Apps &amp; Websites</ViewButton>
-      <span aria-hidden="true" className="text-edge-2">|</span>
       <ViewButton active={view === "rules"} onClick={() => onView("rules")}>Categories &amp; Rules</ViewButton>
     </span>
   );
@@ -62,7 +65,11 @@ function ViewButton({ active, onClick, children }: { active: boolean; onClick: (
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`transition-colors ${active ? "text-ink" : "font-normal text-ink-3 hover:text-ink-2"}`}
+      className={`border-b-2 pb-1 transition-colors ${
+        active
+          ? "border-accent text-ink"
+          : "border-transparent font-normal text-ink-3 hover:border-edge-2 hover:text-ink-2"
+      }`}
     >
       {children}
     </button>

@@ -114,7 +114,22 @@ fn current_install_id(app: &tauri::AppHandle) -> Option<String> {
 /// unchanged: still `None` for every outcome that is not an available update.
 #[tauri::command]
 pub async fn check_for_update(app: tauri::AppHandle) -> Option<AvailableUpdate> {
-    let install_id = current_install_id(&app);
+    run_update_check(&app).await.ok().flatten()
+}
+
+/// The same request, made because the reader pressed "Check for updates" in
+/// Settings. Here the silence above would mislead: someone who asked has to be
+/// told whether Time is current or simply could not reach the server, so a
+/// failure comes back as an error instead of looking like "up to date".
+#[tauri::command]
+pub async fn check_for_update_now(
+    app: tauri::AppHandle,
+) -> Result<Option<AvailableUpdate>, String> {
+    run_update_check(&app).await
+}
+
+async fn run_update_check(app: &tauri::AppHandle) -> Result<Option<AvailableUpdate>, String> {
+    let install_id = current_install_id(app);
     // Only presence is logged. The value would be harmless in a local file, but
     // a diagnostic people paste into bug reports is no place for it.
     let id_state = if install_id.is_some() {
@@ -133,25 +148,25 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Option<AvailableUpdate> 
         Ok(updater) => updater,
         Err(error) => {
             log_update_check(
-                &app,
+                app,
                 &format!("install_id={id_state} outcome=unavailable error={error}"),
             );
-            return None;
+            return Err(error.to_string());
         }
     };
     match updater.check().await {
         Ok(Some(update)) => {
             log_update_check(
-                &app,
+                app,
                 &format!(
                     "install_id={id_state} outcome=available remote={}",
                     update.version
                 ),
             );
-            Some(AvailableUpdate {
+            Ok(Some(AvailableUpdate {
                 version: update.version.clone(),
                 notes: update.body.clone(),
-            })
+            }))
         }
         // The endpoint answered and offered nothing newer. Distinguishing this
         // from `failed` is most of the diagnostic value: one means the manifest
@@ -160,15 +175,15 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Option<AvailableUpdate> 
         // the advertised version cannot be logged without a second request —
         // and a second request would break the "exactly one" claim in README.
         Ok(None) => {
-            log_update_check(&app, &format!("install_id={id_state} outcome=current"));
-            None
+            log_update_check(app, &format!("install_id={id_state} outcome=current"));
+            Ok(None)
         }
         Err(error) => {
             log_update_check(
-                &app,
+                app,
                 &format!("install_id={id_state} outcome=failed error={error}"),
             );
-            None
+            Err(error.to_string())
         }
     }
 }

@@ -144,7 +144,7 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('idle_threshold_seconds','300'),
     ('heartbeat_seconds','15'),
     ('week_start','auto'),
-    ('browser_processes','chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe'),
+    ('browser_processes','chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe,chromium.exe,thorium.exe,floorp.exe,librewolf.exe,waterfox.exe,zen.exe'),
     ('min_app_seconds_per_day','0'),
     -- Extra media sites, on top of the built-in list in
     -- tracker/media_playback.py. Empty on a fresh install by design.

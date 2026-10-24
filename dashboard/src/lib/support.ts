@@ -1,5 +1,9 @@
 export const SUPPORT_EMAIL = "support@trackwithtime.com";
 
+/** Pinned exactly in the opener allowlist in src-tauri/capabilities/default.json,
+ *  like the support subjects below: a path added here is refused at runtime. */
+export const WEBSITE_URL = "https://trackwithtime.com/";
+
 /**
  * Which conversation the reader is starting.
  *

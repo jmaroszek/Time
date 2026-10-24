@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   checkForUpdate,
+  checkForUpdateNow,
   forgetLegacyUpdateCheck,
   installUpdate,
   shouldCheckForUpdates,
@@ -21,7 +22,12 @@ export interface AppUpdateState {
   installing: boolean;
   progress: UpdateProgress | null;
   install: () => void;
+  /** Where the check asked for from Settings stands; "idle" until it is used. */
+  manualCheck: ManualUpdateCheck;
+  checkNow: () => void;
 }
+
+export type ManualUpdateCheck = "idle" | "checking" | "current" | "available" | "failed";
 
 export function useAppUpdate(
   settings: Record<string, string>,
@@ -31,6 +37,7 @@ export function useAppUpdate(
   const [available, setAvailable] = useState<AvailableUpdate | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
+  const [manualCheck, setManualCheck] = useState<ManualUpdateCheck>("idle");
   // Once per launch. Settings arrive as a fresh object on every refresh, and a
   // write anywhere in the app produces one; without this the check would fire
   // again on each. Closing the window ends the process, so the next open is a
@@ -73,5 +80,18 @@ export function useAppUpdate(
     });
   }, [installing, onError]);
 
-  return { available, installing, progress, install };
+  // Asked for, so it runs whether or not automatic checks are on: that switch
+  // is about Time reaching out unprompted, and pressing the button is consent.
+  const checkNow = useCallback(() => {
+    if (manualCheck === "checking") return;
+    setManualCheck("checking");
+    void checkForUpdateNow()
+      .then((update) => {
+        setAvailable(update);
+        setManualCheck(update ? "available" : "current");
+      })
+      .catch(() => setManualCheck("failed"));
+  }, [manualCheck]);
+
+  return { available, installing, progress, install, manualCheck, checkNow };
 }

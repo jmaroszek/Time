@@ -22,6 +22,7 @@ const VALUE_CONTROLS: Record<string, number> = {
   // The select trigger, which shows the value it holds.
   "../components/ui/MenuSelect.tsx": 1,
   // The restore dialog's list of backups, a radio group.
+  "../tabs/activity/ActivityTables.tsx": 1,
   "../tabs/settings/DataSection.tsx": 1,
   // The browser-process and media-site chips: each is an entered value.
   "../tabs/settings/fields.tsx": 1,

@@ -336,12 +336,11 @@ test("@workflow a banner lifecycle action gates Settings and Data while in fligh
 test("@workflow support email includes the installed component versions", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const advanced = page.locator("#settings-advanced");
-  const support = page.locator("#settings-help-feedback");
+  const support = page.locator("#settings-about-help");
 
   await expect(support.getByText("support@trackwithtime.com", { exact: true })).toBeVisible();
   await expect(
-    advanced.getByText(
+    support.getByText(
       "Dashboard 0.1.0-device-fixture · Tracker 0.1.0-device-fixture",
       { exact: true },
     ),

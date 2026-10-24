@@ -31,6 +31,7 @@ import {
   CHART_LABEL_SIZE,
   chartChrome,
   STACKED_BAR_LEGEND_GEOMETRY,
+  NO_HIDDEN_STACKS,
   stackedBarLegend,
   tooltipStyle,
   uncategorizedMark,
@@ -284,6 +285,8 @@ export default function ProductiveHoursChart({
   categories = [],
   members = null,
   averageMeasure = "productive",
+  hiddenStacks = NO_HIDDEN_STACKS,
+  onToggleStack,
 }: {
   historyDays: DailyActivitySummary[];
   range: Range;
@@ -298,6 +301,10 @@ export default function ProductiveHoursChart({
    *  question; a single app's is how much it was used, since its productivity
    *  is just its category — and for an unproductive one, a flat zero. */
   averageMeasure?: "productive" | "tracked";
+  /** Legend entries the reader has switched off. Owned by the card so they
+   *  survive the option being rebuilt on every refresh. */
+  hiddenStacks?: ReadonlySet<string>;
+  onToggleStack?: (name: string, visible: boolean) => void;
 }) {
   const { palette, theme } = useMeta();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -493,7 +500,7 @@ export default function ProductiveHoursChart({
       textStyle: { fontFamily: CHART_FONT_FAMILY },
       grid: { left: 36, right: 12, top: topPad, bottom: bottomPad },
       tooltip,
-      legend: stackedBarLegend(chrome, legendData),
+      legend: stackedBarLegend(chrome, legendData, hiddenStacks),
       xAxis: {
         type: "category",
         data: labels,
@@ -530,13 +537,14 @@ export default function ProductiveHoursChart({
         }] : []),
       ],
     };
-  }, [agg, stackBy, categories, members, chartWidth, theme, palette]);
+  }, [agg, stackBy, categories, members, chartWidth, theme, palette, hiddenStacks]);
 
   return (
     <div ref={wrapRef}>
       <EChart
         option={option}
         height={254}
+        onLegendToggle={onToggleStack}
         accessibleDescription={`Stacked ${granularity} activity hours for the selected ${
           calendarDays(range)
         }-day period, broken down by ${STACK_WORDS[stackBy]} with a ${averageMeasure === "tracked" ? "tracked" : "productive"}-time rolling average.`}

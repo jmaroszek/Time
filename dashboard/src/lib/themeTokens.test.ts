@@ -275,6 +275,8 @@ describe("colour utilities in components", () => {
       if (path.includes(".test.")) continue;
       for (const [, name] of source.matchAll(UTILITY)) {
         if (BUILT_IN.has(name) || name.startsWith("[")) continue;
+        // One edge's width (`border-b-2`) names geometry, not a colour.
+        if (/^[trblxyse]-\d+$/.test(name)) continue;
         // A size or geometry step sharing a utility prefix (`border-2`,
         // `shadow-menu`, `text-xs`) is not a colour reference.
         if (`--color-${name}` in DARK) continue;

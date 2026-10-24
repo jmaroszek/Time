@@ -182,13 +182,18 @@ _SEED_CATEGORIES = [
 # their explicit scope allows.
 _SEED_RULES: list[tuple[str, str, str, int]] = []
 
+_PREVIOUS_DEFAULT_BROWSER_PROCESSES = (
+    "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe"
+)
+
 DEFAULT_SETTINGS = {
     "weekly_goal_hours": "0",
     "idle_threshold_seconds": "300",
     "heartbeat_seconds": "15",
     "week_start": "auto",
     "browser_processes": (
-        "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe"
+        "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe,"
+        "chromium.exe,thorium.exe,floorp.exe,librewolf.exe,waterfox.exe,zen.exe"
     ),
     "min_app_seconds_per_day": "0",
     # Sites the reader added to the built-in media list in
@@ -566,6 +571,14 @@ def _seed(conn: sqlite3.Connection) -> None:
     conn.executemany(
         "INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)",
         list(DEFAULT_SETTINGS.items()),
+    )
+    # The browser list grew to cover common Firefox and Chromium forks, whose
+    # users otherwise saw the extension do nothing. A row still holding the
+    # earlier shipped list was never edited, so it follows the new default; a
+    # list the reader changed is theirs and stays exactly as they left it.
+    conn.execute(
+        "UPDATE settings SET value=? WHERE key='browser_processes' AND value=?",
+        (DEFAULT_SETTINGS["browser_processes"], _PREVIOUS_DEFAULT_BROWSER_PROCESSES),
     )
 
 

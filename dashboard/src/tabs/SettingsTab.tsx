@@ -53,6 +53,7 @@ import {
 import { useBanner } from "../state/banner";
 import { useLifecycleBusy } from "../lib/lifecycleBusy";
 import { useMeta } from "../state/meta";
+import type { AppUpdateState } from "../state/useAppUpdate";
 import DataSection from "./settings/DataSection";
 import ExclusionSummary from "./settings/ExclusionSummary";
 import HelpAndFeedbackSection from "./settings/HelpAndFeedbackSection";
@@ -114,9 +115,11 @@ export default function SettingsTab({
   onManageCategories,
   highlightSection = null,
   onHighlightShown,
+  update,
 }: {
   onManageExclusions: () => void;
   onManageCategories: () => void;
+  update: AppUpdateState;
   /** A section title to scroll to and mark on arrival — a one-shot request from
    *  whatever sent the reader here, cleared through onHighlightShown. */
   highlightSection?: string | null;
@@ -707,7 +710,7 @@ export default function SettingsTab({
         />
         {/* The only network request Time makes. Installing stays a separate,
             manual act: the control for it appears beside the tabs when a
-            version is waiting. */}
+            version is waiting, and About & help can ask on demand. */}
         <Row
           label="Check for updates"
           help="Check for updates when you open Time."
@@ -1138,9 +1141,6 @@ export default function SettingsTab({
             />
           }
         />
-        <p className="border-t border-surface-2 px-4 py-3 text-xs text-ink-3">
-          Dashboard {appVersion ?? "—"} · Tracker {meta.settings.tracker_version ?? "not stamped yet"}
-        </p>
       </Section>
 
       {/* Restoring defaults and erasing history are the same kind of act, so
@@ -1150,6 +1150,7 @@ export default function SettingsTab({
       <HelpAndFeedbackSection
         appVersion={appVersion}
         trackerVersion={meta.settings.tracker_version}
+        update={update}
       />
       <RestoreDefaultsSection
         disabled={savingKeys.size > 0 || lifecycleBusy}

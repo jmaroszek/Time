@@ -77,11 +77,15 @@ export default function EChart({
   option,
   height,
   onClick,
+  onLegendToggle,
   accessibleDescription,
 }: {
   option: EChartsOption;
   height: number;
   onClick?: (params: ECElementEvent) => void;
+  /** For a chart whose legend selection is held by its caller; see
+   *  `stackedBarLegend`. */
+  onLegendToggle?: (name: string, visible: boolean) => void;
   accessibleDescription: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -168,6 +172,17 @@ export default function EChart({
       zr.off("mousemove", keepArrow);
     };
   }, [onClick, option]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !onLegendToggle) return;
+    const handler = (event: { name: string; selected: Record<string, boolean> }) =>
+      onLegendToggle(event.name, event.selected[event.name] !== false);
+    chart.on("legendselectchanged", handler as never);
+    return () => {
+      chart.off("legendselectchanged", handler as never);
+    };
+  }, [onLegendToggle]);
 
   return (
     <div

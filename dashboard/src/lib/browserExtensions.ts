@@ -25,8 +25,15 @@ export const TIME_EXTENSION_NAME = "Time Web Extension";
 
 export const TIME_EXTENSION_LISTINGS: readonly TimeExtensionListing[] = [
   {
-    browsers: "Chrome, Brave, Opera, and Vivaldi",
-    processes: ["chrome.exe", "brave.exe", "opera.exe", "vivaldi.exe"],
+    browsers: "Chrome, Brave, Opera, Vivaldi, and other Chromium browsers",
+    processes: [
+      "chrome.exe",
+      "brave.exe",
+      "opera.exe",
+      "vivaldi.exe",
+      "chromium.exe",
+      "thorium.exe",
+    ],
     store: "Chrome Web Store",
     storeUrl:
       "https://chromewebstore.google.com/detail/time-web-extension/gnlfnddpjedjehaeofdbpfmmjghieoke",
@@ -38,8 +45,8 @@ export const TIME_EXTENSION_LISTINGS: readonly TimeExtensionListing[] = [
     storeUrl: null,
   },
   {
-    browsers: "Firefox",
-    processes: ["firefox.exe"],
+    browsers: "Firefox and its forks",
+    processes: ["firefox.exe", "floorp.exe", "librewolf.exe", "waterfox.exe", "zen.exe"],
     store: "Firefox Add-ons",
     // Locale-less path on purpose: AMO redirects it to the reader's own locale,
     // where the "en-US" listing URL would pin every reader to English.

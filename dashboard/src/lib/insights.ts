@@ -483,6 +483,11 @@ export function websiteComparisonIsAvailable(
     && Math.abs(currentDetected - previousDetected) <= 0.1 + Number.EPSILON;
 }
 
+/** The longest range drawn as a timeline. Past about two weeks of rows it
+ *  stops being readable, so longer ranges get the calendar and rhythm views —
+ *  which in turn have too little to show below it. */
+export const TIMELINE_MAX_DAYS = 14;
+
 function buildInsightsModelWithClassifier(
   request: InsightsRequest,
   classifier: Classifier,
@@ -581,9 +586,9 @@ function buildInsightsModelWithClassifier(
       previousDaily: aggregation.previousWebsiteDaily,
     },
   );
-  const timelineSessions = rangeDays <= 14 ? aggregation.current : null;
+  const timelineSessions = rangeDays <= TIMELINE_MAX_DAYS ? aggregation.current : null;
   const rhythm =
-    rangeDays > 14
+    rangeDays > TIMELINE_MAX_DAYS
       ? weekdayRhythmSummaries(
           aggregation.current,
           request.range,

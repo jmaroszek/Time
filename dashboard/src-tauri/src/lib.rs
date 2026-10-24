@@ -156,6 +156,7 @@ pub fn run() {
             commands::reveal_database,
             commands::default_browser_prog_id,
             update::check_for_update,
+            update::check_for_update_now,
             update::install_update
         ])
         .run(tauri::generate_context!())

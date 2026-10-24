@@ -7,9 +7,10 @@ import {
 } from "./browsers";
 
 describe("DEFAULT_BROWSER_PROCESSES", () => {
-  it("ships only the six supported mainstream Windows browsers", () => {
+  it("ships the mainstream Windows browsers and their common forks", () => {
     expect(DEFAULT_BROWSER_PROCESSES).toBe(
-      "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe",
+      "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe," +
+        "chromium.exe,thorium.exe,floorp.exe,librewolf.exe,waterfox.exe,zen.exe",
     );
   });
 });

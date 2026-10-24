@@ -8,7 +8,8 @@
 
 // Mirrors DEFAULT_SETTINGS in tracker/db.py and BOOTSTRAP_SQL in database/schema.rs.
 export const DEFAULT_BROWSER_PROCESSES =
-  "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe";
+  "chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe," +
+  "chromium.exe,thorium.exe,floorp.exe,librewolf.exe,waterfox.exe,zen.exe";
 
 /** The settings field uses the names people recognize; matching keeps the
  *  canonical executable suffix internally. Non-exe extensions stay visible. */

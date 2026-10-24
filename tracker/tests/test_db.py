@@ -410,6 +410,39 @@ def test_empty_browser_processes_fall_back_to_the_shipped_list(conn):
     assert {"chrome.exe", "msedge.exe", "firefox.exe"} <= browsers
 
 
+def test_reopening_upgrades_an_unedited_earlier_browser_list(tmp_path):
+    path = tmp_path / "test.db"
+    c = db.open_db(path)
+    c.execute(
+        "UPDATE settings SET value=? WHERE key='browser_processes'",
+        ("chrome.exe,msedge.exe,firefox.exe,opera.exe,brave.exe,vivaldi.exe",),
+    )
+    c.close()
+    c = db.open_db(path)
+    value = c.execute(
+        "SELECT value FROM settings WHERE key='browser_processes'"
+    ).fetchone()[0]
+    c.close()
+    assert value == db.DEFAULT_SETTINGS["browser_processes"]
+    assert "floorp.exe" in value
+
+
+def test_reopening_keeps_a_browser_list_the_reader_edited(tmp_path):
+    path = tmp_path / "test.db"
+    c = db.open_db(path)
+    c.execute(
+        "UPDATE settings SET value=? WHERE key='browser_processes'",
+        ("chrome.exe,firefox.exe",),
+    )
+    c.close()
+    c = db.open_db(path)
+    value = c.execute(
+        "SELECT value FROM settings WHERE key='browser_processes'"
+    ).fetchone()[0]
+    c.close()
+    assert value == "chrome.exe,firefox.exe"
+
+
 def test_media_domains_are_normalized_to_stored_host_names(conn):
     conn.execute(
         "UPDATE settings SET value=? WHERE key='media_domains'",

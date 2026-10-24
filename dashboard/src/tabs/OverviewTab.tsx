@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import ActivityCalendar from "../components/ActivityCalendar";
@@ -9,9 +9,10 @@ import TimelineChart from "../components/TimelineChart";
 import TopUsageList from "../components/TopUsageList";
 import ProductiveHoursChart from "../components/ProductiveHoursChart";
 import { Card, MenuSelect, MetricCard, Spinner } from "../components/ui";
+import { NO_HIDDEN_STACKS } from "../lib/chartTheme";
 import { fmtDuration, fmtPct, fmtWholeHours } from "../lib/format";
 import type { ActivityWindowTarget } from "../lib/activity";
-import type { InsightsRequest } from "../lib/insights";
+import { TIMELINE_MAX_DAYS, type InsightsRequest } from "../lib/insights";
 import {
   parentScope,
   scopeCandidates,
@@ -22,13 +23,12 @@ import {
 } from "../lib/insightsScope";
 import { productivityDataState } from "../lib/metrics";
 import { hidesUtilities } from "../lib/noise";
-import { calendarDays, matchedPreviousRange, type Range } from "../lib/time";
+import { allTimeRange, calendarDays, matchedPreviousRange, type Range } from "../lib/time";
 import {
   MONTH_CALENDAR_MIN_DAYS,
   ACTIVITY_METRICS,
   activityComposition,
   ACTIVITY_METRIC_LABELS,
-  ACTIVITY_METRIC_WORDS,
   type ActivityMetric,
   type ActivityStack,
 } from "../lib/overview";
@@ -146,6 +146,12 @@ export default function OverviewTab({
     scope,
     setScope,
   } = view;
+  // Hours-chart legend entries the reader switched off, tagged with the stacking
+  // they were hidden under: another stacking has other names, so its legend
+  // starts with everything shown.
+  const [hiddenLegend, setHiddenLegend] = useState<{ stack: ActivityStack; names: ReadonlySet<string> }>(
+    { stack: stackBy, names: NO_HIDDEN_STACKS },
+  );
 
   const { startSec: fetchStart, endSec: fetchEnd } = insightsFetchWindow(range);
   const sessionData = useSessions(fetchStart, fetchEnd, historyRevision, liveTick);
@@ -248,7 +254,7 @@ export default function OverviewTab({
   // The calendar default is a starting point, not a rule: without this, any
   // change to the range's length (toggling Rolling on the same preset, say)
   // would silently move the picker off the view that's already on screen.
-  const aggregateRangeDays = model && model.rangeDays > 14 ? model.rangeDays : null;
+  const aggregateRangeDays = model && model.rangeDays > TIMELINE_MAX_DAYS ? model.rangeDays : null;
   useEffect(() => {
     if (aggregateRangeDays === null) return;
     setAggregateView((current) => current ?? "calendar");
@@ -280,7 +286,7 @@ export default function OverviewTab({
   // laid out) are both useful; the calendar is the pinned default (set above)
   // and the card header lets you override it from then on.
   const middleView =
-    rangeDays <= 14 ? "timeline" : (aggregateView ?? "calendar");
+    rangeDays <= TIMELINE_MAX_DAYS ? "timeline" : (aggregateView ?? "calendar");
   // What the narrowed subject's time is made of in this range. Most apps and
   // sites sit wholly in one category, and a split of one part is no split.
   const composition = scope
@@ -295,6 +301,12 @@ export default function OverviewTab({
   // Past ~14 months, day cells slice too thin; the calendar shows month cells
   // (years as rows) instead. Rhythm needs no such switch — it is always 7×24.
   const calendarByMonth = rangeDays >= MONTH_CALENDAR_MIN_DAYS;
+  // A range can't reach back past the first recorded session, so until the
+  // whole history is longer than the timeline's limit, every range — even All
+  // time — lands on the timeline. Without saying so, picking "Last 30 days"
+  // looked like the calendar and rhythm views did not exist.
+  const historyIsShort = firstSessionSec !== null
+    && calendarDays(allTimeRange(firstSessionSec)) <= TIMELINE_MAX_DAYS;
 
   const rankedItems = (rankedEntityKind === "apps" ? model.apps : model.websites).slice(0, topN);
   const updateError = sessionData.error ?? analyzed.error;
@@ -327,6 +339,11 @@ export default function OverviewTab({
       ? { kind: "app", key: item.key, name: item.name, within }
       : { kind: "website", key: item.key, name: item.name, within });
   const heldIn = scope ? parentScope(scope) : null;
+  // The ranked card is where a narrowed view was entered from, so it is where
+  // the way back belongs — the chip beside the tabs reads as a filter, not as
+  // the exit. One step at a time: an app opened inside a category returns to it.
+  const leaveScope = () => setScope(heldIn);
+  const backTo = heldIn ? heldIn.name : "all activity";
   const scopeCategory = scope?.kind === "category"
     ? meta.categories.find((category) => category.id === scope.categoryId) ?? null
     : heldIn?.kind === "category"
@@ -350,6 +367,14 @@ export default function OverviewTab({
     : memberBreakdown || stackChoices.length === 0
       ? "total"
       : stackChoices.includes(stackBy) ? stackBy : stackChoices[0];
+  const hiddenStacks = hiddenLegend.stack === shownStack ? hiddenLegend.names : NO_HIDDEN_STACKS;
+  const toggleStack = (name: string, visible: boolean) => {
+    const names = new Set(hiddenStacks);
+    if (visible) names.delete(name);
+    else names.add(name);
+    setHiddenLegend({ stack: shownStack, names });
+  };
+  const showAllStacks = () => setHiddenLegend({ stack: shownStack, names: NO_HIDDEN_STACKS });
 
   return (
     <div ref={rootRef} className="relative flex flex-col gap-4" aria-busy={refreshing}>
@@ -451,25 +476,13 @@ export default function OverviewTab({
 
       <Card
         surface="chart"
+        // No subtitles: the metric and view menus beside the title already say
+        // what the grid shows, and the Rhythm tooltip says its cells are averages.
         title={middleView === "timeline"
           ? "Timeline"
           : middleView === "rhythm"
-            ? (
-                <span className="flex flex-col gap-0.5">
-                  <span>Activity Rhythm</span>
-                  <span className="text-xs font-normal text-ink-3">
-                    {`Average ${ACTIVITY_METRIC_WORDS[shownMetric]} time by weekday and hour`}
-                  </span>
-                </span>
-              )
-            : (
-                <span className="flex flex-col gap-0.5">
-                  <span>Activity Calendar</span>
-                  <span className="text-xs font-normal text-ink-3">
-                    {`${ACTIVITY_METRIC_WORDS[shownMetric].replace(/^./, (c) => c.toUpperCase())} time by ${calendarByMonth ? "month" : "day"}`}
-                  </span>
-                </span>
-              )}
+            ? "Activity Rhythm"
+            : "Activity Calendar"}
         right={middleView === "timeline" ? (
           <MenuSelect
             variant="quiet"
@@ -514,12 +527,19 @@ export default function OverviewTab({
         )}
       >
         {middleView === "timeline" ? (
-          <TimelineChart
-            sessions={model.timelineSessions ?? []}
-            range={displayRange}
-            classifier={meta.classifier}
-            blockMinutes={blockMinutes}
-          />
+          <>
+            <TimelineChart
+              sessions={model.timelineSessions ?? []}
+              range={displayRange}
+              classifier={meta.classifier}
+              blockMinutes={blockMinutes}
+            />
+            {historyIsShort && (
+              <p className="mt-3 text-xs text-ink-3">
+                More views appear here after two weeks of tracking.
+              </p>
+            )}
+          </>
         ) : middleView === "rhythm" ? (
           <RhythmChart
             summary={model.rhythm!}
@@ -542,7 +562,7 @@ export default function OverviewTab({
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {scope && scope.kind !== "category" && scopeWindows ? (
           <Card
-            title="Top Windows"
+            title={<BackTitle onBack={leaveScope} backTo={backTo}>Top Windows</BackTitle>}
             className="h-[345px]"
             right={
               <MenuSelect
@@ -571,7 +591,11 @@ export default function OverviewTab({
           </Card>
         ) : (
           <Card
-            title={rankedEntityKind === "apps" ? "Top Apps" : "Top Websites"}
+            title={
+              <BackTitle onBack={scope ? leaveScope : null} backTo={backTo}>
+                {rankedEntityKind === "apps" ? "Top Apps" : "Top Websites"}
+              </BackTitle>
+            }
             className="h-[345px]"
             right={
               <span className="flex items-center gap-2">
@@ -619,26 +643,39 @@ export default function OverviewTab({
         <Card
           title={hoursTitle}
           className="h-[345px]"
-          right={shownStack === "member" || shownStack === "total" || stackChoices.length === 1 ? (
-            // Fixed, so stated rather than offered: the menu's other view
-            // would not split this subject at all. Sized as the menu is, so
-            // the title stays level with the neighbouring card's, and held
-            // open even when there is nothing to state.
-            <span className="flex min-h-[calc(1rem+0.75rem+2px)] items-center border border-transparent text-xs text-ink-3">
-              {STACK_STATEMENTS[shownStack]}
+          right={
+            <span className="flex items-center gap-3">
+              {hiddenStacks.size > 0 && (
+                <button
+                  type="button"
+                  onClick={showAllStacks}
+                  className="text-xs text-accent transition-colors hover:underline hover:decoration-accent/50 hover:underline-offset-4"
+                >
+                  Show all
+                </button>
+              )}
+              {shownStack === "member" || shownStack === "total" || stackChoices.length === 1 ? (
+                // Fixed, so stated rather than offered: the menu's other view
+                // would not split this subject at all. Sized as the menu is, so
+                // the title stays level with the neighbouring card's, and held
+                // open even when there is nothing to state.
+                <span className="flex min-h-[calc(1rem+0.75rem+2px)] items-center border border-transparent text-xs text-ink-3">
+                  {STACK_STATEMENTS[shownStack]}
+                </span>
+              ) : (
+                <MenuSelect
+                  variant="quiet"
+                  label="Stack bars by"
+                  value={shownStack}
+                  onChange={(v) => setStackBy(v as ActivityStack)}
+                  options={[
+                    { value: "state", label: "Productivity" },
+                    { value: "category", label: "Categories" },
+                  ]}
+                />
+              )}
             </span>
-          ) : (
-            <MenuSelect
-              variant="quiet"
-              label="Stack bars by"
-              value={shownStack}
-              onChange={(v) => setStackBy(v as ActivityStack)}
-              options={[
-                { value: "state", label: "Productivity" },
-                { value: "category", label: "Categories" },
-              ]}
-            />
-          )}
+          }
         >
           <div className="pt-2">
             {isSingleDay ? (
@@ -647,6 +684,8 @@ export default function OverviewTab({
                 stackBy={shownStack}
                 categories={meta.categories}
                 members={model.members}
+                hiddenStacks={hiddenStacks}
+                onToggleStack={toggleStack}
               />
             ) : (
               <ProductiveHoursChart
@@ -659,11 +698,44 @@ export default function OverviewTab({
                 categories={meta.categories}
                 members={model.members}
                 averageMeasure={scope ? "tracked" : "productive"}
+                hiddenStacks={hiddenStacks}
+                onToggleStack={toggleStack}
               />
             )}
           </div>
         </Card>
       </div>
     </div>
+  );
+}
+
+/** A card title with the back arrow the Activity detail panel uses, so the two
+ *  ways of drilling into one subject leave it the same way. */
+function BackTitle({
+  onBack,
+  backTo,
+  children,
+}: {
+  onBack: (() => void) | null;
+  backTo: string;
+  children: ReactNode;
+}) {
+  if (!onBack) return <>{children}</>;
+  const label = `Back to ${backTo}`;
+  return (
+    <span className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={onBack}
+        title={label}
+        aria-label={label}
+        className="-ml-1.5 flex h-7 w-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M19 12H5m7-7-7 7 7 7" />
+        </svg>
+      </button>
+      {children}
+    </span>
   );
 }

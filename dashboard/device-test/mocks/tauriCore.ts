@@ -977,6 +977,7 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
     // it. Installing resolves nowhere on purpose: the real command exits the
     // process, and a spec that clicks it wants the downloading state to hold.
     case "check_for_update":
+    case "check_for_update_now":
       result =
         fixtureParams.get("update") === "available"
           ? { version: "0.2.0", notes: "Fixture release notes." }

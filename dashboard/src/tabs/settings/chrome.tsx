@@ -36,7 +36,7 @@ const SETTINGS_SECTIONS = [
   "Hidden items",
   "Appearance",
   "Advanced",
-  "Help & feedback",
+  "About & help",
   "Defaults",
   "Data management",
 ] as const;
