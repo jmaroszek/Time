@@ -1890,6 +1890,8 @@ mod tests {
                     ("recording_consent", "1"),
                     ("launch_at_login", "1"),
                     ("tracking_schedule_enabled", "1"),
+                    ("break_reminder_enabled", "1"),
+                    ("break_reminder_seconds", "900"),
                 ])
                 .await
                 .unwrap();
@@ -1978,6 +1980,19 @@ mod tests {
                     .await
                     .unwrap();
             assert_eq!(theme, "system");
+            let break_reminder: Vec<(String, String)> = sqlx::query_as(
+                "SELECT key, value FROM settings WHERE key LIKE 'break_reminder_%' ORDER BY key",
+            )
+            .fetch_all(database.test_pool())
+            .await
+            .unwrap();
+            assert_eq!(
+                break_reminder,
+                [
+                    ("break_reminder_enabled".to_string(), "0".to_string()),
+                    ("break_reminder_seconds".to_string(), "3600".to_string()),
+                ]
+            );
             let lifecycle = database.lifecycle_settings().await.unwrap();
             assert!(!lifecycle.recording_consent);
             assert!(!lifecycle.launch_at_login);

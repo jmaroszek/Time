@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tracker import config, db, platforms, tray
+from tracker.break_reminder import BreakReminder
 from tracker.domains import parse_domain
 from tracker.session_manager import LOCK_PROCESS, SessionManager, is_idle
 from tracker.tracking_schedule import schedule_state
@@ -371,6 +372,8 @@ def run() -> None:
     human_input_monitor = platforms.start_human_input_monitor()
     media_monitor = platforms.start_media_playback_monitor()
     power_monitor = platforms.start_power_event_monitor()
+    notifier = platforms.start_notifier()
+    break_reminder = BreakReminder()
     stop_event = threading.Event()
     tray_controller = tray.create_tray_controller(config.DB_PATH, stop_event)
     tray_visible = _sync_tray(tray_controller, raw_settings)
@@ -389,12 +392,14 @@ def run() -> None:
 
     logging.info(
         "Tracker started | tray_available=%s | tray_visible=%s |"
-        " power_events=%s | human_input=%s | media_playback=%s | poll=%ss",
+        " power_events=%s | human_input=%s | media_playback=%s |"
+        " notifications=%s | poll=%ss",
         tray_controller is not None,
         tray_visible,
         power_monitor is not None,
         human_input_monitor is not None,
         media_monitor is not None,
+        notifier is not None,
         config.POLL_SECONDS,
     )
     poll = config.POLL_SECONDS
@@ -457,6 +462,12 @@ def run() -> None:
                         ),
                     )
                 manager.tick(snap)
+                minutes = break_reminder.observe(snap, manager.settings)
+                if minutes is not None and notifier is not None:
+                    if notifier.show(
+                        "Time for a break", f"You've been active for {minutes} minutes."
+                    ):
+                        logging.info("Break reminder shown | minutes=%s", minutes)
                 # A spinning loop with broken capture is not a healthy recorder.
                 # Successful paused/excluded polls still reach this stamp.
                 monotonic_now = time.monotonic()
@@ -471,6 +482,8 @@ def run() -> None:
                     last_health_publish = monotonic_now
             except Exception as exc:
                 manager.observation_interrupted()
+                # Activity the loop failed to observe cannot extend a stretch.
+                break_reminder.reset()
                 failures.record("tick failed", exc, time.monotonic())
 
             next_tick += poll

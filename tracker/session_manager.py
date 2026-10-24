@@ -82,6 +82,10 @@ class Settings:
     # sees only the `media_playing` verdict that gate produces. It rides here
     # because this is the settings bag the tracker already refreshes each poll.
     media_domains: frozenset[str] = frozenset()
+    # Read by tracker/break_reminder.py, not by this state machine, for the
+    # same reason media_domains rides here.
+    break_reminder_enabled: bool = False
+    break_reminder_seconds: float = 3600.0
 
 
 def is_idle(snap: Snapshot, settings: Settings) -> bool:

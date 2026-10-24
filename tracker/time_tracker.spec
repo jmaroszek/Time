@@ -61,11 +61,13 @@ a = Analysis(
     hiddenimports=[
         "pystray._win32",
         "winrt.runtime",
+        "winrt.windows.data.xml.dom",
         "winrt.windows.foundation",
         "winrt.windows.foundation.collections",
         "winrt.windows.media",
         "winrt.windows.media.control",
         "winrt.windows.storage.streams",
+        "winrt.windows.ui.notifications",
     ],
     hookspath=[],
     hooksconfig={},

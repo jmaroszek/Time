@@ -45,6 +45,7 @@ def _forbid_background_components(monkeypatch) -> None:
         "start_human_input_monitor",
         unexpected,
     )
+    monkeypatch.setattr(tracker.platforms, "start_notifier", unexpected)
     monkeypatch.setattr(tracker.tray, "create_tray_controller", unexpected)
 
 
@@ -178,6 +179,7 @@ def test_loop_applies_privacy_and_recording_gates_after_clock_setback(
         (tracker.platforms, "start_human_input_monitor"),
         (tracker.platforms, "start_media_playback_monitor"),
         (tracker.platforms, "start_power_event_monitor"),
+        (tracker.platforms, "start_notifier"),
     ]:
         monkeypatch.setattr(component, function, lambda: None)
     stop = []

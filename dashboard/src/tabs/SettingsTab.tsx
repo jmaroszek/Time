@@ -382,6 +382,8 @@ export default function SettingsTab({
   // rather than waiting for the tracker's next poll to agree.
   const trayIconRequested =
     (drafts.show_tray_icon ?? meta.settings.show_tray_icon ?? "1") !== "0";
+  const breakRemindersOn =
+    (drafts.break_reminder_enabled ?? meta.settings.break_reminder_enabled) === "1";
   const scheduleSettings = { ...meta.settings, ...drafts };
   const schedule = trackingScheduleState(scheduleSettings);
   const selectedScheduleDays = parseTrackingScheduleDays(
@@ -921,12 +923,39 @@ export default function SettingsTab({
           computer use and time away from it. Every section below reads or draws
           the totals they define.
 
-          Idle goes second, against the section title's order, because its media
+          Idle goes last, against the section title's order, because its media
           exception hangs off it in an indented group — and an indent that is
           not the last thing in the card leaves the row below it looking like it
-          might be inside the group too. */}
+          might be inside the group too. Break reminders sit above it for the
+          same reason: their indent appears only while they are on, while the
+          media one is always there. */}
       <Section title="Focus & idle">
         <Row label="Focus chain max gap" help="Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration, while unproductive or AFK time ends it immediately." control={numberControl(SPECS.focus, "Focus chain max gap", "min")} />
+        <SettingGroup
+          dependents={breakRemindersOn && (
+            <Row
+              bare
+              compact
+              label="Remind after"
+              help="Continuous activity before the reminder. It shows once, then waits for your next break."
+              control={numberControl(SPECS.breakReminder, "Remind after", "min")}
+            />
+          )}
+        >
+          <Row
+            bare
+            label="Break reminders"
+            help="A quiet notification after a long stretch without a break. Being AFK for the idle threshold below counts as a break."
+            control={
+              <PrivacyToggle
+                label="Break reminders"
+                enabled={breakRemindersOn}
+                disabled={savingKeys.has("break_reminder_enabled")}
+                onChange={(enabled) => selectSetting("break_reminder_enabled", enabled ? "1" : "0")}
+              />
+            }
+          />
+        </SettingGroup>
         <SettingGroup
           dependents={
             <Row

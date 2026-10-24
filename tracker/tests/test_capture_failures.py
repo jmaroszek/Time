@@ -10,16 +10,20 @@ from tracker import db, tracker
 from tracker.session_manager import Snapshot
 
 
-def drive_loop(tmp_path, monkeypatch, snapshots, *, input_monitor=None, media_monitor=None, probe_inputs=None):
+def drive_loop(
+    tmp_path, monkeypatch, snapshots, *, input_monitor=None, media_monitor=None, probe_inputs=None,
+    notifier=None, settings=None,
+):
     path = tmp_path / "capture.db"
     conn = db.open_db(path)
-    db.set_settings(conn, {"recording_consent": "1", "privacy_onboarding_complete": "1"})
+    db.set_settings(conn, {"recording_consent": "1", "privacy_onboarding_complete": "1", **(settings or {})})
     conn.close()
     monkeypatch.setattr(tracker.config, "DB_PATH", path)
     monkeypatch.delenv("TIME_MIGRATE_ONLY", raising=False)
     monkeypatch.setattr(tracker.platforms, "start_human_input_monitor", lambda: input_monitor)
     monkeypatch.setattr(tracker.platforms, "start_media_playback_monitor", lambda: media_monitor)
     monkeypatch.setattr(tracker.platforms, "start_power_event_monitor", lambda: None)
+    monkeypatch.setattr(tracker.platforms, "start_notifier", lambda: notifier)
     monkeypatch.setitem(sys.modules, "win32api", SimpleNamespace(SetConsoleCtrlHandler=lambda *_: None))
     step = 0
     health = []
@@ -91,3 +95,21 @@ def test_prolonged_missing_foreground_does_not_extend_previous_app(tmp_path, mon
                               [("editor.exe", 0)] + [(None, 0)] * 7 + [("editor.exe", idle)])
     assert rows == [(1000, 1000, "editor.exe"), (1080, 1090, "editor.exe")]
     assert health == [1000] * 8 + [1080]
+
+
+def test_break_reminder_reaches_the_notifier_once_per_stretch(tmp_path, monkeypatch):
+    shown = []
+    notifier = SimpleNamespace(show=lambda title, body: shown.append((title, body)) or True)
+    # Ten seconds per poll: the shortest allowed interval, 900 s, is poll 90.
+    drive_loop(
+        tmp_path, monkeypatch, [("editor.exe", 0)] * 120, notifier=notifier,
+        settings={"break_reminder_enabled": "1", "break_reminder_seconds": "900"},
+    )
+    assert shown == [("Time for a break", "You've been active for 15 minutes.")]
+
+
+def test_break_reminder_stays_off_by_default(tmp_path, monkeypatch):
+    shown = []
+    notifier = SimpleNamespace(show=lambda title, body: shown.append(title) or True)
+    drive_loop(tmp_path, monkeypatch, [("editor.exe", 0)] * 120, notifier=notifier)
+    assert shown == []

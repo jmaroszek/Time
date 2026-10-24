@@ -385,6 +385,20 @@ def test_get_settings_parses_and_clamps(conn):
     conn.execute("UPDATE settings SET value='garbage' WHERE key='idle_threshold_seconds'")
     assert db.get_settings(conn).idle_threshold_seconds == 300.0  # fallback
 
+
+def test_break_reminder_is_off_by_default_and_clamped(conn):
+    s = db.get_settings(conn)
+    assert s.break_reminder_enabled is False
+    assert s.break_reminder_seconds == 3600.0
+
+    db.set_settings(conn, {"break_reminder_enabled": "1", "break_reminder_seconds": "60"})
+    s = db.get_settings(conn)
+    assert s.break_reminder_enabled is True
+    assert s.break_reminder_seconds == 900.0  # the 15-minute floor
+
+    db.set_setting(conn, "break_reminder_seconds", "99999")
+    assert db.get_settings(conn).break_reminder_seconds == 10800.0  # the 3-hour cap
+
     conn.execute(
         "INSERT INTO tracking_exclusions VALUES ('app','code.exe',1),"
         "('website','example.com',1)"

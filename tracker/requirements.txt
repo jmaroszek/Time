@@ -7,5 +7,7 @@ winrt-runtime==3.2.1
 winrt-Windows-Foundation==3.2.1
 winrt-Windows-Foundation-Collections==3.2.1
 winrt-Windows-Media==3.2.1
+winrt-Windows-Data-Xml-Dom==3.2.1
 winrt-Windows-Media-Control==3.2.1
 winrt-Windows-Storage-Streams==3.2.1
+winrt-Windows-UI-Notifications==3.2.1

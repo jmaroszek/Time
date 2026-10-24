@@ -216,6 +216,10 @@ DEFAULT_SETTINGS = {
     # OS so a light-mode user never gets a dark first run.
     "theme": "system",
     "focus_chain_max_gap_seconds": "300",
+    # Opt-in: a notification nobody asked for is the nagging Time avoids. The
+    # interval counts continuous activity, which an AFK-length break resets.
+    "break_reminder_enabled": "0",
+    "break_reminder_seconds": "3600",
     "day_start_hour": "0",
     "day_end_hour": "24",
     # Pause state (written by the tray / dashboard, read by the tracker):
@@ -669,6 +673,8 @@ def get_settings(conn: sqlite3.Connection, now: float | None = None) -> Settings
         excluded_processes=excluded_processes,
         excluded_domains=excluded_domains,
         media_domains=normalize_media_domains(raw.get("media_domains", "")),
+        break_reminder_enabled=raw.get("break_reminder_enabled") == "1",
+        break_reminder_seconds=_float("break_reminder_seconds", 3600.0, 900.0, 10800.0),
     )
 
 

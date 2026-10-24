@@ -160,6 +160,8 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     ('productivity_style','vivid'),
     ('theme','system'),
     ('focus_chain_max_gap_seconds','300'),
+    ('break_reminder_enabled','0'),
+    ('break_reminder_seconds','3600'),
     ('day_start_hour','0'),
     ('day_end_hour','24'),
     ('tracking_paused','0'),

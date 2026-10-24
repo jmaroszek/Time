@@ -33,6 +33,7 @@ OS_ONLY_ATTRIBUTES = {("os", "startfile")}
 # The tracker's logic. These may not reach into the platform layer at all; the
 # composition root (tracker.py) and the tray hand them what they need.
 CORE = {
+    "break_reminder.py",
     "config.py",
     "db.py",
     "domains.py",

@@ -12,6 +12,8 @@ the running OS's set:
   ``is_foreground_playing(...)``, or None.
 - ``start_power_event_monitor()``: an object with ``drain() -> list[PowerEvent]``
   and ``close()``, or None.
+- ``start_notifier()``: an object with ``show(title, body) -> bool`` that posts a
+  user notification attributed to Time and never raises, or None.
 - ``acquire_single_instance() -> bool``: False when this user's tracker is
   already running.
 - ``install_console_shutdown_handler(handler)``: call ``handler`` when a

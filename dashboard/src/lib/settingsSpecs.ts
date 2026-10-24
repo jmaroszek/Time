@@ -23,6 +23,7 @@ export const SPECS = {
   end: { key: "day_end_hour", min: 1, max: 24, scale: 1 },
   idle: { key: "idle_threshold_seconds", min: 1, max: 60, scale: 60 },
   focus: { key: "focus_chain_max_gap_seconds", min: 0, max: 30, scale: 60 },
+  breakReminder: { key: "break_reminder_seconds", min: 15, max: 180, scale: 60, step: 5 },
   noiseTime: { key: "activity_noise_max_seconds", min: 0, max: 30, scale: 60, step: 0.5 },
   noiseSessions: { key: "activity_noise_max_sessions", min: 1, max: 20, scale: 1 },
 } satisfies Record<string, NumericSpec>;

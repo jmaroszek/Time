@@ -27,6 +27,7 @@ if sys.platform == "win32":
         snapshot,
         start_human_input_monitor,
         start_media_playback_monitor,
+        start_notifier,
         start_power_event_monitor,
     )
 else:
@@ -42,5 +43,6 @@ __all__ = [
     "snapshot",
     "start_human_input_monitor",
     "start_media_playback_monitor",
+    "start_notifier",
     "start_power_event_monitor",
 ]
