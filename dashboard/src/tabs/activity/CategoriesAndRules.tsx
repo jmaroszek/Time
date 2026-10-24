@@ -767,14 +767,15 @@ export default function CategoriesAndRules({
                     read without opening a category. Right after the name, it
                     reads as the sentence it is: "Work at least 20h/wk". No goal
                     shows nothing: new goals start from the actions menu. The
-                    negative margin takes back the hover box's padding, so the
-                    words sit a space from the name rather than a column away. */}
+                    negative margin takes back most of the hover box's padding, so
+                    the words sit 12px from the name: apart from it, but not a
+                    column away. */}
                 {!locked && !category.isIgnored && category.goal && (
                   <button
                     type="button"
                     title="Edit weekly goal"
                     aria-label={`Weekly goal for ${category.name}: ${goalSummary(category.goal)}. Edit`}
-                    className="-ml-2 shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 tabular-nums text-ink-3 hover:bg-hover-2 hover:text-ink-2"
+                    className="-ml-1 shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 tabular-nums text-ink-3 hover:bg-hover-2 hover:text-ink-2"
                     onClick={(event) => {
                       if (goalMenu?.id === category.id) return setGoalMenu(null);
                       openGoalEditor(category.id, event.currentTarget.getBoundingClientRect());
