@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Category } from "./classify";
 import {
   fmtGoalTarget,
+  goalBarParts,
   goalCategories,
   goalProgress,
   goalSummary,
@@ -78,5 +79,22 @@ describe("goal wording", () => {
     expect(goalTargetLabel(goalProgress(0, week, { hours: 2, kind: "at_most" }))).toBe("max 2h");
     expect(goalSummary({ hours: 10, kind: "at_least" })).toBe("at least 10h/wk");
     expect(goalSummary({ hours: 5, kind: "at_most" })).toBe("at most 5h/wk");
+  });
+});
+
+describe("goalBarParts", () => {
+  it("fills toward the goal while short of it", () => {
+    expect(goalBarParts(5, 10)).toEqual({ within: 0.5, over: 0 });
+  });
+
+  it("spans the time once past the goal, keeping the goal's place", () => {
+    // 18h against 15h: the goal at 15/18 of the bar, 3/18 beyond it.
+    const parts = goalBarParts(18, 15);
+    expect(parts.within).toBeCloseTo(15 / 18);
+    expect(parts.over).toBeCloseTo(3 / 18);
+  });
+
+  it("draws nothing for nothing", () => {
+    expect(goalBarParts(0, 0)).toEqual({ within: 0, over: 0 });
   });
 });

@@ -443,6 +443,7 @@ export default function OverviewTab({
                 <span className="text-xs font-normal tracking-normal text-ink-3">
                   {`of ${fmtWholeHours(pace.targetHours)}`}
                 </span>
+                {pace.met && <GoalMetMark />}
               </span>
             )) : categoryGoals.length > 0 ? (emptyReason ?? (
               /* Category goals alone: how many stand where they should, in the
@@ -471,9 +472,6 @@ export default function OverviewTab({
               : goalConfigured && pace.roundedTieWhileBehind
                 ? "<1h left"
                 : undefined}
-            mark={goalConfigured && !emptyReason && pace.met
-              ? <GoalMetMark />
-              : undefined}
             hint={goalConfigured
               ? "Productive time in this range vs your weekly goal, prorated to the range's length."
               : categoryGoals.length > 0

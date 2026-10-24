@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "re
 import { createPortal } from "react-dom";
 
 import { MENU_VIEWPORT_MARGIN } from "../../components/ui";
-import { goalTargetLabel, type GoalProgress } from "../../lib/categoryGoals";
-import type { Category } from "../../lib/classify";
+import { goalBarParts, goalTargetLabel, type GoalProgress } from "../../lib/categoryGoals";
+import type { Category, GoalKind } from "../../lib/classify";
 import { fmtDuration, fmtDurationTitle, fmtWholeHours } from "../../lib/format";
 import type { GoalPace } from "../../lib/metrics";
 import { GoalMetMark } from "./GoalMetMark";
@@ -34,6 +34,7 @@ export default function GoalsPopover({
   onClose: () => void;
 }) {
   const popoverRef = useRef<HTMLDivElement>(null);
+  const anyMet = (overall?.met ?? false) || goals.some(({ progress }) => progress.met);
   const [box, setBox] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
@@ -100,8 +101,11 @@ export default function GoalsPopover({
           color={productiveColor}
           done={fmtWholeHours(overall.doneHours)}
           target={`of ${fmtWholeHours(overall.targetHours)}`}
-          fraction={overall.fraction}
+          kind="at_least"
+          doneValue={overall.doneHours}
+          targetValue={overall.targetHours}
           met={overall.met}
+          markSlot={anyMet}
           over={false}
         />
       )}
@@ -113,8 +117,11 @@ export default function GoalsPopover({
           done={fmtDuration(progress.doneSeconds)}
           doneTitle={fmtDurationTitle(progress.doneSeconds)}
           target={goalTargetLabel(progress)}
-          fraction={progress.fraction}
+          kind={progress.kind}
+          doneValue={progress.doneSeconds}
+          targetValue={progress.targetSeconds}
           met={progress.met}
+          markSlot={anyMet}
           over={progress.over}
           onClick={() => onSelectCategory(category)}
         />
@@ -130,9 +137,12 @@ function GoalRow({
   done,
   doneTitle,
   target,
-  fraction,
+  kind,
+  doneValue,
+  targetValue,
   met,
   over,
+  markSlot,
   onClick,
 }: {
   name: string;
@@ -140,29 +150,44 @@ function GoalRow({
   done: string;
   doneTitle?: string;
   target: string;
-  fraction: number;
+  kind: GoalKind;
+  /** The figures behind `done` and `target`, in one unit, for the bar. */
+  doneValue: number;
+  targetValue: number;
   met: boolean;
   over: boolean;
+  /** Keep the check's width even without one, so the figures of every row
+   *  end on the same line whenever any row has a check. */
+  markSlot: boolean;
   onClick?: () => void;
 }) {
+  const parts = goalBarParts(doneValue, targetValue);
+  // Up to the goal: green once a target is reached, accent otherwise. Past
+  // it: a fainter green for a target exceeded, warn for a limit passed.
+  const withinColor = kind === "at_least" && met ? "bg-good-data" : "bg-accent";
+  const overColor = kind === "at_least" ? "bg-good-data opacity-45" : "bg-warn";
   const body = (
     <>
       <span className="flex items-center gap-2">
         <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: color }} />
         <span className="min-w-0 flex-1 truncate text-left">{name}</span>
-        {met && <GoalMetMark />}
         <span className={`shrink-0 tabular-nums ${over ? "text-warn" : "text-ink"}`} title={doneTitle}>
           {done}
         </span>
         <span className="shrink-0 tabular-nums text-ink-3-raised">{target}</span>
+        {met ? <GoalMetMark /> : markSlot && <span aria-hidden="true" className="w-[9px] shrink-0" />}
       </span>
-      {/* Over its limit, a bar would only say "full"; the colour says by how
-          little or much is for the figure. */}
-      <span aria-hidden="true" className="ml-[18px] mt-1.5 block h-1 overflow-hidden rounded-full bg-ink-3/20">
-        <span
-          className={`block h-full rounded-full ${met ? "bg-good-data" : over ? "bg-warn" : "bg-accent"}`}
-          style={{ width: `${Math.min(1, Math.max(0, fraction)) * 100}%` }}
-        />
+      {/* Past the goal, the bar spans the time and a gap marks where the goal
+          was, so the part beyond it reads as the overrun. */}
+      <span aria-hidden="true" className="ml-[18px] mt-1.5 flex h-1 gap-[2px] overflow-hidden rounded-full bg-ink-3/20">
+        {parts.over > 0 ? (
+          <>
+            <span className={`block h-full ${withinColor}`} style={{ flex: `${parts.within} 1 0` }} />
+            <span className={`block h-full ${overColor}`} style={{ flex: `${parts.over} 1 0` }} />
+          </>
+        ) : (
+          <span className={`block h-full rounded-full ${withinColor}`} style={{ width: `${parts.within * 100}%` }} />
+        )}
       </span>
     </>
   );

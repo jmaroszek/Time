@@ -43,6 +43,22 @@ export function goalProgress(seconds: number, range: Range, goal: CategoryGoal):
   };
 }
 
+/**
+ * A progress bar's two parts, as shares of its full width. The bar spans the
+ * larger of the time and the goal, so a goal passed still shows where the
+ * goal was and, beyond it, by how much: 18h against 15h is 15 parts to the
+ * goal and 3 past it. Short of the goal, `within` is the whole story and
+ * the rest of the track is what's left.
+ */
+export function goalBarParts(done: number, target: number): { within: number; over: number } {
+  const scale = Math.max(done, target);
+  if (scale <= 0) return { within: 0, over: 0 };
+  return {
+    within: Math.min(done, target) / scale,
+    over: Math.max(0, done - target) / scale,
+  };
+}
+
 /** Categories whose goals Insights shows, in list order. Ignored time is never
  *  counted, so a goal on an ignored category could only ever read zero. */
 export function goalCategories(categories: Category[]): Array<Category & { goal: CategoryGoal }> {

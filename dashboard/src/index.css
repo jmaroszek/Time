@@ -347,6 +347,16 @@ textarea:focus-visible,
   outline-offset: 2px;
 }
 
+/* Except where text is typed. A text field matches :focus-visible on a mouse
+   click too, so it wore this ring every time it was used, outside the accent
+   border every field already draws on focus: two blue edges where one says
+   it. The border alone is the landmark there. Checkboxes and radios keep the
+   ring; they draw no focus border of their own. */
+input:is(:not([type]), [type="text"], [type="search"], [type="number"], [type="date"]):focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
 html,
 body,
 #root {

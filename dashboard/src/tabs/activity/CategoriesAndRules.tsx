@@ -767,12 +767,16 @@ export default function CategoriesAndRules({
                     state, so it shows on the header where every goal can be
                     read without opening a category. No goal shows nothing: new
                     goals start from the actions menu. */}
+                {/* Fixed width, text from the left, beside a fixed-width state
+                    slot: "Productive", "Neutral" and "Unproductive" differ in
+                    length, and the labels' left edges should line up down the
+                    list rather than drift with the word after them. */}
                 {!locked && !category.isIgnored && category.goal && (
                   <button
                     type="button"
                     title="Edit weekly goal"
                     aria-label={`Weekly goal for ${category.name}: ${goalSummary(category.goal)}. Edit`}
-                    className="shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 tabular-nums text-ink-3 hover:bg-hover-2 hover:text-ink-2"
+                    className="w-[6.75rem] shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 text-left tabular-nums text-ink-3 hover:bg-hover-2 hover:text-ink-2"
                     onClick={(event) => {
                       if (goalMenu?.id === category.id) return setGoalMenu(null);
                       openGoalEditor(category.id, event.currentTarget.getBoundingClientRect());
@@ -784,7 +788,9 @@ export default function CategoriesAndRules({
                 {/* The built-in Ignored category has no state to show: its only
                     possible one is its own name, and it cannot be changed. */}
                 {!locked && (
-                  <span className="shrink-0">
+                  // As wide as "Unproductive", the longest state, and right
+                  // aligned so the menu still ends beside the actions.
+                  <span className="flex w-24 shrink-0 justify-end">
                     <MenuSelect
                       variant="bare"
                       size="compact"
@@ -841,18 +847,20 @@ export default function CategoriesAndRules({
                         else if (action === "rename") beginRename();
                         else if (action === "delete") setPendingDelete({ category, ruleCount: allRules.length });
                       }}
+                      // Grouped by what each does: leave for Insights; change the
+                      // category itself (its name, its goal); remove it.
                       options={[
                         // Insights does not count ignored time, so a category
                         // still carrying the old ignored state has no view.
                         ...(onViewInInsights && !category.isIgnored
                           ? [{ value: "insights", label: "View in Insights" }]
                           : []),
+                        { value: "rename", label: "Rename", divider: Boolean(onViewInInsights && !category.isIgnored) },
                         // Ignored time is never counted, so a goal there could
                         // only ever read zero.
                         ...(!category.isIgnored
                           ? [{ value: "goal", label: category.goal ? "Edit weekly goal…" : "Set weekly goal…" }]
                           : []),
-                        { value: "rename", label: "Rename" },
                         { value: "delete", label: "Delete category…", divider: true, danger: true },
                       ]}
                     />

@@ -58,13 +58,17 @@ export default function GoalEditor({
         style={{ left, top, width: GOAL_EDITOR_WIDTH }}
         className="menu-pop fixed z-50 flex flex-col gap-3 rounded-[11px] border border-raised-edge bg-raised p-3 text-xs shadow-menu"
       >
-        <Segmented
-          label="Goal kind"
-          options={["at_least", "at_most"]}
-          labels={KIND_LABELS}
-          value={kind}
-          onChange={(value) => setKind(value as GoalKind)}
-        />
+        {/* self-start: a column stretches its children, and the switch's frame
+            should hug its two options rather than run on past them. */}
+        <div className="self-start">
+          <Segmented
+            label="Goal kind"
+            options={["at_least", "at_most"]}
+            labels={KIND_LABELS}
+            value={kind}
+            onChange={(value) => setKind(value as GoalKind)}
+          />
+        </div>
         <label className="flex items-center gap-2 text-ink-2">
           <input
             autoFocus
@@ -81,12 +85,12 @@ export default function GoalEditor({
           hours a week
         </label>
         <p className="leading-relaxed text-ink-3">
-          Shown in Insights and prorated to the range you're viewing.
+          Goal progress is shown in Insights.
         </p>
         <div className="-mx-1 -mb-1 flex items-center">
-          {/* Plain text rather than red: red is kept for removing recorded
-              history, and a goal is a preference, not a record. */}
-          {goal && <Button onClick={() => onSave(null)}>Remove goal</Button>}
+          {/* Gray at rest, red only on hover: it removes something, but a
+              preference rather than recorded history, which keeps red at rest. */}
+          {goal && <Button variant="text-danger-hover" onClick={() => onSave(null)}>Remove goal</Button>}
           <span className="flex-1" />
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={!valid} onClick={save}>Save</Button>

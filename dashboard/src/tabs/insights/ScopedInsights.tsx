@@ -60,13 +60,15 @@ export function ScopeTiles({
           <span className="flex items-baseline gap-1.5 tabular-nums" title={fmtDurationTitle(summary.seconds)}>
             <span className={goal?.over ? "text-warn" : undefined}>{fmtDuration(summary.seconds)}</span>
             {goal ? (
-              <span className="text-xs font-normal tracking-normal text-ink-3">{goalTargetLabel(goal)}</span>
+              <>
+                <span className="text-xs font-normal tracking-normal text-ink-3">{goalTargetLabel(goal)}</span>
+                {goal.met && <GoalMetMark />}
+              </>
             ) : change && (
               <span className="text-xs font-normal tracking-normal text-ink-3">{change}</span>
             )}
           </span>
         )}
-        mark={goal?.met ? <GoalMetMark /> : undefined}
         hint={`${changeNote}${share > 0 && share < 0.01 ? "Under 1%" : fmtPct(share)} ${shareOf}.${previousNote}`}
       />
       <MetricCard
