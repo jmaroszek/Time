@@ -923,39 +923,14 @@ export default function SettingsTab({
           computer use and time away from it. Every section below reads or draws
           the totals they define.
 
-          Idle goes last, against the section title's order, because its media
-          exception hangs off it in an indented group — and an indent that is
-          not the last thing in the card leaves the row below it looking like it
-          might be inside the group too. Break reminders sit above it for the
-          same reason: their indent appears only while they are on, while the
-          media one is always there. */}
+          Idle comes after the chain gap, against the section title's order,
+          because its media exception hangs off it in an indented group. Break
+          reminders go last: they build on the idle threshold, their own indent
+          appears only while they are on, and with nothing indented below them
+          the switched-off row reads like every other row in the card. The
+          media indent is closed off by the rule above the next group. */}
       <Section title="Focus & idle">
         <Row label="Focus chain max gap" help="Bridges untracked gaps up to this long between productive sessions. Neutral and uncategorized activity preserve the chain without adding to its duration, while unproductive or AFK time ends it immediately." control={numberControl(SPECS.focus, "Focus chain max gap", "min")} />
-        <SettingGroup
-          dependents={breakRemindersOn && (
-            <Row
-              bare
-              compact
-              label="Remind after"
-              help="Continuous activity before the reminder. It shows once, then waits for your next break."
-              control={numberControl(SPECS.breakReminder, "Remind after", "min")}
-            />
-          )}
-        >
-          <Row
-            bare
-            label="Break reminders"
-            help="A quiet notification after a long stretch without a break. Being AFK for the idle threshold below counts as a break."
-            control={
-              <PrivacyToggle
-                label="Break reminders"
-                enabled={breakRemindersOn}
-                disabled={savingKeys.has("break_reminder_enabled")}
-                onChange={(enabled) => selectSetting("break_reminder_enabled", enabled ? "1" : "0")}
-              />
-            }
-          />
-        </SettingGroup>
         <SettingGroup
           dependents={
             <Row
@@ -978,6 +953,31 @@ export default function SettingsTab({
             label="AFK idle threshold"
             help="No keyboard or mouse input for this long marks you AFK. Software-generated input doesn’t count. AFK time does not count towards your totals."
             control={numberControl(SPECS.idle, "AFK idle threshold", "min")}
+          />
+        </SettingGroup>
+        <SettingGroup
+          dependents={breakRemindersOn && (
+            <Row
+              bare
+              compact
+              label="Remind after"
+              help="The reminder appears after this long without a break."
+              control={numberControl(SPECS.breakReminder, "Remind after", "min")}
+            />
+          )}
+        >
+          <Row
+            bare
+            label="Break reminders"
+            help="Shows a notification after a long stretch without a break. Stepping away long enough to be marked AFK counts as a break."
+            control={
+              <PrivacyToggle
+                label="Break reminders"
+                enabled={breakRemindersOn}
+                disabled={savingKeys.has("break_reminder_enabled")}
+                onChange={(enabled) => selectSetting("break_reminder_enabled", enabled ? "1" : "0")}
+              />
+            }
           />
         </SettingGroup>
       </Section>
