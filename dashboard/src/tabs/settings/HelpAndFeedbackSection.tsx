@@ -79,7 +79,7 @@ export default function HelpAndFeedbackSection({
       />
       <Row
         label="Website"
-        help="The latest installer, the browser extension, how Time handles your data, and answers to common questions."
+        help="The latest installer, the browser extension, and answers to common questions."
         control={<TextAction onClick={() => void openWebsite()}>Open trackwithtime.com</TextAction>}
       />
       <Row
