@@ -97,6 +97,8 @@ function Shell() {
   const [highlightSection, setHighlightSection] = useState<string | null>(null);
   // And again for a window Insights lists, which Activity opens on arrival.
   const [activityWindow, setActivityWindow] = useState<ActivityWindowTarget | null>(null);
+  // And a category Settings lists, which Categories & Rules opens and scrolls to.
+  const [activityCategory, setActivityCategory] = useState<number | null>(null);
   // Where the header lends Insights room for its scope picker, beside the
   // tabs. State rather than a ref, so the tab re-renders into the slot the
   // moment it exists.
@@ -672,6 +674,8 @@ function Shell() {
             onExclusionsOpened={() => setOpenExclusions(false)}
             requestedWindow={activityWindow}
             onRequestedWindowOpened={() => setActivityWindow(null)}
+            requestedCategory={activityCategory}
+            onRequestedCategoryOpened={() => setActivityCategory(null)}
             onViewInInsights={(scope) => {
               insightsView.setScope(scope);
               setTab("insights");
@@ -692,6 +696,12 @@ function Shell() {
             }}
             onManageCategories={() => {
               setOpenExclusions(false);
+              setActivityView("rules");
+              setTab("activity");
+            }}
+            onOpenCategory={(categoryId) => {
+              setOpenExclusions(false);
+              setActivityCategory(categoryId);
               setActivityView("rules");
               setTab("activity");
             }}

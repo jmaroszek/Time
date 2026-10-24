@@ -13,6 +13,7 @@ import {
   CalendarComponent,
   GridComponent,
   LegendComponent,
+  MarkLineComponent,
   TooltipComponent,
   VisualMapContinuousComponent,
 } from "echarts/components";
@@ -44,6 +45,8 @@ use([
   CalendarComponent,
   GridComponent,
   LegendComponent,
+  // The narrowed hours chart's weekly goal line.
+  MarkLineComponent,
   TooltipComponent,
   // Continuous only: every visualMap here is a min/max ramp, none piecewise.
   VisualMapContinuousComponent,

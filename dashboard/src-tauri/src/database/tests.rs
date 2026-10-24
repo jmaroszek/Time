@@ -349,6 +349,11 @@ fn restricts_webview_mutation_targets() {
     assert!(
         TimeDatabase::validate_mutation_target("UPDATE rules SET pattern=$1 WHERE id=$2").is_ok()
     );
+    // Category goals are written by the renderer, like a category's name.
+    assert!(TimeDatabase::validate_mutation_target(
+        "UPDATE categories SET weekly_goal_hours = $1, goal_kind = $2 WHERE id = $3"
+    )
+    .is_ok());
     assert!(TimeDatabase::validate_mutation_target("UPDATE settings SET value='1'").is_err());
     assert!(TimeDatabase::validate_mutation_target("DELETE FROM settings").is_err());
 }
@@ -364,7 +369,7 @@ fn an_older_database_reports_a_recognizable_migration_error() {
         let path = scratch_database("older-schema");
         let database = TimeDatabase::open(path.clone()).await.unwrap();
         database
-            .update_lifecycle_settings(&[("schema_version", "4")])
+            .update_lifecycle_settings(&[("schema_version", "5")])
             .await
             .unwrap();
         database.close().await;
@@ -373,7 +378,7 @@ fn an_older_database_reports_a_recognizable_migration_error() {
         assert!(is_older_schema_error(&error), "error was {error:?}");
         // The version and the target both stay in the message: this is what
         // the fatal-launch dialog shows if the migration itself fails.
-        assert!(error.contains('4') && error.contains('5'), "{error}");
+        assert!(error.contains('5') && error.contains('6'), "{error}");
         assert!(!is_older_schema_error("disk I/O error"));
     });
 }

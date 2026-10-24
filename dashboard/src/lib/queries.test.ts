@@ -19,12 +19,14 @@ import {
   deleteActivity,
   deleteHistoryBefore,
   eraseAllHistory,
+  fetchCategories,
   fetchSessions,
   fetchTrackerStatus,
   inspectDatabaseBackup,
   listDatabaseBackups,
   restoreDatabase,
   restoreDefaultSettings,
+  setCategoryGoal,
   takeRestoreNotice,
   updateRule,
 } from "./queries";
@@ -225,5 +227,35 @@ describe("tracker tray reporting", () => {
     expect(status.lastHeartbeat).toBe(1_000);
     expect(status.liveSessionCount).toBe(1);
     expect(status.totalSessionCount).toBe(2);
+  });
+});
+
+describe("category goals", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("reads a nonzero weekly goal into the category and leaves zero as none", async () => {
+    const select = vi.fn().mockResolvedValue([
+      { id: 1, name: "Study", color: "#111", is_productive: 1, is_neutral: 0, is_ignored: 0, sort_order: 1, weekly_goal_hours: 10, goal_kind: "at_least" },
+      { id: 2, name: "Media", color: "#222", is_productive: 0, is_neutral: 0, is_ignored: 0, sort_order: 2, weekly_goal_hours: 5, goal_kind: "at_most" },
+      { id: 3, name: "Chat", color: "#333", is_productive: 0, is_neutral: 1, is_ignored: 0, sort_order: 3, weekly_goal_hours: 0, goal_kind: "at_most" },
+    ]);
+    getDb.mockResolvedValue({ select });
+    const categories = await fetchCategories();
+    expect(categories.map((category) => category.goal)).toEqual([
+      { hours: 10, kind: "at_least" },
+      { hours: 5, kind: "at_most" },
+      undefined,
+    ]);
+    expect("goal" in categories[2]).toBe(false);
+  });
+
+  it("writes a goal on its own, and clears it to zero", async () => {
+    getDb.mockResolvedValue({ execute: dbExecute });
+    await setCategoryGoal(4, { hours: 8, kind: "at_most" });
+    await setCategoryGoal(4, null);
+    expect(dbExecute.mock.calls).toEqual([
+      ["UPDATE categories SET weekly_goal_hours = $1, goal_kind = $2 WHERE id = $3", [8, "at_most", 4]],
+      ["UPDATE categories SET weekly_goal_hours = $1, goal_kind = $2 WHERE id = $3", [0, "at_least", 4]],
+    ]);
   });
 });

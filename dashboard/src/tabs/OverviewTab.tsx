@@ -21,6 +21,7 @@ import {
   topScopeWindows,
   type ScopeContext,
 } from "../lib/insightsScope";
+import { goalProgress } from "../lib/categoryGoals";
 import { productivityDataState } from "../lib/metrics";
 import { hidesUtilities } from "../lib/noise";
 import { allTimeRange, calendarDays, matchedPreviousRange, type Range } from "../lib/time";
@@ -42,6 +43,8 @@ import {
   type RankedEntityKind,
 } from "../state/useInsightsView";
 import { useSessions } from "../state/useSessions";
+import GoalsPopover from "./insights/GoalsPopover";
+import { GoalMetMark } from "./insights/GoalMetMark";
 import ScopePicker from "./insights/ScopePicker";
 import {
   ScopeTiles,
@@ -62,35 +65,6 @@ const HOURS_CARD_TITLES = {
   monthly: "Monthly Hours",
   yearly: "Yearly Hours",
 } as const;
-
-/**
- * Shown beside the Goal pace label only while the period's total is past its
- * goal. Deliberately this quiet: no fill, no chip, no label text. A goal met is
- * worth noticing when you happen to look at the tile, not worth an
- * announcement — and the figure beside it already says by how much.
- */
-function GoalMetMark() {
-  return (
-    <span
-      title="Goal met for this period"
-      className="flex items-center text-good-data opacity-80"
-    >
-      <svg
-        viewBox="0 0 10 10"
-        width="9"
-        height="9"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M1.6 5.4 3.7 7.5 8.4 2.8" />
-      </svg>
-    </span>
-  );
-}
 
 export default function OverviewTab({
   range,
@@ -152,6 +126,8 @@ export default function OverviewTab({
   const [hiddenLegend, setHiddenLegend] = useState<{ stack: ActivityStack; names: ReadonlySet<string> }>(
     { stack: stackBy, names: NO_HIDDEN_STACKS },
   );
+  const [goalsOpen, setGoalsOpen] = useState(false);
+  const goalTileRef = useRef<HTMLDivElement>(null);
 
   const { startSec: fetchStart, endSec: fetchEnd } = insightsFetchWindow(range);
   const sessionData = useSessions(fetchStart, fetchEnd, historyRevision, liveTick);
@@ -327,6 +303,12 @@ export default function OverviewTab({
     ? "Nothing recorded yet"
     : "Nothing classified yet";
   const goalConfigured = meta.weeklyGoalHours > 0;
+  // In the reader's themed colours, so the swatches match every other list.
+  const categoryGoals = model.categoryGoals.flatMap(({ categoryId, progress }) => {
+    const category = meta.categories.find((item) => item.id === categoryId);
+    return category ? [{ category, progress }] : [];
+  });
+  const onTrackCount = categoryGoals.filter(({ progress }) => progress.onTrack).length;
 
   // The row's own identity, so the scope it opens totals exactly what the row
   // showed. Website keys are already the lowercased host. Inside a category the
@@ -349,6 +331,14 @@ export default function OverviewTab({
     : heldIn?.kind === "category"
       ? meta.categories.find((category) => category.id === heldIn.categoryId) ?? null
       : scopeSummary?.category ?? null;
+  // Narrowed to a category with a goal: the scope's own total against it, the
+  // same figure Time in range shows, prorated over the same range.
+  const scopeGoalSpec = scope?.kind === "category" && !scopeCategory?.isIgnored
+    ? scopeCategory?.goal
+    : undefined;
+  const scopeGoal = scopeGoalSpec && scopeSummary
+    ? goalProgress(scopeSummary.seconds, range, scopeGoalSpec)
+    : null;
   const pickerCandidates = () => scopeCandidates(sessionData.sessions, scopeContext, scopeSpans.range);
   const hoursTitle = isSingleDay ? "Hourly Activity" : HOURS_CARD_TITLES[granularity];
   // Narrowed, the Hours menu offers only the splits this subject's time has:
@@ -409,6 +399,7 @@ export default function OverviewTab({
           summary={scopeSummary}
           rangeDays={rangeDays}
           previousDays={scopeSpans.previousDays}
+          goal={scopeGoal ?? undefined}
         />
       ) : (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -436,7 +427,15 @@ export default function OverviewTab({
               typographic ranks say that, and a slash does not. */}
           <MetricCard
             label="Goal pace"
-            value={goalConfigured && emptyReason ? emptyReason : goalConfigured ? (
+            cardRef={goalTileRef}
+            open={categoryGoals.length > 0
+              ? {
+                  label: "Show every goal in this range",
+                  expanded: goalsOpen,
+                  onClick: () => setGoalsOpen((current) => !current),
+                }
+              : undefined}
+            value={goalConfigured ? (emptyReason ?? (
               <span className="flex items-baseline gap-1.5 tabular-nums">
                 {fmtWholeHours(pace.doneHours)}
                 {/* tracking-normal resets the tile's -.02em, which is drawn for
@@ -445,7 +444,17 @@ export default function OverviewTab({
                   {`of ${fmtWholeHours(pace.targetHours)}`}
                 </span>
               </span>
-            ) : (
+            )) : categoryGoals.length > 0 ? (emptyReason ?? (
+              /* Category goals alone: how many stand where they should, in the
+                 tile's own two ranks. On track is a target reached or a limit
+                 not passed. */
+              <span className="flex items-baseline gap-1.5 tabular-nums">
+                {onTrackCount}
+                <span className="text-xs font-normal tracking-normal text-ink-3">
+                  {`of ${categoryGoals.length} on track`}
+                </span>
+              </span>
+            )) : (
               /* "Not set" named the state and left the reader to hunt for the
                  control. The tile is where the absence is noticed, so it is also
                  where the way out belongs. */
@@ -457,21 +466,35 @@ export default function OverviewTab({
                 Set a goal
               </button>
             )}
-            sub={goalConfigured
-              ? emptyReason
-                ? emptyNote
-                : pace.roundedTieWhileBehind
-                  ? "<1h left"
-                  : undefined
-              : undefined}
+            sub={(goalConfigured || categoryGoals.length > 0) && emptyReason
+              ? emptyNote
+              : goalConfigured && pace.roundedTieWhileBehind
+                ? "<1h left"
+                : undefined}
             mark={goalConfigured && !emptyReason && pace.met
               ? <GoalMetMark />
               : undefined}
             hint={goalConfigured
               ? "Productive time in this range vs your weekly goal, prorated to the range's length."
-              : "An optional weekly goal. Opens Settings, where you can set one."}
+              : categoryGoals.length > 0
+                ? "Your weekly category goals in this range: targets reached and limits not passed."
+                : "An optional weekly goal. Opens Settings, where you can set one."}
           />
         </div>
+      )}
+
+      {goalsOpen && !scope && categoryGoals.length > 0 && (
+        <GoalsPopover
+          anchorRef={goalTileRef}
+          overall={goalConfigured && !emptyReason ? pace : null}
+          productiveColor={meta.palette.productive}
+          goals={categoryGoals}
+          onSelectCategory={(category) => {
+            setGoalsOpen(false);
+            setScope({ kind: "category", categoryId: category.id, name: category.name });
+          }}
+          onClose={() => setGoalsOpen(false)}
+        />
       )}
 
       <Card
@@ -698,6 +721,7 @@ export default function OverviewTab({
                 categories={meta.categories}
                 members={model.members}
                 averageMeasure={scope ? "tracked" : "productive"}
+                goal={scopeGoalSpec}
                 hiddenStacks={hiddenStacks}
                 onToggleStack={toggleStack}
               />

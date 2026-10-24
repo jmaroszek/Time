@@ -57,6 +57,7 @@ def legacy_database(path):
 @pytest.mark.parametrize("statement", [
     "DROP TABLE rules",
     "ALTER TABLE rules_window_v4 RENAME TO rules",
+    "ALTER TABLE categories ADD COLUMN goal_kind",
     "INSERT INTO settings (key,value) VALUES ('schema_version',?)",
 ])
 def test_interrupted_migration_preserves_original_and_can_retry(tmp_path, mode, statement):

@@ -158,7 +158,7 @@ def test_window_rule_shape_is_explicit_and_constrained(conn):
         )
 
 
-def test_v2_database_migrates_to_v5_resetting_title_rules_and_backing_up(tmp_path):
+def test_v2_database_migrates_to_v6_resetting_title_rules_and_backing_up(tmp_path):
     path = tmp_path / "v2.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -179,7 +179,7 @@ def test_v2_database_migrates_to_v5_resetting_title_rules_and_backing_up(tmp_pat
 
     migrated = db.open_db(path)
     raw = db.read_settings_raw(migrated)
-    assert raw["schema_version"] == "5"
+    assert raw["schema_version"] == "6"
     assert raw["window_rules_reset_v4_count"] == "1"
     assert raw["window_rules_reset_v4_pending"] == "1"
     assert migrated.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0
@@ -199,7 +199,7 @@ def test_v2_database_migrates_to_v5_resetting_title_rules_and_backing_up(tmp_pat
     restored.close()
 
 
-def test_v3_database_migrates_to_v5_preserving_app_and_website_rules(tmp_path):
+def test_v3_database_migrates_to_v6_preserving_app_and_website_rules(tmp_path):
     path = tmp_path / "v3.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -229,7 +229,7 @@ def test_v3_database_migrates_to_v5_preserving_app_and_website_rules(tmp_path):
         (6, "domain", "github.com", "", "", "", ""),
     ]
     raw = db.read_settings_raw(migrated)
-    assert raw["schema_version"] == "5"
+    assert raw["schema_version"] == "6"
     assert raw["window_rules_reset_v4_count"] == "1"
     assert raw["window_rules_reset_v4_pending"] == "1"
     assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
@@ -245,7 +245,7 @@ def test_fresh_database_is_not_backed_up(tmp_path):
     assert list((tmp_path / "Backups").glob("backup_schema*.db")) == []
 
 
-def test_v1_database_migrates_to_v5_in_one_pass(tmp_path):
+def test_v1_database_migrates_to_v6_in_one_pass(tmp_path):
     path = tmp_path / "v1.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -265,9 +265,9 @@ def test_v1_database_migrates_to_v5_in_one_pass(tmp_path):
     conn.close()
 
     migrated = db.open_db(path)
-    # Every step in one open: v1 -> v2 adds tables, v3/v4 rebuild rules, and
-    # v5 adds the exact-overlap index.
-    assert db.read_settings_raw(migrated)["schema_version"] == "5"
+    # Every step in one open: v1 -> v2 adds tables, v3/v4 rebuild rules, v5
+    # adds the exact-overlap index, and v6 adds category goals.
+    assert db.read_settings_raw(migrated)["schema_version"] == "6"
     assert migrated.execute("SELECT process FROM sessions WHERE id=7").fetchone()[0] == "code.exe"
     tables = {
         row[0]
@@ -281,10 +281,12 @@ def test_v1_database_migrates_to_v5_in_one_pass(tmp_path):
         "title_match_mode",
         "title_anchor",
     } <= columns
+    category_columns = {row[1] for row in migrated.execute("PRAGMA table_info(categories)")}
+    assert {"weekly_goal_hours", "goal_kind"} <= category_columns
     migrated.close()
 
 
-def test_v4_database_migrates_to_v5_adding_end_index_without_changing_rows(tmp_path):
+def test_v4_database_migrates_to_v6_adding_end_index_without_changing_rows(tmp_path):
     path = tmp_path / "v4.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -299,7 +301,7 @@ def test_v4_database_migrates_to_v5_adding_end_index_without_changing_rows(tmp_p
     conn.close()
 
     migrated = db.open_db(path)
-    assert db.read_settings_raw(migrated)["schema_version"] == "5"
+    assert db.read_settings_raw(migrated)["schema_version"] == "6"
     assert [tuple(row) for row in migrated.execute(
         "SELECT id,start_ts,end_ts,process FROM sessions ORDER BY id"
     )] == [(7, 10, 20, "code.exe"), (8, 30, 40, "notes.exe")]
@@ -316,6 +318,52 @@ def test_v4_database_migrates_to_v5_adding_end_index_without_changing_rows(tmp_p
     assert backup.execute(
         "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_sessions_end'"
     ).fetchone() is None
+    backup.close()
+
+
+def test_v5_database_migrates_to_v6_adding_category_goals(tmp_path):
+    path = tmp_path / "v5.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE categories (id INTEGER PRIMARY KEY,name TEXT UNIQUE NOT NULL,"
+        "color TEXT NOT NULL,is_productive INTEGER NOT NULL DEFAULT 0,"
+        "is_neutral INTEGER NOT NULL DEFAULT 0,is_ignored INTEGER NOT NULL DEFAULT 0,"
+        "sort_order INTEGER);"
+        "CREATE TABLE settings (key TEXT PRIMARY KEY,value TEXT);"
+        "INSERT INTO settings VALUES ('schema_version','5');"
+        "INSERT INTO categories VALUES (1,'Study','#abcdef',1,0,0,1),(2,'Media','#123456',0,0,0,2);"
+    )
+    conn.close()
+
+    migrated = db.open_db(path)
+    assert db.read_settings_raw(migrated)["schema_version"] == "6"
+    # Appended after sort_order, the same order a fresh table has.
+    assert [row[1] for row in migrated.execute("PRAGMA table_info(categories)")] == [
+        "id", "name", "color", "is_productive", "is_neutral", "is_ignored",
+        "sort_order", "weekly_goal_hours", "goal_kind",
+    ]
+    assert [tuple(row) for row in migrated.execute(
+        "SELECT id,name,color,is_productive,sort_order,weekly_goal_hours,goal_kind"
+        " FROM categories WHERE id IN (1,2) ORDER BY id"
+    )] == [
+        (1, "Study", "#abcdef", 1, 1, 0, "at_least"),
+        (2, "Media", "#123456", 0, 2, 0, "at_least"),
+    ]
+    migrated.execute(
+        "UPDATE categories SET weekly_goal_hours=5, goal_kind='at_most' WHERE id=2"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        migrated.execute("UPDATE categories SET weekly_goal_hours=101 WHERE id=1")
+    with pytest.raises(sqlite3.IntegrityError):
+        migrated.execute("UPDATE categories SET goal_kind='exactly' WHERE id=1")
+    migrated.close()
+
+    backups = list((tmp_path / "Backups").glob("backup_schema5_*.db"))
+    assert len(backups) == 1
+    backup = sqlite3.connect(backups[0])
+    assert "weekly_goal_hours" not in {
+        row[1] for row in backup.execute("PRAGMA table_info(categories)")
+    }
     backup.close()
 
 

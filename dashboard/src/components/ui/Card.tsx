@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import { FloatingTooltip } from "./FloatingTooltip";
 
@@ -36,6 +36,8 @@ export function MetricCard({
   sub,
   hint,
   mark,
+  open,
+  cardRef,
 }: {
   label: string;
   value: ReactNode;
@@ -46,22 +48,62 @@ export function MetricCard({
    *  carry. It sits with the label rather than the value on purpose: the figure
    *  is the measurement, and anything appended there competes with reading it. */
   mark?: ReactNode;
+  /** Makes the whole card open something, such as a popover with more detail.
+   *  A chevron after the label says so, since a card has no other look of
+   *  being pressable. */
+  open?: { label: string; expanded: boolean; onClick: () => void };
+  cardRef?: Ref<HTMLDivElement>;
 }) {
   return (
-    <div className="time-card-shadow rounded-xl border border-card-edge bg-surface px-4 py-3">
+    <div
+      ref={cardRef}
+      className={`time-card-shadow relative rounded-xl border bg-surface px-4 py-3 transition-colors ${
+        open ? (open.expanded ? "border-accent/60" : "border-card-edge hover:border-edge-2") : "border-card-edge"
+      }`}
+    >
+      {/* Laid over the card rather than wrapped around it: the label's hint is
+          its own focus stop, and a control can't hold another. The label and
+          mark are positioned, so they paint above it and hovering them still
+          explains the figure; the in-flow value and sub paint beneath it. */}
+      {open && (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open.expanded}
+          aria-label={open.label}
+          onClick={open.onClick}
+          className="absolute inset-0 cursor-pointer rounded-xl outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
+        />
+      )}
       <div className="flex items-center gap-1.5">
         {hint ? (
           <FloatingTooltip
             text={hint}
             ariaLabel={`${label}. ${hint}`}
-            className="cursor-help text-xs text-ink-2 outline-none"
+            className="relative cursor-help text-xs text-ink-2 outline-none"
           >
             {label}
           </FloatingTooltip>
         ) : (
           <p className="text-xs text-ink-2">{label}</p>
         )}
-        {mark}
+        {mark && <span className="relative flex">{mark}</span>}
+        {open && (
+          <svg
+            viewBox="0 0 10 10"
+            width="9"
+            height="9"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className={`pointer-events-none text-ink-3 transition-transform ${open.expanded ? "rotate-180" : ""}`}
+          >
+            <path d="M2.5 3.75 5 6.25 7.5 3.75" />
+          </svg>
+        )}
       </div>
       <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
       {sub && <p className="mt-0.5 text-xs text-ink-2">{sub}</p>}

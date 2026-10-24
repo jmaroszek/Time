@@ -6,6 +6,7 @@ import {
   type Classifier,
   type Rule,
 } from "./classify";
+import { goalCategories, goalProgress, type GoalProgress } from "./categoryGoals";
 import { insightsMember } from "./entityIdentity";
 import { appGroupKey } from "./format";
 import {
@@ -75,6 +76,9 @@ interface InsightsAggregation {
   websiteCoverage: BrowserDomainCoverage;
   previousWebsiteCoverage: BrowserDomainCoverage;
   historyDays: DailyActivitySummary[];
+  /** Non-AFK seconds in the range per category id, for category goals.
+   *  `historyDays` can't stand in: it starts early to seed the rolling average. */
+  categorySeconds: Map<number, number>;
   /** Days in range that recorded any non-AFK activity. */
   activeDays: number;
   /** Null unless a member breakdown was asked for. */
@@ -129,6 +133,9 @@ export interface InsightsModel {
   labelMode: "weekday" | "date";
   kpis: Kpis;
   pace: ReturnType<typeof goalPace>;
+  /** One entry per category with a goal, in list order. By id rather than the
+   *  category itself: the renderer draws them in its own themed colours. */
+  categoryGoals: Array<{ categoryId: number; progress: GoalProgress }>;
   apps: AppDelta[];
   websites: WebsiteDelta[];
   websiteCoverage: BrowserDomainCoverage;
@@ -307,6 +314,7 @@ export function aggregateInsightsSessions(
   const currentWebsiteDaily = new Map<string, number[]>();
   const previousWebsiteDaily = new Map<string, number[]>();
   const activeDayKeys = new Set<string>();
+  const categorySeconds = new Map<number, number>();
   const current: Session[] = [];
   let totalSec = 0;
   let prodSec = 0;
@@ -361,6 +369,7 @@ export function aggregateInsightsSessions(
         }
         if (category?.isProductive) prodSec += seconds;
         if (!category) uncategorizedSec += seconds;
+        else categorySeconds.set(category.id, (categorySeconds.get(category.id) ?? 0) + seconds);
         rangeChain.add(inCurrent.start, inCurrent.end, seconds, category);
       }
     }
@@ -461,6 +470,7 @@ export function aggregateInsightsSessions(
         previousBrowserSeconds === 0 ? 0 : previousMissingDomainSeconds / previousBrowserSeconds,
     },
     historyDays: finalizeDays(historyDays),
+    categorySeconds,
     activeDays: activeDayKeys.size,
     members: memberOf
       ? [...memberTotals.values()].sort(
@@ -632,6 +642,14 @@ function buildInsightsModelWithClassifier(
     labelMode: request.labelMode,
     kpis: aggregation.kpis,
     pace: goalPace(aggregation.kpis.prodSec, request.range, request.weeklyGoalHours),
+    categoryGoals: goalCategories(request.categories).map((category) => ({
+      categoryId: category.id,
+      progress: goalProgress(
+        aggregation.categorySeconds.get(category.id) ?? 0,
+        request.range,
+        category.goal,
+      ),
+    })),
     apps,
     websites,
     websiteCoverage: aggregation.websiteCoverage,

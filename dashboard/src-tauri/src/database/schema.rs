@@ -1,6 +1,6 @@
 //! The schema a fresh database gets, and how an older or newer one is recognized.
 
-pub(crate) const SCHEMA_VERSION: i64 = 5;
+pub(crate) const SCHEMA_VERSION: i64 = 6;
 
 /// Marks the one open failure a launch can repair by itself, so the caller can
 /// recognize it without matching a formatted sentence.  Mirrors the
@@ -41,7 +41,11 @@ CREATE TABLE IF NOT EXISTS categories (
     is_productive INTEGER NOT NULL DEFAULT 0,
     is_neutral INTEGER NOT NULL DEFAULT 0,
     is_ignored INTEGER NOT NULL DEFAULT 0,
-    sort_order INTEGER
+    sort_order INTEGER,
+    weekly_goal_hours INTEGER NOT NULL DEFAULT 0
+        CHECK(weekly_goal_hours BETWEEN 0 AND 100),
+    goal_kind TEXT NOT NULL DEFAULT 'at_least'
+        CHECK(goal_kind IN ('at_least','at_most'))
 );
 CREATE TABLE IF NOT EXISTS rules (
     id INTEGER PRIMARY KEY,
@@ -138,7 +142,7 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
     -- Must track SCHEMA_VERSION above: this is what a database created by the
     -- dashboard rather than the tracker is stamped with, and open() refuses
     -- anything older than the constant.
-    ('schema_version','5'),
+    ('schema_version','6'),
     ('rule_priority_scheme','low-wins-v1'),
     ('weekly_goal_hours','0'),
     ('idle_threshold_seconds','300'),

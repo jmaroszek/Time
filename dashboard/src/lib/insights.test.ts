@@ -16,6 +16,7 @@ import {
   packInsightsRequestInChunks,
   websiteComparisonIsAvailable,
 } from "./insights";
+import { scopeMatcher, summarizeScope } from "./insightsScope";
 import { dailyActivitySummaries, overviewGranularity, overviewHistoryStart } from "./overview";
 import { previousRange, type Range } from "./time";
 
@@ -653,5 +654,69 @@ describe("utility rows in the Insights rankings", () => {
 
   it("does not inflate the count that explains the duration filter", () => {
     expect(build(true).hiddenAppCount).toBe(0);
+  });
+});
+
+describe("category goals", () => {
+  const goalCategoriesList: Category[] = categories.map((category) =>
+    category.id === 1
+      ? { ...category, goal: { hours: 3, kind: "at_least" } }
+      : category.id === 2
+        ? { ...category, goal: { hours: 1, kind: "at_most" } }
+        : category.id === 3
+          ? { ...category, goal: { hours: 5, kind: "at_least" } }
+          : category,
+  );
+  const request = {
+    sessions,
+    range,
+    categories: goalCategoriesList,
+    rules,
+    browserProcesses: [],
+    weekStart: "Sunday" as const,
+    weeklyGoalHours: 0,
+    minAppSecondsPerDay: 0,
+    aliases: {},
+    focusChainMaxGapSeconds: 120,
+    hideUtilityApps: false,
+    dayStartHour: 0,
+    dayEndHour: 24,
+    labelMode: "date" as const,
+    ...observation,
+  };
+
+  it("measures each goal over the range alone, never the history before it", () => {
+    const model = buildInsightsModel(request);
+    // Ignored categories have no goal to show.
+    expect(model.categoryGoals.map((goal) => goal.categoryId)).toEqual([1, 2]);
+    const [focus, media] = model.categoryGoals.map((goal) => goal.progress);
+    // 30 minutes after midnight on the 8th, then 9:00–11:00; the 5th and 7th
+    // are history before the range.
+    expect(focus.doneSeconds).toBe(9000);
+    expect(focus.targetSeconds).toBeCloseTo((3 * 3 / 7) * 3600);
+    expect(focus.met).toBe(true);
+    expect(media.doneSeconds).toBe(59 * 60 + 3600);
+    expect(media.over).toBe(true);
+  });
+
+  it("agrees with the narrowed view's Time in range for the same category", () => {
+    const model = buildInsightsModel(request);
+    const goalClassifier = buildClassifier(goalCategoriesList, rules, new Set());
+    for (const { categoryId, progress } of model.categoryGoals) {
+      const summary = summarizeScope(
+        sessions,
+        scopeMatcher(
+          { kind: "category", categoryId, name: `${categoryId}` },
+          { classifier: goalClassifier, aliases: {}, browserProcesses: new Set() },
+        ),
+        goalClassifier,
+        {
+          startSec: range.start.getTime() / 1000,
+          endSec: Math.min(range.end.getTime() / 1000, observation.analysisCutoffSec),
+        },
+        null,
+      );
+      expect(progress.doneSeconds).toBe(summary.seconds);
+    }
   });
 });

@@ -42,6 +42,18 @@ export interface Category {
   /** Ignored categories are hidden from every visualization. */
   isIgnored: boolean;
   sortOrder: number | null;
+  /** A weekly goal, shown in Insights and never announced. Absent means none;
+   *  optional so the many literal categories in tests needn't spell it out. */
+  goal?: CategoryGoal;
+}
+
+/** "At least" is a target to reach; "at most" is a limit to stay under. */
+export type GoalKind = "at_least" | "at_most";
+
+export interface CategoryGoal {
+  /** Whole hours a week, 1–100. */
+  hours: number;
+  kind: GoalKind;
 }
 
 /** Collapse the two flags into the single productivity state. */

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   estimateLegendRows,
   formatHoursTooltipRow,
+  goalLineSeries,
+  GOAL_LINE_SERIES,
   legendContentWidth,
   MEMBER_SERIES_LIMIT,
   memberSeries,
@@ -242,5 +244,27 @@ describe("representedStacks", () => {
       stack("Reading", [2]),
     ]);
     expect(kept.map((s) => s.name)).toEqual(["Work", "Reading"]);
+  });
+});
+
+describe("goalLineSeries", () => {
+  it("draws a flat, dotted, labelled line that keeps the goal in the y extent", () => {
+    const series = goalLineSeries({ hours: 10, kind: "at_least" }, 4, "#777")!;
+    expect(series.name).toBe(GOAL_LINE_SERIES);
+    // Invisible points at the goal put it inside the axis extent.
+    expect(series.data).toEqual([10, 10, 10, 10]);
+    expect(series.lineStyle.opacity).toBe(0);
+    expect(series.markLine.data).toEqual([{ yAxis: 10 }]);
+    expect(series.markLine.lineStyle.type).toBe("dotted");
+    expect(series.markLine.label.formatter).toBe("Goal 10h");
+  });
+
+  it("names a limit as one", () => {
+    expect(goalLineSeries({ hours: 5, kind: "at_most" }, 2, "#777")!.markLine.label.formatter).toBe("Limit 5h");
+  });
+
+  it("draws nothing without a goal or bars", () => {
+    expect(goalLineSeries(undefined, 4, "#777")).toBeNull();
+    expect(goalLineSeries({ hours: 5, kind: "at_most" }, 0, "#777")).toBeNull();
   });
 });

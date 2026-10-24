@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 
 import {
@@ -12,6 +12,7 @@ import {
   categoryState,
   categoryStateFlags,
   type Category,
+  type CategoryGoal,
   type Productivity,
   type Rule,
 } from "../../lib/classify";
@@ -33,6 +34,7 @@ import {
   serializeDismissed,
   type ConsolidationSuggestion,
 } from "../../lib/domainConsolidation";
+import { goalSummary } from "../../lib/categoryGoals";
 import { fmtDuration } from "../../lib/format";
 import { canonicalSwatch, previewSwatches } from "../../lib/palettes";
 import {
@@ -40,6 +42,7 @@ import {
   addRule,
   deleteCategory,
   deleteRule,
+  setCategoryGoal,
   updateCategory,
   updateRule,
   updateSetting,
@@ -49,6 +52,7 @@ import { useMeta } from "../../state/meta";
 import Chevron from "./Chevron";
 import ClearableInput from "./ClearableInput";
 import Collapsible from "./Collapsible";
+import GoalEditor, { GOAL_EDITOR_WIDTH } from "./GoalEditor";
 import RuleKindGlyph from "./RuleKindGlyph";
 import { toggleSetValue } from "../../lib/setUpdates";
 import { stateColors } from "./activityStyles";
@@ -184,6 +188,8 @@ export default function CategoriesAndRules({
   ruleUsageSeconds,
   onChanged,
   onViewInInsights,
+  requestedCategory = null,
+  onRequestedCategoryOpened,
 }: {
   /** All of history, for the match preview under the rule being written. Null
    *  until the sessions have loaded. */
@@ -195,6 +201,9 @@ export default function CategoriesAndRules({
   onChanged: () => Promise<void>;
   /** Opens Insights narrowed to one category. */
   onViewInInsights?: (category: Category) => void;
+  /** A category to open and scroll to on arrival, from Settings' goal list. */
+  requestedCategory?: number | null;
+  onRequestedCategoryOpened?: () => void;
 }) {
   const meta = useMeta();
   const banner = useBanner();
@@ -207,6 +216,10 @@ export default function CategoriesAndRules({
   // the category list scrolls now, and a menu positioned inside it would be
   // clipped by that scroll container the moment a row neared the bottom.
   const [colorMenu, setColorMenu] = useState<{ id: number; left: number; top: number } | null>(null);
+  // The goal editor anchors the same way, to the goal label or, when it was
+  // opened from the actions menu, to the row's header.
+  const [goalMenu, setGoalMenu] = useState<{ id: number; left: number; top: number } | null>(null);
+  const categoryHeaderRefs = useRef(new Map<number, HTMLDivElement>());
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [newName, setNewName] = useState("");
@@ -230,6 +243,18 @@ export default function CategoriesAndRules({
     () => (ruleUsageSeconds === null ? null : new Map(ruleUsageSeconds)),
     [ruleUsageSeconds],
   );
+  useEffect(() => {
+    if (requestedCategory === null) return;
+    setExpanded((current) => new Set(current).add(requestedCategory));
+    // After the expansion has rendered, so the header lands where it will stay.
+    window.requestAnimationFrame(() => {
+      categoryHeaderRefs.current.get(requestedCategory)?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+    onRequestedCategoryOpened?.();
+  }, [requestedCategory, onRequestedCategoryOpened]);
 
   const draftFor = (id: number): CategoryRuleDraft =>
     drafts[id] ?? {
@@ -387,6 +412,18 @@ export default function CategoriesAndRules({
       });
       await onChanged();
     } catch (error) { banner.report(error, "category"); }
+  };
+  const openGoalEditor = (categoryId: number, anchor: DOMRect) => {
+    setGoalMenu({
+      id: categoryId,
+      left: Math.max(8, Math.min(anchor.right - GOAL_EDITOR_WIDTH, window.innerWidth - GOAL_EDITOR_WIDTH - 8)),
+      top: Math.min(anchor.bottom + 6, window.innerHeight - 196),
+    });
+  };
+  const saveGoal = async (category: Category, goal: CategoryGoal | null) => {
+    setGoalMenu(null);
+    try { await setCategoryGoal(category.id, goal); await onChanged(); }
+    catch (error) { banner.report(error, "category"); }
   };
   const saveRename = async (category: Category) => {
     const name = renameDraft.trim();
@@ -675,6 +712,10 @@ export default function CategoriesAndRules({
               className="overflow-hidden rounded-[11px] border border-edge bg-group"
             >
               <div
+                ref={(node) => {
+                  if (node) categoryHeaderRefs.current.set(category.id, node);
+                  else categoryHeaderRefs.current.delete(category.id);
+                }}
                 className={`flex items-center gap-2.5 px-3 py-3 text-xs ${rowToggles ? "cursor-pointer" : ""}`}
                 onClick={rowToggles ? toggleFromRow : undefined}
               >
@@ -722,6 +763,24 @@ export default function CategoriesAndRules({
                   </span>
                 )}
                 <span className="flex-1" />
+                {/* A goal is the category's own property, like its colour and
+                    state, so it shows on the header where every goal can be
+                    read without opening a category. No goal shows nothing: new
+                    goals start from the actions menu. */}
+                {!locked && !category.isIgnored && category.goal && (
+                  <button
+                    type="button"
+                    title="Edit weekly goal"
+                    aria-label={`Weekly goal for ${category.name}: ${goalSummary(category.goal)}. Edit`}
+                    className="shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 tabular-nums text-ink-3 hover:bg-hover-2 hover:text-ink-2"
+                    onClick={(event) => {
+                      if (goalMenu?.id === category.id) return setGoalMenu(null);
+                      openGoalEditor(category.id, event.currentTarget.getBoundingClientRect());
+                    }}
+                  >
+                    {goalSummary(category.goal)}
+                  </button>
+                )}
                 {/* The built-in Ignored category has no state to show: its only
                     possible one is its own name, and it cannot be changed. */}
                 {!locked && (
@@ -775,6 +834,10 @@ export default function CategoriesAndRules({
                       }
                       onChange={(action) => {
                         if (action === "insights") onViewInInsights?.(category);
+                        else if (action === "goal") {
+                          const header = categoryHeaderRefs.current.get(category.id);
+                          if (header) openGoalEditor(category.id, header.getBoundingClientRect());
+                        }
                         else if (action === "rename") beginRename();
                         else if (action === "delete") setPendingDelete({ category, ruleCount: allRules.length });
                       }}
@@ -783,6 +846,11 @@ export default function CategoriesAndRules({
                         // still carrying the old ignored state has no view.
                         ...(onViewInInsights && !category.isIgnored
                           ? [{ value: "insights", label: "View in Insights" }]
+                          : []),
+                        // Ignored time is never counted, so a goal there could
+                        // only ever read zero.
+                        ...(!category.isIgnored
+                          ? [{ value: "goal", label: category.goal ? "Edit weekly goal…" : "Set weekly goal…" }]
                           : []),
                         { value: "rename", label: "Rename" },
                         { value: "delete", label: "Delete category…", divider: true, danger: true },
@@ -1060,6 +1128,19 @@ export default function CategoriesAndRules({
         </span>,
         document.body,
       )}
+      {goalMenu !== null && (() => {
+        const category = meta.categories.find((item) => item.id === goalMenu.id);
+        return category ? (
+          <GoalEditor
+            categoryName={category.name}
+            goal={category.goal}
+            left={goalMenu.left}
+            top={goalMenu.top}
+            onSave={(goal) => void saveGoal(category, goal)}
+            onClose={() => setGoalMenu(null)}
+          />
+        ) : null;
+      })()}
       {pendingDelete && (
         <ConfirmDialog
           title="Delete this category?"

@@ -210,6 +210,13 @@ export interface GoalPace {
   roundedTieWhileBehind: boolean;
 }
 
+/** A weekly goal scaled to a range's length: one day targets a seventh of it,
+ *  eight weeks eight times it. Every goal, overall or per category, prorates
+ *  through this one rule. */
+export function proratedTargetHours(weeklyHours: number, range: Range): number {
+  return (weeklyHours * calendarDays(range)) / 7;
+}
+
 /**
  * Progress toward the goal over the selected window, plus a daily-average pace.
  * The target scales with the range (weekly goal × days / 7), so one day targets
@@ -222,7 +229,7 @@ export interface GoalPace {
  */
 export function goalPace(prodSec: number, range: Range, weeklyGoalHours: number): GoalPace {
   const targetDays = calendarDays(range);
-  const targetHours = (weeklyGoalHours * targetDays) / 7;
+  const targetHours = proratedTargetHours(weeklyGoalHours, range);
   const doneHours = prodSec / 3600;
   const met = doneHours >= targetHours;
   return {

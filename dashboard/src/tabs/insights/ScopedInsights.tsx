@@ -1,5 +1,6 @@
 import { MetricCard } from "../../components/ui";
 import { appSuffixNames, trimAppSuffix } from "../../lib/activityFormat";
+import { goalTargetLabel, type GoalProgress } from "../../lib/categoryGoals";
 import { fmtDuration, fmtDurationTitle, fmtPct } from "../../lib/format";
 import { RUN_DEFINITION } from "../../lib/runs";
 import {
@@ -8,6 +9,7 @@ import {
   type ScopeWindow,
   type ScopeWindowList,
 } from "../../lib/insightsScope";
+import { GoalMetMark } from "./GoalMetMark";
 
 /**
  * The four tiles, for one subject instead of everything.
@@ -21,11 +23,14 @@ export function ScopeTiles({
   summary,
   rangeDays,
   previousDays,
+  goal,
 }: {
   scope: InsightsScope;
   summary: ScopeSummary;
   rangeDays: number;
   previousDays: number;
+  /** A category's weekly goal over this range, when it has one. */
+  goal?: GoalProgress;
 }) {
   const change = summary.previousSeconds === null
     ? null
@@ -41,19 +46,28 @@ export function ScopeTiles({
   const previousNote = summary.previousSeconds === null
     ? ""
     : ` ${fmtDuration(summary.previousSeconds)} in the previous ${previousDays} ${previousDays === 1 ? "day" : "days"}.`;
+  // With a goal, the target takes the small slot beside the figure, exactly as
+  // on Goal pace, and the change moves into the hover text rather than
+  // onto a caption line under the figure.
+  const changeNote = goal && change
+    ? `${change === "new" ? "New" : change} vs the previous ${previousDays} ${previousDays === 1 ? "day" : "days"}. `
+    : "";
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       <MetricCard
         label="Time in range"
         value={(
           <span className="flex items-baseline gap-1.5 tabular-nums" title={fmtDurationTitle(summary.seconds)}>
-            {fmtDuration(summary.seconds)}
-            {change && (
+            <span className={goal?.over ? "text-warn" : undefined}>{fmtDuration(summary.seconds)}</span>
+            {goal ? (
+              <span className="text-xs font-normal tracking-normal text-ink-3">{goalTargetLabel(goal)}</span>
+            ) : change && (
               <span className="text-xs font-normal tracking-normal text-ink-3">{change}</span>
             )}
           </span>
         )}
-        hint={`${share > 0 && share < 0.01 ? "Under 1%" : fmtPct(share)} ${shareOf}.${previousNote}`}
+        mark={goal?.met ? <GoalMetMark /> : undefined}
+        hint={`${changeNote}${share > 0 && share < 0.01 ? "Under 1%" : fmtPct(share)} ${shareOf}.${previousNote}`}
       />
       <MetricCard
         label="Days used"

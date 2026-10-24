@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { Category } from "../lib/classify";
+import type { Category, CategoryGoal } from "../lib/classify";
 import type { InsightsMemberTotal } from "../lib/insights";
 import { rollingMeanObserved } from "../lib/metrics";
 import {
@@ -287,6 +287,7 @@ export default function ProductiveHoursChart({
   averageMeasure = "productive",
   hiddenStacks = NO_HIDDEN_STACKS,
   onToggleStack,
+  goal,
 }: {
   historyDays: DailyActivitySummary[];
   range: Range;
@@ -305,6 +306,9 @@ export default function ProductiveHoursChart({
    *  survive the option being rebuilt on every refresh. */
   hiddenStacks?: ReadonlySet<string>;
   onToggleStack?: (name: string, visible: boolean) => void;
+  /** A narrowed category's weekly goal, drawn only at weekly granularity: on
+   *  daily bars a weekly line would read as a daily goal that doesn't exist. */
+  goal?: CategoryGoal;
 }) {
   const { palette, theme } = useMeta();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -424,6 +428,7 @@ export default function ProductiveHoursChart({
   const option = useMemo<EChartsOption>(() => {
     const chrome = chartChrome(theme);
     const { labels, avgLine, tooltipHeaders, visible, averageName, stateStacks, totalStacks } = agg;
+    const goalLine = goalLineSeries(granularity === "weekly" ? goal : undefined, labels.length, chrome.axisLabel);
     const categoryStacks = representedStacks(categorySeries(visible, categories, theme));
     const memberStacks = stackBy === "member" && members
       ? representedStacks(memberSeries(
@@ -498,7 +503,9 @@ export default function ProductiveHoursChart({
     return {
       animation: false,
       textStyle: { fontFamily: CHART_FONT_FAMILY },
-      grid: { left: 36, right: 12, top: topPad, bottom: bottomPad },
+      // A goal line's label sits just past the plot's right edge, where no bar
+      // can sit under it; the plot gives up that much width only while it shows.
+      grid: { left: 36, right: goalLine ? GOAL_LABEL_GUTTER : 12, top: topPad, bottom: bottomPad },
       tooltip,
       legend: stackedBarLegend(chrome, legendData, hiddenStacks),
       xAxis: {
@@ -535,9 +542,10 @@ export default function ProductiveHoursChart({
           lineStyle: { color: annotation(theme), width: 2, type: "dashed" },
           itemStyle: { color: annotation(theme) },
         }] : []),
+        ...(goalLine ? [goalLine] : []),
       ],
     };
-  }, [agg, stackBy, categories, members, chartWidth, theme, palette, hiddenStacks]);
+  }, [agg, stackBy, categories, members, chartWidth, theme, palette, hiddenStacks, granularity, goal]);
 
   return (
     <div ref={wrapRef}>
@@ -547,11 +555,50 @@ export default function ProductiveHoursChart({
         onLegendToggle={onToggleStack}
         accessibleDescription={`Stacked ${granularity} activity hours for the selected ${
           calendarDays(range)
-        }-day period, broken down by ${STACK_WORDS[stackBy]} with a ${averageMeasure === "tracked" ? "tracked" : "productive"}-time rolling average.`}
+        }-day period, broken down by ${STACK_WORDS[stackBy]} with a ${averageMeasure === "tracked" ? "tracked" : "productive"}-time rolling average.${
+          goal && granularity === "weekly"
+            ? ` A dotted line marks the weekly ${goal.kind === "at_most" ? "limit" : "goal"} of ${goal.hours} hours.`
+            : ""
+        }`}
       />
     </div>
   );
 }
+
+/** Not in the legend or the tooltip, both of which list their series by name:
+ *  the line is a reference, not a measurement. Flat and dotted against the
+ *  average's moving dash, and labelled, so the two can't be confused. The
+ *  series' own points are invisible and only keep the goal inside the y-axis
+ *  extent, so the line is never clipped above the tallest bar. */
+export function goalLineSeries(goal: CategoryGoal | undefined, length: number, color: string) {
+  if (!goal || goal.hours <= 0 || length === 0) return null;
+  return {
+    name: GOAL_LINE_SERIES,
+    type: "line" as const,
+    data: Array<number>(length).fill(goal.hours),
+    symbol: "none",
+    silent: true,
+    lineStyle: { opacity: 0 },
+    tooltip: { show: false },
+    markLine: {
+      silent: true,
+      symbol: "none",
+      lineStyle: { color, width: 1, type: "dotted" as const },
+      label: {
+        position: "end" as const,
+        distance: 6,
+        color,
+        fontSize: CHART_LABEL_SIZE,
+        formatter: `${goal.kind === "at_most" ? "Limit" : "Goal"} ${goal.hours}h`,
+      },
+      data: [{ yAxis: goal.hours }],
+    },
+  };
+}
+
+export const GOAL_LINE_SERIES = "Weekly goal";
+/** Room on the right for "Limit 100h" at the chart's label size. */
+const GOAL_LABEL_GUTTER = 64;
 
 /** How each stack view is named in the charts' accessible descriptions. */
 export const STACK_WORDS: Record<ActivityStack, string> = {

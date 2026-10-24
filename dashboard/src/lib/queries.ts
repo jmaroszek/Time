@@ -5,7 +5,9 @@ import {
   DEFAULT_RULE_PRIORITY,
   normalizeRulePattern,
   type Category,
+  type CategoryGoal,
   type CategoryState,
+  type GoalKind,
   type MatchType,
   type Rule,
   type TitleRuleSpec,
@@ -71,13 +73,15 @@ interface CategoryRow {
   is_neutral: number;
   is_ignored: number;
   sort_order: number | null;
+  weekly_goal_hours: number;
+  goal_kind: GoalKind;
 }
 
 export async function fetchCategories(): Promise<Category[]> {
   const db = await getDb();
   const rows = await db.select<CategoryRow[]>(
-    "SELECT id, name, color, is_productive, is_neutral, is_ignored, sort_order FROM categories" +
-      " ORDER BY sort_order, name",
+    "SELECT id, name, color, is_productive, is_neutral, is_ignored, sort_order," +
+      " weekly_goal_hours, goal_kind FROM categories ORDER BY sort_order, name",
   );
   return rows.map((r) => ({
     id: r.id,
@@ -87,6 +91,9 @@ export async function fetchCategories(): Promise<Category[]> {
     isNeutral: r.is_neutral !== 0,
     isIgnored: r.is_ignored !== 0,
     sortOrder: r.sort_order,
+    ...(r.weekly_goal_hours > 0
+      ? { goal: { hours: r.weekly_goal_hours, kind: r.goal_kind === "at_most" ? "at_most" : "at_least" } }
+      : {}),
   }));
 }
 
@@ -439,6 +446,17 @@ export async function updateCategory(cat: Category): Promise<void> {
       cat.isIgnored ? 1 : 0,
       cat.id,
     ],
+  );
+}
+
+/** Its own statement rather than a field of `updateCategory`, so a rename or a
+ *  colour change, which write the whole row from the stored copy, can never
+ *  carry a stale goal back over a newer one. Null removes the goal. */
+export async function setCategoryGoal(categoryId: number, goal: CategoryGoal | null): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    "UPDATE categories SET weekly_goal_hours = $1, goal_kind = $2 WHERE id = $3",
+    [goal?.hours ?? 0, goal?.kind ?? "at_least", categoryId],
   );
 }
 

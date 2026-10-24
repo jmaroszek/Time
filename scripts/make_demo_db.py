@@ -397,6 +397,11 @@ def generate(out: Path, weeks: int, end_day: datetime, now_ts: int | None) -> in
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('process_aliases',?)",
             (json.dumps(PROCESS_ALIASES, sort_keys=True),),
         )
+        # One goal of each kind, so the demo shows a target and a limit.
+        conn.executemany(
+            "UPDATE categories SET weekly_goal_hours=?, goal_kind=? WHERE name=?",
+            [(20, "at_least", "Work"), (4, "at_most", "Entertainment")],
+        )
         cat_ids = {r[1]: r[0] for r in conn.execute("SELECT id, name FROM categories")}
         conn.executemany(
             "INSERT INTO rules (match_type, pattern, category_id, priority) VALUES (?,?,?,?)",

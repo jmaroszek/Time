@@ -41,7 +41,9 @@ RULE_COLUMNS = (
     "match_type,pattern,category_id,priority,"
     "scope_kind,scope_value,title_match_mode,title_anchor"
 )
-CATEGORY_COLUMNS = "name,color,is_productive,is_neutral,is_ignored,sort_order"
+CATEGORY_COLUMNS = (
+    "name,color,is_productive,is_neutral,is_ignored,sort_order,weekly_goal_hours,goal_kind"
+)
 
 
 class MergeError(RuntimeError):
@@ -113,7 +115,7 @@ def _category_map(
             continue
         cursor = merged.execute(
             "INSERT INTO categories"
-            f" ({CATEGORY_COLUMNS}) VALUES (?,?,?,?,?,?)",
+            f" ({CATEGORY_COLUMNS}) VALUES (?,?,?,?,?,?,?,?)",
             (
                 row["name"],
                 row["color"],
@@ -121,6 +123,8 @@ def _category_map(
                 row["is_neutral"],
                 row["is_ignored"],
                 next_order,
+                row["weekly_goal_hours"],
+                row["goal_kind"],
             ),
         )
         next_order += 1

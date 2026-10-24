@@ -160,6 +160,8 @@ export default function ActivityTab({
   onExclusionsOpened,
   requestedWindow = null,
   onRequestedWindowOpened,
+  requestedCategory = null,
+  onRequestedCategoryOpened,
   onViewInInsights,
   notice = null,
   onOpenSettings,
@@ -182,6 +184,10 @@ export default function ActivityTab({
    *  reaches the entity; honored once, on mount, like openExclusions. */
   requestedWindow?: ActivityWindowTarget | null;
   onRequestedWindowOpened?: () => void;
+  /** Settings asked for one category, opened and scrolled to in Categories &
+   *  Rules; cleared through onRequestedCategoryOpened once honored. */
+  requestedCategory?: number | null;
+  onRequestedCategoryOpened?: () => void;
   /** Leaves for Insights, narrowed to one app, website, or category. */
   onViewInInsights?: (scope: InsightsScope) => void;
   /** An app-wide notice (a stopped tracker, a feedback ask), placed here so it
@@ -1263,6 +1269,8 @@ export default function ActivityTab({
             source={source}
             ruleUsageSeconds={result?.ruleUsageSeconds ?? null}
             onChanged={refreshMeta}
+            requestedCategory={requestedCategory}
+            onRequestedCategoryOpened={onRequestedCategoryOpened}
             onViewInInsights={onViewInInsights
               ? (category) => onViewInInsights({
                   kind: "category",

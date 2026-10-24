@@ -18,7 +18,7 @@ from tracker.tracking_schedule import (
 )
 
 T = TypeVar("T")
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class SchemaTooNewError(RuntimeError):
@@ -58,7 +58,13 @@ CREATE TABLE IF NOT EXISTS categories (
     is_productive INTEGER NOT NULL DEFAULT 0,
     is_neutral INTEGER NOT NULL DEFAULT 0,
     is_ignored INTEGER NOT NULL DEFAULT 0,
-    sort_order INTEGER
+    sort_order INTEGER,
+    -- 0 means no goal, as in the weekly_goal_hours setting. Shown only;
+    -- nothing in the tracker reads either column.
+    weekly_goal_hours INTEGER NOT NULL DEFAULT 0
+        CHECK(weekly_goal_hours BETWEEN 0 AND 100),
+    goal_kind TEXT NOT NULL DEFAULT 'at_least'
+        CHECK(goal_kind IN ('at_least','at_most'))
 );
 
 CREATE TABLE IF NOT EXISTS rules (
@@ -407,7 +413,7 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     releases behind has to walk every step, so each block upgrades by one
     version and falls through to the next.
     """
-    if from_version not in {0, 1, 2, 3, 4, SCHEMA_VERSION}:
+    if from_version not in {0, 1, 2, 3, 4, 5, SCHEMA_VERSION}:
         raise RuntimeError(f"unsupported database schema {from_version}")
     if from_version == 0:
         return  # _SCHEMA is the authoritative fresh-install shape
@@ -534,6 +540,21 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         # index changes no recorded rows and remains safe to repeat after a
         # partially completed migration.
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_end ON sessions(end_ts)")
+    if from_version <= 5:
+        # Per-category weekly goals. ADD COLUMN appends, so the column order
+        # matches a fresh _SCHEMA table; checking table_info first keeps a retry
+        # after a partial upgrade from failing on a column that already exists.
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(categories)")}
+        if "weekly_goal_hours" not in existing:
+            conn.execute(
+                "ALTER TABLE categories ADD COLUMN weekly_goal_hours INTEGER NOT NULL"
+                " DEFAULT 0 CHECK(weekly_goal_hours BETWEEN 0 AND 100)"
+            )
+        if "goal_kind" not in existing:
+            conn.execute(
+                "ALTER TABLE categories ADD COLUMN goal_kind TEXT NOT NULL"
+                " DEFAULT 'at_least' CHECK(goal_kind IN ('at_least','at_most'))"
+            )
 
 
 def _seed(conn: sqlite3.Connection) -> None:

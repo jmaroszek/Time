@@ -180,10 +180,10 @@ const noTitles = fixtureParams.get("titles") === "none";
 if (noTitles) sessions = sessions.map((session) => ({ ...session, title: "" }));
 
 const categoryRows = [
-  { id: 1, name: "Focus", color: "#6ba0da", is_productive: 1, is_neutral: 0, is_ignored: 0, sort_order: 1 },
-  { id: 2, name: "Communication", color: "#a78bfa", is_productive: 0, is_neutral: 1, is_ignored: 0, sort_order: 2 },
-  { id: 3, name: "System", color: "#94a3b8", is_productive: 0, is_neutral: 1, is_ignored: 0, sort_order: 3 },
-  { id: 4, name: "Ignored", color: "#5b616b", is_productive: 0, is_neutral: 0, is_ignored: 1, sort_order: 4 },
+  { id: 1, name: "Focus", color: "#6ba0da", is_productive: 1, is_neutral: 0, is_ignored: 0, sort_order: 1, weekly_goal_hours: 10, goal_kind: "at_least" },
+  { id: 2, name: "Communication", color: "#a78bfa", is_productive: 0, is_neutral: 1, is_ignored: 0, sort_order: 2, weekly_goal_hours: 0, goal_kind: "at_least" },
+  { id: 3, name: "System", color: "#94a3b8", is_productive: 0, is_neutral: 1, is_ignored: 0, sort_order: 3, weekly_goal_hours: 0, goal_kind: "at_least" },
+  { id: 4, name: "Ignored", color: "#5b616b", is_productive: 0, is_neutral: 0, is_ignored: 1, sort_order: 4, weekly_goal_hours: 0, goal_kind: "at_least" },
 ];
 
 const ruleRows = [
@@ -491,6 +491,16 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
         const at = ruleRows.findIndex((rule) => rule.id === Number(values[0]));
         if (at !== -1) ruleRows.splice(at, 1);
         result = { rowsAffected: at === -1 ? 0 : 1, lastInsertId: 0 };
+        break;
+      }
+      if (query.startsWith("update categories set weekly_goal_hours")) {
+        const [hours, kind, categoryId] = values as [number, string, number];
+        const row = categoryRows.find((category) => category.id === categoryId);
+        if (row) {
+          row.weekly_goal_hours = hours;
+          row.goal_kind = kind;
+        }
+        result = { rowsAffected: row ? 1 : 0, lastInsertId: 0 };
         break;
       }
       throw new Error(`Device fixture has no db_execute response for: ${query}`);

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "../components/ui";
 import { ExtensionLinks } from "../components/ExtensionLinks";
 import { displayBrowserProcesses, normalizeBrowserProcesses } from "../lib/browsers";
+import { goalCategories, goalSummary } from "../lib/categoryGoals";
 import { fmtElapsed } from "../lib/format";
 import { KeyedSerialQueue } from "../lib/keyedSerialQueue";
 import { normalizeMediaSites } from "../lib/mediaSites";
@@ -113,12 +114,15 @@ const settingWrites = new KeyedSerialQueue();
 export default function SettingsTab({
   onManageExclusions,
   onManageCategories,
+  onOpenCategory,
   highlightSection = null,
   onHighlightShown,
   update,
 }: {
   onManageExclusions: () => void;
   onManageCategories: () => void;
+  /** Opens Categories & Rules at one category, for its goal. */
+  onOpenCategory: (categoryId: number) => void;
   update: AppUpdateState;
   /** A section title to scroll to and mark on arrival — a one-shot request from
    *  whatever sent the reader here, cleared through onHighlightShown. */
@@ -127,6 +131,7 @@ export default function SettingsTab({
 }) {
   const meta = useMeta();
   const banner = useBanner();
+  const categoryGoalList = goalCategories(meta.categories);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [startingTracker, setStartingTracker] = useState(false);
@@ -996,6 +1001,37 @@ export default function SettingsTab({
           control={<Segmented label="Week starts on" options={["Sunday", "Monday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
         />
         <Row label="Weekly productivity goal" help="Set to 0 hours to leave your goal unset." control={numberControl(SPECS.goal, "Weekly productivity goal", "hrs")} />
+        {/* Listed, not edited: a goal belongs to its category, and two editors
+            for one value would be two places to wonder which one won. Each row
+            goes to the category, where its goal is changed. */}
+        <Row
+          label="Category goals"
+          help={categoryGoalList.length > 0
+            ? "Weekly goals on single categories, shown in Insights. Change one from its category."
+            : "Set a category's goal from its menu in Categories & Rules."}
+          control={categoryGoalList.length > 0
+            ? null
+            : <TextAction onClick={onManageCategories}>Open Categories &amp; Rules</TextAction>}
+          footer={categoryGoalList.length > 0 && (
+            <ul className="-mx-2 flex flex-col">
+              {categoryGoalList.map((category) => (
+                <li key={category.id}>
+                  <button
+                    type="button"
+                    onClick={() => onOpenCategory(category.id)}
+                    title={`Open ${category.name} in Categories & Rules`}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-hover-2"
+                  >
+                    <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: category.color }} />
+                    <span className="min-w-0 flex-1 truncate font-medium text-ink">{category.name}</span>
+                    <span className="shrink-0 tabular-nums text-ink-2">{goalSummary(category.goal)}</span>
+                    <span aria-hidden="true" className="shrink-0 text-ink-3">›</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        />
         <Row label="Day starts at" help="First hour shown in the Timeline and Rhythm visualizations. Activity before still counts towards your totals." control={numberControl(SPECS.start, "Day starts at", undefined, true)} />
         <Row label="Day ends at" help="Last hour shown in the Timeline and Rhythm visualizations. Activity after still counts towards your totals." control={numberControl(SPECS.end, "Day ends at", undefined, true)} />
       </Section>
