@@ -29,7 +29,7 @@
       "type": "table",
       "name": "categories",
       "table": "categories",
-      "sql": "CREATE TABLE categories ( id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, color TEXT NOT NULL, is_productive INTEGER NOT NULL DEFAULT 0, is_neutral INTEGER NOT NULL DEFAULT 0, is_ignored INTEGER NOT NULL DEFAULT 0, sort_order INTEGER, weekly_goal_hours INTEGER NOT NULL DEFAULT 0 CHECK(weekly_goal_hours BETWEEN 0 AND 100), goal_kind TEXT NOT NULL DEFAULT 'at_least' CHECK(goal_kind IN ('at_least','at_most')) )"
+      "sql": "CREATE TABLE categories ( id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, color TEXT NOT NULL, is_productive INTEGER NOT NULL DEFAULT 0, is_neutral INTEGER NOT NULL DEFAULT 0, is_ignored INTEGER NOT NULL DEFAULT 0, sort_order INTEGER, weekly_goal_hours REAL NOT NULL DEFAULT 0 CHECK(weekly_goal_hours BETWEEN 0 AND 100), goal_kind TEXT NOT NULL DEFAULT 'at_least' CHECK(goal_kind IN ('at_least','at_most')) )"
     },
     {
       "type": "table",
@@ -83,7 +83,7 @@
       "is_neutral": 0,
       "is_ignored": 0,
       "sort_order": 1,
-      "weekly_goal_hours": 0,
+      "weekly_goal_hours": 0.0,
       "goal_kind": "at_least"
     },
     {
@@ -94,7 +94,7 @@
       "is_neutral": 1,
       "is_ignored": 0,
       "sort_order": 2,
-      "weekly_goal_hours": 0,
+      "weekly_goal_hours": 0.0,
       "goal_kind": "at_least"
     },
     {
@@ -105,7 +105,7 @@
       "is_neutral": 1,
       "is_ignored": 0,
       "sort_order": 3,
-      "weekly_goal_hours": 0,
+      "weekly_goal_hours": 0.0,
       "goal_kind": "at_least"
     },
     {
@@ -116,7 +116,7 @@
       "is_neutral": 0,
       "is_ignored": 0,
       "sort_order": 4,
-      "weekly_goal_hours": 0,
+      "weekly_goal_hours": 0.0,
       "goal_kind": "at_least"
     },
     {
@@ -127,7 +127,7 @@
       "is_neutral": 1,
       "is_ignored": 0,
       "sort_order": 5,
-      "weekly_goal_hours": 0,
+      "weekly_goal_hours": 0.0,
       "goal_kind": "at_least"
     },
     {
@@ -138,7 +138,7 @@
       "is_neutral": 0,
       "is_ignored": 1,
       "sort_order": 99,
-      "weekly_goal_hours": 0,
+      "weekly_goal_hours": 0.0,
       "goal_kind": "at_least"
     }
   ]

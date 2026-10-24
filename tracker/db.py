@@ -59,9 +59,10 @@ CREATE TABLE IF NOT EXISTS categories (
     is_neutral INTEGER NOT NULL DEFAULT 0,
     is_ignored INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER,
-    -- 0 means no goal, as in the weekly_goal_hours setting. Shown only;
-    -- nothing in the tracker reads either column.
-    weekly_goal_hours INTEGER NOT NULL DEFAULT 0
+    -- 0 means no goal, as in the weekly_goal_hours setting. Hours, which may
+    -- be fractional (1.5 is 1h 30m). Shown only; nothing in the tracker
+    -- reads either column.
+    weekly_goal_hours REAL NOT NULL DEFAULT 0
         CHECK(weekly_goal_hours BETWEEN 0 AND 100),
     goal_kind TEXT NOT NULL DEFAULT 'at_least'
         CHECK(goal_kind IN ('at_least','at_most'))
@@ -547,7 +548,7 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         existing = {row[1] for row in conn.execute("PRAGMA table_info(categories)")}
         if "weekly_goal_hours" not in existing:
             conn.execute(
-                "ALTER TABLE categories ADD COLUMN weekly_goal_hours INTEGER NOT NULL"
+                "ALTER TABLE categories ADD COLUMN weekly_goal_hours REAL NOT NULL"
                 " DEFAULT 0 CHECK(weekly_goal_hours BETWEEN 0 AND 100)"
             )
         if "goal_kind" not in existing:

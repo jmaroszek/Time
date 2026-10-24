@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS categories (
     is_neutral INTEGER NOT NULL DEFAULT 0,
     is_ignored INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER,
-    weekly_goal_hours INTEGER NOT NULL DEFAULT 0
+    weekly_goal_hours REAL NOT NULL DEFAULT 0
         CHECK(weekly_goal_hours BETWEEN 0 AND 100),
     goal_kind TEXT NOT NULL DEFAULT 'at_least'
         CHECK(goal_kind IN ('at_least','at_most'))

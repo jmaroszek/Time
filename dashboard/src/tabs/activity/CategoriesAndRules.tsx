@@ -56,6 +56,7 @@ import GoalEditor, { GOAL_EDITOR_WIDTH } from "./GoalEditor";
 import RuleKindGlyph from "./RuleKindGlyph";
 import { toggleSetValue } from "../../lib/setUpdates";
 import { stateColors } from "./activityStyles";
+import { SECTION_FLASH_MS } from "../settings/chrome";
 import {
   ASSIGNABLE_STATES,
   CategoryRuleForm,
@@ -201,7 +202,7 @@ export default function CategoriesAndRules({
   onChanged: () => Promise<void>;
   /** Opens Insights narrowed to one category. */
   onViewInInsights?: (category: Category) => void;
-  /** A category to open and scroll to on arrival, from Settings' goal list. */
+  /** A category to scroll to and flash on arrival, from Settings' goal list. */
   requestedCategory?: number | null;
   onRequestedCategoryOpened?: () => void;
 }) {
@@ -243,18 +244,28 @@ export default function CategoriesAndRules({
     () => (ruleUsageSeconds === null ? null : new Map(ruleUsageSeconds)),
     [ruleUsageSeconds],
   );
+  // Arriving from Settings' goal list, the category is pointed out rather than
+  // opened: the reader came to find the row, whose label and menu hold the
+  // goal, not to read its rules. The flash is Settings' own section flash, so
+  // "this is where you were sent" looks the same in both tabs.
+  const [flashedCategory, setFlashedCategory] = useState<number | null>(null);
   useEffect(() => {
     if (requestedCategory === null) return;
-    setExpanded((current) => new Set(current).add(requestedCategory));
-    // After the expansion has rendered, so the header lands where it will stay.
+    // A frame later, once the list has rendered in the tab just switched to.
     window.requestAnimationFrame(() => {
       categoryHeaderRefs.current.get(requestedCategory)?.scrollIntoView({
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-        block: "start",
+        block: "nearest",
       });
     });
+    setFlashedCategory(requestedCategory);
     onRequestedCategoryOpened?.();
   }, [requestedCategory, onRequestedCategoryOpened]);
+  useEffect(() => {
+    if (flashedCategory === null) return;
+    const timer = window.setTimeout(() => setFlashedCategory(null), SECTION_FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [flashedCategory]);
 
   const draftFor = (id: number): CategoryRuleDraft =>
     drafts[id] ?? {
@@ -709,7 +720,9 @@ export default function CategoriesAndRules({
           return (
             <div
               key={category.id}
-              className="overflow-hidden rounded-[11px] border border-edge bg-group"
+              className={`overflow-hidden rounded-[11px] border border-edge bg-group transition-shadow duration-500 ${
+                flashedCategory === category.id ? "ring-2 ring-accent/70" : "ring-0 ring-transparent"
+              }`}
             >
               <div
                 ref={(node) => {
@@ -765,17 +778,17 @@ export default function CategoriesAndRules({
                 {/* A goal is the category's own property, like its colour and
                     state, so it shows on the header where every goal can be
                     read without opening a category. Right after the name, it
-                    reads as the sentence it is: "Work at least 20h/wk". No goal
+                    reads as the sentence it is: "Work at least 20h per week". No goal
                     shows nothing: new goals start from the actions menu. The
                     negative margin takes back most of the hover box's padding, so
-                    the words sit 12px from the name: apart from it, but not a
+                    the words sit 8px from the name: apart from it, but not a
                     column away. */}
                 {!locked && !category.isIgnored && category.goal && (
                   <button
                     type="button"
                     title="Edit weekly goal"
                     aria-label={`Weekly goal for ${category.name}: ${goalSummary(category.goal)}. Edit`}
-                    className="-ml-1 shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 tabular-nums text-ink-3 hover:bg-hover-2 hover:text-ink-2"
+                    className="-ml-2 shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 tabular-nums text-ink-3 hover:bg-hover-2 hover:text-ink-2"
                     onClick={(event) => {
                       if (goalMenu?.id === category.id) return setGoalMenu(null);
                       openGoalEditor(category.id, event.currentTarget.getBoundingClientRect());

@@ -20,7 +20,7 @@ interface RuleSets {
 
 // Ten thousand rules parse in a few milliseconds, but the consolidation check
 // asks this question once per candidate parent per render. Built on first use
-// rather than at module load, so a session that never opens Categories & Rules
+// rather than at module load, so a session that never opens Categories
 // never pays for it at all.
 let cached: RuleSets | null = null;
 

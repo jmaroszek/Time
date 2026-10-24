@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildClassifier, type Category, type Rule } from "./classify";
 import {
   clipSessions,
+  completedDays,
   computeKpis,
   dailySecondsByApp,
   goalPace,
@@ -170,6 +171,29 @@ describe("computeKpis", () => {
     );
     expect(k.totalSec).toBe(5000);
     expect(k.longestFocusSec).toBe(4600);
+  });
+});
+
+describe("goalPace missed", () => {
+  // Sun Oct 18 – Sat Oct 24 2026, a 20h week: 20/7 h a day.
+  const week = { start: new Date(2026, 9, 18), end: new Date(2026, 9, 25) };
+  const friday9am = new Date(2026, 9, 23, 9);
+
+  it("counts only the days over before today", () => {
+    expect(completedDays(week, friday9am)).toBe(5);
+    expect(completedDays(week, new Date(2026, 9, 18, 23))).toBe(0);
+    expect(completedDays(week, new Date(2026, 10, 2))).toBe(7);
+  });
+
+  it("is missed only when short even for the days already over", () => {
+    // Five days over: a 14.3h share. 12h is short of it, 15h is not.
+    expect(goalPace(12 * 3600, week, 20, friday9am).missed).toBe(true);
+    expect(goalPace(15 * 3600, week, 20, friday9am).missed).toBe(false);
+    // The first morning has no finished day to fall short on.
+    expect(goalPace(0, week, 20, new Date(2026, 9, 18, 9)).missed).toBe(false);
+    // A range that has ended is held to the whole goal.
+    expect(goalPace(19 * 3600, week, 20, new Date(2026, 10, 2)).missed).toBe(true);
+    expect(goalPace(20 * 3600, week, 20, new Date(2026, 10, 2)).missed).toBe(false);
   });
 });
 

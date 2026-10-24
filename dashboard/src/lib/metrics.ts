@@ -3,7 +3,7 @@
 
 import type { Category, Classifier } from "./classify";
 import { appGroupKey, cleanDomainName, cleanProcessName } from "./format";
-import { addDays, calendarDays, dayKey, listDays, type Range } from "./time";
+import { addDays, calendarDays, dayKey, listDays, startOfDay, type Range } from "./time";
 
 export interface Session {
   id: number;
@@ -208,6 +208,8 @@ export interface GoalPace {
   met: boolean;
   /** Rounded figures look equal although the exact target is still ahead. */
   roundedTieWhileBehind: boolean;
+  /** Short of the goal even for the days already over: see `goalMissed`. */
+  missed: boolean;
 }
 
 /** A weekly goal scaled to a range's length: one day targets a seventh of it,
@@ -215,6 +217,26 @@ export interface GoalPace {
  *  through this one rule. */
 export function proratedTargetHours(weeklyHours: number, range: Range): number {
   return (weeklyHours * calendarDays(range)) / 7;
+}
+
+/** Whole days of the range that ended before today began. A range runs through
+ *  the end of today, so a range that ended earlier is all of them, and the
+ *  "Today" preset none. */
+export function completedDays(range: Range, now: Date = new Date()): number {
+  const end = Math.min(range.end.getTime(), startOfDay(now).getTime());
+  return end <= range.start.getTime() ? 0 : Math.round((end - range.start.getTime()) / 86_400_000);
+}
+
+/**
+ * Whether a target has been missed, not merely not yet reached. Every range
+ * runs through the end of today, so held against the whole target, any goal
+ * would read as missed every morning until the day's work was done. Held
+ * against the share for the days already over, it is missed only when even
+ * those fell short; a range that has ended entirely is held to all of it.
+ */
+export function goalMissed(doneHours: number, weeklyHours: number, range: Range, now: Date = new Date()): boolean {
+  const days = completedDays(range, now);
+  return days > 0 && doneHours < (weeklyHours * days) / 7;
 }
 
 /**
@@ -227,7 +249,12 @@ export function proratedTargetHours(weeklyHours: number, range: Range): number {
  * against the daily goal — not a per-remaining-day catch-up rate (which would
  * collapse the entire window's shortfall onto today).
  */
-export function goalPace(prodSec: number, range: Range, weeklyGoalHours: number): GoalPace {
+export function goalPace(
+  prodSec: number,
+  range: Range,
+  weeklyGoalHours: number,
+  now: Date = new Date(),
+): GoalPace {
   const targetDays = calendarDays(range);
   const targetHours = proratedTargetHours(weeklyGoalHours, range);
   const doneHours = prodSec / 3600;
@@ -241,6 +268,7 @@ export function goalPace(prodSec: number, range: Range, weeklyGoalHours: number)
     met,
     roundedTieWhileBehind:
       !met && Math.round(doneHours) === Math.round(targetHours),
+    missed: !met && goalMissed(doneHours, weeklyGoalHours, range, now),
   };
 }
 

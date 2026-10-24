@@ -69,7 +69,7 @@ async function waitForInsights() {
 
 async function waitForActivity() {
   await page.getByRole("button", { name: "Activity", exact: true }).waitFor();
-  await page.getByRole("button", { name: "Apps & Websites", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Library", exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector('[aria-busy="true"]'));
   await page.waitForTimeout(500);
 }
@@ -326,7 +326,7 @@ if (activityRequested) {
 }
 
 if (requested("activity-apps-websites-week")) {
-  await page.getByRole("button", { name: "Apps & Websites", exact: true }).click();
+  await page.getByRole("button", { name: "Library", exact: true }).click();
   await page.getByRole("columnheader", { name: "Name", exact: true }).waitFor();
   await page.locator(".overflow-auto").evaluateAll((nodes) => {
     for (const node of nodes) node.scrollTop = 0;
@@ -335,7 +335,7 @@ if (requested("activity-apps-websites-week")) {
 }
 
 if (requested("activity-categories-rules-work-expanded")) {
-  await page.getByRole("button", { name: "Categories & Rules", exact: true }).click();
+  await page.getByRole("button", { name: "Categories", exact: true }).click();
   await page.getByPlaceholder("Search rules, types, and categories…").waitFor();
 
   // Make this deterministic if the debug session had retained expansion state:
@@ -348,7 +348,7 @@ if (requested("activity-categories-rules-work-expanded")) {
     for (const node of nodes) node.scrollTop = 0;
   });
   const rulesSurface = page
-    .getByRole("button", { name: "Categories & Rules", exact: true })
+    .getByRole("button", { name: "Categories", exact: true })
     .locator("xpath=ancestor::div[contains(@class, 'max-w-[800px]')][1]");
   await writeScreenCapture("activity-categories-rules-work-expanded", rulesSurface);
 }

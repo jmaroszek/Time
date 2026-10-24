@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "../../components/ui";
-import { GOAL_MAX_HOURS } from "../../lib/categoryGoals";
+import { GOAL_MAX_HOURS, roundGoalHours } from "../../lib/categoryGoals";
 import type { CategoryGoal, GoalKind } from "../../lib/classify";
 import { Segmented } from "../settings/fields";
 
@@ -33,9 +33,13 @@ export default function GoalEditor({
   onClose: () => void;
 }) {
   const [kind, setKind] = useState<GoalKind>(goal?.kind ?? "at_least");
-  const [hours, setHours] = useState(goal ? String(goal.hours) : "");
-  const parsed = /^\d+$/.test(hours.trim()) ? Number(hours.trim()) : null;
-  const valid = parsed !== null && parsed <= GOAL_MAX_HOURS;
+  // Two decimals are enough to show any whole-minute goal again: 1h 20m is
+  // 1.33, which saves back as the same 80 minutes.
+  const [hours, setHours] = useState(goal ? String(Number(goal.hours.toFixed(2))) : "");
+  const parsed = /^(\d+(\.\d*)?|\.\d+)$/.test(hours.trim()) ? roundGoalHours(Number(hours.trim())) : null;
+  // Under half a minute rounds to 0, which would remove the goal while the
+  // field still shows a number; refuse it instead. A typed 0 still removes.
+  const valid = parsed !== null && parsed <= GOAL_MAX_HOURS && (parsed > 0 || Number(hours.trim()) === 0);
   const save = () => {
     if (!valid) return;
     onSave(parsed === 0 ? null : { hours: parsed, kind });
@@ -72,7 +76,7 @@ export default function GoalEditor({
         <label className="flex items-center gap-2 text-ink-2">
           <input
             autoFocus
-            inputMode="numeric"
+            inputMode="decimal"
             value={hours}
             aria-label={`Hours a week for ${categoryName}`}
             aria-invalid={hours !== "" && !valid}
@@ -84,12 +88,12 @@ export default function GoalEditor({
           />
           hours a week
         </label>
-        <p className="leading-relaxed text-ink-3">
-          Goal progress is shown in Insights.
-        </p>
-        <div className="-mb-1 -mr-1 flex items-center">
+        {/* 20px above the buttons, as every dialog's footer has (mt-5), where
+            the column's 12px gap set them as close to the field as the field
+            is to the switch, so nothing said where the settings ended. */}
+        <div className="-mb-1 -mr-1 mt-2 flex items-center">
           {/* The negative margin takes back the button's padding, so the word
-              starts on the same edge as the switch, the field and the note. */}
+              starts on the same edge as the switch and the field. */}
           {goal && <Button variant="text-danger" className="-ml-[13px]" onClick={() => onSave(null)}>Remove goal</Button>}
           <span className="flex-1" />
           <Button onClick={onClose}>Cancel</Button>

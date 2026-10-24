@@ -121,7 +121,7 @@ export default function SettingsTab({
 }: {
   onManageExclusions: () => void;
   onManageCategories: () => void;
-  /** Opens Categories & Rules at one category, for its goal. */
+  /** Opens Activity › Categories at one category, for its goal. */
   onOpenCategory: (categoryId: number) => void;
   update: AppUpdateState;
   /** A section title to scroll to and mark on arrival — a one-shot request from
@@ -992,14 +992,10 @@ export default function SettingsTab({
           answer, which is how "Week starts on" ended up filed under a window it
           has nothing to do with while pacing the goal two sections above it.
           Read together they are the frame the numbers are measured in: the
-          week everything else is measured against, the target paced against
-          it, and the hours drawn. */}
+          goals, then the calendar they are measured against, the week first
+          and then the hours of the day drawn, so the three settings about
+          time sit together in the order of the title. */}
       <Section title="Goals & time">
-        <Row
-          label="Week starts on"
-          help="Affects weekly presets, bucketing, and goal pacing."
-          control={<Segmented label="Week starts on" options={["Sunday", "Monday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
-        />
         <Row label="Weekly productivity goal" help="Set to 0 hours to leave your goal unset." control={numberControl(SPECS.goal, "Weekly productivity goal", "hrs")} />
         {/* Listed, not edited: a goal belongs to its category, and two editors
             for one value would be two places to wonder which one won. Each row
@@ -1007,11 +1003,11 @@ export default function SettingsTab({
         <Row
           label="Category goals"
           help={categoryGoalList.length > 0
-            ? "Weekly goals on single categories. Set in Categories & Rules."
-            : "Set a category's goal from its menu in Categories & Rules."}
+            ? "Weekly goals on single categories. Set in Activity › Categories."
+            : "Set a category's goal from its menu in Activity › Categories."}
           control={categoryGoalList.length > 0
             ? null
-            : <TextAction onClick={onManageCategories}>Open Categories &amp; Rules</TextAction>}
+            : <TextAction onClick={onManageCategories}>Open Categories</TextAction>}
           footer={categoryGoalList.length > 0 && (
             <ul className="-mx-2 flex flex-col">
               {categoryGoalList.map((category) => (
@@ -1019,7 +1015,7 @@ export default function SettingsTab({
                   <button
                     type="button"
                     onClick={() => onOpenCategory(category.id)}
-                    title={`Open ${category.name} in Categories & Rules`}
+                    title={`Show ${category.name} in Categories`}
                     className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-hover-2"
                   >
                     <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: category.color }} />
@@ -1031,6 +1027,11 @@ export default function SettingsTab({
               ))}
             </ul>
           )}
+        />
+        <Row
+          label="Week starts on"
+          help="Affects weekly presets, bucketing, and goal pacing."
+          control={<Segmented label="Week starts on" options={["Sunday", "Monday"]} value={drafts.week_start === "auto" ? meta.weekStart : (drafts.week_start ?? meta.weekStart)} onChange={(value) => selectSetting("week_start", value)} />}
         />
         <Row label="Day starts at" help="First hour shown in the Timeline and Rhythm visualizations. Activity before still counts towards your totals." control={numberControl(SPECS.start, "Day starts at", undefined, true)} />
         <Row label="Day ends at" help="Last hour shown in the Timeline and Rhythm visualizations. Activity after still counts towards your totals." control={numberControl(SPECS.end, "Day ends at", undefined, true)} />
@@ -1190,7 +1191,7 @@ export default function SettingsTab({
           <p className="text-meta leading-snug text-ink-3">
             Existing categories keep their saved colors.
           </p>
-          <TextAction onClick={onManageCategories}>Open Categories &amp; Rules</TextAction>
+          <TextAction onClick={onManageCategories}>Open Categories</TextAction>
         </div>
       </Section>
 

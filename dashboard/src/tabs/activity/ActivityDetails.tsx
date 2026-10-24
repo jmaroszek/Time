@@ -170,7 +170,7 @@ function GroupSessions({
  * The undocked panel's column. Undocked, the panel takes the card's place, and
  * at the card's full width its bars and rows stretched to a thousand pixels for
  * a list read at a glance. Capped near the docked panel's width and kept left,
- * under the view switcher, the way Categories & Rules caps its own column. The
+ * under the view switcher, the way Categories caps its own column. The
  * tab gives anything above the panel the same width.
  */
 export const DETAIL_PANEL_DRILL_IN_WIDTH = "mr-auto w-full max-w-[720px]";

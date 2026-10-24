@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   estimateLegendRows,
   formatHoursTooltipRow,
+  goalLabelGutter,
   goalLineSeries,
   GOAL_LINE_SERIES,
   legendContentWidth,
@@ -261,6 +262,13 @@ describe("goalLineSeries", () => {
 
   it("names a limit as one", () => {
     expect(goalLineSeries({ hours: 5, kind: "at_most" }, 2, "#777")!.markLine.label.formatter).toBe("Limit 5h");
+  });
+
+  it("writes a fractional goal in hours and minutes, and widens the gutter for it", () => {
+    const goal = { hours: 1.5, kind: "at_most" as const };
+    expect(goalLineSeries(goal, 2, "#777")!.markLine.label.formatter).toBe("Limit 1h 30m");
+    expect(goalLabelGutter({ hours: 100, kind: "at_most" })).toBe(64);
+    expect(goalLabelGutter(goal)).toBeGreaterThan(64);
   });
 
   it("draws nothing without a goal or bars", () => {

@@ -352,6 +352,11 @@ def test_v5_database_migrates_to_v6_adding_category_goals(tmp_path):
     migrated.execute(
         "UPDATE categories SET weekly_goal_hours=5, goal_kind='at_most' WHERE id=2"
     )
+    # Goals may be fractional: 1.5 is 1h 30m, and it comes back as stored.
+    migrated.execute("UPDATE categories SET weekly_goal_hours=1.5 WHERE id=1")
+    assert migrated.execute(
+        "SELECT weekly_goal_hours FROM categories WHERE id=1"
+    ).fetchone()[0] == 1.5
     with pytest.raises(sqlite3.IntegrityError):
         migrated.execute("UPDATE categories SET weekly_goal_hours=101 WHERE id=1")
     with pytest.raises(sqlite3.IntegrityError):

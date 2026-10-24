@@ -15,7 +15,7 @@ const DEFAULT_METRIC: ActivityMetric = "productive";
 const DEFAULT_STACK_BY: ActivityStack = "state"; // "Productivity"
 const BLOCK_MINUTES_OPTIONS = [0, 5, 10, 15, 30];
 
-/** Dashboard-local, like the Categories & Rules list orders: how one person
+/** Dashboard-local, like the Categories list orders: how one person
  *  likes to look at their charts is not part of the tracker contract, and a
  *  setting that resets on every launch read as a bug to the people using it. */
 export const INSIGHTS_VIEW_STORAGE_KEY = "time.insights.view";

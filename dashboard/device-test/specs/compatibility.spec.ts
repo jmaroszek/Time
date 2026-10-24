@@ -172,7 +172,7 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   await assertNoHorizontalOverflow(page);
 
   await page.getByRole("button", { name: "Activity", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Apps & Websites", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Library", exact: true })).toBeVisible();
   if (width < 768) {
     await expect(page.getByRole("columnheader", { name: "Days seen" })).toHaveCount(0);
   } else {
@@ -225,7 +225,7 @@ test("@matrix primary screens remain usable at the effective viewport contract",
   await expect(page.getByRole("table")).toBeVisible();
   await expect(rowTrigger).toBeFocused();
 
-  await page.getByRole("button", { name: "Categories & Rules", exact: true }).click();
+  await page.getByRole("button", { name: "Categories", exact: true }).click();
   await expect(page.getByRole("button", { name: "New category", exact: true })).toBeVisible();
   if (width < 640) {
     const search = page.getByPlaceholder("Search rules, types, and categories…");
@@ -325,7 +325,7 @@ test("@settle category disclosures remain immediate after Library changes", asyn
   // Switching faces still remounts CategoriesAndRules. Repeating that cycle
   // proves the body appears immediately from a fresh disclosure each time.
   for (let attempt = 0; attempt < 10; attempt += 1) {
-    await page.getByRole("button", { name: "Categories & Rules", exact: true }).click();
+    await page.getByRole("button", { name: "Categories", exact: true }).click();
     const toggle = page.getByRole("button", { name: "Expand System rules" });
     const bodyId = await toggle.getAttribute("aria-controls");
     expect(bodyId).not.toBeNull();
@@ -343,7 +343,7 @@ test("@settle category disclosures remain immediate after Library changes", asyn
 
     await page.getByRole("button", { name: "Collapse System rules" }).click();
     await expect(body).toHaveCount(0);
-    await page.getByRole("button", { name: "Apps & Websites", exact: true }).click();
+    await page.getByRole("button", { name: "Library", exact: true }).click();
   }
 });
 
@@ -401,7 +401,7 @@ test("@minimum every primary tab stays reachable at the minimum viewport", async
   // Activity keeps its last sub-view, so return to the catalog explicitly
   // before reaching for a row.
   await page.getByRole("button", { name: "Activity", exact: true }).click();
-  await page.getByRole("button", { name: "Apps & Websites", exact: true }).click();
+  await page.getByRole("button", { name: "Library", exact: true }).click();
   const rowTrigger = page.locator("tbody button").first();
   await expect(rowTrigger).toBeVisible();
   await rowTrigger.click();

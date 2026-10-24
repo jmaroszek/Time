@@ -1,17 +1,23 @@
 /**
  * Shown after a figure's target ("18h of 15h ✓") once the period has settled
- * its goal: a check for a target reached, a cross for a limit passed. Nothing
- * for a target not yet reached, since the period may still reach it.
+ * its goal: a check for a target reached, a cross for a limit passed or a
+ * target missed. Nothing for a target that today could still reach; "missed"
+ * means short even for the days already over (`goalMissed`).
  * Deliberately this quiet: no fill, no chip, no label text. A goal's outcome is
  * worth noticing when you happen to look at the tile, not worth an
  * announcement, and the figure beside it already says by how much. It sits in
  * the target's small text, centred on it, not on the large figure's line: the
  * label row already carries the hint and, on Goal pace, the chevron.
  */
-export function GoalMark({ missed = false }: { missed?: boolean }) {
+export function GoalMark({ missed = false, limit = false }: { missed?: boolean; limit?: boolean }) {
+  const title = !missed
+    ? "Goal met for this period"
+    : limit
+      ? "Over the limit for this period"
+      : "Short of the goal for the days so far";
   return (
     <span
-      title={missed ? "Over the limit for this period" : "Goal met for this period"}
+      title={title}
       className={`flex shrink-0 opacity-80 ${missed ? "text-bad" : "text-good-data"}`}
     >
       <svg

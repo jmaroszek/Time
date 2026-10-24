@@ -62,7 +62,7 @@ export function ScopeTiles({
             {goal ? (
               <span className="flex items-center gap-1.5 text-xs font-normal tracking-normal text-ink-3">
                 {goalTargetLabel(goal)}
-                {(goal.met || goal.over) && <GoalMark missed={goal.over} />}
+                {(goal.met || goal.missed) && <GoalMark missed={goal.missed} limit={goal.kind === "at_most"} />}
               </span>
             ) : change && (
               <span className="text-xs font-normal tracking-normal text-ink-3">{change}</span>

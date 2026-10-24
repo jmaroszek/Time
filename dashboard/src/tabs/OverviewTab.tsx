@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import ActivityCalendar from "../components/ActivityCalendar";
@@ -324,8 +324,6 @@ export default function OverviewTab({
   // The ranked card is where a narrowed view was entered from, so it is where
   // the way back belongs — the chip beside the tabs reads as a filter, not as
   // the exit. One step at a time: an app opened inside a category returns to it.
-  const leaveScope = () => setScope(heldIn);
-  const backTo = heldIn ? heldIn.name : "all activity";
   const scopeCategory = scope?.kind === "category"
     ? meta.categories.find((category) => category.id === scope.categoryId) ?? null
     : heldIn?.kind === "category"
@@ -442,7 +440,7 @@ export default function OverviewTab({
                     24px and too tight at 12. */}
                 <span className="flex items-center gap-1.5 text-xs font-normal tracking-normal text-ink-3">
                   {`of ${fmtWholeHours(pace.targetHours)}`}
-                  {pace.met && <GoalMark />}
+                  {(pace.met || pace.missed) && <GoalMark missed={pace.missed} />}
                 </span>
               </span>
             )) : categoryGoals.length > 0 ? (emptyReason ?? (
@@ -485,7 +483,6 @@ export default function OverviewTab({
         <GoalsPopover
           anchorRef={goalTileRef}
           overall={goalConfigured && !emptyReason ? pace : null}
-          productiveColor={meta.palette.productive}
           goals={categoryGoals}
           onSelectCategory={(category) => {
             setGoalsOpen(false);
@@ -583,7 +580,7 @@ export default function OverviewTab({
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {scope && scope.kind !== "category" && scopeWindows ? (
           <Card
-            title={<BackTitle onBack={leaveScope} backTo={backTo}>Top Windows</BackTitle>}
+            title="Top Windows"
             className="h-[345px]"
             right={
               <MenuSelect
@@ -612,11 +609,7 @@ export default function OverviewTab({
           </Card>
         ) : (
           <Card
-            title={
-              <BackTitle onBack={scope ? leaveScope : null} backTo={backTo}>
-                {rankedEntityKind === "apps" ? "Top Apps" : "Top Websites"}
-              </BackTitle>
-            }
+            title={rankedEntityKind === "apps" ? "Top Apps" : "Top Websites"}
             className="h-[345px]"
             right={
               <span className="flex items-center gap-2">
@@ -728,36 +721,5 @@ export default function OverviewTab({
         </Card>
       </div>
     </div>
-  );
-}
-
-/** A card title with the back arrow the Activity detail panel uses, so the two
- *  ways of drilling into one subject leave it the same way. */
-function BackTitle({
-  onBack,
-  backTo,
-  children,
-}: {
-  onBack: (() => void) | null;
-  backTo: string;
-  children: ReactNode;
-}) {
-  if (!onBack) return <>{children}</>;
-  const label = `Back to ${backTo}`;
-  return (
-    <span className="flex items-center gap-1">
-      <button
-        type="button"
-        onClick={onBack}
-        title={label}
-        aria-label={label}
-        className="-ml-1.5 flex h-7 w-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M19 12H5m7-7-7 7 7 7" />
-        </svg>
-      </button>
-      {children}
-    </span>
   );
 }

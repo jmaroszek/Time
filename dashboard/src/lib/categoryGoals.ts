@@ -3,11 +3,20 @@
 
 import type { Category, CategoryGoal, GoalKind } from "./classify";
 import { fmtExactDuration } from "./format";
-import { proratedTargetHours } from "./metrics";
+import { goalMissed, proratedTargetHours } from "./metrics";
 import type { Range } from "./time";
 
 /** The goal range, the same 0–100 as the overall goal in Settings. 0 removes. */
 export const GOAL_MAX_HOURS = 100;
+
+/**
+ * Hours as a goal stores them: to the nearest minute. Goals may be fractional
+ * (1.5, 2.25), and a minute is the finest a figure beside them ever shows, so
+ * an entry like 1.333 can't leave a target that never reads as a round number.
+ */
+export function roundGoalHours(hours: number): number {
+  return Math.round(hours * 60) / 60;
+}
 
 export interface GoalProgress {
   kind: GoalKind;
@@ -20,6 +29,9 @@ export interface GoalProgress {
   over: boolean;
   /** Met for a target, not over for a limit. What "2 of 3 on track" counts. */
   onTrack: boolean;
+  /** Settled the wrong way: a limit passed, or a target short even for the
+   *  days already over (see `goalMissed`). What the red cross marks. */
+  missed: boolean;
   /** Done over target, for a progress bar. Unclamped. */
   fraction: number;
 }
@@ -28,7 +40,12 @@ export interface GoalProgress {
  * Where a goal stands over a range. Exact comparisons, never rounded ones: a
  * limit 20 seconds over is over, whatever the figure beside it rounds to.
  */
-export function goalProgress(seconds: number, range: Range, goal: CategoryGoal): GoalProgress {
+export function goalProgress(
+  seconds: number,
+  range: Range,
+  goal: CategoryGoal,
+  now: Date = new Date(),
+): GoalProgress {
   const targetSeconds = proratedTargetHours(goal.hours, range) * 3600;
   const met = goal.kind === "at_least" && seconds >= targetSeconds;
   const over = goal.kind === "at_most" && seconds > targetSeconds;
@@ -39,6 +56,7 @@ export function goalProgress(seconds: number, range: Range, goal: CategoryGoal):
     met,
     over,
     onTrack: goal.kind === "at_least" ? met : !over,
+    missed: goal.kind === "at_least" ? !met && goalMissed(seconds / 3600, goal.hours, range, now) : over,
     fraction: targetSeconds > 0 ? seconds / targetSeconds : 0,
   };
 }
@@ -59,13 +77,25 @@ export function goalBarParts(done: number, target: number): { within: number; ov
   };
 }
 
-/** Categories whose goals Insights shows, in list order. Ignored time is never
- *  counted, so a goal on an ignored category could only ever read zero. */
+/**
+ * Categories whose goals Insights and Settings list: targets, then limits,
+ * each by name. Two groups because the two read in opposite directions, more
+ * is better for one and worse for the other. By name within them because the
+ * stored order is
+ * only when each category was made, which nothing shows or lets you change,
+ * and a status order would move rows every time a goal changed state.
+ * Ignored time is never counted, so a goal on an ignored category could only
+ * ever read zero.
+ */
 export function goalCategories(categories: Category[]): Array<Category & { goal: CategoryGoal }> {
-  return categories.filter(
-    (category): category is Category & { goal: CategoryGoal } =>
-      !category.isIgnored && category.goal !== undefined && category.goal.hours > 0,
-  );
+  return categories
+    .filter(
+      (category): category is Category & { goal: CategoryGoal } =>
+        !category.isIgnored && category.goal !== undefined && category.goal.hours > 0,
+    )
+    .sort((a, b) =>
+      (a.goal.kind === b.goal.kind ? 0 : a.goal.kind === "at_least" ? -1 : 1)
+      || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
 
 /**
@@ -83,7 +113,12 @@ export function goalTargetLabel(progress: GoalProgress): string {
   return `${progress.kind === "at_most" ? "max" : "of"} ${fmtGoalTarget(progress.targetSeconds)}`;
 }
 
-/** The goal as set, unprorated: "at least 10h/wk", "at most 5h/wk". */
+/** Goal hours as the rest of the app writes a duration: "10h", "2h 15m", "45m". */
+export function fmtGoalHours(hours: number): string {
+  return fmtGoalTarget(roundGoalHours(hours) * 3600);
+}
+
+/** The goal as set, unprorated: "at least 10h per week", "at most 1h 30m per week". */
 export function goalSummary(goal: CategoryGoal): string {
-  return `${goal.kind === "at_most" ? "at most" : "at least"} ${goal.hours}h/wk`;
+  return `${goal.kind === "at_most" ? "at most" : "at least"} ${fmtGoalHours(goal.hours)} per week`;
 }

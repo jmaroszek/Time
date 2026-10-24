@@ -44,17 +44,18 @@ export type ClassifiableEntity = Pick<ActivityEntitySummary, "kind" | "key" | "d
 export function ViewSwitcher({ view, onView }: { view: ActivityView; onView: (view: ActivityView) => void }) {
   return (
     // Underlined rather than divided by a bar: two labels told apart only by
-    // brightness read as a heading and a dimmed heading, and "Categories &
-    // Rules" was not recognized as somewhere to go. A segmented control like
+    // brightness read as a heading and a dimmed heading, and the categories
+    // face was not recognized as somewhere to go. A segmented control like
     // the main tabs was tried here and competed with them.
     <span className="flex flex-wrap items-center gap-5">
-      {/* Named for what it lists, not for what it is. "Library" promised an
-          archive, which made the Unclassified queue above the table read as
-          somebody else's business; against "Categories & Rules" it also states
-          the split the two faces actually make — the things on one side, the
-          labels on the other. */}
-      <ViewButton active={view === "library"} onClick={() => onView("library")}>Apps &amp; Websites</ViewButton>
-      <ViewButton active={view === "rules"} onClick={() => onView("rules")}>Categories &amp; Rules</ViewButton>
+      {/* One word each: "Apps & Websites" and "Categories & Rules" read as
+          clunky side by side. "Categories" loses nothing, since a category's
+          rules live inside it. "Library" is a return: the face was called that
+          once and renamed because it promised an archive, which made the
+          Unclassified queue above the table read as somebody else's business.
+          If that confusion comes back, it is this name doing it. */}
+      <ViewButton active={view === "library"} onClick={() => onView("library")}>Library</ViewButton>
+      <ViewButton active={view === "rules"} onClick={() => onView("rules")}>Categories</ViewButton>
     </span>
   );
 }
@@ -88,9 +89,12 @@ function ViewButton({ active, onClick, children }: { active: boolean; onClick: (
  */
 export function TableRegion({ children }: { children: ReactNode }) {
   // pr-4 is the scrollbar's gutter: the last column is right-aligned, so
-  // without it the dates sit against the scrollbar.
+  // without it the dates sit against the scrollbar. The well also reaches 8px
+  // left of the table (-ml-2 pl-2, so the text stays put) and keeps 8px on the
+  // right even when narrow: a row's rounded highlight extends that far past
+  // its text, and the well clips whatever it doesn't contain.
   return (
-    <div className="scroll-well min-h-0 flex-1 overflow-auto pr-1 sm:min-h-[240px] sm:pr-4">{children}</div>
+    <div className="scroll-well -ml-2 min-h-0 flex-1 overflow-auto pl-2 pr-2 sm:min-h-[240px] sm:pr-4">{children}</div>
   );
 }
 
@@ -467,7 +471,10 @@ export function LibraryControls({
  */
 function StickyHead({ children, offset = "top-0" }: { children: ReactNode; offset?: string }) {
   return (
-    <thead className={`sticky z-10 bg-surface shadow-[0_1px_0_var(--color-edge)] ${offset}`}>
+    // The side shadows paint the header's background over the 8px either side
+    // of the table, where a selected row's highlight would otherwise show as
+    // it scrolls beneath.
+    <thead className={`sticky z-10 bg-surface shadow-[0_1px_0_var(--color-edge),-8px_0_0_var(--color-surface),8px_0_0_var(--color-surface)] ${offset}`}>
       {children}
     </thead>
   );
@@ -613,10 +620,23 @@ function SummaryTable({
             // beside it and has to be told apart from the one under the cursor.
             // A second gray could not; the interface's own colour can.
             aria-current={row.selected ? "true" : undefined}
-            className={`cursor-pointer border-b border-edge/40 transition-colors hover:bg-hover ${row.selected ? "bg-accent/[.09]" : ""}`}
+            className="group/row relative isolate cursor-pointer border-b border-edge/40"
             onClick={row.onOpen}
           >
             <td className="py-2.5 pr-4">
+              {/* The highlight is a rounded layer behind the row rather than the
+                  row's own background: a collapsed table ignores border-radius
+                  on its rows and cells, which left a hard-cornered band. It is
+                  a real element, not the row's ::before, which a table lays out
+                  as one more cell. Positioned against the row, it reaches a
+                  little past the text on each side, as a rule row's does in
+                  Categories, so the corners don't clip the first letter. */}
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none absolute inset-y-px -inset-x-2 -z-10 rounded-lg transition-colors ${
+                  row.selected ? "bg-accent/[.09]" : "group-hover/row:bg-hover"
+                }`}
+              />
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="flex min-w-0 items-center gap-1.5">
                   {/* The row is clickable for the mouse, but the keyboard needs
@@ -958,7 +978,7 @@ function EntityTable({
   );
 }
 
-/** What an Apps & Websites row can do without its panel being opened. */
+/** What a Library row can do without its panel being opened. */
 export interface EntityQuickActions {
   categories: Category[];
   /** A replacement query is in flight and the rows may be stale. */

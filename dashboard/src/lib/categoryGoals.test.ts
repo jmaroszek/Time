@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { Category } from "./classify";
 import {
+  fmtGoalHours,
   fmtGoalTarget,
   goalBarParts,
   goalCategories,
   goalProgress,
   goalSummary,
   goalTargetLabel,
+  roundGoalHours,
 } from "./categoryGoals";
 import { goalPace } from "./metrics";
 import type { Range } from "./time";
@@ -65,6 +67,16 @@ describe("goalCategories", () => {
     ]);
     expect(listed.map((item) => item.id)).toEqual([1, 5]);
   });
+
+  it("puts targets before limits, each by name", () => {
+    const listed = goalCategories([
+      category(1, { name: "video", goal: { hours: 4, kind: "at_most" } }),
+      category(2, { name: "Writing", goal: { hours: 5, kind: "at_least" } }),
+      category(3, { name: "Games", goal: { hours: 2, kind: "at_most" } }),
+      category(4, { name: "reading", goal: { hours: 3, kind: "at_least" } }),
+    ]);
+    expect(listed.map((item) => item.name)).toEqual(["reading", "Writing", "Games", "video"]);
+  });
 });
 
 describe("goal wording", () => {
@@ -77,8 +89,30 @@ describe("goal wording", () => {
   it("labels targets and limits", () => {
     expect(goalTargetLabel(goalProgress(0, eightWeeks, { hours: 10, kind: "at_least" }))).toBe("of 80h");
     expect(goalTargetLabel(goalProgress(0, week, { hours: 2, kind: "at_most" }))).toBe("max 2h");
-    expect(goalSummary({ hours: 10, kind: "at_least" })).toBe("at least 10h/wk");
-    expect(goalSummary({ hours: 5, kind: "at_most" })).toBe("at most 5h/wk");
+    expect(goalSummary({ hours: 10, kind: "at_least" })).toBe("at least 10h per week");
+    expect(goalSummary({ hours: 5, kind: "at_most" })).toBe("at most 5h per week");
+  });
+
+  it("keeps fractional goals to the minute and writes them as durations", () => {
+    expect(roundGoalHours(1.333)).toBeCloseTo(80 / 60, 10);
+    expect(roundGoalHours(0.001)).toBe(0);
+    expect(fmtGoalHours(2.25)).toBe("2h 15m");
+    expect(fmtGoalHours(0.75)).toBe("45m");
+    expect(fmtGoalHours(80 / 60)).toBe("1h 20m");
+    expect(goalSummary({ hours: 1.5, kind: "at_most" })).toBe("at most 1h 30m per week");
+    // Prorated as any goal is: 1.5h a week over a day is under 13 minutes.
+    expect(goalTargetLabel(goalProgress(0, day, { hours: 1.5, kind: "at_most" }))).toBe("max 12m");
+  });
+});
+
+describe("goalProgress missed", () => {
+  const friday9am = new Date(2026, 9, 23, 9);
+
+  it("crosses a target short for the days over, and a limit once passed", () => {
+    expect(goalProgress(hours(5), week, { hours: 10, kind: "at_least" }, friday9am).missed).toBe(true);
+    expect(goalProgress(hours(8), week, { hours: 10, kind: "at_least" }, friday9am).missed).toBe(false);
+    expect(goalProgress(hours(3), week, { hours: 2, kind: "at_most" }, friday9am).missed).toBe(true);
+    expect(goalProgress(hours(1), week, { hours: 2, kind: "at_most" }, friday9am).missed).toBe(false);
   });
 });
 

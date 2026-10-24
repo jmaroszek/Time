@@ -97,7 +97,7 @@ function Shell() {
   const [highlightSection, setHighlightSection] = useState<string | null>(null);
   // And again for a window Insights lists, which Activity opens on arrival.
   const [activityWindow, setActivityWindow] = useState<ActivityWindowTarget | null>(null);
-  // And a category Settings lists, which Categories & Rules opens and scrolls to.
+  // And a category Settings lists, which the Categories view scrolls to and flashes.
   const [activityCategory, setActivityCategory] = useState<number | null>(null);
   // Where the header lends Insights room for its scope picker, beside the
   // tabs. State rather than a ref, so the tab re-renders into the slot the

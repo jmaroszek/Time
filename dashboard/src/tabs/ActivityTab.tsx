@@ -98,7 +98,7 @@ import {
 
 export type { ActivityView } from "./activity/ActivityTables";
 
-/** Categories & Rules' column. Shared with whatever sits above the card, so a
+/** The Categories view's column. Shared with whatever sits above the card, so a
  *  notice there ends where the card does. */
 const RULES_COLUMN_WIDTH = "mr-auto w-full max-w-[700px]";
 
@@ -885,7 +885,7 @@ export default function ActivityTab({
   };
 
   // The column everything above the table shares, so a notice or hint is never
-  // wider than the content it sits on: Categories & Rules caps its card, and an
+  // wider than the content it sits on: Categories caps its card, and an
   // undocked panel caps itself when it replaces the table.
   const columnWidth = view !== "library"
     ? RULES_COLUMN_WIDTH
@@ -1077,7 +1077,7 @@ export default function ActivityTab({
         className={`flex min-h-0 ${
           view === "library"
             ? "flex-1"
-            // Categories & Rules is a settings surface, not a data surface: a
+            // Categories is a settings surface, not a data surface: a
             // name, a state and a count, with half a screen of air between them
             // at full width. The floor is the Window-rule composer — its
             // "Applies to" row plus a scope input, inside the rule indent. A
@@ -1092,7 +1092,7 @@ export default function ActivityTab({
       {/* One card, whose title is the switcher: a floating control row above it
           left the page reading as two stacked chromes instead of "date picker
           up top, one card below". */}
-      {/* Only the Library fills the window. Categories & Rules is a short,
+      {/* Only the Library fills the window. Categories is a short,
           mostly-folded list, and stretching it to the viewport bought a screen
           of empty card for nothing. It still takes min-h-0, so it sizes to its
           content while staying able to shrink — enough categories opened at
@@ -1133,7 +1133,7 @@ export default function ActivityTab({
                 <button
                   type="button"
                   onClick={() => switchView("library")}
-                  title="Show these in Apps & Websites"
+                  title="Show these in the Library"
                   className="tabular-nums underline-offset-2 hover:text-ink-2 hover:underline"
                 >
                   {pendingTriage} unclassified

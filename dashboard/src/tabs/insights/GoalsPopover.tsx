@@ -20,7 +20,6 @@ const POPOVER_WIDTH = 300;
 export default function GoalsPopover({
   anchorRef,
   overall,
-  productiveColor,
   goals,
   onSelectCategory,
   onClose,
@@ -28,13 +27,13 @@ export default function GoalsPopover({
   anchorRef: RefObject<HTMLDivElement | null>;
   /** Null when no overall goal is set. */
   overall: GoalPace | null;
-  productiveColor: string;
   goals: Array<{ category: Category; progress: GoalProgress }>;
   onSelectCategory: (category: Category) => void;
   onClose: () => void;
 }) {
   const popoverRef = useRef<HTMLDivElement>(null);
-  const anyMark = (overall?.met ?? false) || goals.some(({ progress }) => progress.met || progress.over);
+  const anyMark = (overall ? overall.met || overall.missed : false)
+    || goals.some(({ progress }) => progress.met || progress.missed);
   const [box, setBox] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
@@ -98,7 +97,6 @@ export default function GoalsPopover({
       {overall && (
         <GoalRow
           name="Productive time"
-          color={productiveColor}
           done={fmtWholeHours(overall.doneHours)}
           target={`of ${fmtWholeHours(overall.targetHours)}`}
           kind="at_least"
@@ -106,14 +104,13 @@ export default function GoalsPopover({
           targetValue={overall.targetHours}
           met={overall.met}
           markSlot={anyMark}
-          over={false}
+          missed={overall.missed}
         />
       )}
       {goals.map(({ category, progress }) => (
         <GoalRow
           key={category.id}
           name={category.name}
-          color={category.color}
           done={fmtDuration(progress.doneSeconds)}
           doneTitle={fmtDurationTitle(progress.doneSeconds)}
           target={goalTargetLabel(progress)}
@@ -122,7 +119,7 @@ export default function GoalsPopover({
           targetValue={progress.targetSeconds}
           met={progress.met}
           markSlot={anyMark}
-          over={progress.over}
+          missed={progress.missed}
           onClick={() => onSelectCategory(category)}
         />
       ))}
@@ -133,7 +130,6 @@ export default function GoalsPopover({
 
 function GoalRow({
   name,
-  color,
   done,
   doneTitle,
   target,
@@ -141,12 +137,11 @@ function GoalRow({
   doneValue,
   targetValue,
   met,
-  over,
+  missed,
   markSlot,
   onClick,
 }: {
   name: string;
-  color: string;
   done: string;
   doneTitle?: string;
   target: string;
@@ -155,7 +150,8 @@ function GoalRow({
   doneValue: number;
   targetValue: number;
   met: boolean;
-  over: boolean;
+  /** A limit passed or a target missed: the cross in the check's place. */
+  missed: boolean;
   /** Keep the mark's width even without one, so the figures of every row
    *  end on the same line whenever any row has a mark. */
   markSlot: boolean;
@@ -170,20 +166,18 @@ function GoalRow({
   const body = (
     <>
       <span className="flex items-center gap-2">
-        {/* Nudged down a pixel. Centred on the capitals, the swatch looked
-            high beside names that are mostly lowercase; a pixel lower sits
-            between the capitals' middle and the lowercase letters'. */}
-        <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 translate-y-px rounded-[3px]" style={{ backgroundColor: color }} />
         <span className="min-w-0 flex-1 truncate text-left">{name}</span>
-        <span className="shrink-0 tabular-nums text-ink" title={doneTitle}>
-          {done}
+        {/* One phrase, "18h of 20h", so a word space apart rather than the
+            row's 8px gap, which read as two separate columns. */}
+        <span className="flex shrink-0 items-baseline gap-1 tabular-nums">
+          <span className="text-ink" title={doneTitle}>{done}</span>
+          <span className="text-ink-3-raised">{target}</span>
         </span>
-        <span className="shrink-0 tabular-nums text-ink-3-raised">{target}</span>
-        {met || over ? <GoalMark missed={over} /> : markSlot && <span aria-hidden="true" className="w-[9px] shrink-0" />}
+        {met || missed ? <GoalMark missed={missed} limit={kind === "at_most"} /> : markSlot && <span aria-hidden="true" className="w-[9px] shrink-0" />}
       </span>
       {/* Past the goal, the bar spans the time and a gap marks where the goal
           was, so the part beyond it reads as the overrun. */}
-      <span aria-hidden="true" className="ml-[18px] mt-1.5 flex h-1 gap-[2px] overflow-hidden rounded-full bg-ink-3/20">
+      <span aria-hidden="true" className="mt-1.5 flex h-1 gap-[2px] overflow-hidden rounded-full bg-ink-3/20">
         {parts.over > 0 ? (
           <>
             <span className={`block h-full ${withinColor}`} style={{ flex: `${parts.within} 1 0` }} />

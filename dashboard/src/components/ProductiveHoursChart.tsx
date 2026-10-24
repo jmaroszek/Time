@@ -4,6 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { fmtGoalHours } from "../lib/categoryGoals";
 import type { Category, CategoryGoal } from "../lib/classify";
 import type { InsightsMemberTotal } from "../lib/insights";
 import { rollingMeanObserved } from "../lib/metrics";
@@ -505,7 +506,7 @@ export default function ProductiveHoursChart({
       textStyle: { fontFamily: CHART_FONT_FAMILY },
       // A goal line's label sits just past the plot's right edge, where no bar
       // can sit under it; the plot gives up that much width only while it shows.
-      grid: { left: 36, right: goalLine ? GOAL_LABEL_GUTTER : 12, top: topPad, bottom: bottomPad },
+      grid: { left: 36, right: goalLine && goal ? goalLabelGutter(goal) : 12, top: topPad, bottom: bottomPad },
       tooltip,
       legend: stackedBarLegend(chrome, legendData, hiddenStacks),
       xAxis: {
@@ -557,7 +558,7 @@ export default function ProductiveHoursChart({
           calendarDays(range)
         }-day period, broken down by ${STACK_WORDS[stackBy]} with a ${averageMeasure === "tracked" ? "tracked" : "productive"}-time rolling average.${
           goal && granularity === "weekly"
-            ? ` A dotted line marks the weekly ${goal.kind === "at_most" ? "limit" : "goal"} of ${goal.hours} hours.`
+            ? ` A dotted line marks the weekly ${goal.kind === "at_most" ? "limit" : "goal"} of ${fmtGoalHours(goal.hours)}.`
             : ""
         }`}
       />
@@ -589,7 +590,7 @@ export function goalLineSeries(goal: CategoryGoal | undefined, length: number, c
         distance: 6,
         color,
         fontSize: CHART_LABEL_SIZE,
-        formatter: `${goal.kind === "at_most" ? "Limit" : "Goal"} ${goal.hours}h`,
+        formatter: goalLineLabel(goal),
       },
       data: [{ yAxis: goal.hours }],
     },
@@ -597,8 +598,18 @@ export function goalLineSeries(goal: CategoryGoal | undefined, length: number, c
 }
 
 export const GOAL_LINE_SERIES = "Weekly goal";
-/** Room on the right for "Limit 100h" at the chart's label size. */
-const GOAL_LABEL_GUTTER = 64;
+
+/** "Goal 10h", "Limit 1h 30m". */
+export function goalLineLabel(goal: CategoryGoal): string {
+  return `${goal.kind === "at_most" ? "Limit" : "Goal"} ${fmtGoalHours(goal.hours)}`;
+}
+
+/** Room on the right for the goal label at the chart's label size: 64px holds
+ *  "Limit 100h", and each character past those ten takes about 6px more, so a
+ *  goal with minutes ("Limit 1h 30m") isn't cut off at the edge. */
+export function goalLabelGutter(goal: CategoryGoal): number {
+  return 64 + 6 * Math.max(0, goalLineLabel(goal).length - 10);
+}
 
 /** How each stack view is named in the charts' accessible descriptions. */
 export const STACK_WORDS: Record<ActivityStack, string> = {
