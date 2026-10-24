@@ -80,7 +80,15 @@ export default function HelpAndFeedbackSection({
       <Row
         label="Website"
         help="The latest installer, the browser extension, and answers to common questions."
-        control={<TextAction onClick={() => void openWebsite()}>Open trackwithtime.com</TextAction>}
+        control={
+          <Button
+            variant="accent"
+            onClick={() => void openWebsite()}
+            className="-mr-3 max-sm:-ml-3 max-sm:mr-0"
+          >
+            Trackwithtime.com
+          </Button>
+        }
       />
       <Row
         label="Contact support"
