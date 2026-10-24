@@ -99,30 +99,32 @@ export function TableRegion({ children }: { children: ReactNode }) {
 }
 
 /**
- * Three kinds of filter share one menu, and the rules mark the seams: how an
- * entity is classified, which category it landed in, and last the two ways an
- * entity sits outside the count — ignored, which is recorded but excluded from
- * Insights, and excluded, which is never recorded at all. The category rule
- * moves to whichever category comes first and disappears with them when none
+ * Three kinds of filter share one menu, and the rules mark the seams, ordered
+ * by what someone opens it to find: the reader's own categories first, then
+ * the two states that have no category yet (uncategorized, mixed), and last the
+ * two ways an entity sits outside the count — ignored, which is recorded but
+ * excluded from Insights, and excluded, which is never recorded at all. The
+ * rule under "All classifications" disappears with the categories when none
  * are defined.
  */
 function classificationOptions(categories: Category[], uncategorizedCount: number): MenuOption[] {
   const named = categories.filter((category) => !category.isIgnored);
   return [
     { value: "all", label: "All classifications" },
+    ...named.map((category, i) => ({
+      value: `category:${category.id}`,
+      label: category.name,
+      divider: i === 0,
+    })),
     // The count rides the option that applies the filter rather than sitting
     // in the card header as a second entry point to it: one control, and one
     // that can show whether it is engaged.
     {
       value: "uncategorized",
       label: uncategorizedCount > 0 ? `Uncategorized (${uncategorizedCount})` : "Uncategorized",
+      divider: named.length > 0,
     },
     { value: "mixed", label: "Mixed" },
-    ...named.map((category, i) => ({
-      value: `category:${category.id}`,
-      label: category.name,
-      divider: i === 0,
-    })),
     { value: "ignored", label: "Ignored", divider: true },
     { value: "excluded", label: "Excluded from tracking" },
   ];
