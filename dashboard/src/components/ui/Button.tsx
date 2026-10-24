@@ -11,7 +11,7 @@ export function Button({
 }: {
   children: ReactNode;
   onClick?: () => void;
-  variant?: "text" | "text-danger" | "accent" | "primary" | "danger";
+  variant?: "text" | "text-danger" | "text-danger-hover" | "accent" | "primary" | "danger";
   disabled?: boolean;
   title?: string;
   /** Placement only, such as the negative margin that sets a text action's
@@ -43,6 +43,7 @@ export function Button({
   const styles = {
     text: "text-ink-2 hover:bg-hover-2 hover:text-accent",
     "text-danger": "text-bad hover:bg-bad/10",
+    "text-danger-hover": "text-ink-2 hover:bg-bad/10 hover:text-bad",
     accent: "text-accent hover:bg-accent/10",
     primary: "bg-accent/10 text-accent hover:bg-accent/[.18]",
     danger: "bg-bad/10 text-bad hover:bg-bad/[.18]",

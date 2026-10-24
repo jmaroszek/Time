@@ -1277,7 +1277,7 @@ export function EntityPanel({
               Do not track
             </Button>
             <Button
-              variant="text-danger"
+              variant="text-danger-hover"
               onClick={onDeleteEntity}
               disabled={actionsDisabled}
               title="Removes recorded visits. Categories, rules, and aliases are kept."
