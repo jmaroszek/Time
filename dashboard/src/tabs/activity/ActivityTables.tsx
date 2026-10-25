@@ -66,7 +66,7 @@ function ViewButton({ active, onClick, children }: { active: boolean; onClick: (
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`border-b-2 pb-1 transition-colors ${
+      className={`cursor-pointer border-b-2 pb-1 transition-colors ${
         active
           ? "border-accent text-ink"
           : "border-transparent font-normal text-ink-3 hover:border-edge-2 hover:text-ink-2"

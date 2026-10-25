@@ -53,8 +53,8 @@ import { AUTOMATIC_CLASSIFICATION, RULE_LABELS } from "./ruleComposer";
  *  visit was the loudest thing in a list most people only read. */
 function revealBox(group: "day" | "visit", selectionActive: boolean, actionsDisabled: boolean) {
   const reveal = group === "day"
-    ? "opacity-0 group-hover/day:opacity-100 group-focus-within/day:opacity-100"
-    : "opacity-0 group-hover/visit:opacity-100 group-focus-within/visit:opacity-100";
+    ? "opacity-0 group-hover/day:opacity-100 group-has-[:focus-visible]/day:opacity-100"
+    : "opacity-0 group-hover/visit:opacity-100 group-has-[:focus-visible]/visit:opacity-100";
   return `shrink-0 transition-opacity ${selectionActive ? "" : reveal} ${
     actionsDisabled ? "pointer-events-none opacity-50" : ""
   }`;
@@ -394,7 +394,9 @@ function PanelWindowRow({
     >
       {/* Present but invisible until the row is pointed at or focused, or a
           selection exists: a column of empty boxes down every row was the
-          loudest thing in a list most people only read. */}
+          loudest thing in a list most people only read. Keyboard focus only —
+          a clicked box keeps focus, so plain focus-within left an emptied box
+          showing after the pointer had gone until something else was clicked. */}
       {selectable && (
         <Checkbox
           checked={selected}
@@ -403,7 +405,7 @@ function PanelWindowRow({
           className={`mt-px shrink-0 transition-opacity ${
             selectionActive
               ? ""
-              : "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+              : "opacity-0 group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100"
           } ${actionsDisabled ? "pointer-events-none opacity-50" : ""}`}
         />
       )}
