@@ -156,7 +156,9 @@ export function SectionRail() {
           key={title}
           href={`#${sectionSlug(title)}`}
           aria-current={active === title ? "true" : undefined}
-          className={`truncate rounded-md px-2 py-[5px] text-xs transition-colors ${
+          // A section list, like the tab bar, so the arrow rather than the
+          // browser's link hand.
+          className={`cursor-default truncate rounded-md px-2 py-[5px] text-xs transition-colors ${
             active === title
               ? "bg-selected font-medium text-ink"
               : "text-ink-3 hover:bg-hover hover:text-ink-2"

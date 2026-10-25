@@ -94,7 +94,7 @@ export function BannerProvider({ children }: { children: ReactNode }) {
             <span
               className={`h-2 w-2 shrink-0 rounded-full ${banner.tone === "bad" ? "bg-bad" : "bg-good"}`}
             />
-            <span className="min-w-0">{banner.message}</span>
+            <span className="copyable min-w-0">{banner.message}</span>
             {banner.action && (
               <button
                 type="button"

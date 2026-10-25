@@ -136,7 +136,7 @@ function GroupSessions({
                   disabled={actionsDisabled}
                   title="Edit visit"
                   aria-label={`Edit the visit starting ${formatDateTime(session.start)}`}
-                  className="flex h-5 w-5 items-center justify-center rounded text-ink-3 opacity-0 transition-opacity hover:bg-hover-2 hover:text-accent focus-visible:opacity-100 group-hover/visit:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex h-5 w-5 items-center justify-center rounded text-ink-3 opacity-0 transition-opacity hover:bg-hover-2 hover:text-accent focus-visible:opacity-100 group-hover/visit:opacity-100 disabled:cursor-default disabled:opacity-40"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
@@ -508,7 +508,7 @@ export function WindowPanel({
         </>
       }
       heading={
-        <h2 className="break-words text-lg font-semibold">
+        <h2 className="copyable break-words text-lg font-semibold">
           {group.title || <span className="italic text-ink-3">No title recorded</span>}
         </h2>
       }
@@ -524,7 +524,7 @@ export function WindowPanel({
           >
             {group.displayName}
           </button>
-          {" · "}<span className="font-mono">{group.entityKey}</span>
+          {" · "}<span className="copyable font-mono">{group.entityKey}</span>
         </p>
       }
       onBack={onBack}
@@ -1027,7 +1027,7 @@ export function EntityPanel({
       subtitle={
         <>
           {/* The key is already available from the source row's tooltip. */}
-          <p className="truncate font-mono text-xs text-ink-3">{entity.key}</p>
+          <p className="copyable truncate font-mono text-xs text-ink-3">{entity.key}</p>
           {renaming && (
             <p className="mt-1 text-xs text-ink-3">Enter or click away to save. Leave blank to use the recorded name.</p>
           )}
@@ -1250,7 +1250,7 @@ export function EntityPanel({
       </section>
 
       {/* Keep curation actions together at the end of the panel. */}
-      <section className="mt-8 border-t border-edge/60 pt-6">
+      <section className="mt-8">
         <div className="flex flex-wrap items-center gap-2">
           {/* The panel's section-title style, as Classification and Timeline
               take. In gray at 13px it matched the text actions beside it

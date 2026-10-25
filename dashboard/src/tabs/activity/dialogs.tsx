@@ -511,7 +511,7 @@ export function WindowRuleDialog({
               disabled={saving || !categoryId}
               title={categoryId ? undefined : "Choose a category first"}
               onClick={() => void saveBroadRule()}
-              className="font-semibold text-ink-2 underline-offset-2 enabled:hover:text-accent enabled:hover:underline disabled:cursor-not-allowed"
+              className="cursor-pointer font-semibold text-ink-2 underline-offset-2 enabled:hover:text-accent enabled:hover:underline disabled:cursor-default"
             >
               use {ruleKind === "App" ? "an" : "a"} {ruleKind} rule instead
             </button>.
@@ -866,7 +866,7 @@ export function SessionCorrectionDialog({
               onClick={() => setEditingTimes((open) => !open)}
               aria-expanded={editingTimes}
               disabled={locked}
-              className="mt-4 flex items-center gap-1.5 rounded-md text-xs text-ink-2 transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              className="mt-4 flex items-center gap-1.5 rounded-md text-xs text-ink-2 transition-colors hover:text-ink disabled:cursor-default disabled:opacity-40"
             >
               <Chevron open={editingTimes} />
               Adjust recorded times

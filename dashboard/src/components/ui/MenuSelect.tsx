@@ -264,7 +264,7 @@ export function MenuSelect({
         title={title}
         onClick={() => (open ? close() : (setActive(selected), setOpen(true)))}
         onKeyDown={onKeyDown}
-        className={`flex items-center justify-between gap-2 border outline-none transition-colors disabled:cursor-not-allowed ${MENU_SIZES[size]} ${
+        className={`flex items-center justify-between gap-2 border outline-none transition-colors disabled:cursor-default ${MENU_SIZES[size]} ${
           open ? "border-accent/60 bg-selected-strong text-ink" : MENU_VARIANTS[variant]
         } ${className}`}
       >

@@ -94,7 +94,7 @@ export function PrivacyToggle({
       aria-checked={enabled}
       disabled={disabled}
       onClick={() => onChange(!enabled)}
-      className="relative h-9 w-11 rounded-full disabled:cursor-not-allowed disabled:opacity-40"
+      className="relative h-9 w-11 rounded-full disabled:cursor-default disabled:opacity-40"
     >
       <span
         aria-hidden="true"
@@ -429,7 +429,7 @@ export function NumberStepper({
 }) {
   return (
     <div className="inline-flex items-center rounded-[10px] border border-control-edge bg-control p-[3px] transition-colors focus-within:border-accent/60">
-      <button type="button" aria-label={`Decrease ${label}`} disabled={disabled} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40" onClick={onMinus}>−</button>
+      <button type="button" aria-label={`Decrease ${label}`} disabled={disabled} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink disabled:cursor-default disabled:opacity-40" onClick={onMinus}>−</button>
       <div className={`flex items-baseline justify-center ${unit ? "min-w-[34px] gap-1" : "min-w-[34px]"}`}>
         <input
           type={readOnly ? "text" : "number"}
@@ -457,7 +457,7 @@ export function NumberStepper({
         />
         {unit && <span className="text-xs text-ink-3">{unit}</span>}
       </div>
-      <button type="button" aria-label={`Increase ${label}`} disabled={disabled} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40" onClick={onPlus}>+</button>
+      <button type="button" aria-label={`Increase ${label}`} disabled={disabled} className="flex h-7 w-[30px] items-center justify-center rounded-[7px] text-sm text-ink-2 hover:bg-hover-2 hover:text-ink disabled:cursor-default disabled:opacity-40" onClick={onPlus}>+</button>
     </div>
   );
 }
@@ -540,7 +540,7 @@ export function InlineAction({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="text-ink-2 underline decoration-ink-3/60 underline-offset-2 transition-colors hover:text-accent hover:decoration-accent disabled:cursor-not-allowed disabled:opacity-40"
+      className="cursor-pointer text-ink-2 underline decoration-ink-3/60 underline-offset-2 transition-colors hover:text-accent hover:decoration-accent disabled:cursor-default disabled:opacity-40"
     >
       {children}
     </button>

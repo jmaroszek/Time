@@ -158,7 +158,7 @@ export function PrivacyOnboarding() {
         </div>
 
         {error && (
-          <p className="mt-4 rounded-lg border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">
+          <p className="copyable mt-4 rounded-lg border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">
             {error}
           </p>
         )}
@@ -681,7 +681,7 @@ export function TrackerAlert({ onOpenSettings }: { onOpenSettings: () => void })
 }
 
 function DbPathFooter() {
-  return <p className="mt-3 break-all font-mono text-xs text-ink-3">{getDbPath()}</p>;
+  return <p className="copyable mt-3 break-all font-mono text-xs text-ink-3">{getDbPath()}</p>;
 }
 
 export function WaitingForTracker() {

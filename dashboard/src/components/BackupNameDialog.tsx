@@ -64,7 +64,7 @@ export function BackupNameDialog({
           className="mt-1.5 w-full rounded-lg border border-edge bg-surface-2 px-3 py-2 text-xs text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-accent/60"
         />
       </label>
-      {error && <p id="save-backup-error" role="alert" className="mt-2 text-xs text-bad">{error}</p>}
+      {error && <p id="save-backup-error" role="alert" className="copyable mt-2 text-xs text-bad">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
         <Button onClick={onClose} disabled={saving}>Cancel</Button>
         <Button variant="primary" onClick={() => void save()} disabled={!trimmedName || saving}>

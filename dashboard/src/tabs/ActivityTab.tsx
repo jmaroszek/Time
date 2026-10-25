@@ -909,7 +909,7 @@ export default function ActivityTab({
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-4">
         {noticeBlock}
-        <p className="p-8 text-sm text-bad">DB error: {error}</p>
+        <p className="copyable p-8 text-sm text-bad">DB error: {error}</p>
       </div>
     );
   }
@@ -1189,7 +1189,7 @@ export default function ActivityTab({
                           setTypeFilter("website");
                           setClassificationFilter("all");
                         }}
-                        className="text-ink-2 underline-offset-2 hover:text-ink hover:underline"
+                        className="cursor-pointer text-ink-2 underline-offset-2 hover:text-ink hover:underline"
                       >
                         Show websites
                       </button>
@@ -1201,7 +1201,7 @@ export default function ActivityTab({
                   type="button"
                   disabled={dismissingWebsiteRuleHint}
                   onClick={() => void dismissWebsiteRuleHint()}
-                  className="shrink-0 text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline disabled:cursor-wait disabled:no-underline"
+                  className="shrink-0 cursor-pointer text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline disabled:cursor-progress disabled:no-underline"
                 >
                   {dismissingWebsiteRuleHint ? "Saving…" : "Dismiss"}
                 </button>

@@ -68,7 +68,7 @@ export default function ActivityExportMenu({
       <summary
         title="Download CSV"
         aria-label="Download CSV"
-        className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2"
+        className="flex h-7 w-7 list-none items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -88,7 +88,7 @@ export default function ActivityExportMenu({
               type="button"
               disabled={exporting !== null}
               onClick={() => void run(kind)}
-              className="rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg px-2.5 py-1.5 text-left text-xs text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink disabled:cursor-default disabled:opacity-40"
             >
               {exporting === kind ? "Preparing…" : kind === "summary" ? "Activity summary CSV" : "Session details CSV"}
             </button>

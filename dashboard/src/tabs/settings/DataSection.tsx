@@ -413,7 +413,7 @@ function RestoreBackupDialog({
 
         <div className="mt-4 max-h-[300px] overflow-y-auto rounded-[11px] border border-edge bg-surface-dim p-2">
           {loading && <p className="px-2 py-6 text-center text-xs text-ink-3">Finding backups…</p>}
-          {loadError && <p className="px-2 py-4 text-xs text-bad">{loadError}</p>}
+          {loadError && <p className="copyable px-2 py-4 text-xs text-bad">{loadError}</p>}
           {!loading && !loadError && backups.length === 0 && (
             <p className="px-2 py-6 text-center text-xs text-ink-3">
               No Time backups found yet.
@@ -450,7 +450,7 @@ function RestoreBackupDialog({
                       {backup.legacyLocation && " · Legacy location"}
                     </span>
                     {backup.issue && (
-                      <span className="mt-1 block text-xs leading-snug text-bad">
+                      <span className="copyable mt-1 block text-xs leading-snug text-bad">
                         {backup.issue}
                       </span>
                     )}

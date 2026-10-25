@@ -1,7 +1,7 @@
 export function CategoryDot({ color, label }: { color: string; label?: string }) {
   return (
     <span
-      className={`inline-block h-2 w-2 shrink-0 rounded-full ${label ? "cursor-pointer" : ""}`}
+      className="inline-block h-2 w-2 shrink-0 rounded-full"
       style={{ backgroundColor: color }}
       title={label}
     />

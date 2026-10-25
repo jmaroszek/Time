@@ -66,7 +66,7 @@ function ViewButton({ active, onClick, children }: { active: boolean; onClick: (
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`cursor-pointer border-b-2 pb-1 transition-colors ${
+      className={`border-b-2 pb-1 transition-colors ${
         active
           ? "border-accent text-ink"
           : "border-transparent font-normal text-ink-3 hover:border-edge-2 hover:text-ink-2"
@@ -661,7 +661,7 @@ function SummaryTable({
                       event.stopPropagation();
                       row.onOpen();
                     }}
-                    className="min-w-0 truncate rounded-sm text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
+                    className="min-w-0 cursor-pointer truncate rounded-sm text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-accent/70"
                   >
                     {row.primary}
                   </button>
@@ -1032,6 +1032,9 @@ function RowClassification({
         placeholder={<ClassificationLabel entity={entity} />}
         label={`${verb} for ${entity.displayName}`}
         title={verb}
+        // The row around it takes the pointer; an arrow here would read as a
+        // gap in the row's target.
+        className="cursor-pointer"
         disabled={actions.disabled}
         onChange={(value) => actions.onAssign(entity, Number(value))}
         options={categoryDestinationOptions(actions.categories)}

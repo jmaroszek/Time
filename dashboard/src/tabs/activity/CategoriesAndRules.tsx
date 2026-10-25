@@ -639,7 +639,6 @@ export default function CategoriesAndRules({
           variant="resting"
           align="end"
           label="Sort categories and rules"
-          className="cursor-pointer"
           value=""
           placeholder={
             <>
@@ -946,7 +945,7 @@ export default function CategoriesAndRules({
                           the row only when another Window rule here shares the
                           pattern — then they are what tells the two apart. */}
                       <span
-                        className="min-w-0 shrink cursor-text truncate font-mono"
+                        className="min-w-0 shrink truncate font-mono"
                         title={windowQualifier ?? undefined}
                       >
                         {rule.pattern}

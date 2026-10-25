@@ -194,7 +194,7 @@ function GoalRow({
       type="button"
       onClick={onClick}
       title={`Narrow Insights to ${name}`}
-      className="flex w-full cursor-pointer flex-col rounded-lg px-2.5 py-2 text-xs text-ink-2-raised transition-colors hover:bg-selected-strong focus-visible:bg-selected-strong focus-visible:outline-none"
+      className="flex w-full flex-col rounded-lg px-2.5 py-2 text-xs text-ink-2-raised transition-colors hover:bg-selected-strong focus-visible:bg-selected-strong focus-visible:outline-none"
     >
       {body}
     </button>

@@ -245,7 +245,7 @@ export default function OverviewTab({
 
   if (!model) {
     const error = sessionData.error ?? analyzed.error;
-    if (error) return <p className="p-8 text-sm text-bad">DB error: {error}</p>;
+    if (error) return <p className="copyable p-8 text-sm text-bad">DB error: {error}</p>;
     return <Spinner />;
   }
 

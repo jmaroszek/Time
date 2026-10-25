@@ -373,6 +373,19 @@ body {
      never resolved and this stack has always rendered as plain Segoe UI. */
   font-family: "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* A desktop app's labels are not a page to select from: the I-beam over
+     every figure, and the highlight a double-click or a drag across a row left
+     behind, both read as a web page. Fields stay selectable on their own. */
+  user-select: none;
+  cursor: default;
+}
+
+/* The few things worth pasting elsewhere: an error for a bug report, the
+   database path, and the raw process, domain, or window title a rule is
+   written against. `auto` gives the I-beam over the words only. */
+.copyable {
+  user-select: text;
+  cursor: auto;
 }
 
 #root {
@@ -453,7 +466,6 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   background: var(--color-ink-2);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='black' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='1.5' y='2.5' width='11' height='10' rx='1.5'/%3E%3Cpath d='M4 1.5v2M10 1.5v2M1.5 5.5h11'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='black' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='1.5' y='2.5' width='11' height='10' rx='1.5'/%3E%3Cpath d='M4 1.5v2M10 1.5v2M1.5 5.5h11'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
-  cursor: pointer;
 }
 
 /* Hide the spinner arrows on number inputs — the settings fields are typed. */

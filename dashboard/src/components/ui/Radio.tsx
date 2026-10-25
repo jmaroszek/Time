@@ -20,7 +20,7 @@ export function Radio({
   className?: string;
 }) {
   return (
-    <label className={`group flex cursor-pointer items-center gap-2.5 ${className}`}>
+    <label className={`group flex items-center gap-2.5 ${className}`}>
       <input type="radio" name={name} checked={checked} onChange={onChange} className="peer sr-only" />
       <span
         aria-hidden="true"

@@ -43,7 +43,7 @@ export function Checkbox({
   }, [indeterminate, checked]);
   return (
     <label
-      className={`group flex cursor-pointer gap-2 ${align === "start" ? "items-start" : "items-center"} ${className}`}
+      className={`group flex gap-2 ${align === "start" ? "items-start" : "items-center"} ${className}`}
     >
       <input
         ref={input}
