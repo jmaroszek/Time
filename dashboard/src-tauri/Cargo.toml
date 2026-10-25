@@ -1,6 +1,6 @@
 [package]
 name = "dashboard"
-version = "1.4.2"
+version = "1.5.0"
 description = "Time tracking dashboard"
 authors = ["Jonah Maroszek"]
 edition = "2021"
