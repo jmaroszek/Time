@@ -75,11 +75,16 @@ export function MetricCard({
           className="absolute inset-0 cursor-pointer rounded-xl outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
         />
       )}
-      <div className="flex items-center gap-1.5">
+      {/* The label paints above the overlay so its hint stays hoverable, which
+          also means it eats clicks meant for the card. The chevron sits right
+          beside it, so the words read as the thing to press: let the click
+          through to the same handler. The cursor stays the hint's. */}
+      <div className="flex items-center gap-1.5" onClick={open?.onClick}>
         {hint ? (
           <FloatingTooltip
             text={hint}
             ariaLabel={`${label}. ${hint}`}
+            disabled={open?.expanded}
             className="relative cursor-help text-xs text-ink-2 outline-none"
           >
             {label}

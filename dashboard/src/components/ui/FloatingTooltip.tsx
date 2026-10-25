@@ -10,6 +10,7 @@ export function FloatingTooltip({
   ariaLabel,
   children,
   className = "",
+  disabled = false,
 }: {
   text: string;
   /** Accessible name, when it has to differ from the visible tooltip. A label
@@ -20,6 +21,8 @@ export function FloatingTooltip({
   ariaLabel?: string;
   children: ReactNode;
   className?: string;
+  /** Suppresses the tooltip, and dismisses one already showing. */
+  disabled?: boolean;
 }) {
   const triggerRef = useRef<HTMLSpanElement>(null);
   const timerRef = useRef<number | null>(null);
@@ -31,6 +34,7 @@ export function FloatingTooltip({
     setPosition(null);
   };
   const show = () => {
+    if (disabled) return;
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const width = 208;
@@ -46,6 +50,10 @@ export function FloatingTooltip({
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(show, TOOLTIP_DELAY_MS);
   };
+
+  useEffect(() => {
+    if (disabled) hide();
+  }, [disabled]);
 
   useEffect(() => () => {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
