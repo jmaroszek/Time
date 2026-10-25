@@ -102,8 +102,13 @@ export type { ActivityView } from "./activity/ActivityTables";
  *  notice there ends where the card does. */
 const RULES_COLUMN_WIDTH = "mr-auto w-full max-w-[700px]";
 
-const ENTITY_PAGE = 50;
-const WINDOW_PAGE = 50;
+/** The Library's first page, and how many more each Load more press adds. A
+ *  handful of rows holds nearly all of a range's time, so the first page stops
+ *  short of the long tail; anyone who asks for the tail gets it in bigger steps. */
+const ENTITY_PAGE = 25;
+const ENTITY_MORE = 50;
+const WINDOW_PAGE = 25;
+const WINDOW_MORE = 50;
 
 /** The panel's own window list is a preview, not an archive — the searched
  *  Windows table is where a long list belongs. A handful of the heaviest
@@ -1235,8 +1240,8 @@ export default function ActivityTab({
                       selectedWindowKey={currentWindow?.key ?? null}
                       onSelectEntity={openEntity}
                       onSelectWindow={(group) => openWindow(group, "library")}
-                      onLoadIdentities={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
-                      onLoadWindows={() => setWindowLimit((limit) => limit + WINDOW_PAGE)}
+                      onLoadIdentities={() => setEntityLimit((limit) => limit + ENTITY_MORE)}
+                      onLoadWindows={() => setWindowLimit((limit) => limit + WINDOW_MORE)}
                       isAllTime={isAllTime}
                       onTryAllTime={onTryAllTime}
                       hasActiveFilters={hasActiveLibraryFilters}
@@ -1252,7 +1257,7 @@ export default function ActivityTab({
                       onSort={(next) => updateSortState(next, sort, direction, "name", setSort, setDirection)}
                       selectedEntityId={selectedEntityId}
                       onSelect={openEntity}
-                      onLoadMore={() => setEntityLimit((limit) => limit + ENTITY_PAGE)}
+                      onLoadMore={() => setEntityLimit((limit) => limit + ENTITY_MORE)}
                       isAllTime={isAllTime}
                       onTryAllTime={onTryAllTime}
                       hasActiveFilters={hasActiveLibraryFilters}
