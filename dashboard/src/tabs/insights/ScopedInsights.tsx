@@ -16,7 +16,9 @@ import { GoalMark } from "./GoalMark";
  *
  * The page's usual four are all productivity measures, which for a single app
  * restate its category. These answer what a single subject raises instead:
- * how much, how regularly, how often, and in what kind of stretch.
+ * how much, how much of the whole, how often, and in what kind of stretch.
+ * Which days it was used is the calendar's to show, so the count of them
+ * rides in the time tile's hover text.
  */
 export function ScopeTiles({
   scope,
@@ -38,11 +40,17 @@ export function ScopeTiles({
   // Held inside a category, the share is of that category: "a fifth of my
   // Entertainment" is the comparison its list was showing.
   const base = summary.parentSeconds ?? summary.trackedSeconds;
-  const share = base > 0 ? summary.seconds / base : 0;
-  const shareOf = scope.kind !== "category" && scope.within
-    ? `of ${scope.within.name} in this range`
-    : "of everything tracked in this range";
+  const share = base > 0 ? summary.seconds / base : null;
+  const parentName = scope.kind !== "category" && scope.within ? scope.within.name : null;
   const perDay = summary.daysUsed > 0 ? summary.runs / summary.daysUsed : null;
+  // On a single day the count is always 1 or 0, and the average is the figure.
+  // Otherwise the average spreads over every day in the range, as Daily
+  // productive time does, and the count beside it says how thinly.
+  const daysNote = rangeDays <= 1
+    ? `Time in ${scope.name} on this day.`
+    : summary.seconds > 0
+      ? `About ${fmtDuration(summary.seconds / rangeDays)} a day, used on ${summary.daysUsed} of ${rangeDays} days.`
+      : `Used on 0 of ${rangeDays} days.`;
   const previousNote = summary.previousSeconds === null
     ? ""
     : ` ${fmtDuration(summary.previousSeconds)} in the previous ${previousDays} ${previousDays === 1 ? "day" : "days"}.`;
@@ -69,19 +77,21 @@ export function ScopeTiles({
             )}
           </span>
         )}
-        hint={`${changeNote}${share > 0 && share < 0.01 ? "Under 1%" : fmtPct(share)} ${shareOf}.${previousNote}`}
+        hint={`${changeNote}${daysNote}${previousNote}`}
       />
       <MetricCard
-        label="Days used"
-        value={(
-          <span className="flex items-baseline gap-1.5 tabular-nums">
-            {summary.daysUsed}
-            <span className="text-xs font-normal tracking-normal text-ink-3">
-              {`of ${rangeDays}`}
+        label="Share"
+        value={share === null ? "—" : (
+          <span className="flex min-w-0 items-baseline gap-1.5 tabular-nums">
+            {share > 0 && share < 0.01 ? "<1%" : fmtPct(share)}
+            <span className="truncate text-xs font-normal tracking-normal text-ink-3">
+              {`of ${parentName ?? "everything"}`}
             </span>
           </span>
         )}
-        hint={`Days in the interval with any time in ${scope.name}.`}
+        hint={parentName
+          ? `Share of ${parentName}'s time in this range that was spent in ${scope.name}.`
+          : `Share of everything tracked in this range that was spent in ${scope.name}.`}
       />
       <MetricCard
         label="Runs per day"

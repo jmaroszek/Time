@@ -32,7 +32,8 @@ test("@workflow a Top Apps row narrows Insights to that app, and back out", asyn
 
   await narrowedTo(page, "Slack");
   await expect(tile(page, "Time in range")).toContainText("6h 18m");
-  await expect(tile(page, "Days used")).toHaveText(/^7\s*of 7$/);
+  await expect(tile(page, "Share")).toHaveText(/^24%\s*of everything$/);
+  await expect(page.getByLabel(/^Time in range\./)).toHaveAccessibleName(/About 54m a day, used on 7 of 7 days\./);
   await expect(tile(page, "Runs per day")).toHaveText("1");
   await expect(tile(page, "Typical run")).toHaveText("54m");
   await expect(page.getByRole("button", { name: "Product Design — Time", exact: true })).toBeVisible();
@@ -65,6 +66,8 @@ test("@workflow an app opened from a category stays inside that category", async
   await expect(backToFocus).toHaveAttribute("title", "Back to Focus");
   // Chrome's Focus sites, and not metrics.corp.example, which no rule classifies.
   await expect(tile(page, "Time in range")).toContainText("7h 14m");
+  // Its share is of the category it is held in, not of everything.
+  await expect(tile(page, "Share")).toHaveText(/^61%\s*of Focus$/);
   await expect(page.getByRole("button", { name: /docs\.example\.com/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /mail\.corp\.example/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /metrics\.corp\.example/ })).toHaveCount(0);
