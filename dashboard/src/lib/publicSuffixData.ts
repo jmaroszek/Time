@@ -7008,6 +7008,7 @@ barsy.ca
 *.compute.estate
 *.alces.network
 alibabacloudcs.com
+*.ztna-dingtalk.com
 ms.fun
 ms.show
 kasserver.com
