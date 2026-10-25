@@ -32,7 +32,7 @@ test("@workflow a Top Apps row narrows Insights to that app, and back out", asyn
 
   await narrowedTo(page, "Slack");
   await expect(tile(page, "Time in range")).toContainText("6h 18m");
-  await expect(tile(page, "Share")).toHaveText(/^24%\s*of everything$/);
+  await expect(tile(page, "Share")).toHaveText("24%");
   await expect(page.getByLabel(/^Time in range\./)).toHaveAccessibleName(/About 54m a day, used on 7 of 7 days\./);
   await expect(tile(page, "Runs per day")).toHaveText("1");
   await expect(tile(page, "Typical run")).toHaveText("54m");

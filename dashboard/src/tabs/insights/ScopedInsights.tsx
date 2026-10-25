@@ -81,17 +81,21 @@ export function ScopeTiles({
       />
       <MetricCard
         label="Share"
+        // Bare like Productive share when the base is all tracked time; named
+        // only when it is a category, since the figure alone can't say which.
         value={share === null ? "—" : (
           <span className="flex min-w-0 items-baseline gap-1.5 tabular-nums">
             {share > 0 && share < 0.01 ? "<1%" : fmtPct(share)}
-            <span className="truncate text-xs font-normal tracking-normal text-ink-3">
-              {`of ${parentName ?? "everything"}`}
-            </span>
+            {parentName && (
+              <span className="truncate text-xs font-normal tracking-normal text-ink-3">
+                {`of ${parentName}`}
+              </span>
+            )}
           </span>
         )}
         hint={parentName
           ? `Share of ${parentName}'s time in this range that was spent in ${scope.name}.`
-          : `Share of everything tracked in this range that was spent in ${scope.name}.`}
+          : `Share of all tracked time in this range that was spent in ${scope.name}. Idle time and ignored categories are left out.`}
       />
       <MetricCard
         label="Runs per day"
