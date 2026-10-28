@@ -222,6 +222,10 @@ DEFAULT_SETTINGS = {
     # Appearance (dashboard-only). dark | light | system; "system" follows the
     # OS so a light-mode user never gets a dark first run.
     "theme": "system",
+    # Dashboard-only. Whether Insights reopens on the range and chart options
+    # last used; off opens every launch on the stock view. The view itself is
+    # dashboard-local storage, not a setting.
+    "remember_insights_view": "1",
     "focus_chain_max_gap_seconds": "300",
     # Opt-in: a notification nobody asked for is the nagging Time avoids. The
     # interval counts continuous activity, which an AFK-length break resets.

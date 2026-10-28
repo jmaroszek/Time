@@ -1193,6 +1193,18 @@ export default function SettingsTab({
           </p>
           <TextAction onClick={onManageCategories}>Open Categories</TextAction>
         </div>
+        <Row
+          label="Remember Insights view"
+          help="Reopen Insights on the date range and chart options you last used. Off opens on Week every launch."
+          control={
+            <PrivacyToggle
+              label="Remember Insights view"
+              enabled={(drafts.remember_insights_view ?? meta.settings.remember_insights_view) !== "0"}
+              disabled={savingKeys.has("remember_insights_view")}
+              onChange={(enabled) => selectSetting("remember_insights_view", enabled ? "1" : "0")}
+            />
+          }
+        />
       </Section>
 
       <Section title="Advanced">

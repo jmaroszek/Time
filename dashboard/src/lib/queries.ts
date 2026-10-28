@@ -231,6 +231,7 @@ export const DEFAULT_USER_SETTINGS: Readonly<Record<string, string>> = {
   color_palette: "slate",
   productivity_style: "vivid",
   theme: "system",
+  remember_insights_view: "1",
   focus_chain_max_gap_seconds: "300",
   break_reminder_enabled: "0",
   break_reminder_seconds: "3600",

@@ -103,8 +103,6 @@ function Shell() {
   // tabs. State rather than a ref, so the tab re-renders into the slot the
   // moment it exists.
   const [scopeSlot, setScopeSlot] = useState<HTMLDivElement | null>(null);
-  const [preset, setPreset] = useState<PresetOrCustom>("last7");
-  const [rolling, setRolling] = useState(true);
   const [customRange, setCustomRange] = useState<Range | null>(null);
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [firstSessionSec, setFirstSessionSec] = useState<number | null>(null);
@@ -113,8 +111,12 @@ function Shell() {
    *  transition can be told apart from a first reading on a populated database. */
   const sessionCountRef = useRef<number | null>(null);
   // Insights view controls live here, above the tab switch, so a change made on
-  // the Insights tab survives leaving for another tab and coming back.
-  const insightsView = useInsightsView();
+  // the Insights tab survives leaving for another tab and coming back. The
+  // date preset is among them: Activity's Library reads the same range.
+  const insightsView = useInsightsView(
+    meta.loaded ? meta.settings.remember_insights_view !== "0" : null,
+  );
+  const { preset, setPreset, rolling, setRolling } = insightsView;
   const liveTick = useLiveRefresh();
 
   // The tab strip scrolls away with the page on Insights and Settings; these

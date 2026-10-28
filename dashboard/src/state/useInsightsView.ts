@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import type { PresetOrCustom } from "../components/DateRangePicker";
 import type { InsightsScope } from "../lib/insightsScope";
 import { ACTIVITY_METRICS, type ActivityMetric, type ActivityStack } from "../lib/overview";
 
@@ -15,6 +16,19 @@ const DEFAULT_METRIC: ActivityMetric = "productive";
 const DEFAULT_STACK_BY: ActivityStack = "state"; // "Productivity"
 const BLOCK_MINUTES_OPTIONS = [0, 5, 10, 15, 30];
 
+/** Every preset worth reopening on. "custom" is absent: its dates are absolute,
+ *  so a week later they would reopen on a range nobody asked to look at. */
+type StoredPreset = Exclude<PresetOrCustom, "custom">;
+const STORED_PRESETS: readonly StoredPreset[] = [
+  "today",
+  "last7",
+  "last14",
+  "last30",
+  "last90",
+  "last365",
+  "alltime",
+];
+
 /** Dashboard-local, like the Categories list orders: how one person
  *  likes to look at their charts is not part of the tracker contract, and a
  *  setting that resets on every launch read as a bug to the people using it. */
@@ -24,6 +38,8 @@ export const INSIGHTS_VIEW_STORAGE_KEY = "time.insights.view";
  *  below), and so are the stacks only a narrowed view can show: "member" and
  *  "total" are chosen by the data, never by the reader. */
 export interface StoredInsightsView {
+  preset: StoredPreset;
+  rolling: boolean;
   topN: number;
   rankedEntityKind: RankedEntityKind;
   blockMinutes: number;
@@ -33,6 +49,8 @@ export interface StoredInsightsView {
 }
 
 export const DEFAULT_INSIGHTS_VIEW: StoredInsightsView = {
+  preset: "last7", // "Week"
+  rolling: true,
   topN: DEFAULT_TOP_ITEMS,
   rankedEntityKind: "apps",
   blockMinutes: DEFAULT_BLOCK_MINUTES,
@@ -56,6 +74,8 @@ export function parseStoredInsightsView(raw: string | null): StoredInsightsView 
   const pick = <T>(key: keyof StoredInsightsView, allowed: readonly T[]): T =>
     allowed.includes(parsed[key] as T) ? (parsed[key] as T) : (DEFAULT_INSIGHTS_VIEW[key] as T);
   return {
+    preset: pick("preset", STORED_PRESETS),
+    rolling: pick("rolling", [true, false]),
     topN: pick("topN", TOP_ITEMS_OPTIONS),
     rankedEntityKind: pick<RankedEntityKind>("rankedEntityKind", ["apps", "websites"]),
     blockMinutes: pick("blockMinutes", BLOCK_MINUTES_OPTIONS),
@@ -63,6 +83,12 @@ export function parseStoredInsightsView(raw: string | null): StoredInsightsView 
     metric: pick("metric", ACTIVITY_METRICS),
     stackBy: pick<"state" | "category">("stackBy", ["state", "category"]),
   };
+}
+
+/** What a launch opens on: the stored view when the reader keeps it, the stock
+ *  one when they asked for a clean slate. */
+export function launchInsightsView(remember: boolean, stored: StoredInsightsView): StoredInsightsView {
+  return remember ? stored : DEFAULT_INSIGHTS_VIEW;
 }
 
 function readStoredInsightsView(): StoredInsightsView {
@@ -73,12 +99,17 @@ function readStoredInsightsView(): StoredInsightsView {
   }
 }
 
-/** Selected timeline resolution, aggregate view, ranked-identity view/count,
- *  calendar metric, and hours-chart stacking — everything the Insights tab lets
- *  you change, remembered across launches. `aggregateView`
- *  starts null so OverviewTab can pin its default the first time a long-enough
- *  range appears. */
+/** Selected date preset and Rolling, timeline resolution, aggregate view,
+ *  ranked-identity view/count, calendar metric, and hours-chart stacking —
+ *  everything the Insights tab lets you change, remembered across launches
+ *  unless the reader turned that off. `aggregateView` starts null so
+ *  OverviewTab can pin its default the first time a long-enough range appears. */
 export interface InsightsViewState {
+  /** Shared with Activity's Library, which reads the same range picker. */
+  preset: PresetOrCustom;
+  setPreset: (preset: PresetOrCustom) => void;
+  rolling: boolean;
+  setRolling: (rolling: boolean) => void;
   topN: number;
   setTopN: (n: number) => void;
   rankedEntityKind: RankedEntityKind;
@@ -105,8 +136,16 @@ export interface InsightsViewState {
   setScope: (scope: InsightsScope | null) => void;
 }
 
-export function useInsightsView(): InsightsViewState {
+/** `remember` is the `remember_insights_view` setting, or null until settings
+ *  have loaded. App draws nothing before then, so the one-time drop to the
+ *  stock view lands before the reader can have changed anything. Only the
+ *  launch is affected: switching tabs keeps the view either way, and the view
+ *  is still saved while the switch is off, so turning it back on reopens on
+ *  the last one used. */
+export function useInsightsView(remember: boolean | null): InsightsViewState {
   const [stored] = useState(readStoredInsightsView);
+  const [preset, setPreset] = useState<PresetOrCustom>(stored.preset);
+  const [rolling, setRolling] = useState(stored.rolling);
   const [topN, setTopN] = useState(stored.topN);
   const [rankedEntityKind, setRankedEntityKind] = useState<RankedEntityKind>(stored.rankedEntityKind);
   const [blockMinutes, setBlockMinutes] = useState(stored.blockMinutes);
@@ -115,8 +154,26 @@ export function useInsightsView(): InsightsViewState {
   const [stackBy, setStackBy] = useState<ActivityStack>(stored.stackBy);
   const [scope, setScope] = useState<InsightsScope | null>(null);
 
+  const launchApplied = useRef(false);
+  useEffect(() => {
+    if (remember === null || launchApplied.current) return;
+    launchApplied.current = true;
+    const view = launchInsightsView(remember, stored);
+    setPreset(view.preset);
+    setRolling(view.rolling);
+    setTopN(view.topN);
+    setRankedEntityKind(view.rankedEntityKind);
+    setBlockMinutes(view.blockMinutes);
+    setAggregateView(view.aggregateView);
+    setMetric(view.metric);
+    setStackBy(view.stackBy);
+  }, [remember, stored]);
+
   useEffect(() => {
     const next: StoredInsightsView = {
+      // A custom range reopens as Week rather than on dates gone stale.
+      preset: preset === "custom" ? DEFAULT_INSIGHTS_VIEW.preset : preset,
+      rolling,
       topN,
       rankedEntityKind,
       blockMinutes,
@@ -131,9 +188,13 @@ export function useInsightsView(): InsightsViewState {
     } catch {
       // A blocked store costs the next launch its remembered view, nothing more.
     }
-  }, [topN, rankedEntityKind, blockMinutes, aggregateView, metric, stackBy]);
+  }, [preset, rolling, topN, rankedEntityKind, blockMinutes, aggregateView, metric, stackBy]);
 
   return {
+    preset,
+    setPreset,
+    rolling,
+    setRolling,
     topN,
     setTopN,
     rankedEntityKind,
