@@ -853,6 +853,21 @@ export default function SettingsTab({
             </span>
           }
         />
+        {/* What the dashboard opens on, beside what starts with Windows: both
+            answer what a launch looks like. Above the schedule so its expanding
+            panel stays the last thing in the card. */}
+        <Row
+          label="Remember Insights view"
+          help="Reopen Insights on the date range and chart options you last used. Off opens on Week every launch."
+          control={
+            <PrivacyToggle
+              label="Remember Insights view"
+              enabled={(drafts.remember_insights_view ?? meta.settings.remember_insights_view) !== "0"}
+              disabled={savingKeys.has("remember_insights_view")}
+              onChange={(enabled) => selectSetting("remember_insights_view", enabled ? "1" : "0")}
+            />
+          }
+        />
         <Row
           label="Record on a schedule"
           help="Record only during selected hours."
@@ -1193,18 +1208,6 @@ export default function SettingsTab({
           </p>
           <TextAction onClick={onManageCategories}>Open Categories</TextAction>
         </div>
-        <Row
-          label="Remember Insights view"
-          help="Reopen Insights on the date range and chart options you last used. Off opens on Week every launch."
-          control={
-            <PrivacyToggle
-              label="Remember Insights view"
-              enabled={(drafts.remember_insights_view ?? meta.settings.remember_insights_view) !== "0"}
-              disabled={savingKeys.has("remember_insights_view")}
-              onChange={(enabled) => selectSetting("remember_insights_view", enabled ? "1" : "0")}
-            />
-          }
-        />
       </Section>
 
       <Section title="Advanced">
