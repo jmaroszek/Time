@@ -212,6 +212,7 @@ impl TimeDatabase {
         request: &ActivityDeleteRequest,
     ) -> Result<ActivityDeleteResult, String> {
         self.ensure_writable_schema()?;
+        self.record_early_beta().await?;
         let snapshot_max_id = request
             .snapshot_max_id
             .ok_or("Preview Activity deletion before confirming")?;
@@ -266,6 +267,7 @@ impl TimeDatabase {
 
     pub async fn delete_history_before(&self, cutoff_sec: f64) -> Result<u64, String> {
         self.ensure_writable_schema()?;
+        self.record_early_beta().await?;
         if !cutoff_sec.is_finite() {
             return Err("Invalid history cutoff".into());
         }
@@ -286,6 +288,7 @@ impl TimeDatabase {
 
     pub async fn erase_history(&self) -> Result<u64, String> {
         self.ensure_writable_schema()?;
+        self.record_early_beta().await?;
         let result = sqlx::query("DELETE FROM sessions")
             .execute(&self.pool)
             .await

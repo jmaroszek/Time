@@ -24,6 +24,7 @@ use std::{
 
 mod backup;
 mod corrections;
+mod early_beta;
 mod exclusions;
 mod files;
 mod guard;

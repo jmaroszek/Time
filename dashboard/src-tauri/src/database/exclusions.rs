@@ -263,6 +263,9 @@ impl TimeDatabase {
     ) -> Result<TrackingExclusionResult, String> {
         self.ensure_writable_schema()?;
         let normalized = normalize_exclusion(kind, pattern)?;
+        if delete_history {
+            self.record_early_beta().await?;
+        }
         let now = unix_now()?;
         let mut transaction = self.pool.begin().await.map_err(|error| error.to_string())?;
         sqlx::query(

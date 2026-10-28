@@ -2045,3 +2045,130 @@ fn recording_schedule_fails_closed_when_enabled_but_invalid() {
     assert!(!schedule_allows_local(true, "0", "540", "540", 0, 600));
     assert!(schedule_allows_local(false, "", "540", "540", 0, 600));
 }
+
+async fn early_beta_marker(database: &TimeDatabase) -> Option<String> {
+    sqlx::query_scalar("SELECT value FROM settings WHERE key='early_beta'")
+        .fetch_optional(&database.pool)
+        .await
+        .unwrap()
+}
+
+async fn insert_session_at(database: &TimeDatabase, id: i64, start_ts: i64, process: &str) {
+    sqlx::query("INSERT INTO sessions (id,start_ts,end_ts,process) VALUES (?,?,?,?)")
+        .bind(id)
+        .bind(start_ts)
+        .bind(start_ts + 60)
+        .bind(process)
+        .execute(&database.pool)
+        .await
+        .unwrap();
+}
+
+#[test]
+fn early_beta_marker_is_decided_by_the_first_session_against_the_cutoff() {
+    tauri::async_runtime::block_on(async {
+        let cutoff = TimeDatabase::early_beta_cutoff_ts();
+        let database = TimeDatabase::open(scratch_database("early-beta-cutoff"))
+            .await
+            .unwrap();
+
+        database.record_early_beta().await.unwrap();
+        assert_eq!(early_beta_marker(&database).await, None, "no history yet");
+
+        insert_session_at(&database, 1, cutoff, "later.exe").await;
+        database.record_early_beta().await.unwrap();
+        assert_eq!(
+            early_beta_marker(&database).await,
+            None,
+            "the first second after the cutoff day is too late"
+        );
+
+        insert_session_at(&database, 2, cutoff - 1, "earlier.exe").await;
+        database.record_early_beta().await.unwrap();
+        database.record_early_beta().await.unwrap();
+        assert_eq!(early_beta_marker(&database).await.as_deref(), Some("1"));
+
+        // A stale renderer must not be able to grant or revoke it.
+        for value in ["0", "1"] {
+            assert!(database
+                .update_user_settings(&[SettingUpdate {
+                    key: "early_beta".into(),
+                    value: value.into(),
+                }])
+                .await
+                .is_err());
+        }
+        database.close().await;
+    });
+}
+
+#[test]
+fn early_beta_marker_is_recorded_before_any_history_deletion_and_survives_resets() {
+    tauri::async_runtime::block_on(async {
+        let early = TimeDatabase::early_beta_cutoff_ts() - 30 * 86_400;
+        let far_future = (TimeDatabase::early_beta_cutoff_ts() + 3_650 * 86_400) as f64;
+
+        // Each deletion path starts from early history with no marker yet,
+        // which is the state of every early install the first time it runs
+        // a release that knows about the marker.
+        let older_than = TimeDatabase::open(scratch_database("early-beta-older-than"))
+            .await
+            .unwrap();
+        insert_session_at(&older_than, 1, early, "editor.exe").await;
+        assert_eq!(
+            older_than.delete_history_before(far_future).await.unwrap(),
+            1
+        );
+        assert_eq!(early_beta_marker(&older_than).await.as_deref(), Some("1"));
+        older_than.restore_default_settings().await.unwrap();
+        assert_eq!(early_beta_marker(&older_than).await.as_deref(), Some("1"));
+        older_than.close().await;
+
+        let erased = TimeDatabase::open(scratch_database("early-beta-erase"))
+            .await
+            .unwrap();
+        insert_session_at(&erased, 1, early, "editor.exe").await;
+        assert_eq!(erased.erase_history().await.unwrap(), 1);
+        assert_eq!(early_beta_marker(&erased).await.as_deref(), Some("1"));
+        erased.close().await;
+
+        let selected = TimeDatabase::open(scratch_database("early-beta-selected"))
+            .await
+            .unwrap();
+        insert_session_at(&selected, 1, early, "editor.exe").await;
+        let mut request = ActivityDeleteRequest {
+            mode: "sessions".into(),
+            session_ids: vec![1],
+            entity_kind: None,
+            entity_key: None,
+            start_sec: None,
+            end_sec: None,
+            browser_processes: vec![],
+            snapshot_max_id: None,
+            preview_protected_session_id: None,
+        };
+        let preview = selected.preview_activity_delete(&request).await.unwrap();
+        request.snapshot_max_id = Some(preview.snapshot_max_id);
+        assert_eq!(
+            selected
+                .delete_activity(&request)
+                .await
+                .unwrap()
+                .deleted_count,
+            1
+        );
+        assert_eq!(early_beta_marker(&selected).await.as_deref(), Some("1"));
+        selected.close().await;
+
+        let excluded = TimeDatabase::open(scratch_database("early-beta-exclusion"))
+            .await
+            .unwrap();
+        insert_session_at(&excluded, 1, early, "editor.exe").await;
+        excluded
+            .add_tracking_exclusion("app", "editor.exe", true)
+            .await
+            .unwrap();
+        assert_eq!(early_beta_marker(&excluded).await.as_deref(), Some("1"));
+        excluded.close().await;
+    });
+}

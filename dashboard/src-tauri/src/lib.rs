@@ -120,6 +120,11 @@ pub fn run() {
                 &database,
                 &RealTrackingSystem,
             ));
+            // Recorded before any window can ask to delete history, so the
+            // early-beta marker never depends on activity that is later
+            // deleted. The deletion paths record it again in case this one
+            // failed; a failure here costs nothing until a paid release.
+            let _ = tauri::async_runtime::block_on(database.record_early_beta());
             app.manage(database);
             app.manage(LifecycleCoordinator::default());
             Ok(())
