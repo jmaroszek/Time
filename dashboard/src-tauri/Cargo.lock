@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "dashboard"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "chrono",
  "serde",
