@@ -50,6 +50,7 @@ pub(crate) enum TrackingLifecycleAction {
         #[serde(default)]
         end_minute: Option<u32>,
     },
+    Pause,
     Resume,
     EnsureStarted,
     RestoreDefaults,
@@ -797,6 +798,25 @@ pub(crate) async fn execute_tracking_lifecycle(
             start_minute,
             end_minute,
         } => set_schedule(database, system, enabled, days, start_minute, end_minute).await,
+        TrackingLifecycleAction::Pause => {
+            let settings = database.lifecycle_settings().await?;
+            if !settings.recording_consent {
+                return Err("Recording consent is required to pause tracking".into());
+            }
+            // Open-ended, the same pause the tray's "Until resumed" writes. Both
+            // keys in one transaction because the tracker reads them
+            // independently, and a timed pause left behind would end this one
+            // early. No process is touched: the tracker picks the pause up on
+            // its next settings poll, and stopping it would turn a pause into
+            // the dead tracker the status card alarms about.
+            database
+                .update_lifecycle_settings(&[
+                    ("tracking_paused", "1"),
+                    ("tracking_paused_until", "0"),
+                ])
+                .await?;
+            current_result(database, false, 0).await
+        }
         TrackingLifecycleAction::Resume => {
             let settings = database.lifecycle_settings().await?;
             if !settings.recording_consent {
@@ -1207,6 +1227,55 @@ mod tests {
                     database.close().await;
                 }
             }
+        });
+    }
+
+    #[test]
+    fn pausing_writes_an_open_ended_pause_and_leaves_the_tracker_alone() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch("pause")).await.unwrap();
+            database
+                .update_lifecycle_settings(&[
+                    ("recording_consent", "1"),
+                    ("launch_at_login", "1"),
+                    ("tracking_schedule_enabled", "1"),
+                    // A timed pause from the tray that has not run out yet.
+                    // Left in place, it would end this pause at its boundary.
+                    ("tracking_paused_until", "4102444800"),
+                ])
+                .await
+                .unwrap();
+            let system = FakeSystem::default();
+            let result =
+                execute_tracking_lifecycle(&database, TrackingLifecycleAction::Pause, &system)
+                    .await
+                    .unwrap();
+            assert!(!result.tracker_started);
+            let settings = database.lifecycle_settings().await.unwrap();
+            assert!(settings.tracking_paused);
+            assert_eq!(settings.tracking_paused_until, "0");
+            assert!(settings.recording_consent);
+            assert!(settings.launch_at_login);
+            assert!(settings.schedule_enabled);
+            assert!(system.calls.lock().unwrap().is_empty());
+            database.close().await;
+        });
+    }
+
+    #[test]
+    fn pausing_requires_recording_consent() {
+        tauri::async_runtime::block_on(async {
+            let database = TimeDatabase::open(scratch("pause-no-consent"))
+                .await
+                .unwrap();
+            let system = FakeSystem::default();
+            assert!(
+                execute_tracking_lifecycle(&database, TrackingLifecycleAction::Pause, &system)
+                    .await
+                    .is_err()
+            );
+            assert!(!database.lifecycle_settings().await.unwrap().tracking_paused);
+            database.close().await;
         });
     }
 

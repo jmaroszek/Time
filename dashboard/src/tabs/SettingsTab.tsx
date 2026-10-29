@@ -136,6 +136,7 @@ export default function SettingsTab({
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [startingTracker, setStartingTracker] = useState(false);
   const [resumingTracker, setResumingTracker] = useState(false);
+  const [pausingTracker, setPausingTracker] = useState(false);
   const lifecycleBusy = useLifecycleBusy();
   const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
   const [flashedSection, setFlashedSection] = useState<string | null>(null);
@@ -428,7 +429,7 @@ export default function SettingsTab({
     ? "No new activity is being recorded"
     : trackerRecording.kind === "paused"
       ? trackerRecording.until !== null
-        ? `Resumes at ${new Date(trackerRecording.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}, or now from here or the tray`
+        ? `Resumes at ${new Date(trackerRecording.until * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
         : "Nothing is being recorded until you resume"
       : trackerRecording.kind === "off_schedule"
         ? !trackerRecording.valid
@@ -437,7 +438,9 @@ export default function SettingsTab({
             ? `Scheduled to resume ${formatScheduleResume(trackerRecording.nextStart)}`
             : "No recording days are selected"
         : trackerRecording.kind === "recording"
-          ? "Collecting activity in real time"
+          // The label already says it is live; the heartbeat is what tells a
+          // working tracker from one that has just stopped answering.
+          ? `Last heartbeat ${fmtElapsed(heartbeatAge ?? 0)} ago`
           : heartbeatAge === null
             ? "Waiting for a tracker health signal"
             : `No tracker heartbeat for ${fmtElapsed(heartbeatAge)}`;
@@ -546,6 +549,25 @@ export default function SettingsTab({
           : { endMinute: minute },
       ),
     );
+  };
+
+  // Open-ended, like the tray's "Until resumed": the card offers one Pause, and
+  // a duration picker belongs to the tray menu rather than this row.
+  const pauseTracking = async () => {
+    if (pausingTracker || lifecycleBusy) return;
+    setPausingTracker(true);
+    try {
+      await runTrackingLifecycle({ action: "pause" });
+      // Same reason as resume below: the pause poll would otherwise take up to
+      // 15s to notice the pause the reader just asked for.
+      setPause({ paused: true, until: 0 });
+      await meta.refresh();
+      banner.show("Tracking paused");
+    } catch (error) {
+      banner.report(error, "pausing tracking");
+    } finally {
+      setPausingTracker(false);
+    }
   };
 
   // Starting is not resuming. The lifecycle action clears both pause keys and
@@ -671,15 +693,23 @@ export default function SettingsTab({
                 disabled={resumingTracker || lifecycleBusy}
                 onClick={() => void resumeTracking()}
               >
-                {resumingTracker ? "Resuming…" : "Resume now"}
+                {resumingTracker ? "Resuming…" : "Resume"}
+              </TextAction>
+            </div>
+          ) : trackerRecording.kind === "recording" ? (
+            <div className="basis-full sm:ml-auto sm:basis-auto">
+              <TextAction
+                disabled={pausingTracker || lifecycleBusy}
+                onClick={() => void pauseTracking()}
+              >
+                {pausingTracker ? "Pausing…" : "Pause"}
               </TextAction>
             </div>
           ) : !trackingEnabled || trackerLive ? (
-            heartbeatAge !== null && (
-              <span className="basis-full text-xs tabular-nums text-ink-3 sm:ml-auto sm:basis-auto">
-                last heartbeat {fmtElapsed(heartbeatAge)} ago
-              </span>
-            )
+            // Disabled belongs to the Record activity switch below, and outside
+            // scheduled hours a pause would change nothing, so neither gets a
+            // control here.
+            null
           ) : (
             <div className="basis-full sm:ml-auto sm:basis-auto">
               <TextAction

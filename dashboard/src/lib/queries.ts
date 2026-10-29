@@ -183,6 +183,7 @@ export type TrackingLifecycleAction =
       startMinute?: number;
       endMinute?: number;
     }
+  | { action: "pause" }
   | { action: "resume" }
   | { action: "ensure_started" }
   | { action: "restore_defaults" }

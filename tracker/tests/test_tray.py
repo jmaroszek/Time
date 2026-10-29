@@ -3,6 +3,7 @@ import time
 
 import pystray
 import pytest
+from PIL import Image, ImageDraw
 
 from tracker import db, tray
 from tracker.platforms.windows import launch
@@ -207,7 +208,8 @@ class _FakeMenuItem:
 
 
 class _FakeIcon:
-    def __init__(self, _name, _image, title, menu):
+    def __init__(self, _name, image, title, menu):
+        self.icon = image
         self.title = title
         self.menu = menu
         self.visible = False
@@ -246,6 +248,8 @@ def test_tray_controller_hides_and_recreates_without_stopping_tracker(
     conn.close()
     pystray_fake = _FakePystray()
     monkeypatch.setattr(tray, "_load_icon", lambda *_args: object())
+    images = {"recording": "R", "paused": "P", "off_schedule": "O"}
+    monkeypatch.setattr(tray, "_state_icons", lambda *_args: images)
     stop_event = threading.Event()
     controller = tray.TrayController(
         path,
@@ -262,12 +266,20 @@ def test_tray_controller_hides_and_recreates_without_stopping_tracker(
             break
         time.sleep(0.01)
     assert first.visible is True
+    assert first.icon == "R"
     assert controller.set_enabled(True) is True
     assert len(pystray_fake.icons) == 1
 
     controller.sync_state(True, 0, schedule_state({}))
     assert first.title == "Time: paused"
+    assert first.icon == "P"
     assert first.menu_updates == 1
+
+    outside = schedule_state(
+        {"tracking_schedule_enabled": "1", "tracking_schedule_days": ""}, now=1_000
+    )
+    controller.sync_state(False, 0, outside)
+    assert first.icon == "O"
 
     assert controller.set_enabled(False) is False
     assert first.stopped.is_set()
@@ -305,3 +317,96 @@ def test_tray_send_feedback_survives_a_machine_with_no_mail_client(tmp_path, mon
 
     # No handler is a dead menu item, not a dead tracker.
     actions.send_feedback(None, None)
+
+
+def test_tray_icon_state_follows_the_tooltip_precedence():
+    inside = schedule_state({})
+    outside = schedule_state(
+        {"tracking_schedule_enabled": "1", "tracking_schedule_days": ""}, now=1_000
+    )
+    assert tray._icon_state(False, inside) == "recording"
+    assert tray._icon_state(False, None) == "recording"
+    assert tray._icon_state(False, outside) == "off_schedule"
+    # A pause is the reader's own choice, so it outranks the schedule, the same
+    # way the tooltip names it first.
+    assert tray._icon_state(True, outside) == "paused"
+
+
+def _clock(size=256):
+    """A stand-in for the app icon: a light face with the hands meeting at the
+    centre, pointing up and right, as in icon.ico."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((8, 8, size - 8, size - 8), fill=(240, 240, 240, 255), outline=(150, 150, 150, 255), width=12)
+    mid = size // 2
+    draw.rectangle((mid - 8, mid - 70, mid + 8, mid), fill=(90, 90, 90, 255))
+    draw.rectangle((mid - 8, mid - 8, mid + 60, mid + 8), fill=(90, 90, 90, 255))
+    return img
+
+
+def test_state_icons_leave_recording_alone_and_mark_the_other_states():
+    base = _clock()
+    images = tray._state_icons(base, Image, ImageDraw)
+
+    # Recording is the icon the tray has always shown, not a redrawn copy.
+    assert images["recording"] is base
+
+    paused = images["paused"]
+    assert paused.size == base.size
+    assert paused.getpixel((202, 202)) == tray._PAUSED_DOT
+    # The dot stays clear of both hands and of the face's centre.
+    for point in [(128, 128), (128, 70), (180, 128)]:
+        assert paused.getpixel(point) == base.getpixel(point)
+
+    faded = images["off_schedule"]
+    r, g, b, a = faded.getpixel((128, 128))
+    assert r == g == b
+    assert 0 < a < base.getpixel((128, 128))[3]
+    # Nothing is added outside the face; transparent stays transparent.
+    assert faded.getpixel((0, 0))[3] == 0
+
+
+def test_state_icons_scale_with_the_source_frame():
+    images = tray._state_icons(_clock(64), Image, ImageDraw)
+    assert images["paused"].getpixel((50, 50)) == tray._PAUSED_DOT
+
+
+def test_tray_actions_swap_the_icon_with_the_click_that_changed_state(tmp_path):
+    path = tmp_path / "tray.db"
+    conn = db.open_db(path)
+    conn.close()
+    actions = tray._TrayActions(path, threading.Event())
+    actions.icon_images = {"recording": "R", "paused": "P", "off_schedule": "O"}
+
+    class FakeIcon:
+        title = ""
+        icon = "R"
+
+    icon = FakeIcon()
+    actions.pause_indefinitely(icon, None)
+    assert icon.icon == "P"
+    actions.resume(icon, None)
+    assert icon.icon == "R"
+
+
+def test_tray_keeps_an_unbadged_icon_when_the_state_icons_cannot_be_drawn(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "tray.db"
+    conn = db.open_db(path)
+    conn.close()
+    pystray_fake = _FakePystray()
+    base = object()
+    monkeypatch.setattr(tray, "_load_icon", lambda *_args: base)
+
+    def explode(*_args):
+        raise OSError("bad frame")
+
+    monkeypatch.setattr(tray, "_state_icons", explode)
+    controller = tray.TrayController(path, threading.Event(), pystray_fake, object(), object())
+
+    assert controller.set_enabled(True) is True
+    assert pystray_fake.icons[0].icon is base
+    controller.sync_state(True, 0, schedule_state({}))
+    assert pystray_fake.icons[0].icon is base
+    controller.close()

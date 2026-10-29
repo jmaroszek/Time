@@ -211,7 +211,7 @@ test("@workflow a paused tracker is resumed, not started, from its status card",
 
   await expect(page.getByText("Tracking paused")).toBeVisible();
   await expect(page.getByRole("button", { name: "Start tracker" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Resume now" }).click();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
 
   // Both keys move together, or the pause is over and is not.
   await expect.poll(async () => await fixtureSettings(page)).toMatchObject({
@@ -220,6 +220,28 @@ test("@workflow a paused tracker is resumed, not started, from its status card",
   });
   await expect(page.getByText("Tracker is live")).toBeVisible();
   expect(await lifecycleActions(page)).toContain("resume");
+});
+
+// The card's Pause is the tray's "Until resumed", not a timed pause: one
+// control, and the same open-ended state the tray already writes.
+test("@workflow a live tracker is paused from its status card", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByText("Tracker is live")).toBeVisible();
+  await expect(page.getByText(/^Last heartbeat .+ ago$/)).toBeVisible();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+
+  await expect.poll(async () => await fixtureSettings(page)).toMatchObject({
+    tracking_paused: "1",
+    tracking_paused_until: "0",
+  });
+  // The detail line rather than the label: the confirmation toast also reads
+  // "Tracking paused".
+  await expect(
+    page.getByText("Nothing is being recorded until you resume", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
+  expect(await lifecycleActions(page)).toContain("pause");
 });
 
 test("@workflow resuming a pause that outlived the tracker also starts it", async ({ page }) => {
@@ -231,7 +253,7 @@ test("@workflow resuming a pause that outlived the tracker also starts it", asyn
 
   // A pause the reader chose outranks liveness in the label.
   await expect(page.getByText("Tracking paused")).toBeVisible();
-  await page.getByRole("button", { name: "Resume now" }).click();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
 
   // Resuming means "record again", not "clear a flag and leave a second broken
   // state for the reader to find".

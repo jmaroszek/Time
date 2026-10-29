@@ -41,6 +41,11 @@ _SUPPORT_BODY = "\n".join(
 
 _DEV_ICON_PATH = Path(__file__).resolve().parent.parent / "dashboard/src-tauri/icons/icon.ico"
 
+# Mirrors the dark theme's --color-warn in dashboard/src/index.css, the color
+# the dashboard's own status dot uses for a pause. The tray is not themed, and
+# the dark value is the one that still reads on a light taskbar.
+_PAUSED_DOT = (224, 165, 58, 255)
+
 
 def _support_mailto() -> str:
     """The support draft, as a URL the shell can hand to a mail client."""
@@ -116,6 +121,9 @@ class _TrayActions:
     def __init__(self, db_path: str | Path, stop_event: threading.Event):
         self.db_path = db_path
         self.stop_event = stop_event
+        # One image per _icon_state, installed by TrayController once it has
+        # drawn them. None leaves the image alone and refreshes only the title.
+        self.icon_images: dict[str, object] | None = None
 
     def pause_state(self) -> tuple[bool, float]:
         return _read_pause_state(self.db_path)
@@ -126,27 +134,28 @@ class _TrayActions:
     def is_recording(self, _item=None) -> bool:
         return not self.is_paused()
 
-    def tooltip_text(self) -> str:
+    def _refresh_icon(self, icon) -> None:
+        # Here as well as in TrayController.sync_state so the icon answers the
+        # click that changed it, rather than the tracker's next settings poll.
         paused, until, recording_schedule = _read_tracker_state(self.db_path)
-        return _tooltip_text(paused, until, recording_schedule)
-
-    def _refresh_icon_title(self, icon) -> None:
-        icon.title = self.tooltip_text()
+        icon.title = _tooltip_text(paused, until, recording_schedule)
+        if self.icon_images is not None:
+            icon.icon = self.icon_images[_icon_state(paused, recording_schedule)]
 
     def pause_for(self, seconds: float):
         def action(icon, _item) -> None:
             _write_pause(self.db_path, "0", _time.time() + seconds)
-            self._refresh_icon_title(icon)
+            self._refresh_icon(icon)
 
         return action
 
     def pause_indefinitely(self, icon, _item) -> None:
         _write_pause(self.db_path, "1", 0)
-        self._refresh_icon_title(icon)
+        self._refresh_icon(icon)
 
     def resume(self, icon, _item) -> None:
         _write_pause(self.db_path, "0", 0)
-        self._refresh_icon_title(icon)
+        self._refresh_icon(icon)
 
     def open_dashboard(self, _icon, _item) -> None:
         path = platforms.dashboard_path()
@@ -198,6 +207,54 @@ def _tooltip_text(
             return f"Time: scheduled - resumes {day} at {short_time}"
         return "Time: outside scheduled hours"
     return "Time: recording"
+
+
+def _icon_state(paused: bool, recording_schedule: ScheduleState | None) -> str:
+    """Which image the tray shows; the same precedence as _tooltip_text."""
+    if paused:
+        return "paused"
+    if recording_schedule is not None and not recording_schedule.recording_allowed:
+        return "off_schedule"
+    return "recording"
+
+
+def _state_icons(base, Image, ImageDraw) -> dict[str, object]:
+    """Draw the tray image for each _icon_state from the one app icon.
+
+    Recording is the app icon untouched: it is the normal state, and the tray
+    should only draw the eye when something is different. A pause gets a small
+    amber dot in the empty lower-right of the face, clear of both hands. Outside
+    scheduled hours the whole icon fades, because nothing is wrong -- Time is
+    resting when it was told to.
+
+    Drawn on the full-size frame. pystray re-serializes whatever it is given to
+    an .ico and Pillow resamples each tray size from it, so the badge is scaled
+    exactly the way the icon itself always has been.
+    """
+    rgba = base.convert("RGBA")
+    width, height = rgba.size
+
+    red, green, blue, alpha = rgba.convert("LA").convert("RGBA").split()
+    faded = Image.merge(
+        "RGBA", (red, green, blue, alpha.point(lambda value: value * 45 // 100))
+    )
+
+    # Fractions of the icon, so the source frame's size does not matter. The
+    # transparent ring keeps the dot from merging into the clock's rim, which is
+    # the same grey on every taskbar.
+    cx, cy = width * 0.79, height * 0.79
+    radius, ring = width * 0.165, width * 0.045
+    knockout = Image.new("L", rgba.size, 0)
+    ImageDraw.Draw(knockout).ellipse(
+        (cx - radius - ring, cy - radius - ring, cx + radius + ring, cy + radius + ring),
+        fill=255,
+    )
+    paused = Image.composite(Image.new("RGBA", rgba.size, (0, 0, 0, 0)), rgba, knockout)
+    ImageDraw.Draw(paused).ellipse(
+        (cx - radius, cy - radius, cx + radius, cy + radius), fill=_PAUSED_DOT
+    )
+
+    return {"recording": base, "paused": paused, "off_schedule": faded}
 
 
 def _build_menu(pystray, actions: _TrayActions):
@@ -284,17 +341,32 @@ class TrayController:
         self._icon = None
         self._thread: threading.Thread | None = None
         self._state: tuple[bool, float, bool, float | None] | None = None
+        self._images: dict[str, object] | None = None
 
     @property
     def enabled(self) -> bool:
         with self._lock:
             return self._enabled
 
+    def _state_images(self) -> dict[str, object]:
+        if self._images is None:
+            base = _load_icon(self._Image, self._ImageDraw)
+            try:
+                self._images = _state_icons(base, self._Image, self._ImageDraw)
+            except Exception:
+                # A tray that cannot show its state is still the only place to
+                # pause without opening the dashboard; keep it, unbadged.
+                logging.exception("Could not draw the tray state icons")
+                self._images = dict.fromkeys(("recording", "paused", "off_schedule"), base)
+            self._actions.icon_images = self._images
+        return self._images
+
     def _new_icon(self):
+        paused, until, recording_schedule = _read_tracker_state(self._actions.db_path)
         return self._pystray.Icon(
             "time-tracker",
-            _load_icon(self._Image, self._ImageDraw),
-            self._actions.tooltip_text(),
+            self._state_images()[_icon_state(paused, recording_schedule)],
+            _tooltip_text(paused, until, recording_schedule),
             _build_menu(self._pystray, self._actions),
         )
 
@@ -367,8 +439,11 @@ class TrayController:
                 return
             self._state = state
             icon = self._icon
+            images = self._images
         if icon is not None:
             icon.title = _tooltip_text(paused, until, recording_schedule)
+            if images is not None:
+                icon.icon = images[_icon_state(paused, recording_schedule)]
             icon.update_menu()
 
     def close(self) -> None:

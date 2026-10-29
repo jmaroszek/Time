@@ -652,6 +652,11 @@ export async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> 
           if (action.startMinute !== undefined) settings.tracking_schedule_start_minute = String(action.startMinute);
           if (action.endMinute !== undefined) settings.tracking_schedule_end_minute = String(action.endMinute);
           break;
+        case "pause":
+          if (settings.recording_consent !== "1") throw new Error("Recording consent is required to pause tracking");
+          settings.tracking_paused = "1";
+          settings.tracking_paused_until = "0";
+          break;
         case "resume":
           if (settings.recording_consent !== "1") throw new Error("Recording consent is required to resume tracking");
           settings.tracking_paused = "0";
