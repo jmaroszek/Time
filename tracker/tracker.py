@@ -515,7 +515,14 @@ def main() -> int:
 
     log_startup_environment()
     try:
-        if not platforms.acquire_single_instance():
+        # The mutex keeps two recorders off one database, and a migrate-only run
+        # never records. Deferring to the holder used to exit 0 with nothing
+        # migrated, which the dashboard took as success and then failed to open
+        # an older schema: the installer's POSTINSTALL tracker still unpacking,
+        # or an old tracker that survived the upgrade and never migrates.
+        # open_db is already safe against a concurrent startup migrating too.
+        migrate_only = os.environ.get("TIME_MIGRATE_ONLY") == "1"
+        if not migrate_only and not platforms.acquire_single_instance():
             logging.error("Another tracker instance is already running; exiting.")
             return 0
     except OSError:

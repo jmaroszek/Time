@@ -236,6 +236,37 @@ def test_second_instance_logs_and_exits_zero(info_log, monkeypatch):
     assert "already running" in info_log.text
 
 
+def test_migrate_only_run_migrates_even_while_another_tracker_holds_the_mutex(
+    info_log, monkeypatch, tmp_path
+):
+    path = tmp_path / "v5.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE categories (id INTEGER PRIMARY KEY,name TEXT UNIQUE NOT NULL,"
+        "color TEXT NOT NULL,is_productive INTEGER NOT NULL DEFAULT 0,"
+        "is_neutral INTEGER NOT NULL DEFAULT 0,is_ignored INTEGER NOT NULL DEFAULT 0,"
+        "sort_order INTEGER);"
+        "CREATE TABLE settings (key TEXT PRIMARY KEY,value TEXT);"
+        "INSERT INTO settings VALUES ('schema_version','5');"
+    )
+    conn.close()
+    monkeypatch.setattr(config, "DB_PATH", path)
+    monkeypatch.setenv("TIME_MIGRATE_ONLY", "1")
+    monkeypatch.setattr(tracker, "set_up_logging", lambda: None)
+
+    def _held() -> bool:
+        raise AssertionError("a migrate-only run must not defer to the running tracker")
+
+    monkeypatch.setattr(tracker.platforms, "acquire_single_instance", _held)
+    assert tracker.main() == 0
+    migrated = db.open_db(path)
+    try:
+        assert db.read_settings_raw(migrated)["schema_version"] == str(db.SCHEMA_VERSION)
+    finally:
+        migrated.close()
+    assert "already running" not in info_log.text
+
+
 def test_unopenable_log_reports_on_stderr_instead_of_dying_silently(
     monkeypatch, capsys
 ):

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::database::{is_older_schema_error, RestoreNotice, TimeDatabase, SCHEMA_VERSION};
 use crate::platform;
@@ -29,11 +29,35 @@ fn open_current_database(path: PathBuf) -> Result<TimeDatabase, String> {
             // error says why it could not run, and the original says what the
             // database needed, which is the pair somebody debugging a machine
             // that will not start has to see together.
-            platform::run_tracker_migration().map_err(|cause| format!("{error}; {cause}"))?;
-            tauri::async_runtime::block_on(TimeDatabase::open(path))
+            if let Err(cause) = platform::run_tracker_migration() {
+                return Err(migration_failure(&error, Some(&cause), &path));
+            }
+            match tauri::async_runtime::block_on(TimeDatabase::open(path.clone())) {
+                // A clean exit that left the schema behind once passed as
+                // success and ended in the bare error, with nothing on screen
+                // to say the tracker had not even tried.
+                Err(again) if is_older_schema_error(&again) => {
+                    Err(migration_failure(&again, None, &path))
+                }
+                result => result,
+            }
         }
         result => result,
     }
+}
+
+/// The fatal-launch text for a migration that did not happen. It names the
+/// tracker's log, because that is where the reason is and the dialog is the
+/// only thing a reader whose Time will not start can see.
+fn migration_failure(error: &str, cause: Option<&str>, database: &Path) -> String {
+    let cause = cause.unwrap_or("the tracker exited without migrating it");
+    // Mirrors LOG_PATH in tracker/config.py: Logs beside the database.
+    let log = database
+        .parent()
+        .unwrap_or(database)
+        .join("Logs")
+        .join("tracker.log");
+    format!("{error}; {cause}. Details are in {}", log.display())
 }
 
 /// Restore bookkeeping that must never cost the reader their application.
@@ -164,5 +188,23 @@ mod tests {
         assert!(marker.exists());
         assert!(previous.exists());
         assert!(live.exists());
+    }
+
+    #[test]
+    fn a_migration_that_did_not_happen_names_the_tracker_log() {
+        let database = std::path::Path::new(r"C:\Users\reader\AppData\Local\Time\Data\database.db");
+        let error = "DatabaseSchemaTooOld: database schema 5 requires an explicit migration to 6";
+
+        let silent = super::migration_failure(error, None, database);
+        assert!(silent.starts_with(error), "{silent}");
+        assert!(silent.contains("exited without migrating"), "{silent}");
+        assert!(
+            silent.ends_with(r"C:\Users\reader\AppData\Local\Time\Data\Logs\tracker.log"),
+            "{silent}"
+        );
+
+        let failed = super::migration_failure(error, Some("Tracker could not migrate"), database);
+        assert!(failed.contains("; Tracker could not migrate."), "{failed}");
+        assert!(!failed.contains("exited without migrating"), "{failed}");
     }
 }

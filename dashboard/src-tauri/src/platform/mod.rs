@@ -15,7 +15,11 @@
 //! every other target gets: the same signatures, refusing honestly, so the crate
 //! still builds there and a port starts from the complete list.
 
-use std::{path::PathBuf, process::Command};
+use std::{
+    path::PathBuf,
+    process::{Child, Command, ExitStatus},
+    time::{Duration, Instant},
+};
 
 #[cfg(windows)]
 mod windows;
@@ -60,11 +64,16 @@ pub(crate) fn start_tracker() -> Result<(), String> {
     Ok(())
 }
 
+/// Long enough for SQLite's 30 s busy timeout in the tracker, a pre-migration
+/// backup of a large history, and a PyInstaller bundle unpacking itself on a
+/// slow disk. This runs inside `setup()`, before any window exists.
+const MIGRATION_TIMEOUT: Duration = Duration::from_secs(120);
+
 pub(crate) fn run_tracker_migration() -> Result<(), String> {
     let path = tracker_path()?;
     if !path.is_file() {
         return Err(format!(
-            "Packaged tracker was not found at {}; an older backup cannot be migrated",
+            "Packaged tracker was not found at {}; an older database cannot be migrated",
             path.display()
         ));
     }
@@ -72,12 +81,72 @@ pub(crate) fn run_tracker_migration() -> Result<(), String> {
     command.current_dir(path.parent().ok_or("tracker path has no parent")?);
     command.env("TIME_MIGRATE_ONLY", "1");
     imp::hide_native_console(&mut command);
-    let status = command.status().map_err(|error| error.to_string())?;
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let status = wait_with_timeout(&mut child, MIGRATION_TIMEOUT)?;
     if status.success() {
         Ok(())
     } else {
         Err(format!(
-            "Tracker could not migrate the restored database (exit {status})"
+            "Tracker could not migrate the database (exit {status})"
         ))
+    }
+}
+
+/// Wait for `child`, killing it if it outlives `timeout`.
+///
+/// `Command::status` waited forever, so a tracker stuck in its migration froze
+/// the launch with no window to say so, and the process it left running held
+/// the install directory's files open against every later installer.
+fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<ExitStatus, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            // Reap it as well, so nothing outlives this launch either way.
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "Tracker did not finish migrating the database within {} seconds and was stopped",
+                timeout.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    fn ping(count: &str) -> Child {
+        Command::new("ping")
+            .args(["-n", count, "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn ping")
+    }
+
+    #[test]
+    fn a_process_that_exits_in_time_reports_its_status() {
+        let mut child = ping("1");
+        let status = wait_with_timeout(&mut child, Duration::from_secs(30)).unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn a_process_that_outlives_the_timeout_is_stopped() {
+        let mut child = ping("30");
+        let started = Instant::now();
+        let error = wait_with_timeout(&mut child, Duration::from_millis(500)).unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(error.contains("was stopped"), "{error}");
+        // Already reaped: a second wait returns at once rather than blocking.
+        assert!(child.try_wait().unwrap().is_some());
     }
 }
