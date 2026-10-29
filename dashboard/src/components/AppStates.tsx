@@ -579,7 +579,7 @@ export function PauseNotice({
       onDismiss={onDismiss}
       actions={
         <Button variant="primary" disabled={resuming || lifecycleBusy} onClick={() => void resume()}>
-          {resuming ? "Resuming…" : "Resume now"}
+          {resuming ? "Resuming…" : "Resume"}
         </Button>
       }
     />
